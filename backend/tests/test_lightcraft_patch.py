@@ -14,9 +14,10 @@ spec.loader.exec_module(build)
 
 def test_manifest_patch_digest_and_targets():
     value = build.manifest()
-    assert value["version"] == "0.14.0"
-    assert value["commit"] == "03c88c166c054c009db2a47187d59991f6232b85"
+    assert value["version"] == "0.18.0"
+    assert value["commit"] == "32d569ad5d19a6b55cf8d5c077127faa0f44a83b"
     assert value['geometryDescriptorContract'] == 2
+    assert value['contracts'] == {'before': 1, 'preview': 1, 'region': 1, 'wb': 1}
     assert len(value["patches"]) == 1
     patch = (build.ROOT / value["patches"][0]["file"]).read_text(encoding="utf-8")
     assert '"before"' in patch and 'render_job(id, size, size, true, true)' in patch
@@ -28,6 +29,15 @@ def test_archived_010_manifest_and_patch_remain_reproducible():
     value = build.manifest(build.ROOT / 'versions/0.10.0.json')
     assert value['version'] == '0.10.0'
     assert value['patches'][0]['sha256'] == '6d2e4113001aa8d9661ac706857191b2286ca420e4987be987bf55b6462609dc'
+
+
+def test_archived_014_manifest_preserves_the_previous_managed_tuple():
+    value = build.manifest(build.ROOT / 'versions/0.14.0.json')
+    assert value['version'] == '0.14.0'
+    assert value['commit'] == '03c88c166c054c009db2a47187d59991f6232b85'
+    assert value['patches'][0]['sha256'] == '9308d0663de3e4d1f6fd65e564fb04cc7ac1c993b5c1a2aae29ef1f72b521063'
+    assert value['contracts'] == {'before': 1, 'preview': 1, 'region': 1, 'wb': 1}
+    assert value['geometryDescriptorContract'] == 2
 
 
 @pytest.mark.parametrize('changes', [
@@ -65,7 +75,7 @@ def test_browser_identity_is_generated_from_the_managed_manifest():
     assert (build.ROOT.parents[1] / 'frontend/src/lightcraftEngine.ts').read_text(encoding='utf-8') == module.identity_source(build.manifest())
 
 
-@pytest.mark.parametrize('version', ['0.10.0', '0.14.0'])
+@pytest.mark.parametrize('version', ['0.10.0', '0.14.0', '0.18.0'])
 def test_shared_region_artifact_gate_cannot_be_skipped_by_version(tmp_path, monkeypatch, version):
     shared = tmp_path / 'repository'
     managed = shared / 'native/lightcraft'

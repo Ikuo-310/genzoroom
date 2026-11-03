@@ -139,7 +139,11 @@ def test_content_hash_case_uses_c3a_normalization(tmp_path, monkeypatch):
     asyncio.run(run())
 
 
-def test_v010_recipe_restores_on_v014_and_next_save_uses_current_tuple(tmp_path, monkeypatch):
+@pytest.mark.parametrize("saved_version,saved_commit", [
+    ("0.10.0", "a2a41383c4fd62fa85a46ccd00998639221f2d3c"),
+    ("0.14.0", "03c88c166c054c009db2a47187d59991f6232b85"),
+])
+def test_older_recipe_restores_on_current_engine_and_next_save_uses_current_tuple(tmp_path, monkeypatch, saved_version, saved_commit):
     monkeypatch.setattr(edit_store, "DB_PATH", tmp_path / "recipes.db")
     async def run():
         raw, _, children, files = await create(tmp_path)
@@ -147,8 +151,7 @@ def test_v010_recipe_restores_on_v014_and_next_save_uses_current_tuple(tmp_path,
             asset_id = str(uuid4())
             handle, initial = await raw.open_raw(asset_id, files[0])
             current = raw.recipe_identity(handle)
-            old = {**current, "engineVersion": "0.10.0",
-                   "engineCommit": "a2a41383c4fd62fa85a46ccd00998639221f2d3c"}
+            old = {**current, "engineVersion": saved_version, "engineCommit": saved_commit}
             old_saved = store.put_raw_recipe(old, 0, uuid4(), changed_settings())
 
             matched = store.lookup_raw_recipe(current)
@@ -589,7 +592,7 @@ def test_raw_reset_clears_recipe_history_reopens_defaults_and_saves_current_tupl
                 saved = await http.put(f'/api/raw/documents/{current["handle"]}/recipe', json=save_request)
                 assert saved.status_code == 200
                 current_identity = api._recipe_save["identity"]
-                assert current_identity["engineVersion"] == ENGINE_VERSION == "0.14.0"
+                assert current_identity["engineVersion"] == ENGINE_VERSION == "0.18.0"
                 assert current_identity["engineCommit"] == ENGINE_COMMIT
                 assert children[-1].photos[1]["settings"]["light"]["exposure"] == 1.25
         finally:

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { LIGHTCRAFT_ENGINE } from './lightcraftEngine';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useRawCapability } from './useRawCapability';
 import { ANSHITSU_INITIAL_SELECTION_KEY, effectiveAnshitsuSelection, readSettings, updateSetting, useAppSettings } from './appSettings';
@@ -13,7 +14,7 @@ function Harness() {
   return null;
 }
 async function flush() { await act(async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); }); }
-function response(available: boolean) { return new Response(JSON.stringify({ available, version: '0.14.0' }), { headers: { 'Content-Type': 'application/json' } }); }
+function response(available: boolean) { return new Response(JSON.stringify({ available, version: LIGHTCRAFT_ENGINE.version }), { headers: { 'Content-Type': 'application/json' } }); }
 beforeEach(() => {
   vi.useFakeTimers(); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   host = document.createElement('div'); root = createRoot(host); localStorage.clear(); updateSetting('anshitsuInitialSelection', 'raw');

@@ -99,7 +99,7 @@ def test_managed_executable_discovery_is_dev_only_and_manifest_bound(tmp_path):
     manifest = root / 'native' / 'lightcraft' / 'manifest.json'
     manifest.parent.mkdir(parents=True)
     manifest.write_text(json.dumps(MANAGED), encoding='utf-8')
-    executable = root / '.tmp' / 'lightcraft-0.14' / MANAGED['developmentTargetDir'] / 'release' / 'lightcraft-cli.exe'
+    executable = root / '.tmp' / f"lightcraft-{'.'.join(MANAGED['version'].split('.')[:2])}" / MANAGED['developmentTargetDir'] / 'release' / 'lightcraft-cli.exe'
     executable.parent.mkdir(parents=True)
     executable.write_bytes(b'managed executable')
     assert resolve_managed_executable({}, 'win32', project_root=root, frozen=False) == str(executable)

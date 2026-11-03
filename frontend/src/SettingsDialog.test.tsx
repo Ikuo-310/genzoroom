@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applicationBuildLabel, SettingsButton, SettingsProvider } from './SettingsDialog';
+import { LIGHTCRAFT_ENGINE } from './lightcraftEngine';
 import { BUILD_INFO } from './buildInfo';
 import { changeAppLanguage } from './i18n';
 import { ANSHITSU_INITIAL_SELECTION_KEY, DATE_LOCALE_KEY, DATE_LOCALES, SHOW_KEYBOARD_SHORTCUTS_KEY, readSettings, updateSetting, ZOOM_NAVIGATOR_POSITION_KEY, ZOOM_NAVIGATOR_POSITIONS } from './appSettings';
@@ -57,7 +58,7 @@ describe('shared Settings modal', () => {
   it('unlocks and saves RAW and Both only after the Windows RAW capability is available', async () => {
     const fallback = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation(async (url: string) => url === '/api/raw/capabilities'
-      ? new Response(JSON.stringify({ available: true, version: '0.14.0' }), { headers: { 'Content-Type': 'application/json' } }) : fallback(url));
+      ? new Response(JSON.stringify({ available: true, version: LIGHTCRAFT_ENGINE.version }), { headers: { 'Content-Type': 'application/json' } }) : fallback(url));
     await click(host.querySelector('button')!);
     const radios = [...dialog().querySelectorAll<HTMLInputElement>('.anshitsu-selection-options input')];
     expect(radios.every(radio => !radio.disabled)).toBe(true);
