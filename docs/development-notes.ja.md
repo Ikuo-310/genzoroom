@@ -1,5 +1,30 @@
 # GenzoRoom 開発ノート
 
+## RAW Crop Phase 1：Native未crop編集表示・Geometry契約（2026-11-03）
+
+LightCraft v0.18.0 / upstream `32d569ad5d19a6b55cf8d5c077127faa0f44a83b`の既存MCP `render_preview`と同じrender dispatchへ、明示的な`display_mode:"crop-edit"` / `crop_edit_contract:1`を追加した。`id`、32-hex `request_id`、64-hex `settings_fingerprint`を要求し、呼出し時のNative settingsと一致しないsnapshotを拒否する。fingerprintは既存WB契約のtoken-preserving `get_develop` SHA-256と同じ。PNG、Draft / Full、max_side 16〜4096、既存StageCache予算を扱い、Beforeや通常`preview_contract`との混在、不正mode、未知引数を拒否する。
+
+応答は`cropEditContract:1` / `mode:"crop-edit"`、要求ticketとfingerprint、完全な`canonicalGeometry:{crop,orientation}`、`bitmapSpace:"oriented-warped-unstraightened-flipped"`を返す。通常Wholeの`previewContract`は付けない。`frame`は未cropのnative寸法・aspect、実bitmap寸法、modeでdomain分離したgeometryIdを表す。通常geometry descriptor 2を変更せず、その未crop Frame IDを別domainでhashする。同じRecipeであっても通常Wholeと編集bitmapは別identityとなり、canonical rect/angleが変わっても編集bitmap geometryが同じ場合はsettings fingerprintでsnapshotを区別する。
+
+`apply_crop=false`の既存処理を利用し、source EXIF orientation、user orientation、Warp、flip、現像調整は反映する一方、表示Frameのcrop rectangleとStraighten角度はidentityへ置き換える。保存settingsは変更しない。cold RAWの`Session::accept`はas-shot WBを学習し得るため、編集表示ではacceptを実行しない。既存render engine / StagePoolを再利用し、modeをstage署名に追加、RenderJobのapply_crop keyと合わせて通常Previewとの混同を防ぐ。cold decodeをこのmodeからsession source cacheへ受理しないことと、crop-relative効果の見え方が最終出力と異なり得ることは既知の制約とする。
+
+GenzoRoomのdocument revision / token / generation / view generationはNativeが発行する情報ではない。HTTP / Frontend接続は未実装であり、後続Phaseでは既存running 1 + latest pending 1のownerへmode・request ticketを追加し、送信前・応答後・decode後のstale判定、close / restartでの失効を実装する。Native側は正のphoto IDと現settings fingerprintを検証する。新processで数値photo IDが再使用された場合の拒否はBackend generation ownerの責任であり、Native geometry ID単独では保証しない。通常Whole / Before / Region / WB契約、既存HTTP Preview scheduler、Export・thumbnail・Recipe / Historyは変更していない。
+
+Phase 2へ向け、標準Crop commandのparams、絶対的targetと開始snapshot依存のrefit、相対操作、readback・saveId・再送防止の境界をarchitectureへ記録した。実binaryで標準`crop.*`と`develop.set`の成功値はJSON `null`、Rotate / Flipは`{changed:n}`と確認した。Phase 0報告の`{ok:true}`という応答想定を訂正する。成功応答はBackend revision確定ではなく、完全settings readbackが必要。Crop Resetは標準`crop.reset`を使い、rect / aspect / angle / flipを初期化してorientationを維持する。回転を戻す追加commandはない。
+
+managed patchは`mcp/src/preview.rs`（request検証）、`headless.rs`（未crop描画・metadata・read-only tests）、`tools.rs`（schema・引数転送・応答判定・画像予算）、`backend.rs`（明示capability）を更新した。既存patch targetsを維持し、全source diff照合とreverse apply checkで部分適用や管理外変更を排除する。manifestの独立`cropEditContract:1`をreceiptへ追加し、Backend artifact検証もこの項目をstrict照合する。Backend変更はartifact受理だけで、Crop mutation APIやHistory operationは追加していない。
+
+- Patch SHA-256：`2efba419baca52467cef95a3a8160be3098d94fba848e28ac2951163dc556ebc`
+- 実binary SHA-256：`b2836679eb5d394196582ec9f886d090d9d1e5e656d6eecb8adbbcc9abdee6ba`
+- Build先：`.tmp/lightcraft-0.18/target-managed/release/lightcraft-cli.exe`。隣接receiptを実binary全probe成功後に発行。
+- 既存Before / Whole / Region / WBは各contract 1、geometry descriptor 2を維持。
+
+検証はNative MCP 86 unit＋11 integration成功（補助test 1件は既定ignore）、pipeline WB関連7＋1件、engine Crop関連46件、geom Crop関連38件成功、release build成功。MCPは共通Preview dispatchを変更したため既存契約全体を実行した。sandbox下のlocalhost socket制限で9件失敗したが、権限付きの同一実行で全件成功した。新Rust testはcatalog revision、settings、Undo / Redo長、orientation / flip / angleとmode間geometry分離を検証した。
+
+実binaryの既存Whole / Before / StageCache / Region / WB probeをCPUとDX12で成功確認し、Crop probeは各76項目成功。合成PNGの非中央cropで除かれた周辺画素の復元、metadata schema、settings / fingerprint不変、mode間cache往復、Draft / Full、正負角度、portrait / landscape、90°回転、H/V flip、0未満・1超のrect、標準commandとReset、不正request、stale settings拒否を確認した。cold合成Bayer DNGでもsettings不変を確認した。Native成功値とMCP未知引数のJSON-RPC拒否に合わせてprobeの期待値を修正した後、新probeと最終実binary全probeを通してreceiptを発行した。Backend focused testはmanifest / receipt 39件とruntime 33件成功。sandbox下のruntime試験は停止して権限付き単独実行で再確認した。
+
+実写真・実ブラウザ・固定Crop枠UIの手動確認は未実施。Phase 1はNative表示・契約までであり、Backend Crop mutation / History、Frontend UI / 行列 / decode lifecycle、編集中Region、thumbnail / Export変更はPhase 2以降へ残す。Frontend側stale拒否の実装・受入を済ませたとは扱わない。Phase 0記録は以下に維持する。
+
 ## RAW Crop / Straighten Phase 0 設計監査（2026-11-03）
 
 実装前の設計監査として、LightCraft v0.18.0のCrop / Straighten command、DevelopSettings、幾何変換、MCP headless / Preview / Region / Export経路と、GenzoRoomのRAW document、mutation、Recipe / History、Viewer、Whole / Region、thumbnail / Export経路を読み取り調査した。管理identityはupstream commit `32d569ad5d19a6b55cf8d5c077127faa0f44a83b`、patch `0002-v0.18-native-contracts.patch`（SHA-256 `6020b117ed58bdfe9dea1dc1b9b13c54f91313e39f5b285a220f9c7f61056446`）、geometry descriptor contract 2。ローカルmanaged checkoutのHEADとpatch digestはmanifestに一致した。

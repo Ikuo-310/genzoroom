@@ -19,6 +19,7 @@ def managed_manifest():
             or type(value.get('geometryDescriptorContract')) is not int or value['geometryDescriptorContract'] != 2 \
             or value.get('contracts') != {'before': 1, 'preview': 1, 'region': 1, 'wb': 1} \
             or any(type(version) is not int for version in value.get('contracts', {}).values()) \
+            or ('cropEditContract' in value and (type(value['cropEditContract']) is not int or value['cropEditContract'] != 1)) \
             or not isinstance(value.get('patches'), list) or not value['patches']:
         raise ValueError('invalid managed LightCraft manifest')
     return value
@@ -67,9 +68,11 @@ def verified_artifact(executable, digest, version):
         value = json.loads(path.read_text(encoding='utf-8'))
         expected = {**{key: MANAGED[key] for key in ('version', 'commit', 'patches', 'geometryDescriptorContract')},
                     'binarySha256': digest, 'beforeContract': 1, 'previewContract': 1, 'regionContract': 1,
+                    **({'cropEditContract': 1} if MANAGED.get('cropEditContract') == 1 else {}),
                     **({'wbContract': 1} if MANAGED.get('contracts', {}).get('wb') == 1 else {})}
         if not isinstance(value, dict) or any(type(value.get(key)) is not int for key in
                 ('beforeContract', 'previewContract', 'regionContract', 'geometryDescriptorContract',
+                 *(['cropEditContract'] if 'cropEditContract' in expected else []),
                  *(['wbContract'] if 'wbContract' in expected else []))) \
                 or value != expected or version != expected['version'] or not re.fullmatch(r'[a-f0-9]{64}', digest):
             return None

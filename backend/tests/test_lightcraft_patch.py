@@ -45,12 +45,13 @@ def test_archived_014_manifest_preserves_the_previous_managed_tuple():
     {'contracts': {'before': 1, 'preview': 1, 'region': 1, 'wb': 2}},
     {'developmentTargetDir': None}, {'developmentTargetDir': 'target'},
     {'developmentTargetDir': '../target'}, {'developmentTargetDir': 'target/release'},
+    {'cropEditContract': True}, {'cropEditContract': 2},
 ])
 def test_wb_manifest_requires_a_supported_contract_and_independent_target(tmp_path, changes):
     value = {**build.manifest(), **changes}
     path = tmp_path / 'manifest.json'
     path.write_text(json.dumps(value), encoding='utf-8')
-    with pytest.raises(ValueError, match='unsupported managed contracts|invalid managed development target'):
+    with pytest.raises(ValueError, match='unsupported managed contracts|invalid managed development target|unsupported crop editing contract'):
         build.manifest(path)
 
 
@@ -60,6 +61,7 @@ def test_wb_receipt_adds_only_the_independent_wb_contract(tmp_path):
     value = build.manifest()
     actual = build.receipt(binary, value)
     assert actual['wbContract'] == 1
+    assert actual['cropEditContract'] == 1
     assert all(actual[key] == 1 for key in ('beforeContract', 'previewContract', 'regionContract'))
     assert actual['geometryDescriptorContract'] == 2
     assert actual['binarySha256'] == hashlib.sha256(binary.read_bytes()).hexdigest()

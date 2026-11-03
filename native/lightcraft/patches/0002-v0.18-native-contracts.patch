@@ -584,22 +584,23 @@ index b05dae56ff5fccab298fc6dee10239ddd47ed4b9..d461c3241df03e058e32a29ffe644def
 +[dev-dependencies]
 +lightcraft-testkit = { workspace = true }
 diff --git a/crates/mcp/src/backend.rs b/crates/mcp/src/backend.rs
-index a621f403723393f2dd28f23fb0a5f94e5e12bef9..8f16029402a97f332359cdd675520b20c3b83c9c 100644
+index a621f403723393f2dd28f23fb0a5f94e5e12bef9..ffa7656ddd1c207a75d80e93bb0f3caee6d7ae5d 100644
 --- a/crates/mcp/src/backend.rs
 +++ b/crates/mcp/src/backend.rs
-@@ -16,6 +16,10 @@ pub trait Backend {
+@@ -16,6 +16,11 @@ pub trait Backend {
      fn call(&mut self, method: &str, params: Value) -> Result<Value, String>;
      /// True when a real UI is attached (`ui.inspect`, `ui.clickWidget`, `ui.pointer` … work).
      fn has_ui(&self) -> bool;
 +    /// Explicit support; a remote backend must not silently ignore adaptive arguments.
 +    fn preview_contract(&self) -> bool { false }
++    fn crop_edit_contract(&self) -> bool { false }
 +    fn region_contract(&self) -> bool { false }
 +    fn wb_contract(&self) -> bool { false }
      /// Short human description ("headless", "remote 127.0.0.1:7980").
      fn describe(&self) -> String;
      /// Progress/cancellation for the next headless batch export. Other backends ignore it.
 diff --git a/crates/mcp/src/headless.rs b/crates/mcp/src/headless.rs
-index 94b1d2606291c2ae7c4e506c17561d79ae612569..5c545bdf6f915fdb2516b8d42cdead729163ee3f 100644
+index 94b1d2606291c2ae7c4e506c17561d79ae612569..fa9ab899ddef95fd3fd9fcb1f3acb7df5e8a1f58 100644
 --- a/crates/mcp/src/headless.rs
 +++ b/crates/mcp/src/headless.rs
 @@ -14,6 +14,7 @@ use crate::backend::{Backend, ProgressHook};
@@ -619,7 +620,7 @@ index 94b1d2606291c2ae7c4e506c17561d79ae612569..5c545bdf6f915fdb2516b8d42cdead72
      }
  
      /// A headless session with the procedurally generated demo library.
-@@ -53,7 +54,83 @@ impl Headless {
+@@ -53,7 +54,102 @@ impl Headless {
      pub fn render(&mut self, p: &Value, default_size: u64) -> Result<Rgba8, String> {
          let id = self.photo_or_active(p)?;
          let size = p.get("size").or(p.get("longEdge")).and_then(Value::as_u64).unwrap_or(default_size).clamp(16, 16384) as usize;
@@ -640,16 +641,19 @@ index 94b1d2606291c2ae7c4e506c17561d79ae612569..5c545bdf6f915fdb2516b8d42cdead72
 +            let size = p.get("size").and_then(Value::as_u64).unwrap_or(1024).clamp(16, 4096) as usize;
 +            let before = p.get("before").and_then(Value::as_bool).unwrap_or(false);
 +            let photo = self.session.catalog.photo(id).ok_or("preview_render_failed")?;
++            let settings_fingerprint = crate::wb::fingerprint(&photo.develop).map_err(|_| "preview_render_failed")?;
++            if options.crop_edit && p["settings_fingerprint"] != settings_fingerprint { return Err("preview_settings_mismatch"); }
++            let canonical = json!({"crop":photo.develop.crop,"orientation":photo.develop.orientation});
 +            let original = (photo.width as usize, photo.height as usize);
 +            let baseline = photo.import_defaults().hash64();
 +            let before_settings = self.session.before_settings(photo);
-+            let mut job = self.session.render_job(id, size, size, before, true).ok_or("preview_render_failed")?;
++            let mut job = self.session.render_job(id, size, size, before, !options.crop_edit).ok_or("preview_render_failed")?;
 +            if options.draft { job = job.draft(); }
 +            let quality = if job.request.quality == lightcraft_engine::pipeline::Quality::Draft { "draft" } else { "full" };
 +            let source_key = format!("{:?}", job.source_key.ok_or("preview_geometry_unavailable")?);
 +            self.stages.source(&format!("{}:{source_key}", id.0));
-+            let signature = format!("{}:{source_key}:{:?}:{:?}:{:?}:{:?}:{:?}:{:?}", id.0,
-+                job.settings.crop, job.settings.orientation, job.settings.optics, job.settings.geometry,
++            let signature = format!("{}:{}:{source_key}:{:?}:{:?}:{:?}:{:?}:{:?}:{:?}", id.0,
++                options.crop_edit, job.settings.crop, job.settings.orientation, job.settings.optics, job.settings.geometry,
 +                job.settings.profile, if before { baseline } else { 0 });
 +            let side = usize::from(before);
 +            self.stages.configure(options.budget);
@@ -675,17 +679,33 @@ index 94b1d2606291c2ae7c4e506c17561d79ae612569..5c545bdf6f915fdb2516b8d42cdead72
 +            if let Some(cache) = cache { job = job.with_stages(cache); }
 +            let mut result = job.run();
 +            if !was_loaded && result.rendered.is_ok() { result.loaded = loaded.or(result.loaded); }
-+            self.session.accept(&result);
++            // Cold RAW acceptance can learn WB; editing display must not change document settings.
++            if !options.crop_edit { self.session.accept(&result); }
 +            let rendered = result.rendered.map_err(|_| "preview_render_failed")?;
 +            let execution = rendered.execution.ok_or("preview_render_failed")?;
 +            let image = rendered.image;
 +            let frame = rendered.frame.as_ref().ok_or("preview_geometry_unavailable")?;
-+            let metadata = crate::preview::frame_metadata(frame, original, &source_key, image.width, image.height)?;
++            let mut metadata = crate::preview::frame_metadata(frame, original, &source_key, image.width, image.height)?;
++            if options.crop_edit {
++                use sha2::{Digest, Sha256};
++                // Never attest a normal Whole/Region coordinate space with an editing bitmap.
++                metadata["geometryId"] = json!(format!("{:x}", Sha256::digest(
++                    format!("genzoroom-crop-edit-v1:{}", metadata["geometryId"]).as_bytes())));
++            }
 +            self.stages.geometry(side, metadata["geometryId"].as_str().ok_or("preview_geometry_unavailable")?);
 +            let cache_meta = self.stages.finish(side, options.budget, applied);
 +            let mut meta = json!({"previewContract":1, "quality":quality,
 +                "mode":"whole", "kind":if before {"before"} else {"after"}, "frame":metadata,
 +                "execution":execution, "stageCache":cache_meta, "width":image.width, "height":image.height});
++            if options.crop_edit {
++                meta.as_object_mut().ok_or("preview_render_failed")?.remove("previewContract");
++                meta["cropEditContract"] = json!(1);
++                meta["mode"] = json!("crop-edit");
++                meta["requestId"] = p["request_id"].clone();
++                meta["settingsFingerprint"] = json!(settings_fingerprint);
++                meta["canonicalGeometry"] = canonical;
++                meta["bitmapSpace"] = json!("oriented-warped-unstraightened-flipped");
++            }
 +            if before {
 +                meta["beforeFingerprint"] = json!(format!("{baseline:016x}"));
 +                meta["effectiveBeforeFingerprint"] = json!(format!("{:016x}", before_settings.hash64()));
@@ -704,7 +724,7 @@ index 94b1d2606291c2ae7c4e506c17561d79ae612569..5c545bdf6f915fdb2516b8d42cdead72
      }
  
      /// The UI command `app.export`, emulated with the same parameters as the desktop app
-@@ -121,13 +198,27 @@ impl Backend for Headless {
+@@ -121,13 +217,27 @@ impl Backend for Headless {
      fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
          let p = if params.is_null() { json!({}) } else { params };
          match method {
@@ -733,7 +753,7 @@ index 94b1d2606291c2ae7c4e506c17561d79ae612569..5c545bdf6f915fdb2516b8d42cdead72
              }
              "engine.commands" => {
                  let mut v: Vec<Value> = self.session.commands().into_iter().map(|c| serde_json::to_value(c).unwrap_or_default()).collect();
-@@ -137,14 +228,32 @@ impl Backend for Headless {
+@@ -137,14 +247,32 @@ impl Backend for Headless {
                  Ok(Value::Array(v))
              }
              "ui.render" => {
@@ -768,18 +788,19 @@ index 94b1d2606291c2ae7c4e506c17561d79ae612569..5c545bdf6f915fdb2516b8d42cdead72
                  }
              }
              "app.export" => self.export(&p),
-@@ -155,6 +264,10 @@ impl Backend for Headless {
+@@ -155,6 +283,11 @@ impl Backend for Headless {
          }
      }
  
 +    fn preview_contract(&self) -> bool { true }
++    fn crop_edit_contract(&self) -> bool { true }
 +    fn region_contract(&self) -> bool { true }
 +    fn wb_contract(&self) -> bool { true }
 +
      fn has_ui(&self) -> bool {
          false
      }
-@@ -214,7 +327,8 @@ mod tests {
+@@ -214,7 +347,8 @@ mod tests {
              for (folder, name) in [(&dir, format!("lower.{ext}")), (&nested, format!("upper.{}", ext.to_ascii_uppercase()))] {
                  let path = folder.join(name);
                  std::fs::write(&path, b"discovery only, not a decoded photo").unwrap();
@@ -789,10 +810,50 @@ index 94b1d2606291c2ae7c4e506c17561d79ae612569..5c545bdf6f915fdb2516b8d42cdead72
              }
          }
          std::fs::write(nested.join("notes.txt"), b"not a photo").unwrap();
-@@ -225,6 +339,75 @@ mod tests {
+@@ -225,6 +359,115 @@ mod tests {
          std::fs::remove_dir_all(dir).unwrap();
      }
  
++    #[test]
++    fn genzoroom_crop_edit_is_read_only_and_has_a_separate_geometry() {
++        let mut h = Headless::demo();
++        let id = h.session.active().unwrap();
++        for orientation in ["Normal", "Rotate90"] {
++            for angle in [-12.0, 0.0, 12.0] {
++                for (fh, fv) in [(false,false), (true,false), (false,true), (true,true)] {
++                    h.session.execute("develop.merge", &json!({"settings":{"orientation":orientation,
++                        "crop":{"geometry":{"rect":{"x0":0.1,"y0":0.2,"x1":0.7,"y1":0.8},"angle":angle},
++                        "flip_h":fh,"flip_v":fv}}})).unwrap();
++                    let d = h.session.develop_of(id).unwrap();
++                    let fingerprint = crate::wb::fingerprint(&d).unwrap();
++                    let revision = h.session.catalog.revision;
++                    let history = (h.session.undo.len(), h.session.redo.len());
++                    let p = json!({"id":id.0,"size":32,"display_mode":"crop-edit","crop_edit_contract":1,
++                        "request_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","settings_fingerprint":fingerprint});
++                    let m = h.call("ui.render", p.clone()).unwrap();
++                    assert_eq!(m["mode"], "crop-edit");
++                    assert_eq!(m["cropEditContract"], 1);
++                    assert!(m.get("previewContract").is_none());
++                    assert_eq!(m["canonicalGeometry"]["crop"], serde_json::to_value(d.crop).unwrap());
++                    assert_eq!(m["frame"]["nativeWidth"], if orientation == "Normal" { h.session.catalog.photo(id).unwrap().width } else { h.session.catalog.photo(id).unwrap().height });
++                    let job = h.session.render_job(id, 32, 32, false, false).unwrap();
++                    let rendered = job.run().rendered.unwrap();
++                    let f = rendered.frame.unwrap();
++                    assert!(f.crop.is_identity());
++                    assert_eq!((f.flip_h, f.flip_v), (fh, fv));
++                    assert_eq!(h.session.catalog.revision, revision);
++                    assert_eq!((h.session.undo.len(), h.session.redo.len()), history);
++                    assert_eq!(h.session.develop_of(id).unwrap().as_ref(), d.as_ref());
++                    let normal = h.call("ui.render", json!({"id":id.0,"size":32,"preview_contract":1})).unwrap();
++                    assert_ne!(normal["frame"]["geometryId"], m["frame"]["geometryId"]);
++                    let mut stale = p;
++                    stale["settings_fingerprint"] = json!("0".repeat(64));
++                    assert_eq!(h.call("ui.render", stale).unwrap_err(), "preview_settings_mismatch");
++                }
++            }
++        }
++    }
++
 +    #[test]
 +    fn genzoroom_cpu_admission_preserves_loaded_source_and_clears_failed_render() {
 +        lightcraft_engine::gpu::set_enabled(false);
@@ -883,10 +944,10 @@ index 4f9251bcba216893241308d83f9f92ea8fc8e204..17a55a139c8741a86fd8aebde55bb4c3
  pub use base64::{base64_decode, base64_encode};
 diff --git a/crates/mcp/src/preview.rs b/crates/mcp/src/preview.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..7fecb34a9fbc1087828c0f1177b48b0ff2790d65
+index 0000000000000000000000000000000000000000..143b06b0842df1c58c1eff0c5f7b4376738006c3
 --- /dev/null
 +++ b/crates/mcp/src/preview.rs
-@@ -0,0 +1,591 @@
+@@ -0,0 +1,613 @@
 +//! GenzoRoom's opt-in preview envelope; legacy callers keep the original image contract.
 +use std::sync::Arc;
 +
@@ -904,6 +965,7 @@ index 0000000000000000000000000000000000000000..7fecb34a9fbc1087828c0f1177b48b0f
 +#[derive(Clone, Copy)]
 +pub(crate) struct Options {
 +    pub adaptive: bool,
++    pub crop_edit: bool,
 +    pub draft: bool,
 +    pub budget: Option<usize>,
 +}
@@ -913,7 +975,27 @@ index 0000000000000000000000000000000000000000..7fecb34a9fbc1087828c0f1177b48b0f
 +        if p.get("before").is_some_and(|v| !v.is_boolean()) {
 +            return Err("preview_invalid_contract");
 +        }
-+        let adaptive = ["quality", "preview_contract", "stage_cache", "stage_cache_budget_bytes"].iter().any(|k| p.get(k).is_some());
++        let crop_edit = match p.get("display_mode") {
++            None => false,
++            Some(Value::String(s)) if s == "crop-edit" => true,
++            _ => return Err("preview_invalid_contract"),
++        };
++        let hex = |key: &str, len: usize| p[key].as_str().is_some_and(|s| s.len() == len
++            && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
++        if crop_edit {
++            if p["crop_edit_contract"].as_u64() != Some(1) || !hex("request_id", 32)
++                || !hex("settings_fingerprint", 64) || !p["id"].as_u64().is_some_and(|n| n > 0)
++                || p.get("before").is_some_and(|v| v != false) || p.get("preview_contract").is_some()
++                || p.as_object().is_none_or(|o| o.keys().any(|k| !["id", "size", "max_side", "path", "format", "before",
++                    "quality", "stage_cache", "stage_cache_budget_bytes", "display_mode", "crop_edit_contract",
++                    "request_id", "settings_fingerprint"].contains(&k.as_str())))
++                || ["size", "max_side"].iter().any(|k| p.get(k).is_some_and(|v| !v.as_u64().is_some_and(|n| (16..=4096).contains(&n))))
++                || p.get("format").is_some_and(|v| v != "png")
++            { return Err("preview_invalid_contract"); }
++        } else if ["crop_edit_contract", "request_id", "settings_fingerprint"].iter().any(|k| p.get(k).is_some()) {
++            return Err("preview_invalid_contract");
++        }
++        let adaptive = crop_edit || ["quality", "preview_contract", "stage_cache", "stage_cache_budget_bytes"].iter().any(|k| p.get(k).is_some());
 +        let draft = match p.get("quality") {
 +            None => false,
 +            Some(Value::String(s)) if s == "full" => false,
@@ -945,7 +1027,7 @@ index 0000000000000000000000000000000000000000..7fecb34a9fbc1087828c0f1177b48b0f
 +            }
 +            None
 +        };
-+        Ok(Self { adaptive, draft, budget })
++        Ok(Self { adaptive, crop_edit, draft, budget })
 +    }
 +}
 +
@@ -958,6 +1040,7 @@ index 0000000000000000000000000000000000000000..7fecb34a9fbc1087828c0f1177b48b0f
 +        | "preview_geometry_unavailable"
 +        | "preview_geometry_mismatch"
 +        | "preview_budget_exceeded"
++        | "preview_settings_mismatch"
 +        | "preview_render_failed" => code,
 +        _ => "preview_render_failed",
 +    };
@@ -4134,10 +4217,10 @@ index 0000000000000000000000000000000000000000..c989e855fd86155f1e67681bbdf368e7
 +  }
 +}
 diff --git a/crates/mcp/src/tools.rs b/crates/mcp/src/tools.rs
-index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..bdc4cf20ddf6cb87ac4ea1283562e1ef5c70a769 100644
+index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..c68aef780881b75cd80f705b2b7bc5819620f334 100644
 --- a/crates/mcp/src/tools.rs
 +++ b/crates/mcp/src/tools.rs
-@@ -119,6 +119,12 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
+@@ -119,6 +119,16 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
              "Render a photo with its current develop settings (cropped) and return it as an image (`max_side` is the long edge; does not change selection or save a file).",
              json!({
                  "id": {"type": "integer", "description": "Photo id (default: the active photo); selection is unchanged"},
@@ -4145,12 +4228,16 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..bdc4cf20ddf6cb87ac4ea1283562e1ef
 +
 +                "quality": {"type":"string","enum":["draft","full"],"default":"full"},
 +                "preview_contract": {"type":"integer","enum":[1]},
++                "display_mode": {"type":"string","enum":["crop-edit"]},
++                "crop_edit_contract": {"type":"integer","enum":[1]},
++                "request_id": {"type":"string","pattern":"^[a-f0-9]{32}$"},
++                "settings_fingerprint": {"type":"string","pattern":"^[a-f0-9]{64}$"},
 +                "stage_cache": {"type":"string","enum":["off","on"],"default":"off"},
 +                "stage_cache_budget_bytes": {"type":"integer","minimum":1},
                  "max_side": {"type": "integer", "description": "Long edge in pixels (default 1024, max 4096)"},
                  "format": {"type": "string", "enum": ["png", "jpeg"], "description": "Image encoding (default png; jpeg is smaller)"},
              }),
-@@ -218,6 +224,12 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
+@@ -218,6 +228,12 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
              "Render a photo with its current develop settings (cropped) and return it as an image so you can look at the result. `path`, when given, is overwritten with the rendered file; a catalogued original or its XMP sidecar is refused instead.",
              json!({
                  "id": {"type": "integer", "description": "Photo id (default: the active photo); selection is unchanged"},
@@ -4163,7 +4250,7 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..bdc4cf20ddf6cb87ac4ea1283562e1ef
                  "size": {"type": "integer", "description": "Long edge in pixels (default 1024, max 4096)"},
                  "format": {"type": "string", "enum": ["png", "jpeg"], "description": "Image encoding (default png; jpeg is smaller)"},
                  "path": {"type": "string", "description": "Also save the rendered file here"}
-@@ -378,6 +390,8 @@ fn annotations(name: &str, title: &str) -> Value {
+@@ -378,6 +394,8 @@ fn annotations(name: &str, title: &str) -> Value {
              | "list_commands"
              | "doc_inspect"
              | "render_preview"
@@ -4172,7 +4259,7 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..bdc4cf20ddf6cb87ac4ea1283562e1ef
              | "query_photos"
              | "list_controls"
              | "get_develop"
-@@ -415,6 +429,8 @@ pub(crate) fn check_args(name: &str, args: &Value) -> Result<(), String> {
+@@ -415,6 +433,8 @@ pub(crate) fn check_args(name: &str, args: &Value) -> Result<(), String> {
  /// All tools: helpers, plus the generated command tools when `with_commands`.
  pub fn tool_definitions(backend: &mut dyn Backend, with_commands: bool) -> Vec<Value> {
      let mut v = helper_tools(backend.has_ui());
@@ -4181,7 +4268,7 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..bdc4cf20ddf6cb87ac4ea1283562e1ef
      if with_commands {
          v.extend(command_tools(backend));
      }
-@@ -442,13 +458,13 @@ fn activate(b: &mut dyn Backend, args: &Value) -> Result<(), String> {
+@@ -442,13 +462,13 @@ fn activate(b: &mut dyn Backend, args: &Value) -> Result<(), String> {
  /// `lightcraft-mcp-<pid>-<random>` folder in the temp dir, private to this user on Unix (0700).
  /// Straight in a shared /tmp, other users could read the PNG, and a name they took first made the
  /// render fail (#2573). Dropping this removes the folder and whatever is in it.
@@ -4198,11 +4285,11 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..bdc4cf20ddf6cb87ac4ea1283562e1ef
          static N: AtomicU64 = AtomicU64::new(0);
          let temp = std::env::temp_dir();
          for _ in 0..100 {
-@@ -485,6 +501,11 @@ impl Drop for TempPng {
+@@ -485,6 +505,11 @@ impl Drop for TempPng {
  /// Read a PNG the backend wrote, optionally downscale / re-encode as JPEG, and wrap it as image
  /// content (+ a text block with the metadata).
  fn image_result(file: &std::path::Path, max: Option<u32>, format: &str, save_to: Option<&str>, meta: Value) -> ToolResult {
-+    let adaptive = meta.get("previewContract").is_some();
++    let adaptive = meta.get("previewContract").is_some() || meta.get("cropEditContract").is_some();
 +    if adaptive && std::fs::metadata(file).map_or(true, |m| m.len() > 17 * 1024 * 1024) {
 +        let _ = std::fs::remove_file(file);
 +        return crate::preview::error("preview_budget_exceeded");
@@ -4210,7 +4297,7 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..bdc4cf20ddf6cb87ac4ea1283562e1ef
      let bytes = match std::fs::read(file) {
          Ok(b) => b,
          Err(e) => return ToolResult::error(format!("cannot read rendered image {}: {e}", file.display())),
-@@ -524,6 +545,12 @@ fn image_result(file: &std::path::Path, max: Option<u32>, format: &str, save_to:
+@@ -524,6 +549,12 @@ fn image_result(file: &std::path::Path, max: Option<u32>, format: &str, save_to:
      } else if let Some(o) = info.as_object_mut() {
          o.remove("path");
      }
@@ -4223,7 +4310,7 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..bdc4cf20ddf6cb87ac4ea1283562e1ef
      ToolResult {
          content: vec![json!({"type": "image", "data": base64_encode(&bytes), "mimeType": mime}), json!({"type": "text", "text": info.to_string()})],
          is_error: false,
-@@ -540,6 +567,25 @@ fn check_save_path(b: &mut dyn Backend, args: &Value) -> Result<(), String> {
+@@ -540,6 +571,26 @@ fn check_save_path(b: &mut dyn Backend, args: &Value) -> Result<(), String> {
  }
  
  fn render_photo(b: &mut dyn Backend, args: &Value) -> ToolResult {
@@ -4245,11 +4332,12 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..bdc4cf20ddf6cb87ac4ea1283562e1ef
 +        Ok(value) => value,
 +        Err(code) => return crate::preview::error(code),
 +    };
++    if options.crop_edit && !b.crop_edit_contract() { return crate::preview::error("preview_unsupported"); }
 +    if options.adaptive && !b.preview_contract() { return crate::preview::error("preview_unsupported"); }
      if let Err(e) = check_save_path(b, args) {
          return ToolResult::error(e);
      }
-@@ -557,13 +603,36 @@ fn render_photo(b: &mut dyn Backend, args: &Value) -> ToolResult {
+@@ -557,13 +608,39 @@ fn render_photo(b: &mut dyn Backend, args: &Value) -> ToolResult {
          Err(e) => return ToolResult::error(e),
      };
      let path = tmp.file.to_string_lossy().to_string();
@@ -4260,7 +4348,7 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..bdc4cf20ddf6cb87ac4ea1283562e1ef
 +        _ => return ToolResult::error("before must be boolean"),
 +    };
 +    let mut params = json!({"id": id, "size": size, "path": path, "before": before});
-+    for key in ["quality", "preview_contract", "stage_cache", "stage_cache_budget_bytes"] {
++    for key in ["quality", "preview_contract", "stage_cache", "stage_cache_budget_bytes", "display_mode", "crop_edit_contract", "request_id", "settings_fingerprint"] {
 +        if let Some(value) = args.get(key) { params[key] = value.clone(); }
 +    }
 +    let meta = match b.call("ui.render", params) {
@@ -4271,7 +4359,10 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..bdc4cf20ddf6cb87ac4ea1283562e1ef
 +            return if options.adaptive { crate::preview::error(&e) } else { ToolResult::error(e) };
 +        }
      };
-+    if options.adaptive && (meta["previewContract"] != 1 || meta["mode"] != "whole"
++    if options.adaptive && (if options.crop_edit {
++        meta["cropEditContract"] != 1 || meta["mode"] != "crop-edit" || meta.get("previewContract").is_some()
++            || meta["requestId"] != args["request_id"] || meta["settingsFingerprint"] != args["settings_fingerprint"]
++    } else { meta["previewContract"] != 1 || meta["mode"] != "whole" }
 +        || meta["quality"] != if options.draft {"draft"} else {"full"}
 +        || meta["kind"] != if before {"before"} else {"after"}) {
 +        let _ = std::fs::remove_file(&tmp.file);
@@ -4289,7 +4380,7 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..bdc4cf20ddf6cb87ac4ea1283562e1ef
  }
  
  fn screenshot(b: &mut dyn Backend, args: &Value) -> ToolResult {
-@@ -609,6 +678,8 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
+@@ -609,6 +686,8 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
          return ToolResult::from(exec(b, &rest.replace('_', "."), args.clone()));
      }
      match name {
@@ -4298,14 +4389,14 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..bdc4cf20ddf6cb87ac4ea1283562e1ef
          "list_commands" | "command_list" => {
              let filter = s("filter").unwrap_or("").to_lowercase();
              let enabled_only = args.get("enabled_only").and_then(Value::as_bool).unwrap_or(false);
-@@ -664,7 +735,9 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
+@@ -664,7 +743,9 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
          }
          "doc_inspect" => ToolResult::from(doc_inspect(b)),
          "render_preview" => {
 -            let mut a = obj(args, &["id", "format"]);
 +            // obj() deliberately omits nulls for legacy helpers; validate opt-in fields first.
 +            if let Err(code) = crate::preview::Options::parse(args) { return crate::preview::error(code); }
-+            let mut a = obj(args, &["id", "format", "before", "quality", "preview_contract", "stage_cache", "stage_cache_budget_bytes"]);
++            let mut a = obj(args, &["id", "format", "before", "quality", "preview_contract", "stage_cache", "stage_cache_budget_bytes", "display_mode", "crop_edit_contract", "request_id", "settings_fingerprint"]);
              if let Some(m) = args.get("max_side") {
                  a["size"] = m.clone();
              }

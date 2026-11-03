@@ -35,6 +35,8 @@ def manifest(path=None):
             if targets != patch["targets"] or len(targets) != len(set(targets)):
                 raise ValueError("patch targets mismatch")
     if 'geometryDescriptorContract' in value:
+        if 'cropEditContract' in value and (type(value['cropEditContract']) is not int or value['cropEditContract'] != 1):
+            raise ValueError('unsupported crop editing contract')
         contracts = value.get('contracts', {'before': 1, 'preview': 1, 'region': 1})
         if type(value['geometryDescriptorContract']) is not int or value['geometryDescriptorContract'] != 2 \
                 or contracts not in ({'before': 1, 'preview': 1, 'region': 1}, {'before': 1, 'preview': 1, 'region': 1, 'wb': 1}) \
@@ -268,6 +270,11 @@ def probe(binary, spec=None):
         wb_module = importlib.util.module_from_spec(wb_spec)
         wb_spec.loader.exec_module(wb_module)
         wb_module.probe_wb(binary, expected_version=spec['version'])
+    if spec.get('cropEditContract') == 1:
+        crop_spec = importlib.util.spec_from_file_location('genzoroom_crop_probe', ROOT / 'crop_edit_probe.py')
+        crop_module = importlib.util.module_from_spec(crop_spec)
+        crop_spec.loader.exec_module(crop_module)
+        crop_module.probe_crop_edit(binary, expected_version=spec['version'])
 
 
 def valid_execution(value):
@@ -391,6 +398,7 @@ def receipt(binary, spec):
     return {"version": spec["version"], "commit": spec["commit"], "patches": spec["patches"],
             "binarySha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "beforeContract": 1, "previewContract": 1, "regionContract": 1,
             "geometryDescriptorContract": spec['geometryDescriptorContract'],
+            **({'cropEditContract': 1} if spec.get('cropEditContract') == 1 else {}),
             **({'wbContract': 1} if spec.get('contracts', {}).get('wb') == 1 else {})}
 
 

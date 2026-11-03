@@ -33,8 +33,8 @@
         "crates/ui-egui/src/render.rs"
       ],
       "file": "patches/0002-v0.18-native-contracts.patch",
-      "purpose": "Native Before, adaptive Whole and Region contract 1, geometry descriptor 2 and read-only WB estimation contract 1",
-      "sha256": "6020b117ed58bdfe9dea1dc1b9b13c54f91313e39f5b285a220f9c7f61056446"
+      "purpose": "Native Before, adaptive Whole and Region contract 1, geometry descriptor 2 and read-only WB estimation contract 1, read-only Crop editing display contract 1",
+      "sha256": "2efba419baca52467cef95a3a8160be3098d94fba848e28ac2951163dc556ebc"
     }
   ],
   "commit": "32d569ad5d19a6b55cf8d5c077127faa0f44a83b",
@@ -46,5 +46,6 @@
     "region": 1,
     "wb": 1
   },
-  "developmentTargetDir": "target-managed"
+  "developmentTargetDir": "target-managed",
+  "cropEditContract": 1
 }
