@@ -2150,3 +2150,14 @@ Phase 4.5.3後のDesktop確認で、任意比率入力が不要、チェーン�
 独自SVGをLucide公式`link-2`／`link-2-off`のパス・24×24 viewBox・2px丸端線へ置換した。npm依存は追加せず、Lucide ISCおよびFeather由来`link-2`のMIT通知・出典を`frontend/src/icons/ATTRIBUTION.md`へ記録。選択色は既存のニュートラルグレーを維持。Rotate／Flip行は`.raw-crop-buttons.raw-crop-transform-row`の明示的なGrid規則で2列に固定し、共有ボタン行のFlex表示を上書きする。
 
 Crop Controls／Surface／document hookの関連Frontendテスト178件成功。TypeScriptチェックと本番build成功。既存と同種の500 kB超chunk警告あり（index chunk約970 kB）。`git diff --check`成功。CSSテストではjsdomのComputedStyleがGrid列値を提供しないため、実際に読み込んだCSS規則のselector・display・2列定義を確認し、通常ボタン行のFlex規則も確認した。Native API、Recipe形式、History、Exportは変更していない。今回の変更後の実ブラウザ／Desktop受入は未実施。
+
+
+## RAW Crop Phase 4.5.5：Move仮表示の境界制約（2026-11-04）
+
+実装前の原因調査で確認したとおり、Frontendの`provisionalCrop()`は従来、MoveのX/Y変位をまとめて`constrainDraft()`へ渡し、境界に当たる一方の軸がドラッグ全体を縮めていた。Native LightCraft v0.18.0の`drag_crop`は未回転Moveで軸ごとにslideし、回転時はcrop cornersを保つ最近傍offsetを探索して、なければX・Y順にslideする。今回の変更は表示中の暫定Crop計算だけに限定した。
+
+Straighten 0°では画像pixel座標でX/Yを独立Clampし、矩形寸法を変えず、Aspect lockとFlip状態に依存しないようにした。Straighten中はNative `nearest_offset`の半平面制約と最近傍投影を移植し、成立しない場合はNativeと同じX→Y順のslideへ戻す。Resizeの既存`constrainDraft()`、PointerDown owner、PointerUp時の単一Native mutation、readback正本、Recipe／Export／Recovery契約は変更していない。Native API・Backend・Recipe形式にも変更なし。
+
+3990×3000の全高1:1 Cropでdx/dyが(+100,0)、(+100,+2)、(+100,-2)、(-100,+2)の4条件を、Free／1:1双方で確認した。加えて縦移動余地のある左右境界、四隅・全画面境界、Flipの4組、比率固定、矩形サイズ不変、Straighten 6°の小移動と傾斜辺沿い移動を検証した。回転FixtureはLightCraft v0.18.0 pinned sourceの`given_a_small_frame_pushed_past_a_tilted_edge_then_it_stops_on_the_edge_and_slides_along_it`を基準とし、小移動の期待座標も照合している。既存Resizeテストを含む`rawCropDisplay.test.ts`は28件成功。
+
+関連する`rawCropDisplay`／`rawCropMath`／`RawCropSurface`／`useRawDocument`／`rawHistorySave`の5 test files、計279件成功。TypeScriptチェック、本番build、`git diff --check`も成功した。buildは既存同様500 kB超chunk警告を出し、index chunkは約972 kB。Native managed binaryそのものを起動した同一入力のreadback比較と実Desktop／ブラウザ受入は未実施であり、回転時計算はpinned LightCraft sourceの規則とFrontend fixtureによる照合である。1ジェスチャ1Historyと既存確定経路は関連既存テストでも確認し、手動受入の代替とはしない。
