@@ -2091,3 +2091,10 @@ Frontend `ImageViewer`／`RawCropSurface`／Phase 4.3連携の関連テスト219
 Phase 4.3.1実機受入で判明した、右ペインへキーボードfocusが残るとSpaceが有効にならない問題を修正。Space Key Down時にevent.targetをViewer所属判定へ使わず、ImageViewerの`.viewer-viewport` Pointer Enter／Leaveで更新するrefを参照する。Viewer内で押した時だけarmし、外で押したSpaceはhover移動だけでは有効にならない。テキスト等、IME、dialog/menu、操作blockのguardとKey Up／Blur／owner固定を保つ。Capture中やgesture中のhover離脱は進行中ownerを変えない。Pointer MoveによるReact rerenderは発生させない。
 
 関連Frontendテスト、TypeScript、本番build、`git diff --check`の結果は本追記とともに記録する。実ブラウザ／Desktop受入は未実施。
+
+
+## RAW Crop Phase 4.3.3：Spaceハンドカーソル同期（2026-11-04）
+
+実DesktopでPanは動作するがSpace押下だけではカーソルが変わらない事象を追跡。Crop surfaceの親cursorに対し、Move子要素と8 handleが固定cursorを持つため上書きされていた。またhover Pointer Moveによる直接style更新が別のcursor所有者だった。Space判定やPan ownerを変えず、resolved cursorを単一優先順位（Space Pan中grabbing、Space待機grab、開始済みCrop gesture固定cursor、handle resize、枠内move、枠外rotate）で決め、surface／子要素へ適用する。ReactのSpace state更新だけで反映し、Pointer Moveごとの再描画は行わない。
+
+RawCropSurface/ImageViewer/AnshitsuRawPreview関連220件成功。追加テストでpointer moveなしのhandTool state変更による親・Move・handle cursorのgrab/grabbingおよび解除後復帰を確認。TypeScript、本番build、`git diff --check`成功。既存500 kB超chunk警告あり。Space Panの実Desktop受入は既に前段Phaseで確認済みだが、今回カーソル同期修正後の実Desktop確認は未実施。

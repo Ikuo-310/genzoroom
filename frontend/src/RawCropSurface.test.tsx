@@ -5,6 +5,18 @@ import { expect,it,vi } from 'vitest';
 import { provisionalCrop,type CropSnapshot } from './rawCropDisplay';
 import { rawSettings } from './test/rawSettings';
 import { RawCropSurface, type RawCropBinding } from './RawCropSurface';
+it('applies and removes hand cursors from key state without pointer movement',async()=>{
+ vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);const host=document.createElement('div'),root=createRoot(host);
+ const crop={geometry:{rect:{x0:.2,y0:.2,x1:.8,y1:.8},angle:0},aspect:null,flip_h:false,flip_v:false};
+ const binding:RawCropBinding={active:true,canStart:true,begin:vi.fn(async()=>{}),update:vi.fn(),end:vi.fn(async()=>{}),surface:{url:'blob:cursor',frame:{geometryId:'e'.repeat(64),nativeWidth:1000,nativeHeight:500,aspect:2,fullWidth:200,fullHeight:100,window:null},display:{settingsFingerprint:'f'.repeat(64),bitmapSpace:'oriented-warped-unstraightened-flipped',canonicalGeometry:{orientation:'Normal',crop}}}};
+ const render=(handTool:boolean,panning=false)=>root.render(<RawCropSurface binding={binding} viewport={{x:800,y:600}} scale={.5} pan={{x:0,y:0}} busy={()=>{}} handTool={handTool} panning={panning}/>);
+ await act(async()=>render(false));const surface=host.firstElementChild as HTMLElement,move=host.querySelector('[data-crop-move]') as HTMLElement,handle=host.querySelector('[data-crop-handle="topLeft"]') as HTMLElement;
+ expect(move.style.cursor).toBe('move');expect(handle.style.cursor).toBe('nwse-resize');
+ await act(async()=>render(true));expect(surface.style.cursor).toBe('grab');expect(move.style.cursor).toBe('grab');expect(handle.style.cursor).toBe('grab');
+ await act(async()=>render(true,true));expect(surface.style.cursor).toBe('grabbing');expect(move.style.cursor).toBe('grabbing');
+ await act(async()=>render(false));expect(surface.style.cursor).toBe('default');expect(move.style.cursor).toBe('move');expect(handle.style.cursor).toBe('nwse-resize');
+ await act(async()=>root.unmount());vi.unstubAllGlobals();
+});
 it.each(['topLeft','topRight','bottomRight','bottomLeft','top','right','bottom','left','move','cancel'])('captures %s and freezes start/inverse across readback until final point',async(handle)=>{
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);
   const host=document.createElement('div'),root=createRoot(host),busy=vi.fn();

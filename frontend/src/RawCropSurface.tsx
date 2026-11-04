@@ -46,7 +46,8 @@ export function RawCropSurface({ binding, viewport, scale, pan, busy, handTool=f
     g.owner.update({ type: 'drag', params: { handle: g.handle, from: g.from, to: [to.x,to.y], start: g.start, keepRatio: event.shiftKey } });
   };
   const straightenCursor='url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2732%27 height=%2732%27 viewBox=%270 0 32 32%27%3E%3Cpath d=%27M7 20a10 10 0 1 1 3 5%27 fill=%27none%27 stroke=%27white%27 stroke-width=%273%27/%3E%3Cpath d=%27m5 17 2 5 5-2%27 fill=%27none%27 stroke=%27white%27 stroke-width=%272%27/%3E%3C/svg%3E") 16 16, crosshair';
-  return <div ref={root} data-testid="raw-crop-surface" style={{ position: 'absolute', inset: 0, touchAction: 'none', cursor:handTool?(panning?'grabbing':'grab'):gesture.current?.cursor ?? 'default' }}
+  const effectiveCursor=gesture.current?.cursor ?? (handTool?(panning?'grabbing':'grab'):undefined);
+  return <div ref={root} data-testid="raw-crop-surface" style={{ position: 'absolute', inset: 0, touchAction: 'none', cursor:effectiveCursor ?? 'default' }}
     onPointerDown={event => {
       if(handTool)return;
       if (!projection || !surface || !crop || !binding.canStart || gesture.current || event.button !== 0) return;
@@ -76,7 +77,7 @@ export function RawCropSurface({ binding, viewport, scale, pan, busy, handTool=f
     {surface && projection && <>
       <img src={surface.url} alt="" draggable={false} style={{ position:'absolute', width:surface.frame.fullWidth,
         height:surface.frame.fullHeight, maxWidth:'none', transformOrigin:'0 0', transform:`matrix(${projection.bitmapToViewport.join(',')})`, pointerEvents:'none' }} />
-      <div data-crop-move="true" style={{position:'absolute',...projection.rect,cursor:gesture.current?'inherit':'move'}} />
+      <div data-crop-move="true" style={{position:'absolute',...projection.rect,cursor:effectiveCursor ?? 'move'}} />
       <svg width="100%" height="100%" style={{ position:'absolute', inset:0, pointerEvents:'none' }}>
         <path fill="rgba(0,0,0,.55)" fillRule="evenodd" d={`M0 0H${viewport.x}V${viewport.y}H0Z M${projection.rect.left} ${projection.rect.top}h${projection.rect.width}v${projection.rect.height}h${-projection.rect.width}Z`} />
         <rect x={projection.rect.left} y={projection.rect.top} width={projection.rect.width} height={projection.rect.height} fill="none" stroke="white" />
@@ -87,7 +88,7 @@ export function RawCropSurface({ binding, viewport, scale, pan, busy, handTool=f
       </svg>
       {CROP_HANDLES.filter(h => h !== 'move').map(handle => <div key={handle} data-crop-handle={handle}
         style={{ position:'absolute', left:projection.handles[handle].x-12, top:projection.handles[handle].y-12,
-          width:24, height:24, display:'grid', placeItems:'center', cursor:gesture.current?'inherit':cursor(handle) }}>
+          width:24, height:24, display:'grid', placeItems:'center', cursor:effectiveCursor ?? cursor(handle) }}>
         <span style={{ width:8,height:8,background:'white',border:'1px solid #333',pointerEvents:'none' }} />
       </div>)}
     </>}
