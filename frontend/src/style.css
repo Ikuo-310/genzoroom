@@ -926,6 +926,11 @@ dialog.workspace-save-dialog { color: #ececee; }
 .raw-crop-aspect { display: grid; gap: 6px; }
 .raw-crop-aspect select { width: 100%; min-width: 0; }
 .raw-crop-buttons { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
+.raw-crop-overlay { border: 0; padding: 0; margin: 10px 0; min-width: 0; }
+.raw-crop-overlay legend { padding: 0; margin-bottom: 4px; color: #c5d0ca; font-size: 0.78rem; }
+.raw-crop-overlay .raw-crop-buttons { margin: 0; }
+.raw-crop-overlay .tool-button[aria-pressed="true"] { background: #3c5546; border-color: #8da996; color: #fff; }
+.raw-crop-overlay .tool-button[aria-pressed="true"]:hover:not(:disabled) { background: #496653; }
 .raw-crop-custom { display: flex; gap: 5px; align-items: end; flex-wrap: wrap; }
 .raw-crop-custom label { display: grid; flex: 1; min-width: 60px; gap: 4px; }
 .raw-crop-custom input { width: 100%; min-width: 0; box-sizing: border-box; }

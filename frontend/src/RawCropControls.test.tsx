@@ -10,7 +10,7 @@ let raw: any;
 beforeEach(async()=>{vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);await i18n.changeLanguage('en');
  host=document.createElement('div');document.body.append(host);root=createRoot(host);
  raw={status:'ready',settings:{orientation:'Rotate90',crop:{geometry:{rect:{x0:.2,y0:.2,x1:.8,y1:.8},angle:0},aspect:null,flip_h:false,flip_v:false}},
-  frame:{nativeWidth:3000,nativeHeight:4000},history:{},crop:{active:true,surface:{},cancel:vi.fn(async()=>{}),begin:vi.fn(async()=>{}),update:vi.fn(),end:vi.fn(async()=>{}),operate:vi.fn(async()=>{}),recover:vi.fn(async()=>{}),setMode:vi.fn(async()=>{})},retrySave:vi.fn(async()=>{})};
+  frame:{nativeWidth:3000,nativeHeight:4000},history:{},crop:{active:true,surface:{},overlay:'thirds',setOverlay:vi.fn(),straightenTool:false,setStraightenTool:vi.fn(),cancel:vi.fn(async()=>{}),begin:vi.fn(async()=>{}),update:vi.fn(),end:vi.fn(async()=>{}),operate:vi.fn(async()=>{}),recover:vi.fn(async()=>{}),setMode:vi.fn(async()=>{})},retrySave:vi.fn(async()=>{})};
 });
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.unstubAllGlobals();});
 const render=async()=>act(async()=>root.render(<RawCropControls raw={raw}/>));
@@ -32,6 +32,21 @@ it('keeps invalid custom drafts local and applies one exact ratio',async()=>{
  expect(button('Apply').disabled).toBe(true);expect(raw.crop.operate).not.toHaveBeenCalled();await input(values[0],'8.5');
  await act(async()=>host.querySelector('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
  expect(raw.crop.operate).toHaveBeenCalledWith({type:'aspect',params:{aspect:[17,22],orientation:'crop'}},undefined);
+});
+it('renders six accessible overlay choices with visible selected styling and no fieldset border',async()=>{
+ await render();const group=host.querySelector('fieldset.raw-crop-overlay')!;expect(group.querySelector('legend')!.textContent).toBe('Overlay');
+ const choices=Array.from(group.querySelectorAll<HTMLButtonElement>('[aria-pressed]'));
+ expect(choices.map(x=>x.textContent)).toEqual(['Thirds','Grid','Golden Ratio','Diagonals','Halves','None']);
+ expect(choices.map(x=>x.getAttribute('aria-pressed'))).toEqual(['true','false','false','false','false','false']);
+ expect(group.querySelector('button')!.className).toContain('tool-button');
+ expect(styleCss).toContain('.raw-crop-overlay { border: 0; padding: 0; margin: 10px 0; min-width: 0; }');
+ expect(styleCss).toContain('.raw-crop-overlay .tool-button[aria-pressed="true"] { background: #3c5546;');
+ expect(styleCss).not.toContain('rotateOverlay');expect(group.textContent).not.toContain('Spiral');
+ await act(async()=>choices[1].click());expect(choices[1].getAttribute('aria-pressed')).toBe('false');expect(raw.crop.setOverlay).toHaveBeenCalledWith('grid');
+});
+it('uses the Japanese Free label while keeping the free preset value and English Free',async()=>{
+ await i18n.changeLanguage('ja');await render();expect(host.querySelector('select option[value="free"]')!.textContent).toBe('フリー');
+ await i18n.changeLanguage('en');await render();expect(host.querySelector('select option[value="free"]')!.textContent).toBe('Free');
 });
 it.each(['Swap Aspect','Lock Aspect','Rotate Left 90°','Rotate Right 90°','Flip Horizontal','Flip Vertical','Reset Crop'])('dispatches %s once while the outcome is pending',async(label)=>{
  let resolve!:()=>void;raw.crop.operate.mockImplementation(()=>new Promise<void>(r=>resolve=r));await render();

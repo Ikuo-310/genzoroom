@@ -7,7 +7,7 @@ import { straightenFromLine } from './rawStraightenTool';
 import { cropOverlayPaths,type CropOverlay } from './rawCropOverlay';
 export type RawCropBinding = { active: boolean; canStart: boolean; presentation?: CropPresentation;
   straightenTool?:boolean;setStraightenTool?:(active:boolean)=>void;
-  overlay?:CropOverlay;spiralDirection?:number;
+  overlay?:CropOverlay;
   surface?: { url: string; frame: RawGeometry; display: RawCropDisplay };
   begin: (type?:'drag'|'straighten') => Promise<void>; update: (operation: RawGeometryOperation) => void; cancel?: () => Promise<void>; end: () => Promise<void> };
 export function RawCropSurface({ binding, viewport, scale, pan, busy, handTool=false, panning=false }: {
@@ -97,7 +97,7 @@ export function RawCropSurface({ binding, viewport, scale, pan, busy, handTool=f
         <rect x={projection.rect.left} y={projection.rect.top} width={projection.rect.width} height={projection.rect.height} fill="none" stroke="white" />
         <defs><clipPath id={clipId}><rect x={projection.rect.left} y={projection.rect.top} width={projection.rect.width} height={projection.rect.height}/></clipPath></defs>
         <g clipPath={`url(#${clipId})`} fill="none" stroke="rgba(255,255,255,.62)" strokeWidth="1" vectorEffect="non-scaling-stroke" pointerEvents="none">
-          {cropOverlayPaths(binding.overlay??'thirds',projection.rect.width,projection.rect.height,binding.spiralDirection).map((d,i)=><path key={i} d={d} transform={`translate(${projection.rect.left} ${projection.rect.top})`}/>)}
+          {cropOverlayPaths(binding.overlay??'thirds',projection.rect.width,projection.rect.height).map((d,i)=><path key={i} d={d} transform={`translate(${projection.rect.left} ${projection.rect.top})`}/>)}
         </g>
       </svg>
       {CROP_HANDLES.filter(h => h !== 'move').map(handle => <div key={handle} data-crop-handle={handle}

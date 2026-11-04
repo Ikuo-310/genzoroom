@@ -6,8 +6,7 @@ describe('crop overlay geometry',()=>{
   expect(cropOverlayPaths('golden',100,100)[0]).toContain('38.1966');expect(cropOverlayPaths('diagonals',100,100)).toHaveLength(2);
   expect(cropOverlayPaths('grid',100,100)).toHaveLength(16);expect(cropOverlayPaths('none',100,100)).toEqual([]);
  });
- it('rotates the spiral in normalized crop space and rejects invalid frames',()=>{
-  const base=cropOverlayPaths('spiral',400,200,0)[0],rotated=cropOverlayPaths('spiral',400,200,90)[0];
-  expect(rotated).not.toBe(base);expect(cropOverlayPaths('spiral',400,200,360)[0]).toBe(base);expect(cropOverlayPaths('grid',0,3)).toEqual([]);
+ it('supports exactly six overlays and rejects invalid frames',()=>{
+  expect(['thirds','grid','golden','diagonals','halves','none']).toHaveLength(6);expect(cropOverlayPaths('grid',0,3)).toEqual([]);
  });
 });

@@ -2116,3 +2116,12 @@ Crop枠固定の三分割表示を、三分割／グリッド／黄金比／対�
 `rawCropOverlay.ts`の純粋関数がCrop frame内SVG pathを作り、clipPathで矩形に制限する。線はpointer-events noneかつnon-scaling stroke。枠、暗幕、handlesはoverlay種類から独立して維持。通常グリッドは均等分割、黄金比は0.382／0.618、対角線はX字、螺旋は正規化座標上の黄金比減衰spiralを四方向へ回す。写真／ExportへSVGを合成せず、Preview要求も増やさない。
 
 overlay geometry・RAW Crop／Surface／Controls／Viewer／document関連Frontend 277件成功。TypeScript、本番build、`git diff --check`成功。既存500 kB超chunk警告あり。実ブラウザ／Desktopで縦横極端なCrop、線の視認性、リサイズ時の螺旋品質、アクセシビリティ操作は未実施。螺旋は正規化frame内の表示用曲線であり、LightCraftのピクセル一致を保証しない。
+
+
+## RAW Crop Phase 4.5.1：Overlay UI整理（2026-11-04）
+
+実Desktop確認で黄金螺旋形状が不自然、fieldsetの白枠が不要、選択状態が視認できないとの指摘を受けた。採用Overlayを三分割／グリッド／黄金比／対角線／二分割／なしの6種へ整理し、螺旋描画と方向UI・状態・関数分岐・専用テスト・翻訳を削除。過去のPhase 4.5記録は履歴として維持し、architectureの現行契約は6種と明記した。
+
+アクセシビリティを保つためfieldset/legendは維持し、Crop専用CSSでborder/padding/min-widthをreset、legendとcompact wrap layoutを維持した。選択中だけ既存dark UIのgreen selected treatmentを適用し、hover/focus/disabledの規則を維持。日本語Crop aspect表示`free`のみ「フリー」に変更し、内部値と英語`Free`は維持。
+
+関連Frontendテスト178件成功。TypeScript、本番build、`git diff --check`も成功（既存500 kB超chunk警告あり）。実ブラウザ／Desktopでの本修正後確認は未実施。テスト結果は視覚的desktop受入を代替しない。
