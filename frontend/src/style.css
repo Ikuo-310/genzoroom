@@ -924,7 +924,12 @@ dialog.workspace-save-dialog { color: #ececee; }
 .raw-edit-categories .binary-radio-options span { text-align: center; }
 .raw-crop-controls { padding: 10px; min-width: 0; }
 .raw-crop-aspect { display: grid; gap: 6px; }
-.raw-crop-aspect select { width: 100%; min-width: 0; }
+.raw-crop-aspect-row { display: flex; gap: 6px; min-width: 0; }
+.raw-crop-aspect-row select { flex: 1 1 auto; width: 0; min-width: 0; }
+.raw-crop-aspect-lock { display: grid; flex: 0 0 34px; width: 34px; min-height: 34px; padding: 5px; place-items: center; }
+.raw-crop-aspect-lock svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.raw-crop-aspect-lock[aria-pressed="true"] { background: #3c5546; border-color: #8da996; color: #fff; }
+.raw-crop-aspect-lock[aria-pressed="true"]:hover:not(:disabled) { background: #496653; }
 .raw-crop-buttons { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
 .raw-crop-overlay { border: 0; padding: 0; margin: 10px 0; min-width: 0; }
 .raw-crop-overlay legend { padding: 0; margin-bottom: 4px; color: #c5d0ca; font-size: 0.78rem; }

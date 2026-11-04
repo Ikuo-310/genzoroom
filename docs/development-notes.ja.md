@@ -2125,3 +2125,12 @@ overlay geometry・RAW Crop／Surface／Controls／Viewer／document関連Fronte
 アクセシビリティを保つためfieldset/legendは維持し、Crop専用CSSでborder/padding/min-widthをreset、legendとcompact wrap layoutを維持した。選択中だけ既存dark UIのgreen selected treatmentを適用し、hover/focus/disabledの規則を維持。日本語Crop aspect表示`free`のみ「フリー」に変更し、内部値と英語`Free`は維持。
 
 関連Frontendテスト178件成功。TypeScript、本番build、`git diff --check`も成功（既存500 kB超chunk警告あり）。実ブラウザ／Desktopでの本修正後確認は未実施。テスト結果は視覚的desktop受入を代替しない。
+
+
+## RAW Crop Phase 4.5.2：縦横比とチェーンロック（2026-11-04）
+
+Aspect selector横にSVG chain buttonを配置し、独立したテキストLock/Unlockを削除した。OFFからONは既存`aspect:'current'`で現在Crop矩形比率を固定し、source/Original比率へ戻さない。ONからOFFは`aspect:'free'`でconstraintだけを解除し矩形は維持する。プリセット／Custom適用は従来の1つのNative aspect operationのみを送り、readback `crop.aspect`が選択表示と`aria-pressed`双方の正本。stateを複製しない。ボタンbusyは既存run admissionを使う。Aspect rowはselectを可変幅、chain iconを固定コンパクト幅にし、狭いpaneでoverflowを防ぐ。
+
+UI選択肢から`original`を除き、数値readbackは残存presetとの一致判定、非一致はCustom表示とした。元画像比率取得やNative original operationは削除していない。日本語／英語のlock/unlock補助ラベルを追加し旧UI専用文言を削除。SwapとHistory action identifierを維持。
+
+関連Frontend 177件成功。TypeScript、本番build、`git diff --check`成功（既存500 kB超chunk警告）。実Desktopでのpane幅、chain SVG状態、Native readback後のAspect表示、既存Recipe復元は手動受入未実施。

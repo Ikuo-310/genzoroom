@@ -48,17 +48,26 @@ it('uses the Japanese Free label while keeping the free preset value and English
  await i18n.changeLanguage('ja');await render();expect(host.querySelector('select option[value="free"]')!.textContent).toBe('フリー');
  await i18n.changeLanguage('en');await render();expect(host.querySelector('select option[value="free"]')!.textContent).toBe('Free');
 });
-it.each(['Swap Aspect','Lock Aspect','Rotate Left 90°','Rotate Right 90°','Flip Horizontal','Flip Vertical','Reset Crop'])('dispatches %s once while the outcome is pending',async(label)=>{
+it('uses one chain button for aspect lock and derives its state from readback',async()=>{
+ await render();const select=host.querySelector('select')!,chain=host.querySelector<HTMLButtonElement>('.raw-crop-aspect-lock')!;
+ expect(select.parentElement!.className).toBe('raw-crop-aspect-row');expect(select.querySelector('option[value="original"]')).toBeNull();
+ expect(chain.getAttribute('aria-pressed')).toBe('false');expect(chain.getAttribute('aria-label')).toBe('Lock current aspect ratio');
+ await act(async()=>chain.click());expect(raw.crop.operate).toHaveBeenCalledOnce();expect(raw.crop.operate).toHaveBeenCalledWith({type:'aspect',params:{aspect:'current'}},'lock');
+ raw.settings.crop.aspect=[1600,900];await render();expect(chain.getAttribute('aria-pressed')).toBe('true');expect(chain.getAttribute('aria-label')).toBe('Unlock aspect ratio');expect(select.value).toBe('16x9');
+ await act(async()=>chain.click());expect(raw.crop.operate).toHaveBeenLastCalledWith({type:'aspect',params:{aspect:'free'}},'unlock');
+});
+it.each(['Swap Aspect','Rotate Left 90°','Rotate Right 90°','Flip Horizontal','Flip Vertical','Reset Crop'])('dispatches %s once while the outcome is pending',async(label)=>{
  let resolve!:()=>void;raw.crop.operate.mockImplementation(()=>new Promise<void>(r=>resolve=r));await render();
  await act(async()=>{button(label).click();button(label).click();});expect(raw.crop.operate).toHaveBeenCalledOnce();
- const call=raw.crop.operate.mock.calls[0];const types:any={'Swap Aspect':'swap','Lock Aspect':'aspect','Rotate Left 90°':'rotateLeft','Rotate Right 90°':'rotateRight','Flip Horizontal':'flipHorizontal','Flip Vertical':'flipVertical','Reset Crop':'reset'};
- expect(call[0].type).toBe(types[label]);if(label==='Lock Aspect')expect(call).toEqual([{type:'aspect',params:{aspect:'current'}},'lock']);
+ const call=raw.crop.operate.mock.calls[0];const types:any={'Swap Aspect':'swap','Rotate Left 90°':'rotateLeft','Rotate Right 90°':'rotateRight','Flip Horizontal':'flipHorizontal','Flip Vertical':'flipVertical','Reset Crop':'reset'};
+ expect(call[0].type).toBe(types[label]);
  await act(async()=>resolve());
 });
-it('reads Native lock/flip state and labels unlock explicitly',async()=>{
+it('reads Native lock/flip state and labels chain unlock accessibly',async()=>{
  raw.settings.crop.aspect=[1700,2200];raw.settings.crop.flip_h=true;await render();
  expect(host.querySelector('select')!.value).toBe('8.5x11');expect(button('Flip Horizontal').getAttribute('aria-pressed')).toBe('true');
- await act(async()=>button('Unlock Aspect').click());expect(raw.crop.operate).toHaveBeenCalledWith({type:'aspect',params:{aspect:'free'}},'unlock');
+ const chain=host.querySelector<HTMLButtonElement>('.raw-crop-aspect-lock')!;expect(chain.getAttribute('aria-pressed')).toBe('true');expect(chain.getAttribute('aria-label')).toBe('Unlock aspect ratio');
+ await act(async()=>chain.click());expect(raw.crop.operate).toHaveBeenCalledWith({type:'aspect',params:{aspect:'free'}},'unlock');
 });
 it('disables discrete actions and slider while a frame gesture owns the document',async()=>{
  raw.locked=true;raw.crop.operation='drag';await render();
