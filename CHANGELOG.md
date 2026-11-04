@@ -16,6 +16,8 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
+- Added non-destructive RAW Crop and Straighten editing in the Windows darkroom, with interactive crop-frame dragging and resizing, aspect-ratio presets and locking, 90° rotation, horizontal/vertical flipping, and composition overlays.
+- Added line-based Straighten correction, Space-drag panning, and Shift-drag axis locking for crop-frame movement, with boundary-aware dragging and integration with RAW History, Undo/Redo, Reset, saved Recipes, Export, and rendered thumbnails.
 - Saved RAW edits are now reflected in thumbnails across Gallery, Filmstrip, Stack Edited Preview, and immersive previews.
 - The shared photo Viewer now toggles between Fit and Actual Size on image double-click, and offers a configurable corner Zoom Navigator for locating and panning around magnified images.
 - RAW Whole-frame previews now adapt to Viewer size, display pixel density and zoom up to 2048 pixels, while preserving pan/zoom and matching Before/After preview sizes.
