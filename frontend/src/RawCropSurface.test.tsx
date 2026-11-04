@@ -69,6 +69,31 @@ it('locks only Crop Move to a screen axis and re-anchors without jumps when Shif
  expect(binding.begin).toHaveBeenCalledOnce();expect(binding.end).toHaveBeenCalledOnce();
  await act(async()=>root.unmount());vi.unstubAllGlobals();
 });
+it('re-anchors Shift Move at the displayed boundary position after a large overshoot',async()=>{
+ vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);const host=document.createElement('div'),root=createRoot(host),crop={geometry:{rect:{x0:.2,y0:.2,x1:.8,y1:.8},angle:0},aspect:null,flip_h:false,flip_v:false};
+ const snapshot:CropSnapshot={url:'blob:edge',mode:'crop-edit',doc:{...rawSettings({workspaceId:'w',handle:'h',assetId:'a',generation:1,documentToken:'t',revision:1}),crop,orientation:'Normal'},
+  frame:{geometryId:'e'.repeat(64),nativeWidth:1000,nativeHeight:500,aspect:2,fullWidth:200,fullHeight:100,window:null},display:{settingsFingerprint:'f'.repeat(64),bitmapSpace:'oriented-warped-unstraightened-flipped',canonicalGeometry:{orientation:'Normal',crop}}};
+ const updates:RawGeometryOperation[]=[],binding:RawCropBinding={active:true,canStart:true,surface:snapshot,begin:vi.fn(async()=>{}),update:op=>{updates.push(op);binding.presentation={snapshot,crop:provisionalCrop(crop,op,snapshot.frame),phase:'provisional',revision:1,fingerprint:snapshot.doc.settingsFingerprint};render();},cancel:vi.fn(async()=>{}),end:vi.fn(async()=>{})};
+ const busy=vi.fn(),render=()=>root.render(<RawCropSurface binding={binding} viewport={{x:800,y:600}} scale={1} pan={{x:0,y:0}} busy={busy}/>);await act(async()=>render());
+ const surface=host.firstElementChild as HTMLDivElement,move=host.querySelector('[data-crop-move]')!;surface.setPointerCapture=vi.fn();surface.hasPointerCapture=()=>true;surface.releasePointerCapture=vi.fn();
+ const pointer=(type:string,x:number,shiftKey:boolean)=>{const e=new Event(type,{bubbles:true});Object.assign(e,{pointerId:2,button:0,clientX:x,clientY:300,shiftKey});(type==='pointerdown'?move:surface).dispatchEvent(e);};
+ await act(async()=>pointer('pointerdown',400,false));await act(async()=>pointer('pointermove',900,false));expect(binding.presentation!.crop.geometry.rect.x0).toBeCloseTo(.4);
+ const edgeX=Number(host.querySelector('rect')!.getAttribute('x'));await act(async()=>window.dispatchEvent(new KeyboardEvent('keydown',{key:'Shift',bubbles:true,shiftKey:true})));
+ expect(Number(host.querySelector('rect')!.getAttribute('x'))).toBe(edgeX);
+ await act(async()=>pointer('pointermove',890,true));expect(binding.presentation!.crop.geometry.rect.x0).toBeCloseTo(.39);const final=updates.at(-1);
+ await act(async()=>pointer('pointerup',890,true));expect(updates.at(-1)).toEqual(final);expect(binding.end).toHaveBeenCalledOnce();expect(binding.cancel).not.toHaveBeenCalled();
+ await act(async()=>root.unmount());vi.unstubAllGlobals();
+});
+it.each(['move','resize','straighten'] as const)('cancels active %s on Escape and ignores the following PointerUp',async(kind)=>{
+ vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);const host=document.createElement('div'),root=createRoot(host),binding:RawCropBinding={active:true,canStart:true,begin:vi.fn(async()=>{}),update:vi.fn(),cancel:vi.fn(async()=>{}),end:vi.fn(async()=>{}),surface:{url:'blob:cancel',frame:{geometryId:'edit',nativeWidth:1000,nativeHeight:500,aspect:2,fullWidth:200,fullHeight:100,window:null},display:{settingsFingerprint:'fp',bitmapSpace:'oriented-warped-unstraightened-flipped',canonicalGeometry:{orientation:'Normal',crop:{geometry:{rect:{x0:.2,y0:.2,x1:.8,y1:.8},angle:0},aspect:null,flip_h:false,flip_v:false}}}}};
+ await act(async()=>root.render(<RawCropSurface binding={binding} viewport={{x:800,y:600}} scale={1} pan={{x:0,y:0}} busy={()=>{}}/>));const surface=host.firstElementChild as HTMLDivElement;surface.setPointerCapture=vi.fn();surface.hasPointerCapture=()=>true;surface.releasePointerCapture=vi.fn();
+ surface.getBoundingClientRect=()=>({left:0,top:0,width:800,height:600,right:800,bottom:600,x:0,y:0,toJSON:()=>({})});
+ const target=kind==='resize'?host.querySelector('[data-crop-handle="right"]')!:surface,downX=kind==='straighten'?50:kind==='resize'?700:400,downY=kind==='straighten'?80:300;
+ const dispatch=(type:string)=>{const e=new Event(type,{bubbles:true});Object.assign(e,{pointerId:3,button:0,clientX:downX,clientY:downY,shiftKey:false});(type==='pointerdown'?target:surface).dispatchEvent(e);};
+ await act(async()=>dispatch('pointerdown'));expect(binding.begin).toHaveBeenCalledOnce();const escape=new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true});await act(async()=>window.dispatchEvent(escape));expect(escape.defaultPrevented).toBe(true);
+ expect(binding.cancel).toHaveBeenCalledOnce();expect(binding.end).not.toHaveBeenCalled();expect(surface.releasePointerCapture).toHaveBeenCalledWith(3);
+ await act(async()=>dispatch('pointerup'));expect(binding.end).not.toHaveBeenCalled();expect(binding.cancel).toHaveBeenCalledOnce();await act(async()=>root.unmount());vi.unstubAllGlobals();
+});
 it('does not claim outside pan and ends cancellation without an extra mutation',async()=>{
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);const host=document.createElement('div'),root=createRoot(host);
   const binding:RawCropBinding={active:true,canStart:false,begin:vi.fn(async()=>{}),update:vi.fn(),end:vi.fn(async()=>{})};

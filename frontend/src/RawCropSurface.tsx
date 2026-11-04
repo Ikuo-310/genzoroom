@@ -1,24 +1,30 @@
 import type { CropPresentation } from './rawCropDisplay';
 import { useEffect, useId, useRef, useState, type PointerEvent } from 'react';
-import type { RawCropDisplay, RawGeometry, RawGeometryOperation } from './rawApi';
+import type { RawCrop, RawCropDisplay, RawGeometry, RawGeometryOperation } from './rawApi';
 import { CROP_HANDLES, cropMoveAxis, cropMoveTarget, cropPoint, projectRawCrop, type CropHandle, type CropMatrix, type CropMoveAxis } from './rawCropMath';
 import type { Point } from './viewerMath';
 import { straightenFromLine } from './rawStraightenTool';
 import { cropOverlayPaths,type CropOverlay } from './rawCropOverlay';
+import { provisionalCrop } from './rawCropDisplay';
 export type RawCropBinding = { active: boolean; canStart: boolean; presentation?: CropPresentation;
   straightenTool?:boolean;setStraightenTool?:(active:boolean)=>void;
   overlay?:CropOverlay;
   surface?: { url: string; frame: RawGeometry; display: RawCropDisplay };
   begin: (type?:'drag'|'straighten') => Promise<void>; update: (operation: RawGeometryOperation) => void; cancel?: () => Promise<void>; end: () => Promise<void> };
 type CropPointerGesture = { id:number;matrix:CropMatrix;bounds:DOMRect;handle:CropHandle;view:{viewport:Point;scale:number;pan:Point};cursor:string;
-  from:[number,number];start:[number,number,number,number];owner:RawCropBinding;kind:'drag'|'straighten';center:Point;startAngle:number;lastAngle:number;previousPointerAngle:number;
+  from:[number,number];start:[number,number,number,number];startCrop:RawCrop;frame:RawGeometry;owner:RawCropBinding;kind:'drag'|'straighten';center:Point;startAngle:number;lastAngle:number;previousPointerAngle:number;
   lastScreen:Point;lastTo:Point;shift:boolean;axis:CropMoveAxis;axisStartScreen:Point;axisStartTo:Point;freeStartScreen:Point;freeStartTo:Point };
+function effectiveMoveTo(g:CropPointerGesture):Point{
+  const effective=provisionalCrop(g.startCrop,{type:'drag',params:{handle:'move',from:g.from,to:[g.lastTo.x,g.lastTo.y]}},g.frame).geometry.rect;
+  return {x:g.from[0]+(effective.x0-g.startCrop.geometry.rect.x0),y:g.from[1]+(effective.y0-g.startCrop.geometry.rect.y0)};
+}
 function setMoveShift(g:CropPointerGesture|null,active:boolean){
   if(!g||g.kind!=='drag'||g.handle!=='move'||g.shift===active)return;
   // Modifier transitions use the last rendered pointer target as the new origin, avoiding a jump.
+  const anchor=effectiveMoveTo(g);
   g.shift=active;g.axis=null;
-  if(active){g.axisStartScreen=g.lastScreen;g.axisStartTo=g.lastTo;}
-  else {g.freeStartScreen=g.lastScreen;g.freeStartTo=g.lastTo;}
+  if(active){g.axisStartScreen=g.lastScreen;g.axisStartTo=anchor;}
+  else {g.freeStartScreen=g.lastScreen;g.freeStartTo=anchor;}
 }
 export function RawCropSurface({ binding, viewport, scale, pan, busy, handTool=false, panning=false }: {
   binding: RawCropBinding; viewport: Point; scale: number; pan: Point; busy: (value: boolean) => void; handTool?:boolean;panning?:boolean }) {
@@ -42,7 +48,11 @@ export function RawCropSurface({ binding, viewport, scale, pan, busy, handTool=f
     if (root.current?.hasPointerCapture(g.id)) root.current.releasePointerCapture(g.id);
     busy(false); void (cancel && g.owner.cancel ? g.owner.cancel() : g.owner.end()).catch(() => {});
   };
-  useEffect(()=>{const blur=()=>{setLine(null);finish(true);};const key=(e:KeyboardEvent)=>{if(e.key==='Escape'&&binding.straightenTool){setLine(null);binding.setStraightenTool?.(false);}if(e.key==='Shift')setMoveShift(gesture.current,true);};const keyUp=(e:KeyboardEvent)=>{if(e.key==='Shift')setMoveShift(gesture.current,e.shiftKey);};window.addEventListener('blur',blur);window.addEventListener('keydown',key);window.addEventListener('keyup',keyUp);return ()=>{window.removeEventListener('blur',blur);window.removeEventListener('keydown',key);window.removeEventListener('keyup',keyUp);};},[binding]);
+  useEffect(()=>{const blur=()=>{setLine(null);finish(true);};const key=(e:KeyboardEvent)=>{if(e.key==='Shift')setMoveShift(gesture.current,true);if(e.key!=='Escape'||e.isComposing||e.defaultPrevented)return;
+    if(line){const id=line.id;setLine(null);if(root.current?.hasPointerCapture(id))root.current.releasePointerCapture(id);e.preventDefault();e.stopPropagation();return;}
+    if(gesture.current){e.preventDefault();e.stopPropagation();finish(true);return;}
+    if(binding.straightenTool){setLine(null);binding.setStraightenTool?.(false);e.preventDefault();e.stopPropagation();}};
+    const keyUp=(e:KeyboardEvent)=>{if(e.key==='Shift')setMoveShift(gesture.current,e.shiftKey);};window.addEventListener('blur',blur);window.addEventListener('keydown',key);window.addEventListener('keyup',keyUp);return ()=>{window.removeEventListener('blur',blur);window.removeEventListener('keydown',key);window.removeEventListener('keyup',keyUp);};},[binding,line]);
   useEffect(() => () => { const g = gesture.current; if (g) { gesture.current = null;
     if (root.current?.hasPointerCapture(g.id)) root.current.releasePointerCapture(g.id);
     busy(false); void (g.owner.cancel?.() ?? g.owner.end()).catch(() => {}); } }, [busy]);
@@ -98,7 +108,7 @@ export function RawCropSurface({ binding, viewport, scale, pan, busy, handTool=f
       const screen={x,y},moveTo={x:from.x,y:from.y},shift=handle==='move'&&event.shiftKey;
       gesture.current = { id: event.pointerId, matrix: projection.viewportToCanonical, bounds, handle: handle ?? 'move',
         view:{viewport:{...viewport},scale,pan:{...pan}},cursor:kind==='straighten'?straightenCursor:cursor(handle ?? 'move'), from: [from.x,from.y], start: [rect.x0,rect.y0,rect.x1,rect.y1], owner: binding,
-        kind,center,startAngle,lastAngle:startAngle,previousPointerAngle:pointerAngle,lastScreen:screen,lastTo:moveTo,shift,axis:null,
+        kind,center,startAngle,lastAngle:startAngle,previousPointerAngle:pointerAngle,startCrop:structuredClone(crop),frame:surface.frame,lastScreen:screen,lastTo:moveTo,shift,axis:null,
         axisStartScreen:screen,axisStartTo:moveTo,freeStartScreen:screen,freeStartTo:moveTo };
       event.currentTarget.setPointerCapture(event.pointerId); busy(true);
       void binding.begin(kind).catch(() => finish(true));

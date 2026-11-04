@@ -2170,3 +2170,9 @@ Crop枠内部のMove中に限り、Shiftで画面上のCSS pixel X／Y軸へ移�
 軸はCSS pixelで判定後、ジェスチャ開始時に固定した`viewportToCanonical`逆変換でNative intent座標へ変換する。これにより方向判定を画像/Crop比率やFlip状態に結びつけず、Zoom、Pan、quarter-turn後の向き、Flipでも画面上の軸を維持する。Straighten時の境界沿い移動解決はPhase 4.5.5の`provisionalCrop()`／Native規則を引き続き使う。PointerUpもMoveと同じ計算を通し、従来のdrag operation、owner、Native確定1回／History最大1回を維持する。Resizeには既存`keepRatio`、Straighten ToolとSpace Panには従来経路を適用し、Recipe／DB設定やUI項目は追加していない。
 
 純粋関数テストで6px未満、閾値到達、優勢軸と画面座標基準の変換を確認した。SurfaceテストではShift保持中の軸維持、threshold未満、途中解除による自由復帰、再押下時の再判定、PointerUp時にShift状態が変わった場合も含む最終intent一致、gesture begin/end各1回を確認した。`RawCropSurface`／`rawCropMath`／`rawCropDisplay`／`useRawDocument`／`rawHistorySave`／`RawCropControls`／`rawRecipeSave`の7 test files、計327件成功。TypeScriptチェック、本番build、`git diff --check`も成功した。buildには500 kB超chunk警告があり、index chunkは約973 kB。実Desktop／ブラウザでのShift切替・各orientation受入および実Native readbackとの手動比較は未実施。
+
+## RAW Crop監査 F1・F2修正（2026-11-04）
+
+F1はprovisionalCropで得た実効矩形と固定開始矩形との差をcanonical pointer targetへ戻してShift押下・解除のアンカーにした。F2は通常GestureのEscapeを既存cancelへ接続し、基準線は別経路で破棄する。IME・既処理イベントを保護し、owner解除をcapture解放より先に行う既存順序を維持した。
+
+失敗5件は差分演算順の丸め誤差、再描画で変化するテストbusy callback、失敗テストのlistener残留、jsdomの0寸法に起因した。期待座標を緩めず、右500px超過後のShift左10pxでx0=.39を確認。関連Frontend 7ファイル331件、TypeScript、本番Build成功。既存chunk警告（約973 kB）あり。実Desktopでの手動確認は未実施。Native・Backend・Recipe形式に変更なし。
