@@ -111,7 +111,7 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame, rawRegionDisp
   const navigatorPosition = settings.zoomNavigatorPosition;
   const navigatorScale = imageSize.x > 0 && imageSize.y > 0
     ? Math.min(NAVIGATOR_LONG_EDGE / Math.max(imageSize.x, imageSize.y), (viewportSize.x - 24) / imageSize.x, (viewportSize.y - 24) / imageSize.y) : 0;
-  const showNavigator = !rawCrop?.active && zoomed && navigatorPosition !== 'off' && imageState === 'ready'
+  const showNavigator = zoomed && navigatorPosition !== 'off' && imageState === 'ready'
     && viewportSize.x > 24 && viewportSize.y > 24 && navigatorScale > 0;
   const navigatorWidth = imageSize.x * navigatorScale;
   const navigatorHeight = imageSize.y * navigatorScale;
@@ -191,7 +191,7 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame, rawRegionDisp
     window.addEventListener('keydown', escape);
     return () => window.removeEventListener('keydown', escape);
   }, [rawPickActive, onRawPickCancel]);
-  const navigatorImageSrc = regionBase?.url ?? (showBeforeAdjustments && beforeSrc ? beforeSrc : src);
+  const navigatorImageSrc = rawCrop?.active ? rawCrop.surface?.url : regionBase?.url ?? (showBeforeAdjustments && beforeSrc ? beforeSrc : src);
   useLayoutEffect(() => {
     onBeforeAdjustmentsDisplayChange?.(showBeforeAdjustments);
   }, [showBeforeAdjustments, onBeforeAdjustmentsDisplayChange]);
@@ -405,7 +405,7 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame, rawRegionDisp
   }
 
   function startPan(event: ReactPointerEvent<HTMLDivElement>) {
-    if (cropBusy) return;
+    if (cropBusy || rawCrop?.active) return;
     if (rawPickActive) {
       if (event.button === 0 && pickReady && displayedPickTarget && imagePositionRef.current
         && wholeImagePoint({ x: event.clientX, y: event.clientY }, imagePositionRef.current.getBoundingClientRect())) {

@@ -5,12 +5,13 @@ import { CROP_HANDLES, cropPoint, projectRawCrop, type CropHandle, type CropMatr
 import type { Point } from './viewerMath';
 export type RawCropBinding = { active: boolean; canStart: boolean; presentation?: CropPresentation;
   surface?: { url: string; frame: RawGeometry; display: RawCropDisplay };
-  begin: () => Promise<void>; update: (operation: RawGeometryOperation) => void; cancel?: () => Promise<void>; end: () => Promise<void> };
+  begin: (type?:'drag'|'straighten') => Promise<void>; update: (operation: RawGeometryOperation) => void; cancel?: () => Promise<void>; end: () => Promise<void> };
 export function RawCropSurface({ binding, viewport, scale, pan, busy }: {
   binding: RawCropBinding; viewport: Point; scale: number; pan: Point; busy: (value: boolean) => void }) {
   const root = useRef<HTMLDivElement>(null);
   const gesture = useRef<{ id: number; matrix: CropMatrix; bounds: DOMRect; handle: CropHandle;
-    view: {viewport:Point;scale:number;pan:Point}; cursor:string; from: [number, number]; start: [number, number, number, number]; owner: RawCropBinding } | null>(null);
+    view: {viewport:Point;scale:number;pan:Point}; cursor:string; from: [number, number]; start: [number, number, number, number]; owner: RawCropBinding;
+    kind:'drag'|'straighten'; center:Point; startAngle:number; lastAngle:number; previousPointerAngle:number } | null>(null);
   const surface = binding.surface;
   const crop=binding.presentation && binding.presentation.snapshot===surface?binding.presentation.crop:surface?.display.canonicalGeometry.crop;
   const view=gesture.current?.view ?? {viewport,scale,pan};
@@ -34,6 +35,13 @@ export function RawCropSurface({ binding, viewport, scale, pan, busy }: {
   const update = (event: PointerEvent) => {
     const g = gesture.current; if (!g || g.id !== event.pointerId) return;
     event.stopPropagation();
+    if(g.kind==='straighten'){
+      const x=event.clientX-g.center.x,y=event.clientY-g.center.y,r=Math.hypot(x,y);
+      if(r<12)return;
+      const a=Math.atan2(y,x),delta=Math.atan2(Math.sin(a-g.previousPointerAngle),Math.cos(a-g.previousPointerAngle));
+      g.previousPointerAngle=a;g.lastAngle=Math.max(-45,Math.min(45,Math.round((g.lastAngle+delta*180/Math.PI)*10)/10));
+      g.owner.update({type:'straighten',params:{angle:g.lastAngle}});return;
+    }
     const to = cropPoint(g.matrix, { x: event.clientX-g.bounds.left, y: event.clientY-g.bounds.top });
     g.owner.update({ type: 'drag', params: { handle: g.handle, from: g.from, to: [to.x,to.y], start: g.start, keepRatio: event.shiftKey } });
   };
@@ -43,14 +51,21 @@ export function RawCropSurface({ binding, viewport, scale, pan, busy }: {
       const bounds = event.currentTarget.getBoundingClientRect();
       const x = event.clientX-bounds.left, y = event.clientY-bounds.top, r = projection.rect;
       const handle = (event.target as HTMLElement).dataset.cropHandle as CropHandle | undefined;
-      if (!handle && !(x >= r.left && x <= r.left+r.width && y >= r.top && y <= r.top+r.height)) return;
+      const inside = x >= r.left && x <= r.left+r.width && y >= r.top && y <= r.top+r.height;
+      const onHandle=!!handle;
+      const kind: 'drag'|'straighten'=onHandle||inside?'drag':'straighten';
+      if(kind==='straighten'&&(x<0||y<0||x>bounds.width||y>bounds.height))return;
       event.preventDefault(); event.stopPropagation();
       const from = cropPoint(projection.viewportToCanonical,{x,y}), rect = crop.geometry.rect;
       // Freeze the inverse and Native start rectangle across intermediate readbacks.
+      const center={x:bounds.left+bounds.width/2+pan.x,y:bounds.top+bounds.height/2+pan.y};
+      const startAngle=surface.display.canonicalGeometry.crop.geometry.angle;
+      const pointerAngle=Math.atan2(event.clientY-center.y,event.clientX-center.x);
       gesture.current = { id: event.pointerId, matrix: projection.viewportToCanonical, bounds, handle: handle ?? 'move',
-        view:{viewport:{...viewport},scale,pan:{...pan}},cursor:cursor(handle ?? 'move'), from: [from.x,from.y], start: [rect.x0,rect.y0,rect.x1,rect.y1], owner: binding };
+        view:{viewport:{...viewport},scale,pan:{...pan}},cursor:kind==='straighten'?'url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2732%27 height=%2732%27 viewBox=%270 0 32 32%27%3E%3Cpath d=%27M7 20a10 10 0 1 1 3 5%27 fill=%27none%27 stroke=%27white%27 stroke-width=%273%27/%3E%3Cpath d=%27m5 17 2 5 5-2%27 fill=%27none%27 stroke=%27white%27 stroke-width=%272%27/%3E%3C/svg%3E") 16 16, crosshair':cursor(handle ?? 'move'), from: [from.x,from.y], start: [rect.x0,rect.y0,rect.x1,rect.y1], owner: binding,
+        kind,center,startAngle,lastAngle:startAngle,previousPointerAngle:pointerAngle };
       event.currentTarget.setPointerCapture(event.pointerId); busy(true);
-      void binding.begin().catch(() => finish(true));
+      void binding.begin(kind).catch(() => finish(true));
     }} onPointerMove={update} onPointerUp={event => { if (gesture.current?.id === event.pointerId) { update(event); finish(); } }}
     onPointerCancel={event => { if (gesture.current?.id === event.pointerId) { event.stopPropagation(); finish(true); } }}
     onLostPointerCapture={event => { if (gesture.current?.id === event.pointerId) finish(true); }}>

@@ -2064,3 +2064,12 @@ Windows / LightCraft RAW現像にShadows・Midtones・Highlights各Hue/Saturatio
 初回監査はHigh 0 / Medium 2 / Low 0。Mediumは、数値入力の確定時に帯域切替クリックが失われる問題と、`grading`欠落の旧Recipeをnative defaultとの厳密比較で復元できない問題。前者は既存フォーカス保護とradio focus復元、後者は保存Recipe・receiptを変更せずengine/comparison viewにdefaultを補完し、History/Export/edited-stateでも同じ意味を使う修正で対応した。既存global値は保持する。再監査はHigh 0 / Medium 0 / Low 0。
 
 追加確認でja/en翻訳キーの重複（Low 1）を検出し、文言を変えず削除。`9763d57`で修正し、最終監査はHigh 0 / Medium 0 / Low 0。Frontend focused testsは実装時108件、監査後428件、翻訳修正後110件成功。Backend focused testsはColor Grading 23件、Detail 30件、Export artifact 49件、監査後関連範囲412件成功。Frontend typecheck、production build、`git diff --check`も成功。Viteの500 kB超chunk警告は残る。managed LightCraft pinはv0.14.0のままで、実バイナリ更新はしていない。
+
+
+## RAW Crop Phase 4.3：枠外StraightenとZoom Navigator（2026-11-04）
+
+Crop surfaceの8 handle hit targetと表示枠判定に続き、残るViewer内の左ドラッグをStraightenへ割り当てた。写真の表示中心を回転中心とし、CSS pixelで前回Pointer角との差を最短signed deltaとして累積、0.1°へ丸めて±45°に制約する。中心近傍は角度を更新しない。枠内Move／handle ResizeとホイールZoomを維持し、Crop中のViewer Panを明示的に禁止した。Navigatorは引き続きPan所有者で、既存位置・clampを使用する。Native／History処理はPhase 4.2のcrop.angle gesture経路を使う。
+
+拡大中のNavigator画像sourceを既存Crop editing bitmapへ切替えた。このbitmapのcontractはquarter-turn orientationとflip適用済み、unstraightenedであり、Navigatorでは余分な変換をしない。全体画像を表示し、Crop／Straightenで切り取らない。Pan座標はViewer image dimensionsと既存Navigator frame算出を用いる。新Native renderingやCrop操作は追加しない。
+
+関連Frontend 4ファイル251件成功、TypeScript／production build成功。既存500 kB超chunk警告あり。実ブラウザ／実Desktop、物理高DPR、サイズ変更、orientation／flip画像上のNavigator表示枠とPan一致、Viewer境界clipの手動受入は未実施。自動テスト結果はそれらの描画受入を証明しない。
