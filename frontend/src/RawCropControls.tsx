@@ -94,25 +94,22 @@ export function RawCropControls({ raw,disabled=false }: {raw:Raw;disabled?:boole
   const ratio=customCropRatio(w,h);
   // Bubble blur after the number input has submitted its final draft; capture would end the owner too early.
   return <div className="raw-crop-controls" ref={panel} onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node | null))finish();}} aria-busy={busy || !!raw.locked}>
-    <label className="raw-crop-aspect">{t('workspace.rawCrop.aspect')}<span className="raw-crop-aspect-row"><select value={custom?'custom':preset} disabled={locked}
+    <div className="raw-crop-aspect"><label htmlFor={`${name}-aspect`}>{t('workspace.rawCrop.aspect')}</label><div className="raw-crop-aspect-row"><select id={`${name}-aspect`} value={custom?'custom':preset} disabled={locked}
       onChange={event=>{const value=event.target.value;setCustom(value==='custom');if(value!=='custom')run({type:'aspect',params:{aspect:value as 'free',orientation:'crop'}});}}>
       {CROP_PRESETS.map((p,i)=><option key={p} value={p}>{presetLabels[i] || t(`workspace.rawCrop.${p}`)}</option>)}
     </select><button type="button" className="tool-button raw-crop-aspect-lock" disabled={locked} aria-pressed={!!aspect}
       aria-label={t(aspect?'workspace.rawCrop.unlockAspect':'workspace.rawCrop.lockCurrentAspect')} title={t(aspect?'workspace.rawCrop.unlockAspect':'workspace.rawCrop.lockCurrentAspect')}
       onClick={()=>run({type:'aspect',params:{aspect:aspect?'free':'current'}},aspect?'unlock':'lock')}>
-      <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path d={aspect?'M9.2 14.8l5.6-5.6M7.2 12.8l-1.1 1.1a4 4 0 0 1-5.7-5.7l4.2-4.2a4 4 0 0 1 5.7 0M16.8 11.2l1.1-1.1a4 4 0 0 1 5.7 5.7l-4.2 4.2a4 4 0 0 1-5.7 0':'M8.5 15.5l-2.4 2.4a4 4 0 0 1-5.7-5.7l4.2-4.2a4 4 0 0 1 5.7 0M15.5 8.5l2.4-2.4a4 4 0 0 1 5.7 5.7l-4.2 4.2a4 4 0 0 1-5.7 0M9.2 14.8l1.4-1.4M13.4 10.6l1.4-1.4'}/></svg>
-    </button></span></label>
+      <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">{aspect?<><path d="m10 13 4-4"/><path d="M7.5 14.5 6 16a4 4 0 0 1-5.7-5.7l4-4A4 4 0 0 1 6 5.2M16.5 9.5 18 8a4 4 0 0 1 5.7 5.7l-4 4a4 4 0 0 1-5.7.3"/></>:<><path d="m10 13 4-4"/><path d="M7.5 14.5 6 16a4 4 0 0 1-5.7-5.7l4-4A4 4 0 0 1 10 6M16.5 9.5 18 8a4 4 0 0 1 5.7 5.7l-4 4a4 4 0 0 1-5.7 0"/><path d="m3 3 18 18"/></>}</svg>
+    </button></div></div>
     <p className="edit-source-note">{aspect?`${aspect[0]/100} : ${aspect[1]/100}`:t('workspace.rawCrop.free')}</p>
-    <fieldset className="raw-crop-overlay"><legend>{t('workspace.rawCrop.overlay')}</legend><div className="raw-crop-buttons">{overlays.map(mode=><button key={mode} type="button" className="tool-button" aria-pressed={raw.crop.overlay===mode} onClick={()=>raw.crop.setOverlay(mode)}>{t(`workspace.rawCrop.overlays.${mode}`)}</button>)}</div></fieldset>
-    <div className="raw-crop-buttons">
-      <button type="button" className="tool-button" disabled={locked} onClick={()=>run({type:'swap',params:{}})}>{t('workspace.rawCrop.swap')}</button>
-    </div>
     {(custom || preset==='custom') && <form className="raw-crop-custom" onSubmit={event=>{event.preventDefault();if(ratio)run({type:'aspect',params:{aspect:ratio,orientation:'crop'}});}}>
       <label>{t('workspace.rawCrop.width')}<input name={name+'w'} type="number" min="0" step="any" value={w} disabled={locked} onChange={e=>setW(e.target.value)}/></label>
       <span aria-hidden="true">:</span><label>{t('workspace.rawCrop.height')}<input name={name+'h'} type="number" min="0" step="any" value={h} disabled={locked} onChange={e=>setH(e.target.value)}/></label>
       <button type="submit" className="tool-button" disabled={locked || !ratio}>{t('workspace.rawCrop.apply')}</button>
       {(w || h) && !ratio && <p role="alert">{t('workspace.rawCrop.invalidRatio')}</p>}
     </form>}
+    <button type="button" className="tool-button raw-crop-aspect-swap" disabled={locked} onClick={()=>run({type:'swap',params:{}})}>{t('workspace.rawCrop.swap')}</button>
     <AdjustmentSlider adjustmentId="crop.angle" commitPolicy="operation-boundary" label={t('workspace.rawCrop.straighten')}
       valueLabel={t('workspace.rawCrop.angle')} value={angle ?? crop?.geometry.angle ?? 0} min={-45} max={45} step={.1} precision={1}
       valueText={`${(angle ?? crop?.geometry.angle ?? 0)>0?'+':''}${(angle ?? crop?.geometry.angle ?? 0).toFixed(1)}°`}
@@ -123,11 +120,14 @@ export function RawCropControls({ raw,disabled=false }: {raw:Raw;disabled?:boole
       onCommit={finish} onCancel={cancel} onReset={()=>run({type:'straighten',params:{angle:0}})}/>
     <button type="button" className="tool-button" aria-pressed={raw.crop.straightenTool}
       disabled={locked} onClick={()=>raw.crop.setStraightenTool(!raw.crop.straightenTool)}>{t('workspace.rawCrop.straightenTool')}</button>
-    <p className="edit-source-note">{t('workspace.rawCrop.direction')}</p>
-    <div className="raw-crop-buttons">{(['rotateLeft','rotateRight','flipHorizontal','flipVertical'] as const).map(type=><button
-      key={type} type="button" className="tool-button" disabled={locked} aria-pressed={type==='flipHorizontal'?crop?.flip_h:type==='flipVertical'?crop?.flip_v:undefined}
+    <div className="raw-crop-buttons raw-crop-transform-row">{(['rotateLeft','rotateRight'] as const).map(type=><button
+      key={type} type="button" className="tool-button" disabled={locked}
+      onClick={()=>run({type,params:{}})}>{t(`workspace.rawCrop.${type}`)}</button>)}</div>
+    <div className="raw-crop-buttons raw-crop-transform-row">{(['flipHorizontal','flipVertical'] as const).map(type=><button
+      key={type} type="button" className="tool-button" disabled={locked} aria-pressed={type==='flipHorizontal'?crop?.flip_h:crop?.flip_v}
       onClick={()=>run({type,params:{}})}>{t(`workspace.rawCrop.${type}`)}</button>)}</div>
     {raw.settings?.orientation && <p className="edit-source-note">{t('workspace.rawCrop.orientation')}: {t(`workspace.rawCrop.orientations.${raw.settings.orientation}`)}</p>}
+    <fieldset className="raw-crop-overlay"><legend>{t('workspace.rawCrop.overlay')}</legend><div className="raw-crop-buttons">{overlays.map(mode=><button key={mode} type="button" className="tool-button" aria-pressed={raw.crop.overlay===mode} onClick={()=>raw.crop.setOverlay(mode)}>{t(`workspace.rawCrop.overlays.${mode}`)}</button>)}</div></fieldset>
     <button type="button" className="tool-button raw-crop-reset" disabled={locked} onClick={()=>run({type:'reset',params:{}})}>{t('workspace.rawCrop.reset')}</button>
     {(error || raw.saveError) && <div role="alert"><RawFailure code={failureCode ?? raw.saveError}/><p>{t('workspace.rawCrop.failed')}</p>
       <button type="button" className="tool-button" disabled={busy || disabled} onClick={()=>{if(pending.current)return;pending.current=true;setBusy(true);

@@ -2134,3 +2134,10 @@ Aspect selector横にSVG chain buttonを配置し、独立したテキストLock
 UI選択肢から`original`を除き、数値readbackは残存presetとの一致判定、非一致はCustom表示とした。元画像比率取得やNative original operationは削除していない。日本語／英語のlock/unlock補助ラベルを追加し旧UI専用文言を削除。SwapとHistory action identifierを維持。
 
 関連Frontend 177件成功。TypeScript、本番build、`git diff --check`成功（既存500 kB超chunk警告）。実Desktopでのpane幅、chain SVG状態、Native readback後のAspect表示、既存Recipe復元は手動受入未実施。
+
+
+## RAW Crop Phase 4.5.3：パネル最終配置（2026-11-04）
+
+実Desktop確認からの配置改善として、Aspect selectと独立Chain controlのHTML label関係を修正。Aspect group内に現在比率とCustom入力を残し、その直後にSwapを配置した。Straighten sliderの下にAngle Tool、RotateとFlipを別々の2列行、Orientation、その後Reset直前に6 Overlayを配置。時計回り説明文をUIから除去したが操作符号は変更なし。Aspect／Overlay選択の緑アクセントをCrop限定でニュートラルgrayへ変更。Chainは一般的なlink／link-off SVGに置換し、aria-labelとpressedを保持。Native、History、Recipe処理には手を加えていない。
+
+RawCropControls関連Frontend 34件成功。TypeScript、本番build、`git diff --check`成功。既存大容量chunk警告あり。実Desktopでのパネル幅・SVG視認性・最終配置受入は今回未実施。

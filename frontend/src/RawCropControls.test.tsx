@@ -40,13 +40,28 @@ it('renders six accessible overlay choices with visible selected styling and no 
  expect(choices.map(x=>x.getAttribute('aria-pressed'))).toEqual(['true','false','false','false','false','false']);
  expect(group.querySelector('button')!.className).toContain('tool-button');
  expect(styleCss).toContain('.raw-crop-overlay { border: 0; padding: 0; margin: 10px 0; min-width: 0; }');
- expect(styleCss).toContain('.raw-crop-overlay .tool-button[aria-pressed="true"] { background: #3c5546;');
+ expect(styleCss).toContain('.raw-crop-overlay .tool-button[aria-pressed="true"] { background: #505050;');
  expect(styleCss).not.toContain('rotateOverlay');expect(group.textContent).not.toContain('Spiral');
  await act(async()=>choices[1].click());expect(choices[1].getAttribute('aria-pressed')).toBe('false');expect(raw.crop.setOverlay).toHaveBeenCalledWith('grid');
 });
 it('uses the Japanese Free label while keeping the free preset value and English Free',async()=>{
  await i18n.changeLanguage('ja');await render();expect(host.querySelector('select option[value="free"]')!.textContent).toBe('フリー');
  await i18n.changeLanguage('en');await render();expect(host.querySelector('select option[value="free"]')!.textContent).toBe('Free');
+});
+it('orders the panel groups and uses a properly labeled aspect select outside the chain button',async()=>{
+ await render();const select=host.querySelector<HTMLSelectElement>('.raw-crop-aspect-row select')!,label=host.querySelector<HTMLLabelElement>('.raw-crop-aspect label')!;
+ expect(label.htmlFor).toBe(select.id);expect(label.contains(select)).toBe(false);expect(label.contains(host.querySelector('.raw-crop-aspect-lock'))).toBe(false);
+ const swap=host.querySelector('.raw-crop-aspect-swap')!,straighten=host.querySelector('input[type="range"]')!,tool=button('Straighten Tool');
+ expect(swap.compareDocumentPosition(straighten)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+ expect(straighten.compareDocumentPosition(tool)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+ const rows=host.querySelectorAll('.raw-crop-transform-row');expect(rows).toHaveLength(2);
+ expect(rows[0].textContent).toContain('Rotate Left');expect(rows[0].textContent).toContain('Rotate Right');
+ expect(rows[1].textContent).toContain('Flip Horizontal');expect(rows[1].textContent).toContain('Flip Vertical');
+ const orientation=Array.from(host.querySelectorAll('p')).find(p=>p.textContent?.includes('Orientation'))!;
+ const overlays=host.querySelector('fieldset.raw-crop-overlay')!,reset=button('Reset Crop');
+ expect(orientation.compareDocumentPosition(overlays)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+ expect(overlays.compareDocumentPosition(reset)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();expect(host.textContent).not.toContain('Positive angles rotate clockwise');
+ expect(host.querySelectorAll('.raw-crop-aspect-lock svg path').length).toBeGreaterThan(1);expect(host.querySelector('.raw-crop-aspect-lock svg')!.getAttribute('viewBox')).toBe('0 0 24 24');
 });
 it('uses one chain button for aspect lock and derives its state from readback',async()=>{
  await render();const select=host.querySelector('select')!,chain=host.querySelector<HTMLButtonElement>('.raw-crop-aspect-lock')!;

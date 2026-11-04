@@ -294,7 +294,6 @@
     "straightenTool": "角度補正ツール",
       "angle": "水平補正の角度",
       "zero": "水平補正を0°に戻す",
-      "direction": "正の角度は時計回りです。",
       "rotateLeft": "左へ90°回転",
       "rotateRight": "右へ90°回転",
       "flipHorizontal": "水平反転",
