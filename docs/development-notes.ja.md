@@ -2098,3 +2098,12 @@ Phase 4.3.1実機受入で判明した、右ペインへキーボードfocusが�
 実DesktopでPanは動作するがSpace押下だけではカーソルが変わらない事象を追跡。Crop surfaceの親cursorに対し、Move子要素と8 handleが固定cursorを持つため上書きされていた。またhover Pointer Moveによる直接style更新が別のcursor所有者だった。Space判定やPan ownerを変えず、resolved cursorを単一優先順位（Space Pan中grabbing、Space待機grab、開始済みCrop gesture固定cursor、handle resize、枠内move、枠外rotate）で決め、surface／子要素へ適用する。ReactのSpace state更新だけで反映し、Pointer Moveごとの再描画は行わない。
 
 RawCropSurface/ImageViewer/AnshitsuRawPreview関連220件成功。追加テストでpointer moveなしのhandTool state変更による親・Move・handle cursorのgrab/grabbingおよび解除後復帰を確認。TypeScript、本番build、`git diff --check`成功。既存500 kB超chunk警告あり。Space Panの実Desktop受入は既に前段Phaseで確認済みだが、今回カーソル同期修正後の実Desktop確認は未実施。
+
+
+## RAW Crop Phase 4.4：基準線による手動Straighten（2026-11-04）
+
+Crop panelに一時選択・一回操作の「角度補正ツール」／`Straighten Tool`を追加。Space Pan開始を優先し、ツール選択時のViewer pointer downからCSS pixelの基準線を描画する。線は高コントラストstrokeとendpointで表示し、写真へ焼き込まず、Recipe／Historyにも保存しない。Escape／Blur／PointerCancel／capture loss／短線は未送信のまま破棄する。
+
+純粋関数`straightenFromLine`は画面上の線方向を水平／垂直の最近傍へ正規化し、線の向きを逆にしても同一残差を得る。exact ±45°はmodulo規則で一貫して決定する。現在angleから表示線残差を減算し、0.1°丸め後±45°へclampする。画面座標は既にorientation／flip／既存Straightenを含むため元画像座標へ再変換しない。確定は既存begin/update/end straighten gestureへ接続し成功後にツールを解除。別Native API、Recipe形式、History機構なし。
+
+純粋角度関数と既存Crop Controls／Surface／Viewer／document hook関連Frontend 275件成功。TypeScript、本番build、`git diff --check`成功。既存大容量chunk警告あり。複合orientation／flip画像、線表示・pointer capture、実写真での方向受入は実ブラウザ／Desktopで未確認。Native角度制限によるclamp後の残差はあり得る。

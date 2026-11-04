@@ -84,6 +84,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   const resyncPreviewRef = useRef<() => void>(() => {});
   const suspendDisplayRef = useRef<() => void>(() => {});
   const [cropPresentation,setCropPresentation]=useState<CropPresentation|null>(null);
+  const [straightenTool,setStraightenTool]=useState(false);
+  useEffect(()=>{setStraightenTool(false);},[assetId]);
   const cropSnapshotRef=useRef<CropSnapshot|null>(null);
   const cropVisualRef=useRef<{snapshot:CropSnapshot;start:NonNullable<RawSettings['crop']>;latest:NonNullable<RawSettings['crop']>;owner:RawRecipeSave}|null>(null);
   const cropActiveRef = useRef(false);
@@ -971,7 +973,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     },cause=>{if(cropVisualRef.current===visual){cropVisualRef.current=null;setCropPresentation(null);}throw cause;});
   };
   return visible && { ...visible,
-    crop: { operation: cropSaver?.cropOperation,
+    crop: { operation: cropSaver?.cropOperation, straightenTool, setStraightenTool:(value:boolean)=>setStraightenTool(value),
       operate: (operation: RawGeometryOperation, action?: import('./rawApi').RawGeometryAction) => {
         cancelPick();
         if (!callbackEditor() || frozen.current || !cropSaver || cropSaver.locked || !cropActiveRef.current || !cropSourceCurrent) return Promise.reject(new RawApiError('raw_busy'));
@@ -1012,7 +1014,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       },
       end: finishCrop,
       cancel: () => {cropVisualRef.current=null;setCropPresentation(null);return cropSaver?.cancelGeometry() ?? Promise.resolve();},
-      setMode: (enabled: boolean) => { cancelPick(); if (!callbackEditor() || !cropSaver || saverRef.current !== cropSaver) return Promise.reject(new RawApiError('raw_document_closed')); return cropModeRef.current(enabled); } },
+      setMode: (enabled: boolean) => { cancelPick();if(!enabled)setStraightenTool(false); if (!callbackEditor() || !cropSaver || saverRef.current !== cropSaver) return Promise.reject(new RawApiError('raw_document_closed')); return cropModeRef.current(enabled); } },
     beforeAvailable: !!beforeKey,
     pickActive, pickAvailable,
     cancelPick,

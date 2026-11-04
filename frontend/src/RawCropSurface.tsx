@@ -1,14 +1,17 @@
 import type { CropPresentation } from './rawCropDisplay';
-import { useEffect, useRef, type PointerEvent } from 'react';
+import { useEffect, useRef, useState, type PointerEvent } from 'react';
 import type { RawCropDisplay, RawGeometry, RawGeometryOperation } from './rawApi';
 import { CROP_HANDLES, cropPoint, projectRawCrop, type CropHandle, type CropMatrix } from './rawCropMath';
 import type { Point } from './viewerMath';
+import { straightenFromLine } from './rawStraightenTool';
 export type RawCropBinding = { active: boolean; canStart: boolean; presentation?: CropPresentation;
+  straightenTool?:boolean;setStraightenTool?:(active:boolean)=>void;
   surface?: { url: string; frame: RawGeometry; display: RawCropDisplay };
   begin: (type?:'drag'|'straighten') => Promise<void>; update: (operation: RawGeometryOperation) => void; cancel?: () => Promise<void>; end: () => Promise<void> };
 export function RawCropSurface({ binding, viewport, scale, pan, busy, handTool=false, panning=false }: {
   binding: RawCropBinding; viewport: Point; scale: number; pan: Point; busy: (value: boolean) => void; handTool?:boolean;panning?:boolean }) {
   const root = useRef<HTMLDivElement>(null);
+  const [line,setLine]=useState<{id:number;start:Point;end:Point}|null>(null);
   const gesture = useRef<{ id: number; matrix: CropMatrix; bounds: DOMRect; handle: CropHandle;
     view: {viewport:Point;scale:number;pan:Point}; cursor:string; from: [number, number]; start: [number, number, number, number]; owner: RawCropBinding;
     kind:'drag'|'straighten'; center:Point; startAngle:number; lastAngle:number; previousPointerAngle:number } | null>(null);
@@ -28,7 +31,7 @@ export function RawCropSurface({ binding, viewport, scale, pan, busy, handTool=f
     if (root.current?.hasPointerCapture(g.id)) root.current.releasePointerCapture(g.id);
     busy(false); void (cancel && g.owner.cancel ? g.owner.cancel() : g.owner.end()).catch(() => {});
   };
-  useEffect(()=>{const blur=()=>finish(true);window.addEventListener('blur',blur);return ()=>window.removeEventListener('blur',blur);});
+  useEffect(()=>{const blur=()=>{setLine(null);finish(true);};const key=(e:KeyboardEvent)=>{if(e.key==='Escape'&&binding.straightenTool){setLine(null);binding.setStraightenTool?.(false);}};window.addEventListener('blur',blur);window.addEventListener('keydown',key);return ()=>{window.removeEventListener('blur',blur);window.removeEventListener('keydown',key);};},[binding]);
   useEffect(() => () => { const g = gesture.current; if (g) { gesture.current = null;
     if (root.current?.hasPointerCapture(g.id)) root.current.releasePointerCapture(g.id);
     busy(false); void (g.owner.cancel?.() ?? g.owner.end()).catch(() => {}); } }, [busy]);
@@ -46,10 +49,17 @@ export function RawCropSurface({ binding, viewport, scale, pan, busy, handTool=f
     g.owner.update({ type: 'drag', params: { handle: g.handle, from: g.from, to: [to.x,to.y], start: g.start, keepRatio: event.shiftKey } });
   };
   const straightenCursor='url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2732%27 height=%2732%27 viewBox=%270 0 32 32%27%3E%3Cpath d=%27M7 20a10 10 0 1 1 3 5%27 fill=%27none%27 stroke=%27white%27 stroke-width=%273%27/%3E%3Cpath d=%27m5 17 2 5 5-2%27 fill=%27none%27 stroke=%27white%27 stroke-width=%272%27/%3E%3C/svg%3E") 16 16, crosshair';
-  const effectiveCursor=gesture.current?.cursor ?? (handTool?(panning?'grabbing':'grab'):undefined);
+  const completeLine=()=>{const current=line;setLine(null);if(!current||!surface)return;const angle=straightenFromLine(current.start,current.end,surface.display.canonicalGeometry.crop.geometry.angle);if(angle===null)return;
+    void binding.begin('straighten').then(()=>{binding.update({type:'straighten',params:{angle}});return binding.end();}).then(()=>binding.setStraightenTool?.(false)).catch(()=>{});};
+  const effectiveCursor=gesture.current?.cursor ?? (handTool?(panning?'grabbing':'grab'):binding.straightenTool?'crosshair':undefined);
   return <div ref={root} data-testid="raw-crop-surface" style={{ position: 'absolute', inset: 0, touchAction: 'none', cursor:effectiveCursor ?? 'default' }}
     onPointerDown={event => {
       if(handTool)return;
+      if(binding.straightenTool){if(!projection||!surface||!binding.canStart||event.button!==0)return;
+        const imageCorners=[[0,0],[surface.frame.fullWidth,0],[0,surface.frame.fullHeight],[surface.frame.fullWidth,surface.frame.fullHeight]].map(([x,y])=>cropPoint(projection.bitmapToViewport,{x,y}));
+        const left=Math.min(...imageCorners.map(p=>p.x)),right=Math.max(...imageCorners.map(p=>p.x)),top=Math.min(...imageCorners.map(p=>p.y)),bottom=Math.max(...imageCorners.map(p=>p.y));
+        const b=event.currentTarget.getBoundingClientRect(),p={x:event.clientX-b.left,y:event.clientY-b.top};if(p.x<left||p.x>right||p.y<top||p.y>bottom)return;
+        event.preventDefault();event.stopPropagation();setLine({id:event.pointerId,start:p,end:p});event.currentTarget.setPointerCapture(event.pointerId);return;}
       if (!projection || !surface || !crop || !binding.canStart || gesture.current || event.button !== 0) return;
       const bounds = event.currentTarget.getBoundingClientRect();
       const x = event.clientX-bounds.left, y = event.clientY-bounds.top, r = projection.rect;
@@ -69,11 +79,12 @@ export function RawCropSurface({ binding, viewport, scale, pan, busy, handTool=f
         kind,center,startAngle,lastAngle:startAngle,previousPointerAngle:pointerAngle };
       event.currentTarget.setPointerCapture(event.pointerId); busy(true);
       void binding.begin(kind).catch(() => finish(true));
-    }} onPointerMove={event=>{update(event);if(!gesture.current&&projection){const b=event.currentTarget.getBoundingClientRect(),x=event.clientX-b.left,y=event.clientY-b.top,r=projection.rect;
+    }} onPointerMove={event=>{if(line?.id===event.pointerId){const b=event.currentTarget.getBoundingClientRect();setLine({...line,end:{x:event.clientX-b.left,y:event.clientY-b.top}});return;}update(event);if(!gesture.current&&projection){const b=event.currentTarget.getBoundingClientRect(),x=event.clientX-b.left,y=event.clientY-b.top,r=projection.rect;
       const target=event.target as HTMLElement,handle=target.dataset.cropHandle as CropHandle|undefined;
-      event.currentTarget.style.cursor=handTool?'grab':handle?cursor(handle):x>=r.left&&x<=r.left+r.width&&y>=r.top&&y<=r.top+r.height?'move':x>=0&&y>=0&&x<=b.width&&y<=b.height?straightenCursor:'default';}}} onPointerUp={event => { if (gesture.current?.id === event.pointerId) { update(event); finish(); } }}
-    onPointerCancel={event => { if (gesture.current?.id === event.pointerId) { event.stopPropagation(); finish(true); } }}
-    onLostPointerCapture={event => { if (gesture.current?.id === event.pointerId) finish(true); }}>
+      event.currentTarget.style.cursor=handTool?'grab':binding.straightenTool?'crosshair':handle?cursor(handle):x>=r.left&&x<=r.left+r.width&&y>=r.top&&y<=r.top+r.height?'move':x>=0&&y>=0&&x<=b.width&&y<=b.height?straightenCursor:'default';}}} onPointerUp={event => { if(line?.id===event.pointerId){event.stopPropagation();completeLine();}else if (gesture.current?.id === event.pointerId) { update(event); finish(); } }}
+    onPointerCancel={event => { if(line?.id===event.pointerId){setLine(null);}else if (gesture.current?.id === event.pointerId) { event.stopPropagation(); finish(true); } }}
+    onLostPointerCapture={event => { if(line?.id===event.pointerId)setLine(null);else if (gesture.current?.id === event.pointerId) finish(true); }}>
+    {line&&<svg aria-hidden="true" style={{position:'absolute',inset:0,width:'100%',height:'100%',pointerEvents:'none',zIndex:20}}><line x1={line.start.x} y1={line.start.y} x2={line.end.x} y2={line.end.y} stroke="black" strokeWidth="5"/><line x1={line.start.x} y1={line.start.y} x2={line.end.x} y2={line.end.y} stroke="#00e5ff" strokeWidth="2"/><circle cx={line.start.x} cy={line.start.y} r="4" fill="white" stroke="black"/></svg>}
     {surface && projection && <>
       <img src={surface.url} alt="" draggable={false} style={{ position:'absolute', width:surface.frame.fullWidth,
         height:surface.frame.fullHeight, maxWidth:'none', transformOrigin:'0 0', transform:`matrix(${projection.bitmapToViewport.join(',')})`, pointerEvents:'none' }} />

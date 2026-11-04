@@ -118,6 +118,8 @@ export function RawCropControls({ raw,disabled=false }: {raw:Raw;disabled?:boole
       onBegin={begin} onChange={value=>{if(!Number.isFinite(value) || value < -45 || value > 45)return;begin();
         if(angleOwner.current && !ending.current){setAngle(value);angleOwner.current.update({type:'straighten',params:{angle:value}});}}}
       onCommit={finish} onCancel={cancel} onReset={()=>run({type:'straighten',params:{angle:0}})}/>
+    <button type="button" className="tool-button" aria-pressed={raw.crop.straightenTool}
+      disabled={locked} onClick={()=>raw.crop.setStraightenTool(!raw.crop.straightenTool)}>{t('workspace.rawCrop.straightenTool')}</button>
     <p className="edit-source-note">{t('workspace.rawCrop.direction')}</p>
     <div className="raw-crop-buttons">{(['rotateLeft','rotateRight','flipHorizontal','flipVertical'] as const).map(type=><button
       key={type} type="button" className="tool-button" disabled={locked} aria-pressed={type==='flipHorizontal'?crop?.flip_h:type==='flipVertical'?crop?.flip_v:undefined}
