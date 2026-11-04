@@ -2141,3 +2141,12 @@ UI選択肢から`original`を除き、数値readbackは残存presetとの一致
 実Desktop確認からの配置改善として、Aspect selectと独立Chain controlのHTML label関係を修正。Aspect group内に現在比率とCustom入力を残し、その直後にSwapを配置した。Straighten sliderの下にAngle Tool、RotateとFlipを別々の2列行、Orientation、その後Reset直前に6 Overlayを配置。時計回り説明文をUIから除去したが操作符号は変更なし。Aspect／Overlay選択の緑アクセントをCrop限定でニュートラルgrayへ変更。Chainは一般的なlink／link-off SVGに置換し、aria-labelとpressedを保持。Native、History、Recipe処理には手を加えていない。
 
 RawCropControls関連Frontend 34件成功。TypeScript、本番build、`git diff --check`成功。既存大容量chunk警告あり。実Desktopでのパネル幅・SVG視認性・最終配置受入は今回未実施。
+
+
+## RAW Crop Phase 4.5.4：Aspect UI簡素化とChainアイコン修正（2026-11-04）
+
+Phase 4.5.3後のDesktop確認で、任意比率入力が不要、チェーン形状が分かりにくい、Rotate／Flipの2列指定が共有Flex規則に負ける点が課題となった。Aspect UIからCustom選択・幅高さフォーム・検証表示・現在比率テキスト・Free説明行を除去し、`free`と8つの固定プリセットだけにした。任意比率はCrop枠操作とChain Lockで作る。Native readbackの固定比率がプリセットに一致しない場合はselectを`free`表示にし、Chainはreadback由来でONに保つ。これは名前付きプリセットが選ばれていない表示であり、`crop.aspect`の値を消さず、Recipe／Historyの任意比率互換も維持する。解除はChain OFFを使う。
+
+独自SVGをLucide公式`link-2`／`link-2-off`のパス・24×24 viewBox・2px丸端線へ置換した。npm依存は追加せず、Lucide ISCおよびFeather由来`link-2`のMIT通知・出典を`frontend/src/icons/ATTRIBUTION.md`へ記録。選択色は既存のニュートラルグレーを維持。Rotate／Flip行は`.raw-crop-buttons.raw-crop-transform-row`の明示的なGrid規則で2列に固定し、共有ボタン行のFlex表示を上書きする。
+
+Crop Controls／Surface／document hookの関連Frontendテスト178件成功。TypeScriptチェックと本番build成功。既存と同種の500 kB超chunk警告あり（index chunk約970 kB）。`git diff --check`成功。CSSテストではjsdomのComputedStyleがGrid列値を提供しないため、実際に読み込んだCSS規則のselector・display・2列定義を確認し、通常ボタン行のFlex規則も確認した。Native API、Recipe形式、History、Exportは変更していない。今回の変更後の実ブラウザ／Desktop受入は未実施。

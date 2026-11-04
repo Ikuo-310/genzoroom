@@ -6,25 +6,13 @@ import { commitAdjustmentEdits } from './adjustmentFocus';
 import type { RawGeometryOperation, RawGeometryAction } from './rawApi';
 import type { useRawDocument } from './useRawDocument';
 type Raw = NonNullable<ReturnType<typeof useRawDocument>>;
-export const CROP_PRESETS = ['free','1x1','4x5','8.5x11','5x7','2x3','4x3','16x9','16x10','custom'] as const;
-const presetLabels = ['','1 × 1','4 × 5 / 8 × 10','8.5 × 11','5 × 7','2 × 3 / 4 × 6','4 × 3','16 × 9','16 × 10',''];
-export function customCropRatio(w: string, h: string): [number,number] | null {
-  const decimal = (v: string) => {
-    const value=v.trim(),m=/^(\d*)(?:\.(\d*))?(?:e([+-]?\d+))?$/i.exec(value);
-    if (!m || !(m[1] || m[2]) || value.length > 32 || !Number.isFinite(Number(value)) || Number(value)<=0) return null;
-    const exponent=Number(m[3] ?? 0)-(m[2]?.length ?? 0);
-    return { n:BigInt((m[1] || '0')+(m[2] || ''))*10n**BigInt(Math.max(0,exponent)), d:10n**BigInt(Math.max(0,-exponent)) };
-  };
-  const x=decimal(w),y=decimal(h); if(!x || !y || x.n===0n || y.n===0n)return null;
-  let a=x.n*y.d,b=y.n*x.d; const gcd=(a:bigint,b:bigint):bigint=>b?gcd(b,a%b):a;const g=gcd(a,b);a/=g;b/=g;
-  // Native stores round(component * 100) in u32; reduced integer components avoid decimal rounding.
-  if(a>42949672n || b>42949672n || a*20n<b || b*20n<a)return null;
-  return [Number(a),Number(b)];
-}
+export const CROP_PRESETS = ['free','1x1','4x5','8.5x11','5x7','2x3','4x3','16x9','16x10'] as const;
+const presetLabels = ['','1 × 1','4 × 5 / 8 × 10','8.5 × 11','5 × 7','2 × 3 / 4 × 6','4 × 3','16 × 9','16 × 10'];
 export function cropPreset(aspect: [number,number] | null) {
   if(!aspect)return 'free';const ratio=aspect[0]/aspect[1];
   const matches=(r:number)=>Math.abs(ratio/r-1)<1e-7 || Math.abs(ratio*r-1)<1e-7;
-  return CROP_PRESETS.find(p=>p.includes('x') && matches(Number(p.split('x')[0])/Number(p.split('x')[1]))) ?? 'custom';
+  // Keep arbitrary Native/Recipe constraints intact while showing no custom preset in the UI.
+  return CROP_PRESETS.find(p=>p.includes('x') && matches(Number(p.split('x')[0])/Number(p.split('x')[1]))) ?? 'free';
 }
 export function RawEditCategories({ raw, disabled, commit }: { raw:Raw;disabled:boolean;commit:()=>void }) {
   const {t}=useTranslation(),name=useId();const pending=useRef(false),restoreFocus=useRef<HTMLInputElement|null>(null);const [busy,setBusy]=useState(false),[error,setError]=useState(false),[failureCode,setFailureCode]=useState<string>();
@@ -53,7 +41,6 @@ export function RawCropControls({ raw,disabled=false }: {raw:Raw;disabled?:boole
   const pending=useRef(false),angleOwner=useRef<Raw['crop'] | null>(null),ending=useRef(false);
   const [failureCode,setFailureCode]=useState<string>();
   const [busy,setBusy]=useState(false),[error,setError]=useState(false),[angle,setAngle]=useState<number|null>(null);
-  const [custom,setCustom]=useState(false),[w,setW]=useState(''),[h,setH]=useState('');
   const crop=raw.settings?.crop;
   const overlays=['thirds','grid','golden','diagonals','halves','none'] as const;
   const locked=disabled || busy || !!raw.locked || raw.status!=='ready' || !crop || !raw.crop.surface || raw.crop.canStart === false || !!raw.historyError || !!raw.historyLoading || !!raw.editError;
@@ -87,28 +74,23 @@ export function RawCropControls({ raw,disabled=false }: {raw:Raw;disabled?:boole
   useEffect(()=>{ const blur=()=>finishRef.current();window.addEventListener('blur',blur);
     return ()=>window.removeEventListener('blur',blur); },[]);
   const aspect=crop?.aspect ?? null,preset=cropPreset(aspect);
-  useEffect(()=>{
-    // Readback/Undo owns confirmed ratio; only the unsent form draft remains local.
-    setCustom(false);setW(aspect?String(aspect[0]/100):'');setH(aspect?String(aspect[1]/100):'');
-  },[aspect?.[0],aspect?.[1]]);
-  const ratio=customCropRatio(w,h);
   // Bubble blur after the number input has submitted its final draft; capture would end the owner too early.
   return <div className="raw-crop-controls" ref={panel} onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node | null))finish();}} aria-busy={busy || !!raw.locked}>
-    <div className="raw-crop-aspect"><label htmlFor={`${name}-aspect`}>{t('workspace.rawCrop.aspect')}</label><div className="raw-crop-aspect-row"><select id={`${name}-aspect`} value={custom?'custom':preset} disabled={locked}
-      onChange={event=>{const value=event.target.value;setCustom(value==='custom');if(value!=='custom')run({type:'aspect',params:{aspect:value as 'free',orientation:'crop'}});}}>
+    <div className="raw-crop-aspect"><label htmlFor={`${name}-aspect`}>{t('workspace.rawCrop.aspect')}</label><div className="raw-crop-aspect-row"><select id={`${name}-aspect`} value={preset} disabled={locked}
+      onChange={event=>{const value=event.target.value;run({type:'aspect',params:{aspect:value as 'free',orientation:'crop'}});}}>
       {CROP_PRESETS.map((p,i)=><option key={p} value={p}>{presetLabels[i] || t(`workspace.rawCrop.${p}`)}</option>)}
     </select><button type="button" className="tool-button raw-crop-aspect-lock" disabled={locked} aria-pressed={!!aspect}
       aria-label={t(aspect?'workspace.rawCrop.unlockAspect':'workspace.rawCrop.lockCurrentAspect')} title={t(aspect?'workspace.rawCrop.unlockAspect':'workspace.rawCrop.lockCurrentAspect')}
       onClick={()=>run({type:'aspect',params:{aspect:aspect?'free':'current'}},aspect?'unlock':'lock')}>
-      <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">{aspect?<><path d="m10 13 4-4"/><path d="M7.5 14.5 6 16a4 4 0 0 1-5.7-5.7l4-4A4 4 0 0 1 6 5.2M16.5 9.5 18 8a4 4 0 0 1 5.7 5.7l-4 4a4 4 0 0 1-5.7.3"/></>:<><path d="m10 13 4-4"/><path d="M7.5 14.5 6 16a4 4 0 0 1-5.7-5.7l4-4A4 4 0 0 1 10 6M16.5 9.5 18 8a4 4 0 0 1 5.7 5.7l-4 4a4 4 0 0 1-5.7 0"/><path d="m3 3 18 18"/></>}</svg>
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" focusable="false">{aspect?<>
+        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+      </>:<>
+        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+        <line x1="2" x2="22" y1="2" y2="22"/>
+      </>}</svg>
     </button></div></div>
-    <p className="edit-source-note">{aspect?`${aspect[0]/100} : ${aspect[1]/100}`:t('workspace.rawCrop.free')}</p>
-    {(custom || preset==='custom') && <form className="raw-crop-custom" onSubmit={event=>{event.preventDefault();if(ratio)run({type:'aspect',params:{aspect:ratio,orientation:'crop'}});}}>
-      <label>{t('workspace.rawCrop.width')}<input name={name+'w'} type="number" min="0" step="any" value={w} disabled={locked} onChange={e=>setW(e.target.value)}/></label>
-      <span aria-hidden="true">:</span><label>{t('workspace.rawCrop.height')}<input name={name+'h'} type="number" min="0" step="any" value={h} disabled={locked} onChange={e=>setH(e.target.value)}/></label>
-      <button type="submit" className="tool-button" disabled={locked || !ratio}>{t('workspace.rawCrop.apply')}</button>
-      {(w || h) && !ratio && <p role="alert">{t('workspace.rawCrop.invalidRatio')}</p>}
-    </form>}
     <button type="button" className="tool-button raw-crop-aspect-swap" disabled={locked} onClick={()=>run({type:'swap',params:{}})}>{t('workspace.rawCrop.swap')}</button>
     <AdjustmentSlider adjustmentId="crop.angle" commitPolicy="operation-boundary" label={t('workspace.rawCrop.straighten')}
       valueLabel={t('workspace.rawCrop.angle')} value={angle ?? crop?.geometry.angle ?? 0} min={-45} max={45} step={.1} precision={1}

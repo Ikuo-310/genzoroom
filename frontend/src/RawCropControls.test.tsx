@@ -3,7 +3,7 @@ import styleCss from './style.css?raw';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach,beforeEach,expect,it,vi } from 'vitest';
-import { RawCropControls,RawEditCategories,customCropRatio,cropPreset,CROP_PRESETS } from './RawCropControls';
+import { RawCropControls,RawEditCategories,cropPreset,CROP_PRESETS } from './RawCropControls';
 import i18n from './i18n';
 let host:HTMLDivElement,root:Root;
 let raw: any;
@@ -16,22 +16,41 @@ afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.unstubAl
 const render=async()=>act(async()=>root.render(<RawCropControls raw={raw}/>));
 const button=(label:string)=>Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find(b=>b.textContent===label)!;
 async function input(element:HTMLInputElement,value:string){await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(element,value);element.dispatchEvent(new Event('input',{bubbles:true}));});}
-it.each(CROP_PRESETS.filter(p=>p!=='custom'))('sends Native aspect preset %s with crop orientation',async(preset)=>{
+it.each(CROP_PRESETS)('sends Native aspect preset %s with crop orientation',async(preset)=>{
  await render();const select=host.querySelector('select')!;
  await act(async()=>{select.value=preset;select.dispatchEvent(new Event('change',{bubbles:true}));});
  expect(raw.crop.operate).toHaveBeenCalledWith({type:'aspect',params:{aspect:preset,orientation:'crop'}},undefined);
 });
-it('reduces decimal custom ratios exactly and refuses unsupported/invalid inputs',()=>{
- expect(customCropRatio('8.5','11')).toEqual([17,22]);expect(customCropRatio('8.5e-2','11e-2')).toEqual([17,22]);expect(customCropRatio('0.85','1.10')).toEqual([17,22]);
- for(const pair of [['0','1'],['-1','2'],['','2'],['NaN','2'],['Infinity','2'],['1','100'],['.000000001','1']])expect(customCropRatio(...pair as [string,string])).toBeNull();
- expect(cropPreset([2200,1700])).toBe('8.5x11');expect(cropPreset(null)).toBe('free');
+it('offers only nine presets and removes the custom ratio form and readback text',async()=>{
+ await render();const select=host.querySelector('select')!;
+ expect(CROP_PRESETS).toHaveLength(9);expect(Array.from(select.options,option=>option.value)).toEqual([...CROP_PRESETS]);
+ expect(select.querySelector('option[value="custom"]')).toBeNull();expect(select.querySelector('option[value="original"]')).toBeNull();
+ expect(host.querySelector('.raw-crop-custom')).toBeNull();expect(host.querySelector('.raw-crop-aspect input')).toBeNull();
+ expect(host.textContent).not.toContain('3000 : 4000');expect(host.querySelector('.raw-crop-aspect .edit-source-note')).toBeNull();
+ expect(cropPreset([2200,1700])).toBe('8.5x11');expect(cropPreset([1300,1700])).toBe('free');expect(cropPreset(null)).toBe('free');
 });
-it('keeps invalid custom drafts local and applies one exact ratio',async()=>{
- await render();const select=host.querySelector('select')!;await act(async()=>{select.value='custom';select.dispatchEvent(new Event('change',{bubbles:true}));});
- const values=host.querySelectorAll<HTMLInputElement>('.raw-crop-custom input');await input(values[0],'0');await input(values[1],'11');
- expect(button('Apply').disabled).toBe(true);expect(raw.crop.operate).not.toHaveBeenCalled();await input(values[0],'8.5');
- await act(async()=>host.querySelector('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
- expect(raw.crop.operate).toHaveBeenCalledWith({type:'aspect',params:{aspect:[17,22],orientation:'crop'}},undefined);
+it('shows free with the chain on for an arbitrary locked ratio without changing Native readback',async()=>{
+ raw.settings.crop.aspect=[1300,1700];await render();
+ const select=host.querySelector<HTMLSelectElement>('select')!,chain=host.querySelector<HTMLButtonElement>('.raw-crop-aspect-lock')!;
+ expect(select.value).toBe('free');expect(chain.getAttribute('aria-pressed')).toBe('true');
+ expect(host.textContent).not.toContain('13 : 17');expect(host.querySelector('.raw-crop-custom')).toBeNull();
+ expect(raw.settings.crop.aspect).toEqual([1300,1700]);
+ await act(async()=>chain.click());expect(raw.crop.operate).toHaveBeenCalledWith({type:'aspect',params:{aspect:'free'}},'unlock');
+});
+it('uses the standard Lucide link-2 and link-2-off SVG paths',async()=>{
+ await render();const chain=host.querySelector<HTMLElement>('.raw-crop-aspect-lock')!,svg=chain.querySelector('svg')!;
+ const paths=()=>Array.from(svg.querySelectorAll('path,line'),node=>[node.tagName.toLowerCase(),...Array.from(node.attributes,attr=>[attr.name,attr.value].join('='))].join(' '));
+ expect(svg.getAttribute('viewBox')).toBe('0 0 24 24');expect(svg.getAttribute('stroke-width')).toBe('2');
+ expect(paths()).toEqual([
+  'path d=M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71',
+  'path d=M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71',
+  'line x1=2 x2=22 y1=2 y2=22',
+ ]);
+ raw.settings.crop.aspect=[900,1600];await render();
+ expect(paths()).toEqual([
+  'path d=M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71',
+  'path d=M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71',
+ ]);expect(svg.getAttribute('viewBox')).toBe('0 0 24 24');
 });
 it('renders six accessible overlay choices with visible selected styling and no fieldset border',async()=>{
  await render();const group=host.querySelector('fieldset.raw-crop-overlay')!;expect(group.querySelector('legend')!.textContent).toBe('Overlay');
@@ -61,7 +80,7 @@ it('orders the panel groups and uses a properly labeled aspect select outside th
  const overlays=host.querySelector('fieldset.raw-crop-overlay')!,reset=button('Reset Crop');
  expect(orientation.compareDocumentPosition(overlays)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
  expect(overlays.compareDocumentPosition(reset)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();expect(host.textContent).not.toContain('Positive angles rotate clockwise');
- expect(host.querySelectorAll('.raw-crop-aspect-lock svg path').length).toBeGreaterThan(1);expect(host.querySelector('.raw-crop-aspect-lock svg')!.getAttribute('viewBox')).toBe('0 0 24 24');
+ expect(host.querySelectorAll('.raw-crop-aspect-lock svg path').length).toBe(2);expect(host.querySelector('.raw-crop-aspect-lock svg')!.getAttribute('viewBox')).toBe('0 0 24 24');
 });
 it('uses one chain button for aspect lock and derives its state from readback',async()=>{
  await render();const select=host.querySelector('select')!,chain=host.querySelector<HTMLButtonElement>('.raw-crop-aspect-lock')!;
@@ -121,7 +140,7 @@ it('drains a live Straighten gesture when its panel unmounts',async()=>{
 });
 it('rebinds Custom and Straighten display from readback after Undo',async()=>{
  raw.settings.crop.aspect=[1300,1700];raw.settings.crop.geometry.angle=12;await render();
- expect(host.querySelector('select')!.value).toBe('custom');expect(host.querySelector<HTMLInputElement>('.raw-crop-custom input')!.value).toBe('13');
+ expect(host.querySelector('select')!.value).toBe('free');expect(host.querySelector('.raw-crop-custom')).toBeNull();
  raw.settings.crop.aspect=[2200,1700];raw.settings.crop.geometry.angle=0;await render();
  expect(host.querySelector('select')!.value).toBe('8.5x11');expect(host.querySelector<HTMLInputElement>('.adjustment-number')!.value).toBe('0.0');
 });
@@ -130,6 +149,20 @@ it('scopes dark native select and option styling to Crop, including focus and di
  const rules=styleCss.split('\n').filter(line=>line.startsWith('.raw-crop-aspect select')).join('\n');
  expect(rules).toContain('color-scheme: dark');expect(rules).toContain('background: #252528');expect(rules).toContain('color: #eee');
  expect(rules).toContain('select option');expect(rules).toContain('select:focus-visible');expect(rules).toContain('select:disabled');
+});
+
+it('applies a fixed two-column grid only to rotation and flip rows',async()=>{
+ const style=document.createElement('style');style.textContent=styleCss.split('\n').filter(line=>line.includes('.raw-crop-buttons')).join('\n');document.head.append(style);
+ try {
+  await render();const rows=host.querySelectorAll<HTMLElement>('.raw-crop-transform-row');
+  expect(rows).toHaveLength(2);
+  const rules=Array.from(style.sheet!.cssRules).filter((rule):rule is CSSStyleRule=>rule instanceof CSSStyleRule);
+  const grid=rules.find(rule=>rule.selectorText==='.raw-crop-buttons.raw-crop-transform-row')!;
+  const flex=rules.find(rule=>rule.selectorText==='.raw-crop-buttons')!;
+  expect(grid.style.display).toBe('grid');expect(grid.style.cssText).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))');expect(flex.style.display).toBe('flex');
+  const other=document.createElement('div');other.className='raw-crop-buttons';document.body.append(other);
+  expect(getComputedStyle(other).display).toBe('flex');other.remove();
+ } finally {style.remove();}
 });
 
 it('clears a rejected preflight angle owner so the renewed document can accept another gesture',async()=>{
