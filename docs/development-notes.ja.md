@@ -2073,3 +2073,14 @@ Crop surfaceの8 handle hit targetと表示枠判定に続き、残るViewer内�
 拡大中のNavigator画像sourceを既存Crop editing bitmapへ切替えた。このbitmapのcontractはquarter-turn orientationとflip適用済み、unstraightenedであり、Navigatorでは余分な変換をしない。全体画像を表示し、Crop／Straightenで切り取らない。Pan座標はViewer image dimensionsと既存Navigator frame算出を用いる。新Native renderingやCrop操作は追加しない。
 
 関連Frontend 4ファイル251件成功、TypeScript／production build成功。既存500 kB超chunk警告あり。実ブラウザ／実Desktop、物理高DPR、サイズ変更、orientation／flip画像上のNavigator表示枠とPan一致、Viewer境界clipの手動受入は未実施。自動テスト結果はそれらの描画受入を証明しない。
+
+
+## RAW Crop Phase 4.3.1：共通Spaceハンドツール（2026-11-04）
+
+Crop中のPointerDownでSpaceが有効ならsurfaceはイベントを止めず、既存ImageViewerへPan所有権を渡す。Fitより拡大中だけ開始し、既存pan/clampとNavigator状態を共有する。Down時にViewer `dragRef`がownerを固定するため、Spaceを途中で離してもPointer Up／CancelまでPanを継続する。逆にCrop gesture中のSpace押下もCrop所有を変えない。PanはCrop begin/update/endを呼ばずRecipe／History／Native編集を行わない。
+
+Space状態を暗室Viewerで一元管理し、Viewer領域のkeydownのみ受け付ける。入力対象、dialog/menu、IME、workspace lockを除外し、受理したkeydownはページscrollを抑止する。keyup／blur／document・mode切替／block／unmountで解除する。ボタンSpaceなどの既存native動作は維持する。将来Pickerは同じ状態をPointerDownで参照できるが、WB操作には未接続。
+
+Crop hoverカーソルはhandle resize、枠内move、枠外共通rotate SVGの順で判定し、Space／保持中Panをhandとして優先する。pointer move時はDOM style更新を使いReact再描画を発生させない。
+
+Frontend `ImageViewer`／`RawCropSurface`／Phase 4.3連携の関連テスト219件成功、最終buildと`git diff --check`成功（buildで既存大容量chunk警告）。実ブラウザ／Desktop、長時間Space保持や物理Pointer Captureの受入は未実施。

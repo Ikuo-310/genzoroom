@@ -89,12 +89,27 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame, rawRegionDisp
   const imageState = loadedImage?.identity === imageIdentity ? loadedImage.status : 'loading';
   const bitmapSize = loadedImage?.identity === imageIdentity ? loadedImage.size : EMPTY_IMAGE_SIZE;
   const [cropBusy, setCropBusy] = useState(false);
+  const [spaceHand, setSpaceHand] = useState(false);
+  const [viewerPanActive,setViewerPanActive]=useState(false);
   const cropSizeRef = useRef<{ identity: string; size: Point } | null>(null);
   if (rawCrop?.surface) cropSizeRef.current = { identity: imageIdentity, size: {x:rawCrop.surface.frame.nativeWidth,y:rawCrop.surface.frame.nativeHeight} };
   const cropSize = rawCrop?.active && cropSizeRef.current?.identity === imageIdentity ? cropSizeRef.current.size : undefined;
   const logicalWidth = cropSize?.x ?? rawFrame?.nativeWidth ?? bitmapSize.x, logicalHeight = cropSize?.y ?? rawFrame?.nativeHeight ?? bitmapSize.y;
   const imageSize = useMemo(() => ({ x: logicalWidth, y: logicalHeight }), [logicalWidth, logicalHeight]);
   const [dpr, setDpr] = useState(() => typeof window==='undefined'?1:window.devicePixelRatio || 1);
+  useEffect(() => {
+    const down=(event:KeyboardEvent)=>{
+      if(event.code!=='Space'||event.defaultPrevented||event.isComposing||event.repeat||keyboardBlocked||isNativeEditingTarget(event.target)
+        ||(event.target instanceof Element&&!event.target.closest('.viewer-viewport'))
+        ||document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]'))return;
+      setSpaceHand(true);event.preventDefault();
+    };
+    const up=(event:KeyboardEvent)=>{if(event.code==='Space')setSpaceHand(false);};
+    const blur=()=>setSpaceHand(false);
+    window.addEventListener('keydown',down);window.addEventListener('keyup',up);window.addEventListener('blur',blur);
+    return()=>{window.removeEventListener('keydown',down);window.removeEventListener('keyup',up);window.removeEventListener('blur',blur);setSpaceHand(false);};
+  },[keyboardBlocked,documentKey,rawCrop?.active]);
+  useEffect(()=>{if(keyboardBlocked)setSpaceHand(false);},[keyboardBlocked]);
   useEffect(() => {
     const media = window.matchMedia?.(`(resolution: ${dpr}dppx)`);
     const changed = () => setDpr(window.devicePixelRatio || 1);
@@ -405,7 +420,7 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame, rawRegionDisp
   }
 
   function startPan(event: ReactPointerEvent<HTMLDivElement>) {
-    if (cropBusy || rawCrop?.active) return;
+    if (cropBusy || (rawCrop?.active && !spaceHand)) return;
     if (rawPickActive) {
       if (event.button === 0 && pickReady && displayedPickTarget && imagePositionRef.current
         && wholeImagePoint({ x: event.clientX, y: event.clientY }, imagePositionRef.current.getBoundingClientRect())) {
@@ -416,10 +431,11 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame, rawRegionDisp
       return;
     }
     if (event.button === 0) panMovedRef.current = false;
-    if (scale <= fitScale || event.button !== 0) return;
+    if (scale <= fitScale || event.button !== 0 || rawCrop?.active && !spaceHand) return;
     onInteractionStart?.();
     event.currentTarget.setPointerCapture(event.pointerId);
     dragRef.current = { pointerId: event.pointerId, origin: { x: event.clientX, y: event.clientY }, pan };
+    setViewerPanActive(true);
     if (rawFrame) setViewInteracting(true);
   }
 
@@ -452,6 +468,7 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame, rawRegionDisp
     }
     if (dragRef.current?.pointerId !== event.pointerId) return;
     dragRef.current = null;
+    setViewerPanActive(false);
     if (panMovedRef.current) {
       // Pointer capture can retarget the trailing click sequence into a false viewport double-click.
       suppressDoubleClickRef.current = true;
@@ -632,7 +649,7 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame, rawRegionDisp
       onPointerUp={stopPan}
       onPointerCancel={stopPan}
     >
-      {rawCrop?.active && <RawCropSurface binding={rawCrop} viewport={viewportSize} scale={scale} pan={pan} busy={setCropBusy} />}
+      {rawCrop?.active && <RawCropSurface binding={rawCrop} viewport={viewportSize} scale={scale} pan={pan} busy={setCropBusy} handTool={spaceHand && scale>fitScale || viewerPanActive} panning={viewerPanActive} />}
       <div ref={imagePositionRef} className="viewer-image-position" style={{ display: rawCrop?.active ? 'none' : undefined, transform: `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px))` }}
         onPointerDown={(event) => {
           if (event.button === 0) viewportRef.current?.focus({ preventScroll: true });
