@@ -1,7 +1,7 @@
 import type { CropPresentation } from './rawCropDisplay';
 import { useEffect, useId, useRef, useState, type PointerEvent } from 'react';
 import type { RawCropDisplay, RawGeometry, RawGeometryOperation } from './rawApi';
-import { CROP_HANDLES, cropPoint, projectRawCrop, type CropHandle, type CropMatrix } from './rawCropMath';
+import { CROP_HANDLES, cropMoveAxis, cropMoveTarget, cropPoint, projectRawCrop, type CropHandle, type CropMatrix, type CropMoveAxis } from './rawCropMath';
 import type { Point } from './viewerMath';
 import { straightenFromLine } from './rawStraightenTool';
 import { cropOverlayPaths,type CropOverlay } from './rawCropOverlay';
@@ -10,14 +10,22 @@ export type RawCropBinding = { active: boolean; canStart: boolean; presentation?
   overlay?:CropOverlay;
   surface?: { url: string; frame: RawGeometry; display: RawCropDisplay };
   begin: (type?:'drag'|'straighten') => Promise<void>; update: (operation: RawGeometryOperation) => void; cancel?: () => Promise<void>; end: () => Promise<void> };
+type CropPointerGesture = { id:number;matrix:CropMatrix;bounds:DOMRect;handle:CropHandle;view:{viewport:Point;scale:number;pan:Point};cursor:string;
+  from:[number,number];start:[number,number,number,number];owner:RawCropBinding;kind:'drag'|'straighten';center:Point;startAngle:number;lastAngle:number;previousPointerAngle:number;
+  lastScreen:Point;lastTo:Point;shift:boolean;axis:CropMoveAxis;axisStartScreen:Point;axisStartTo:Point;freeStartScreen:Point;freeStartTo:Point };
+function setMoveShift(g:CropPointerGesture|null,active:boolean){
+  if(!g||g.kind!=='drag'||g.handle!=='move'||g.shift===active)return;
+  // Modifier transitions use the last rendered pointer target as the new origin, avoiding a jump.
+  g.shift=active;g.axis=null;
+  if(active){g.axisStartScreen=g.lastScreen;g.axisStartTo=g.lastTo;}
+  else {g.freeStartScreen=g.lastScreen;g.freeStartTo=g.lastTo;}
+}
 export function RawCropSurface({ binding, viewport, scale, pan, busy, handTool=false, panning=false }: {
   binding: RawCropBinding; viewport: Point; scale: number; pan: Point; busy: (value: boolean) => void; handTool?:boolean;panning?:boolean }) {
   const root = useRef<HTMLDivElement>(null);
   const clipId=useId();
   const [line,setLine]=useState<{id:number;start:Point;end:Point}|null>(null);
-  const gesture = useRef<{ id: number; matrix: CropMatrix; bounds: DOMRect; handle: CropHandle;
-    view: {viewport:Point;scale:number;pan:Point}; cursor:string; from: [number, number]; start: [number, number, number, number]; owner: RawCropBinding;
-    kind:'drag'|'straighten'; center:Point; startAngle:number; lastAngle:number; previousPointerAngle:number } | null>(null);
+  const gesture = useRef<CropPointerGesture | null>(null);
   const surface = binding.surface;
   const crop=binding.presentation && binding.presentation.snapshot===surface?binding.presentation.crop:surface?.display.canonicalGeometry.crop;
   const view=gesture.current?.view ?? {viewport,scale,pan};
@@ -34,7 +42,7 @@ export function RawCropSurface({ binding, viewport, scale, pan, busy, handTool=f
     if (root.current?.hasPointerCapture(g.id)) root.current.releasePointerCapture(g.id);
     busy(false); void (cancel && g.owner.cancel ? g.owner.cancel() : g.owner.end()).catch(() => {});
   };
-  useEffect(()=>{const blur=()=>{setLine(null);finish(true);};const key=(e:KeyboardEvent)=>{if(e.key==='Escape'&&binding.straightenTool){setLine(null);binding.setStraightenTool?.(false);}};window.addEventListener('blur',blur);window.addEventListener('keydown',key);return ()=>{window.removeEventListener('blur',blur);window.removeEventListener('keydown',key);};},[binding]);
+  useEffect(()=>{const blur=()=>{setLine(null);finish(true);};const key=(e:KeyboardEvent)=>{if(e.key==='Escape'&&binding.straightenTool){setLine(null);binding.setStraightenTool?.(false);}if(e.key==='Shift')setMoveShift(gesture.current,true);};const keyUp=(e:KeyboardEvent)=>{if(e.key==='Shift')setMoveShift(gesture.current,e.shiftKey);};window.addEventListener('blur',blur);window.addEventListener('keydown',key);window.addEventListener('keyup',keyUp);return ()=>{window.removeEventListener('blur',blur);window.removeEventListener('keydown',key);window.removeEventListener('keyup',keyUp);};},[binding]);
   useEffect(() => () => { const g = gesture.current; if (g) { gesture.current = null;
     if (root.current?.hasPointerCapture(g.id)) root.current.releasePointerCapture(g.id);
     busy(false); void (g.owner.cancel?.() ?? g.owner.end()).catch(() => {}); } }, [busy]);
@@ -48,7 +56,17 @@ export function RawCropSurface({ binding, viewport, scale, pan, busy, handTool=f
       g.previousPointerAngle=a;g.lastAngle=Math.max(-45,Math.min(45,Math.round((g.lastAngle+delta*180/Math.PI)*10)/10));
       g.owner.update({type:'straighten',params:{angle:g.lastAngle}});return;
     }
-    const to = cropPoint(g.matrix, { x: event.clientX-g.bounds.left, y: event.clientY-g.bounds.top });
+    const screen={x:event.clientX-g.bounds.left,y:event.clientY-g.bounds.top};
+    const pointer=cropPoint(g.matrix,screen);
+    let to:Point=pointer;
+    if(g.handle==='move'){
+      setMoveShift(g,event.shiftKey);
+      if(g.shift){
+        g.axis??=cropMoveAxis({x:screen.x-g.axisStartScreen.x,y:screen.y-g.axisStartScreen.y});
+        to=g.axis?cropMoveTarget(g.matrix,g.axisStartScreen,g.axisStartTo,screen,g.axis):g.axisStartTo;
+      }else to=cropMoveTarget(g.matrix,g.freeStartScreen,g.freeStartTo,screen,null);
+    }
+    g.lastScreen=screen;g.lastTo=to;
     g.owner.update({ type: 'drag', params: { handle: g.handle, from: g.from, to: [to.x,to.y], start: g.start, keepRatio: event.shiftKey } });
   };
   const straightenCursor='url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2732%27 height=%2732%27 viewBox=%270 0 32 32%27%3E%3Cpath d=%27M7 20a10 10 0 1 1 3 5%27 fill=%27none%27 stroke=%27white%27 stroke-width=%273%27/%3E%3Cpath d=%27m5 17 2 5 5-2%27 fill=%27none%27 stroke=%27white%27 stroke-width=%272%27/%3E%3C/svg%3E") 16 16, crosshair';
@@ -77,9 +95,11 @@ export function RawCropSurface({ binding, viewport, scale, pan, busy, handTool=f
       const center={x:bounds.left+bounds.width/2+pan.x,y:bounds.top+bounds.height/2+pan.y};
       const startAngle=surface.display.canonicalGeometry.crop.geometry.angle;
       const pointerAngle=Math.atan2(event.clientY-center.y,event.clientX-center.x);
+      const screen={x,y},moveTo={x:from.x,y:from.y},shift=handle==='move'&&event.shiftKey;
       gesture.current = { id: event.pointerId, matrix: projection.viewportToCanonical, bounds, handle: handle ?? 'move',
         view:{viewport:{...viewport},scale,pan:{...pan}},cursor:kind==='straighten'?straightenCursor:cursor(handle ?? 'move'), from: [from.x,from.y], start: [rect.x0,rect.y0,rect.x1,rect.y1], owner: binding,
-        kind,center,startAngle,lastAngle:startAngle,previousPointerAngle:pointerAngle };
+        kind,center,startAngle,lastAngle:startAngle,previousPointerAngle:pointerAngle,lastScreen:screen,lastTo:moveTo,shift,axis:null,
+        axisStartScreen:screen,axisStartTo:moveTo,freeStartScreen:screen,freeStartTo:moveTo };
       event.currentTarget.setPointerCapture(event.pointerId); busy(true);
       void binding.begin(kind).catch(() => finish(true));
     }} onPointerMove={event=>{if(line?.id===event.pointerId){const b=event.currentTarget.getBoundingClientRect();setLine({...line,end:{x:event.clientX-b.left,y:event.clientY-b.top}});return;}update(event);if(!gesture.current&&projection){const b=event.currentTarget.getBoundingClientRect(),x=event.clientX-b.left,y=event.clientY-b.top,r=projection.rect;

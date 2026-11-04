@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect,it,vi } from 'vitest';
 import { provisionalCrop,type CropSnapshot } from './rawCropDisplay';
+import type { RawGeometryOperation } from './rawApi';
 import { rawSettings } from './test/rawSettings';
 import { RawCropSurface, type RawCropBinding } from './RawCropSurface';
 it('applies and removes hand cursors from key state without pointer movement',async()=>{
@@ -27,16 +28,46 @@ it.each(['topLeft','topRight','bottomRight','bottomLeft','top','right','bottom',
   await act(async()=>render());
   const surface=host.firstElementChild as HTMLDivElement;
   surface.setPointerCapture=vi.fn();surface.hasPointerCapture=()=>true;surface.releasePointerCapture=vi.fn();
-  const pointer=(target:Element,type:string,x:number,y:number)=>{const event=new Event(type,{bubbles:true});Object.assign(event,{pointerId:1,button:0,clientX:x,clientY:y,shiftKey:true});target.dispatchEvent(event);};
+  const pointer=(target:Element,type:string,x:number,y:number)=>{const event=new Event(type,{bubbles:true});Object.assign(event,{pointerId:1,button:0,clientX:x,clientY:y,shiftKey:handle!=='move'&&handle!=='cancel'});target.dispatchEvent(event);};
   const target=handle==='move'||handle==='cancel'?surface:host.querySelector(`[data-crop-handle="${handle}"]`)!;
   await act(async()=>pointer(target,'pointerdown',400,300));
   expect(surface.setPointerCapture).toHaveBeenCalledWith(1);expect(binding.begin).toHaveBeenCalledOnce();
   await act(async()=>pointer(surface,'pointermove',410,310));
   binding.surface=structuredClone(binding.surface);binding.surface!.display.canonicalGeometry.crop.geometry.rect={x0:.3,y0:.3,x1:.7,y1:.7};
   await act(async()=>render());await act(async()=>pointer(surface,handle==='cancel'?'pointercancel':'pointerup',420,320));
-  expect(binding.update).toHaveBeenLastCalledWith({type:'drag',params:{handle:handle==='cancel'?'move':handle,from:[.5,.5],to:handle==='cancel'?[.51,.52]:[.52,.54],start:[.2,.2,.8,.8],keepRatio:true}});
+  expect(binding.update).toHaveBeenLastCalledWith({type:'drag',params:{handle:handle==='cancel'?'move':handle,from:[.5,.5],to:handle==='cancel'?[.51,.52]:[.52,.54],start:[.2,.2,.8,.8],keepRatio:handle!=='move'&&handle!=='cancel'}});
   expect(binding.end).toHaveBeenCalledOnce();expect(surface.releasePointerCapture).toHaveBeenCalledWith(1);
   await act(async()=>root.unmount());vi.unstubAllGlobals();
+});
+it('locks only Crop Move to a screen axis and re-anchors without jumps when Shift changes',async()=>{
+ vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);const host=document.createElement('div'),root=createRoot(host),updates:unknown[]=[];
+ const crop={geometry:{rect:{x0:.2,y0:.2,x1:.8,y1:.8},angle:0},aspect:[1,1] as [number,number],flip_h:false,flip_v:false};
+ const binding:RawCropBinding={active:true,canStart:true,begin:vi.fn(async()=>{}),update:operation=>updates.push(operation),end:vi.fn(async()=>{}),surface:{url:'blob:move',
+  frame:{geometryId:'edit',nativeWidth:1000,nativeHeight:500,aspect:2,fullWidth:200,fullHeight:100,window:null},
+  display:{settingsFingerprint:'fp',bitmapSpace:'oriented-warped-unstraightened-flipped',canonicalGeometry:{orientation:'Normal',crop}}}};
+ await act(async()=>root.render(<RawCropSurface binding={binding} viewport={{x:800,y:600}} scale={1} pan={{x:0,y:0}} busy={()=>{}}/>));
+ const surface=host.firstElementChild as HTMLDivElement,move=host.querySelector('[data-crop-move]')!;surface.setPointerCapture=vi.fn();surface.hasPointerCapture=()=>true;surface.releasePointerCapture=vi.fn();
+ const pointer=(type:string,x:number,y:number,shiftKey:boolean)=>{const e=new Event(type,{bubbles:true});Object.assign(e,{pointerId:1,button:0,clientX:x,clientY:y,shiftKey});(type==='pointerdown'?move:surface).dispatchEvent(e);};
+ const modifier=(type:'keydown'|'keyup',shiftKey:boolean)=>window.dispatchEvent(new KeyboardEvent(type,{key:'Shift',bubbles:true,shiftKey}));
+ await act(async()=>pointer('pointerdown',400,300,true));
+ await act(async()=>pointer('pointermove',404,305,true));expect((updates.at(-1) as any).params.to).toEqual([.5,.5]);
+ await act(async()=>pointer('pointermove',410,308,true));expect((updates.at(-1) as any).params.to[0]).toBeCloseTo(.51);expect((updates.at(-1) as any).params.to[1]).toBeCloseTo(.5);
+ await act(async()=>pointer('pointermove',420,350,true));expect((updates.at(-1) as any).params.to[0]).toBeCloseTo(.52);expect((updates.at(-1) as any).params.to[1]).toBeCloseTo(.5);
+ const beforeEnable=(updates.at(-1) as any).params.to;
+ await act(async()=>modifier('keyup',false));
+ await act(async()=>pointer('pointermove',420,350,false));expect((updates.at(-1) as any).params.to).toEqual(beforeEnable);
+ await act(async()=>pointer('pointermove',430,360,false));expect((updates.at(-1) as any).params.to[0]).toBeCloseTo(.53);expect((updates.at(-1) as any).params.to[1]).toBeCloseTo(.52);
+ const beforeEnableAgain=(updates.at(-1) as any).params.to;
+ await act(async()=>modifier('keydown',true));
+ await act(async()=>pointer('pointermove',430,360,true));expect((updates.at(-1) as any).params.to).toEqual(beforeEnableAgain);
+ await act(async()=>pointer('pointermove',430,370,true));expect((updates.at(-1) as any).params.to[0]).toBeCloseTo(beforeEnableAgain[0]);expect((updates.at(-1) as any).params.to[1]).toBeCloseTo(beforeEnableAgain[1]+.02);
+ const lastMove=updates.at(-1);
+ await act(async()=>modifier('keyup',false));
+ await act(async()=>pointer('pointerup',430,370,false));expect((updates.at(-1) as any).params.to).toEqual((lastMove as any).params.to);expect((updates.at(-1) as any).params.keepRatio).toBe(false);
+ const intent=provisionalCrop(crop,updates.at(-1) as RawGeometryOperation,binding.surface!.frame);
+ expect(intent.geometry.rect.x0).toBeCloseTo(.23);expect(intent.geometry.rect.y0).toBeCloseTo(.24);
+ expect(binding.begin).toHaveBeenCalledOnce();expect(binding.end).toHaveBeenCalledOnce();
+ await act(async()=>root.unmount());vi.unstubAllGlobals();
 });
 it('does not claim outside pan and ends cancellation without an extra mutation',async()=>{
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);const host=document.createElement('div'),root=createRoot(host);

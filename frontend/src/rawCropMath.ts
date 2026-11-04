@@ -5,7 +5,19 @@ import type { Point } from './viewerMath';
 export type CropMatrix = readonly [number, number, number, number, number, number];
 export const CROP_HANDLES = ['topLeft', 'topRight', 'bottomRight', 'bottomLeft', 'top', 'right', 'bottom', 'left', 'move'] as const;
 export type CropHandle = typeof CROP_HANDLES[number];
+export type CropMoveAxis = 'x' | 'y' | null;
 export const cropPoint = (m: CropMatrix, p: Point): Point => ({ x: m[0] * p.x + m[2] * p.y + m[4], y: m[1] * p.x + m[3] * p.y + m[5] });
+export const CROP_MOVE_AXIS_THRESHOLD = 6;
+export function cropMoveAxis(delta: Point, threshold=CROP_MOVE_AXIS_THRESHOLD): CropMoveAxis {
+  const x=Math.abs(delta.x),y=Math.abs(delta.y);
+  if(!Number.isFinite(x)||!Number.isFinite(y)||Math.max(x,y)<threshold)return null;
+  return x>=y?'x':'y';
+}
+export function cropMoveTarget(matrix:CropMatrix,anchorScreen:Point,anchorCanonical:Point,pointerScreen:Point,axis:CropMoveAxis):Point {
+  const targetScreen=axis==='x'?{x:pointerScreen.x,y:anchorScreen.y}:axis==='y'?{x:anchorScreen.x,y:pointerScreen.y}:pointerScreen;
+  const anchor=cropPoint(matrix,anchorScreen),target=cropPoint(matrix,targetScreen);
+  return {x:anchorCanonical.x+target.x-anchor.x,y:anchorCanonical.y+target.y-anchor.y};
+}
 export function cropCompose(a: CropMatrix, b: CropMatrix): CropMatrix {
   return [a[0]*b[0]+a[2]*b[1], a[1]*b[0]+a[3]*b[1], a[0]*b[2]+a[2]*b[3], a[1]*b[2]+a[3]*b[3],
     a[0]*b[4]+a[2]*b[5]+a[4], a[1]*b[4]+a[3]*b[5]+a[5]];

@@ -1,8 +1,25 @@
 import { expect, it } from 'vitest';
-import { cropPoint, cropInverse, projectRawCrop } from './rawCropMath';
+import { cropMoveAxis, cropMoveTarget, cropPoint, cropInverse, projectRawCrop } from './rawCropMath';
 import type { RawCrop, RawGeometry } from './rawApi';
 const frame = (w:number,h:number):RawGeometry => ({geometryId:'edit',nativeWidth:w,nativeHeight:h,aspect:w/h,fullWidth:w/4,fullHeight:h/4,window:null});
 const crop = (angle=0,flip_h=false,flip_v=false):RawCrop => ({ geometry:{rect:{x0:.4,y0:.4,x1:.6,y1:.6},angle},aspect:null,flip_h,flip_v });
+it('leaves small screen drift undecided and freezes the dominant axis at the 6px threshold',()=>{
+  expect(cropMoveAxis({x:5.9,y:5.8})).toBeNull();expect(cropMoveAxis({x:6,y:5})).toBe('x');expect(cropMoveAxis({x:5,y:-6})).toBe('y');
+  expect(cropMoveAxis({x:-8,y:9})).toBe('y');
+});
+it.each([0,31,-45])('keeps Shift Move on the chosen screen axis through zoom, pan, flips and oriented dimensions at %s degrees',angle=>{
+  for(const [w,h] of [[4000,2000],[2000,4000]])for(const flip_h of [false,true])for(const flip_v of [false,true]){
+    const c=crop(angle,flip_h,flip_v),p=projectRawCrop(c,frame(w,h),{x:900,y:700},.37,{x:31,y:-19},{imageCentered:true})!;
+    const anchorScreen=cropPoint(p.canonicalToViewport,{x:.5,y:.5}),anchorCanonical={x:.5,y:.5};
+    const pointerScreen={x:anchorScreen.x+40,y:anchorScreen.y+27};
+    const target=cropMoveTarget(p.viewportToCanonical,anchorScreen,anchorCanonical,pointerScreen,'x');
+    const visible=cropPoint(p.canonicalToViewport,target);
+    expect(visible.x).toBeCloseTo(pointerScreen.x,8);expect(visible.y).toBeCloseTo(anchorScreen.y,8);
+    const vertical=cropMoveTarget(p.viewportToCanonical,anchorScreen,anchorCanonical,pointerScreen,'y');
+    const verticalVisible=cropPoint(p.canonicalToViewport,vertical);
+    expect(verticalVisible.x).toBeCloseTo(anchorScreen.x,8);expect(verticalVisible.y).toBeCloseTo(pointerScreen.y,8);
+  }
+});
 it.each([0,45,-45])('round trips noncentral normalized coordinates at %s degrees across oriented dimensions/flips/zoom/DPR', angle => {
   for (const [w,h] of [[4000,2000],[2000,4000]]) for (const flipH of [false,true]) for (const flipV of [false,true])
     for (const dpr of [1,1.5,2]) for (const scale of [.1,1,2]) for (const imageCentered of [false,true]) {

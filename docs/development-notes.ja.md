@@ -2161,3 +2161,12 @@ Straighten 0°では画像pixel座標でX/Yを独立Clampし、矩形寸法を�
 3990×3000の全高1:1 Cropでdx/dyが(+100,0)、(+100,+2)、(+100,-2)、(-100,+2)の4条件を、Free／1:1双方で確認した。加えて縦移動余地のある左右境界、四隅・全画面境界、Flipの4組、比率固定、矩形サイズ不変、Straighten 6°の小移動と傾斜辺沿い移動を検証した。回転FixtureはLightCraft v0.18.0 pinned sourceの`given_a_small_frame_pushed_past_a_tilted_edge_then_it_stops_on_the_edge_and_slides_along_it`を基準とし、小移動の期待座標も照合している。既存Resizeテストを含む`rawCropDisplay.test.ts`は28件成功。
 
 関連する`rawCropDisplay`／`rawCropMath`／`RawCropSurface`／`useRawDocument`／`rawHistorySave`の5 test files、計279件成功。TypeScriptチェック、本番build、`git diff --check`も成功した。buildは既存同様500 kB超chunk警告を出し、index chunkは約972 kB。Native managed binaryそのものを起動した同一入力のreadback比較と実Desktop／ブラウザ受入は未実施であり、回転時計算はpinned LightCraft sourceの規則とFrontend fixtureによる照合である。1ジェスチャ1Historyと既存確定経路は関連既存テストでも確認し、手動受入の代替とはしない。
+
+
+## RAW Crop Phase 4.5.6：Shiftによる軸固定Move（2026-11-04）
+
+Crop枠内部のMove中に限り、Shiftで画面上のCSS pixel X／Y軸へ移動を固定する機能を追加した。6 CSS pxを軸選択閾値とし、最大絶対成分が閾値へ到達した時点で優勢軸を決定する。同値はXを選ぶ。未決定の間は現在の仮表示位置を維持し、Shiftを保持する間は軸を変更しない。Shift解除で自由Moveへ戻る。Shiftの切替点ごとに画面座標と現在の仮表示pointer targetを再アンカーし、ポインター座標とCrop枠が飛ばないようにした。
+
+軸はCSS pixelで判定後、ジェスチャ開始時に固定した`viewportToCanonical`逆変換でNative intent座標へ変換する。これにより方向判定を画像/Crop比率やFlip状態に結びつけず、Zoom、Pan、quarter-turn後の向き、Flipでも画面上の軸を維持する。Straighten時の境界沿い移動解決はPhase 4.5.5の`provisionalCrop()`／Native規則を引き続き使う。PointerUpもMoveと同じ計算を通し、従来のdrag operation、owner、Native確定1回／History最大1回を維持する。Resizeには既存`keepRatio`、Straighten ToolとSpace Panには従来経路を適用し、Recipe／DB設定やUI項目は追加していない。
+
+純粋関数テストで6px未満、閾値到達、優勢軸と画面座標基準の変換を確認した。SurfaceテストではShift保持中の軸維持、threshold未満、途中解除による自由復帰、再押下時の再判定、PointerUp時にShift状態が変わった場合も含む最終intent一致、gesture begin/end各1回を確認した。`RawCropSurface`／`rawCropMath`／`rawCropDisplay`／`useRawDocument`／`rawHistorySave`／`RawCropControls`／`rawRecipeSave`の7 test files、計327件成功。TypeScriptチェック、本番build、`git diff --check`も成功した。buildには500 kB超chunk警告があり、index chunkは約973 kB。実Desktop／ブラウザでのShift切替・各orientation受入および実Native readbackとの手動比較は未実施。
