@@ -90,6 +90,7 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame, rawRegionDisp
   const bitmapSize = loadedImage?.identity === imageIdentity ? loadedImage.size : EMPTY_IMAGE_SIZE;
   const [cropBusy, setCropBusy] = useState(false);
   const [spaceHand, setSpaceHand] = useState(false);
+  const pointerInsideViewer=useRef(false);
   const [viewerPanActive,setViewerPanActive]=useState(false);
   const cropSizeRef = useRef<{ identity: string; size: Point } | null>(null);
   if (rawCrop?.surface) cropSizeRef.current = { identity: imageIdentity, size: {x:rawCrop.surface.frame.nativeWidth,y:rawCrop.surface.frame.nativeHeight} };
@@ -100,14 +101,14 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame, rawRegionDisp
   useEffect(() => {
     const down=(event:KeyboardEvent)=>{
       if(event.code!=='Space'||event.defaultPrevented||event.isComposing||event.repeat||keyboardBlocked||isNativeEditingTarget(event.target)
-        ||(event.target instanceof Element&&!event.target.closest('.viewer-viewport'))
+        ||!pointerInsideViewer.current
         ||document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]'))return;
       setSpaceHand(true);event.preventDefault();
     };
     const up=(event:KeyboardEvent)=>{if(event.code==='Space')setSpaceHand(false);};
-    const blur=()=>setSpaceHand(false);
+    const blur=()=>{setSpaceHand(false);pointerInsideViewer.current=false;};
     window.addEventListener('keydown',down);window.addEventListener('keyup',up);window.addEventListener('blur',blur);
-    return()=>{window.removeEventListener('keydown',down);window.removeEventListener('keyup',up);window.removeEventListener('blur',blur);setSpaceHand(false);};
+    return()=>{window.removeEventListener('keydown',down);window.removeEventListener('keyup',up);window.removeEventListener('blur',blur);setSpaceHand(false);pointerInsideViewer.current=false;};
   },[keyboardBlocked,documentKey,rawCrop?.active]);
   useEffect(()=>{if(keyboardBlocked)setSpaceHand(false);},[keyboardBlocked]);
   useEffect(() => {
@@ -615,6 +616,8 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame, rawRegionDisp
       tabIndex={0}
       aria-label={alt}
       className={`viewer-viewport${zoomed ? ' pannable' : ''}`}
+      onPointerEnter={event=>{if(event.pointerType!=='touch'&&!dragRef.current&&!cropBusy)pointerInsideViewer.current=true;}}
+      onPointerLeave={event=>{if(event.pointerType!=='touch'&&!dragRef.current&&!cropBusy)pointerInsideViewer.current=false;}}
       style={rawPickActive ? { cursor: pickReady ? PICK_CURSOR : 'not-allowed' } : undefined}
       onKeyDown={(event) => {
         // Only actual photo focus participates; hovering a slider does not.

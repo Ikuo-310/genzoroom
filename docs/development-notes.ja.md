@@ -2079,8 +2079,15 @@ Crop surfaceの8 handle hit targetと表示枠判定に続き、残るViewer内�
 
 Crop中のPointerDownでSpaceが有効ならsurfaceはイベントを止めず、既存ImageViewerへPan所有権を渡す。Fitより拡大中だけ開始し、既存pan/clampとNavigator状態を共有する。Down時にViewer `dragRef`がownerを固定するため、Spaceを途中で離してもPointer Up／CancelまでPanを継続する。逆にCrop gesture中のSpace押下もCrop所有を変えない。PanはCrop begin/update/endを呼ばずRecipe／History／Native編集を行わない。
 
-Space状態を暗室Viewerで一元管理し、Viewer領域のkeydownのみ受け付ける。入力対象、dialog/menu、IME、workspace lockを除外し、受理したkeydownはページscrollを抑止する。keyup／blur／document・mode切替／block／unmountで解除する。ボタンSpaceなどの既存native動作は維持する。将来Pickerは同じ状態をPointerDownで参照できるが、WB操作には未接続。
+Space状態を暗室Viewerで一元管理する。keydownのfocus targetではなく、`.viewer-viewport`内のpointer enter／leave refでマウス位置を確認する。PV内で受理したkeydownだけ有効化し、PV外で押した状態のまま入っても起動しない。入力対象、dialog/menu、IME、workspace lockを除外し、受理したkeydownはページscrollを抑止する。keyup／blur／document・mode切替／block／unmountで解除する。ボタンSpaceなどの既存native動作は維持する。将来Pickerは同じ状態をPointerDownで参照できるが、WB操作には未接続。
 
 Crop hoverカーソルはhandle resize、枠内move、枠外共通rotate SVGの順で判定し、Space／保持中Panをhandとして優先する。pointer move時はDOM style更新を使いReact再描画を発生させない。
 
 Frontend `ImageViewer`／`RawCropSurface`／Phase 4.3連携の関連テスト219件成功、最終buildと`git diff --check`成功（buildで既存大容量chunk警告）。実ブラウザ／Desktop、長時間Space保持や物理Pointer Captureの受入は未実施。
+
+
+## RAW Crop Phase 4.3.2：Space起動範囲をPointer hoverで判定（2026-11-04）
+
+Phase 4.3.1実機受入で判明した、右ペインへキーボードfocusが残るとSpaceが有効にならない問題を修正。Space Key Down時にevent.targetをViewer所属判定へ使わず、ImageViewerの`.viewer-viewport` Pointer Enter／Leaveで更新するrefを参照する。Viewer内で押した時だけarmし、外で押したSpaceはhover移動だけでは有効にならない。テキスト等、IME、dialog/menu、操作blockのguardとKey Up／Blur／owner固定を保つ。Capture中やgesture中のhover離脱は進行中ownerを変えない。Pointer MoveによるReact rerenderは発生させない。
+
+関連Frontendテスト、TypeScript、本番build、`git diff --check`の結果は本追記とともに記録する。実ブラウザ／Desktop受入は未実施。
