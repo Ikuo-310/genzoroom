@@ -77,6 +77,9 @@ class RawPreviewApi:
         self._closing = False
         self._lease_task = None
         self._close_task = None
+        self._discard_task = None
+        self._discard_request = None
+        self._discarding = False
         self._touched = monotonic()
         self._workspace_state = "empty"
         self._native_released = False
@@ -93,6 +96,7 @@ class RawPreviewApi:
             Route("/capabilities", self.capabilities),
             Route("/workspaces", self.endpoint, methods=["POST"]),
             Route("/workspaces/{workspace}", self.endpoint, methods=["DELETE"]),
+            Route("/workspaces/{workspace}/discard", self.endpoint, methods=["POST"]),
             Route("/edit-status", self.endpoint, methods=["POST"]),
             Route("/assets/{asset_id}/edits/reset", self.endpoint, methods=["POST"]),
             Route("/documents", self.endpoint, methods=["POST"]),
@@ -165,6 +169,8 @@ class RawPreviewApi:
             lightcraft_log('region.owner.started', level='debug')
         try:
             body = await self._body(request) if request.method in {"POST", "PUT"} else {}
+            if request.method == 'POST' and request.url.path.endswith('/discard'):
+                return await self._discard(request, body)
             if request.method == "POST" and request.url.path.endswith("/edit-status"):
                 if set(body) != {"assetIds"} or not isinstance(body["assetIds"], list) or len(body["assetIds"]) > 100:
                     raise LightCraftError("raw_invalid_request")
@@ -194,7 +200,7 @@ class RawPreviewApi:
                     self._replace_pending_region()
             if preview and not self._closing and not self._history_draining and len(self._image_leases) >= 3:
                 self._replace_pending_image(request, body)
-            if self._closing or self._history_draining or (len(self._image_leases) >= 3 if preview else len(self._tasks) >= 2):
+            if self._closing or self._history_draining or self._discarding or (len(self._image_leases) >= 3 if preview else len(self._tasks) >= 2):
                 raise LightCraftError("raw_busy")
             # HTTP cancellation detaches the waiter, never a transmitted MCP operation.
             handler = self._region if region else self._preview if preview else self._execute
@@ -431,6 +437,53 @@ class RawPreviewApi:
             raise LightCraftError("raw_unavailable")
         return doc
 
+    async def _discard(self, request, body):
+        identity = (request.path_params['workspace'], body)
+        if self._closing:
+            raise LightCraftError('raw_busy')
+        if identity != self._discard_request:
+            doc = self.document
+            expected = {k:doc[k] for k in ('handle','generation','documentToken')} if doc else None
+            if (self.workspace is not None and identity[0] != self.workspace) or (body != {'scope':'workspace'} and (not doc or type(body.get('generation')) is not int or body != expected)):
+                raise LightCraftError('raw_stale_handle')
+            if self._history_draining or self._discarding:
+                raise LightCraftError('raw_busy')
+            self._discard_request = identity
+            self._discard_task = None
+        if self._discard_task is None or self._discard_task.done() and (self._discard_task.cancelled() or self._discard_task.exception() is not None):
+            # Close admission before yielding. Existing shielded owners, including a
+            # lost save reply, finish before the durable Recipe is detached.
+            self._history_draining = self._discarding = True
+            self._discard_task = asyncio.create_task(self._discard_owned(identity[0]), name='raw-discard')
+        return await asyncio.shield(self._discard_task)
+
+    async def _discard_owned(self, workspace):
+        try:
+            if self.cache: self.cache.stop_download()
+            if self._tasks:
+                await asyncio.gather(*tuple(self._tasks), return_exceptions=True)
+            if self._image_tasks:
+                await asyncio.gather(*tuple(self._image_tasks), return_exceptions=True)
+            async with self._lock:
+                if self.workspace not in (None, workspace):
+                    raise LightCraftError('raw_stale_handle')
+                try:
+                    await self._release(checkpoint_history=False)
+                except Exception:
+                    # Reimport is unnecessary for discard. If restart failed, prove
+                    # the old Native owner is closed before releasing its source.
+                    await self.raw.close()
+                    if self.cache: await self.cache.close()
+                    self.cache = self.workspace = self.document = None
+                    self._workspace_state = 'empty'
+                    from lightcraft_raw import LightCraftRawSession
+                    self.raw = LightCraftRawSession(self.manager)
+                    lightcraft_log('raw.discard.engineUnavailable', level='warn', errorCode='raw_unavailable')
+                lightcraft_log('raw.discard.completed', level='info')
+                return Response(status_code=204, headers={'Cache-Control':'no-store'})
+        finally:
+            self._history_draining = self._discarding = False
+
     async def _execute(self, request, body):
         async with self._lock:
             path, method = request.url.path, request.method
@@ -446,6 +499,7 @@ class RawPreviewApi:
                     raise LightCraftError("raw_busy")
                 if body or self.workspace is not None:
                     raise LightCraftError("raw_workspace_conflict")
+                self._discard_task = self._discard_request = None
                 self.workspace = secrets.token_hex(16)
                 self._reset_asset_id = self._reset_owner = None
                 self.cache = RawSourceCache()
@@ -1420,11 +1474,14 @@ class RawPreviewApi:
             raise asyncio.CancelledError()
 
     async def _close(self):
-        self.raw.reserve_control()
+        if self._discard_task is not None:
+            await asyncio.shield(self._discard_task)
+        owner = self.raw
+        owner.reserve_control()
         try:
             await self._close_reserved()
         finally:
-            self.raw.release_control()
+            owner.release_control()
 
     async def _close_reserved(self):
         if self._history_initialized or self._history_save or self._history_tasks:

@@ -30,7 +30,7 @@ type Props = {
   resetDisabled?: boolean;
   trackGradient?: string;
   className?: string;
-  onBegin: () => void; onChange: (value: number) => void; onCommit: () => void; onReset: () => void;
+  onCancel?: () => void; onBegin: () => void; onChange: (value: number) => void; onCommit: () => void; onReset: () => void;
 };
 
 export const ADJUSTMENT_COMMIT_DELAY_MS = 500;
@@ -185,7 +185,11 @@ export function AdjustmentSlider(props: Props) {
       current.onChange(value);
       scheduleCommit('wheel');
     };
-    const pointerEnd = () => finishPointer();
+    const pointerEnd = (event:Event) => {
+      if(event.type==='pointercancel' && latest.current.onCancel && interaction.current==='pointer'){
+        interaction.current='idle';latest.current.onCancel();
+      }else finishPointer();
+    };
     const cancelPendingKeyboardFocus = (event: Event) => {
       if (!restoreKeyboardFocusAfterLock.current || event.target === element) return;
       restoreKeyboardFocusAfterLock.current = false;
@@ -200,7 +204,7 @@ export function AdjustmentSlider(props: Props) {
     return () => {
       unregisterAdjustment(element);
       clearTimeout(timer.current);
-      latest.current.onCommit();
+      if(latest.current.onCancel)latest.current.onCancel();else latest.current.onCommit();
       element?.removeEventListener('wheel', wheel);
       window.removeEventListener('keydown', keydown);
       window.removeEventListener('pointerup', pointerEnd);
@@ -269,7 +273,10 @@ export function AdjustmentSlider(props: Props) {
         interaction.current = 'pointer';
         props.onBegin();
       }}
-      onLostPointerCapture={finishPointer}
+      onLostPointerCapture={()=>{
+        if(props.onCancel && interaction.current==='pointer'){interaction.current='idle';props.onCancel();}
+        else finishPointer();
+      }}
       onChange={(event) => {
         props.onChange(Number(event.target.value));
         if (interaction.current !== 'pointer') scheduleCommit();

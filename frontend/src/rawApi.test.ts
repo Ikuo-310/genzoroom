@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { LIGHTCRAFT_ENGINE } from './lightcraftEngine';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { rawCapability, rawPreview, readRawSettings, setRawControls, saveRawRecipe, saveRawHistory, readRawHistory, readRawRecipe, rawWorkspaceEmpty,
+import { createRawWorkspace,abortRawWorkspaceRequests,discardRawWorkspace, rawCapability, rawPreview, readRawSettings, setRawControls, saveRawRecipe, saveRawHistory, readRawHistory, readRawRecipe, rawWorkspaceEmpty,
   RAW_CONTROL_IDS, RawSaveError, type RawDocument, type RawHistoryRequest, type RawHistoryOperation } from './rawApi';
 import { rawSettings } from './test/rawSettings';
 import { RawSuperseded } from './rawApi';
@@ -329,4 +329,16 @@ it.each([['drag','move',true],['drag','resize',true],['aspect','lock',true],['as
  data.steps[0].kind='geometry';data.steps[0].metadata={operation,action};
  vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify(data),{headers:{'Content-Type':'application/json'}})));
  if(valid)await expect(readRawHistory(result)).resolves.toMatchObject({steps:[{metadata:{operation,action}}]});else await expect(readRawHistory(result)).rejects.toThrow('raw_invalid_response');
+});
+
+it('detaches lost workspace HTTP replies while leaving the discard fence on an independent transport',async()=>{
+ const workspaceId='d'.repeat(32);let pendingSignal:AbortSignal|undefined;
+ vi.stubGlobal('fetch',vi.fn(async(_url,init)=>{
+  if(String(_url).endsWith('/workspaces'))return new Response(JSON.stringify({workspaceId}),{headers:{'Content-Type':'application/json'}});
+  if(String(_url).endsWith('/discard')){expect(init!.signal!.aborted).toBe(false);return new Response(null,{status:204});}
+  pendingSignal=init!.signal as AbortSignal;return new Promise<Response>((_resolve,reject)=>pendingSignal!.addEventListener('abort',()=>reject(new DOMException('aborted','AbortError'))));
+ }));
+ await createRawWorkspace();const pending=readRawSettings({...doc,workspaceId});const caught=pending.catch(()=>{});
+ abortRawWorkspaceRequests(workspaceId);expect(pendingSignal!.aborted).toBe(true);await caught;
+ await expect(discardRawWorkspace({workspaceId})).resolves.toBeUndefined();
 });

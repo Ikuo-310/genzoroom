@@ -10,7 +10,7 @@ let raw: any;
 beforeEach(async()=>{vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);await i18n.changeLanguage('en');
  host=document.createElement('div');document.body.append(host);root=createRoot(host);
  raw={status:'ready',settings:{orientation:'Rotate90',crop:{geometry:{rect:{x0:.2,y0:.2,x1:.8,y1:.8},angle:0},aspect:null,flip_h:false,flip_v:false}},
-  frame:{nativeWidth:3000,nativeHeight:4000},history:{},crop:{active:true,surface:{},begin:vi.fn(async()=>{}),update:vi.fn(),end:vi.fn(async()=>{}),operate:vi.fn(async()=>{}),recover:vi.fn(async()=>{}),setMode:vi.fn(async()=>{})},retrySave:vi.fn(async()=>{})};
+  frame:{nativeWidth:3000,nativeHeight:4000},history:{},crop:{active:true,surface:{},cancel:vi.fn(async()=>{}),begin:vi.fn(async()=>{}),update:vi.fn(),end:vi.fn(async()=>{}),operate:vi.fn(async()=>{}),recover:vi.fn(async()=>{}),setMode:vi.fn(async()=>{})},retrySave:vi.fn(async()=>{})};
 });
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.unstubAllGlobals();});
 const render=async()=>act(async()=>root.render(<RawCropControls raw={raw}/>));
@@ -49,13 +49,13 @@ it('disables discrete actions and slider while a frame gesture owns the document
  raw.locked=true;raw.crop.operation='drag';await render();
  expect(button('Reset Crop').disabled).toBe(true);expect(host.querySelector<HTMLInputElement>('input[type=range]')!.disabled).toBe(true);
 });
-it.each(['pointerup','pointercancel','blur'])('settles one Straighten gesture at %s with the final input',async(end)=>{
+it.each(['pointerup','pointercancel','blur','lostpointercapture'])('settles one Straighten gesture at %s with the final input',async(end)=>{
  await render();const range=host.querySelector<HTMLInputElement>('input[type=range]')!;
  await act(async()=>{const e=new Event('pointerdown',{bubbles:true});Object.assign(e,{button:0});range.dispatchEvent(e);});
  await input(range,'-45');await input(range,'45');
- await act(async()=>window.dispatchEvent(new Event(end)));
+ await act(async()=>end==='lostpointercapture'?range.dispatchEvent(new Event(end,{bubbles:true})):window.dispatchEvent(new Event(end)));
  expect(raw.crop.begin).toHaveBeenCalledWith('straighten');expect(raw.crop.update).toHaveBeenLastCalledWith({type:'straighten',params:{angle:45}});
- expect(raw.crop.end).toHaveBeenCalledOnce();
+ if(end==='pointerup')expect(raw.crop.end).toHaveBeenCalledOnce();else {expect(raw.crop.cancel).toHaveBeenCalledOnce();expect(raw.crop.end).not.toHaveBeenCalled();}
 });
 it('offers explicit recovery on a failed relative mutation without automatically resending it',async()=>{
  raw.crop.operate.mockRejectedValue(new Error('unknown'));await render();await act(async()=>button('Rotate Right 90°').click());
@@ -78,7 +78,7 @@ it('commits numeric Straighten and its local final draft on blur',async()=>{
 it('drains a live Straighten gesture when its panel unmounts',async()=>{
  await render();const range=host.querySelector<HTMLInputElement>('input[type=range]')!;
  await act(async()=>{const e=new Event('pointerdown',{bubbles:true});Object.assign(e,{button:0});range.dispatchEvent(e);});await input(range,'15');
- await act(async()=>root.render(<div/>));expect(raw.crop.end).toHaveBeenCalledOnce();
+ await act(async()=>root.render(<div/>));expect(raw.crop.cancel).toHaveBeenCalledOnce();expect(raw.crop.end).not.toHaveBeenCalled();
 });
 it('rebinds Custom and Straighten display from readback after Undo',async()=>{
  raw.settings.crop.aspect=[1300,1700];raw.settings.crop.geometry.angle=12;await render();
@@ -91,4 +91,11 @@ it('scopes dark native select and option styling to Crop, including focus and di
  const rules=styleCss.split('\n').filter(line=>line.startsWith('.raw-crop-aspect select')).join('\n');
  expect(rules).toContain('color-scheme: dark');expect(rules).toContain('background: #252528');expect(rules).toContain('color: #eee');
  expect(rules).toContain('select option');expect(rules).toContain('select:focus-visible');expect(rules).toContain('select:disabled');
+});
+
+it('clears a rejected preflight angle owner so the renewed document can accept another gesture',async()=>{
+ raw.crop.begin.mockRejectedValueOnce(Object.assign(new Error('renew'),{code:'raw_session_regeneration_required'}));await render();
+ const range=host.querySelector<HTMLInputElement>('input[type=range]')!;await act(async()=>{const e=new Event('pointerdown',{bubbles:true});Object.assign(e,{button:0});range.dispatchEvent(e);});
+ raw.locked=true;await render();raw.locked=false;raw.crop={...raw.crop,begin:vi.fn(async()=>{})};await render();await act(async()=>{const e=new Event('pointerdown',{bubbles:true});Object.assign(e,{button:0});range.dispatchEvent(e);});await input(range,'30');
+ expect(raw.crop.begin).toHaveBeenCalledOnce();await act(async()=>window.dispatchEvent(new Event('pointerup')));expect(raw.crop.end).toHaveBeenCalledOnce();
 });

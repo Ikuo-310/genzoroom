@@ -472,6 +472,16 @@ pub struct Message {
     kind: String,
     request_id: Option<String>,
     saved: Option<bool>,
+    discarded: Option<bool>,
+}
+
+// Discard is a distinct, explicitly confirmed outcome, never a forged save success.
+fn close_disposition(saved: bool, discarded: Option<bool>) -> Result<bool, &'static str> {
+    match (saved, discarded) {
+        (saved, None) => Ok(saved),
+        (false, Some(true)) => Ok(true),
+        _ => Err("invalid_lifecycle_response"),
+    }
 }
 
 #[tauri::command]
@@ -483,10 +493,18 @@ pub fn desktop_lifecycle(
     if window.label() != "main" {
         return Err("invalid_lifecycle_window");
     }
-    if message.kind == "ready" && message.request_id.is_none() && message.saved.is_none() {
+    if message.kind == "ready"
+        && message.request_id.is_none()
+        && message.saved.is_none()
+        && message.discarded.is_none()
+    {
         return state.mark_ready();
     }
-    if message.kind == "restart" && message.request_id.is_none() && message.saved.is_none() {
+    if message.kind == "restart"
+        && message.request_id.is_none()
+        && message.saved.is_none()
+        && message.discarded.is_none()
+    {
         if state
             .owner
             .try_lock()
@@ -497,14 +515,22 @@ pub fn desktop_lifecycle(
         }
         return state.inner().request(window.app_handle(), true);
     }
+    if message.kind == "close"
+        && message.request_id.is_none()
+        && message.saved.is_none()
+        && message.discarded.is_none()
+    {
+        return state.inner().request(window.app_handle(), false);
+    }
     let request_id = message.request_id.ok_or("invalid_lifecycle_response")?;
     let saved = message.saved.ok_or("invalid_lifecycle_response")?;
     if message.kind != "closeResult" {
         return Err("stale_lifecycle_response");
     }
+    let approved = close_disposition(saved, message.discarded)?;
     state.accept_close_result(&request_id)?;
     let app = window.app_handle().clone();
-    if !saved {
+    if !approved {
         state.cancel(&app, &request_id, "edit_save_failed");
         return Ok(());
     }
@@ -532,6 +558,15 @@ mod tests {
             exit_code: AtomicI32::new(0),
             approved: AtomicBool::new(false),
         }
+    }
+
+    #[test]
+    fn explicit_discard_is_distinct_from_saved_and_unapproved_failure() {
+        assert_eq!(close_disposition(false, None), Ok(false));
+        assert_eq!(close_disposition(true, None), Ok(true));
+        assert_eq!(close_disposition(false, Some(true)), Ok(true));
+        assert!(close_disposition(true, Some(true)).is_err());
+        assert!(close_disposition(false, Some(false)).is_err());
     }
 
     #[test]

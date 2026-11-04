@@ -12,7 +12,7 @@ import { ImageViewer } from './ImageViewer';
 import './i18n';
 
 vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(),
-  beginRawGeometry:vi.fn(),updateRawGeometry:vi.fn(),recoverRawGeometry:vi.fn(), rawCapability: vi.fn(), createRawWorkspace: vi.fn(), openRawDocument: vi.fn(),
+  discardRawWorkspace:vi.fn(), beginRawGeometry:vi.fn(),updateRawGeometry:vi.fn(),recoverRawGeometry:vi.fn(), rawCapability: vi.fn(), createRawWorkspace: vi.fn(), openRawDocument: vi.fn(),
   rawRegionOwner: vi.fn(), rawRegion: vi.fn(), cancelRawRegion: vi.fn(async () => {}),
   rawPreview: vi.fn(), cancelRawPreview: vi.fn(async () => {}), readRawDocument: vi.fn(), readRawSettings: vi.fn(), setRawControls: vi.fn(), releaseRawWorkspace: vi.fn(), rawWorkspaceEmpty: vi.fn(),
   readRawHistory: vi.fn(), saveRawHistory: vi.fn(), saveRawRecipe: vi.fn(), readRawRecipe: vi.fn() }));
@@ -1233,9 +1233,9 @@ it.each(['drag','straighten'] as const)('retains paired crop pixels through %s A
  expect(type==='straighten'?current!.crop.presentation!.crop.geometry.angle:current!.crop.presentation!.crop.geometry.rect.x0).toBeCloseTo(type==='straighten'?45:.245);
  expect(api.rawPreview).toHaveBeenCalledTimes(before);
  await act(async()=>ack.resolve());await flush();
- expect(current!.document!.revision).toBeGreaterThan(snapshot.doc.revision);expect(current!.crop.surface).toBe(snapshot);
+ expect(current!.document!.revision).toBe(snapshot.doc.revision);expect(current!.crop.surface).toBe(snapshot);
  expect(snapshot.display.canonicalGeometry.crop).toEqual(initial);expect(api.rawPreview).toHaveBeenCalledTimes(before);
- if(type==='straighten')expect(current!.crop.presentation!.crop.geometry.rect.x0).toBe(.31);
+ expect(api.updateRawGeometry).not.toHaveBeenCalled();
  await act(async()=>current!.crop.end());await flush();
  expect(current!.crop.presentation?.phase).toBe('readback');expect(current!.crop.presentation?.crop.geometry.rect.x0).toBe(.31);
  expect(current!.crop.surface?.url).toBe(snapshot.url);expect(revokeURL).not.toHaveBeenCalledWith(snapshot.url);
@@ -1294,4 +1294,38 @@ it('does not authorize old pixels from matching public controls after a History 
  await act(async()=>current!.undo());await flush();
  expect(current!.crop.surface).toBe(snapshot);expect(current!.crop.presentation).toBeUndefined();expect(current!.crop.canStart).toBe(false);
  await act(async()=>gate.resolve());await flush();expect(current!.crop.surface!.doc.settingsFingerprint).toBe('c'.repeat(64));expect(current!.crop.canStart).toBe(true);
+});
+
+it.each([199,200,255,256])('renews safely around %s attempts and preserves Crop/History identity across the next Drop',async(attempts)=>{
+ const crop=cropVisualFixture();let generation=1,saved:api.RawHistoryResult|undefined;
+ vi.mocked(api.openRawDocument).mockImplementation(async(workspaceId,assetId)=>({workspaceId,assetId,handle:'h'+generation,generation,documentToken:'t'+generation,revision:1}));
+ vi.mocked(api.readRawSettings).mockImplementation(async doc=>({...rawSettings(doc),crop,orientation:'Normal',mutationAttempts:doc.generation===1?attempts:0,
+  settingsFingerprint:saved?.settingsFingerprint ?? '1'.padStart(64,'0'),recipeRevision:saved?.recipeRevision??0,recipeFingerprint:saved?.recipeFingerprint??null}));
+ vi.mocked(api.saveRawHistory).mockImplementation(async request=>{saved=rawHistoryResult(request,request.action==='initialize' && saved?{history:saved.history}:{});return saved;});
+ vi.mocked(api.releaseRawWorkspace).mockImplementation(async()=>{generation++;});
+ vi.mocked(api.updateRawGeometry).mockImplementation(async(doc,id,sequence,op)=>({...doc as api.RawSettings,revision:doc.revision+1,mutationAttempts:(doc as api.RawSettings).mutationAttempts+1,settingsFingerprint:'f'.repeat(64),gestureId:id,sequence,crop:{...crop,geometry:{...crop.geometry,angle:op.type==='straighten'?op.params.angle:0}}}));
+ await render('a');for(let n=0;n<4;n++)await flush();
+ if(attempts>=200){expect(current!.document!.generation).toBe(2);expect(current!.settings!.mutationAttempts).toBe(0);}
+ await act(async()=>current!.crop.setMode(true));await flush();
+ await act(async()=>current!.crop.begin('straighten'));await act(async()=>{for(let n=0;n<100;n++)current!.crop.update({type:'straighten',params:{angle:n*.4}});});
+ expect(api.updateRawGeometry).not.toHaveBeenCalled();await act(async()=>current!.crop.end());for(let n=0;n<4;n++)await flush();
+ expect(api.updateRawGeometry).toHaveBeenCalledOnce();expect(current!.document!.generation).toBe(2);expect(current!.crop.active).toBe(true);expect(current!.locked).toBe(false);
+});
+it('discards a local unsent Crop gesture on unexpected unmount without Native update or commit',async()=>{
+ cropVisualFixture();vi.mocked(api.recoverRawGeometry).mockImplementation(async doc=>doc);
+ await render('a');await flush();await act(async()=>current!.crop.setMode(true));await flush();
+ await act(async()=>current!.crop.begin('straighten'));await act(async()=>current!.crop.update({type:'straighten',params:{angle:30}}));
+ await render(null);for(let n=0;n<3;n++)await flush();
+ expect(api.updateRawGeometry).not.toHaveBeenCalled();expect(vi.mocked(api.saveRawHistory).mock.calls.filter(([r])=>r.action==='commit')).toHaveLength(0);expect(api.releaseRawWorkspace).toHaveBeenCalledOnce();
+});
+
+it('uses the Backend discard barrier without waiting for a lost Drop response and prevents a later History write',async()=>{
+ cropVisualFixture();vi.mocked(api.discardRawWorkspace).mockResolvedValue();
+ const reply=deferred<api.RawGeometryGesture>();vi.mocked(api.updateRawGeometry).mockImplementation(()=>reply.promise);
+ await render('a');await flush();await act(async()=>current!.crop.setMode(true));await flush();
+ await act(async()=>current!.crop.begin('straighten'));await act(async()=>current!.crop.update({type:'straighten',params:{angle:20}}));
+ const saved=current!.settings!;let end!:Promise<void>;await act(async()=>{end=current!.crop.end().catch(()=>{});});await flush();
+ await act(async()=>current!.discardChanges());expect(api.discardRawWorkspace).toHaveBeenCalledWith({workspaceId:'workspace'});
+ await act(async()=>{reply.resolve({...saved,revision:saved.revision+1,settingsFingerprint:'f'.repeat(64),gestureId:'g',sequence:0});await end;});await flush();
+ expect(vi.mocked(api.saveRawHistory).mock.calls.filter(([r])=>r.action==='commit')).toHaveLength(0);
 });

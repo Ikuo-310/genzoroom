@@ -28,8 +28,8 @@ export class RawRecipeSave {
   moving = false;
   private historyOperation?: Promise<void>;
   private moveIntent?: { action: 'undo' | 'redo' | 'jump' | 'operate'; targetStepId?: string | null; operation?: RawHistoryOperation };
-  private cropGesture?: { id: string; type: 'drag' | 'straighten'; action?: RawGeometryAction; ready: boolean; sequence: number; latest?: RawGeometryOperation; running: boolean; ending: boolean;
-    started: Promise<void>; end?: Promise<void>; error?: unknown; commit?: RawHistoryRequest };
+  private cropGesture?: { id: string; type: 'drag' | 'straighten'; action?: RawGeometryAction; sequence: number; latest?: RawGeometryOperation; ending: boolean;
+    started: Promise<void>; end?: Promise<void>; error?: unknown; cancelled?: boolean; updateDoc?: RawSettings; rejected?: boolean; commit?: RawHistoryRequest };
   get cropOperation() { return this.cropGesture?.type; }
   get cropping() { return !!this.cropGesture; }
   private gesture?: { control: RawControlId; fingerprint: string };
@@ -143,15 +143,17 @@ export class RawRecipeSave {
   }
   private cropFailure(cause: unknown) {
     this.error = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
-    try { frontendLogger.add({ level: 'error', component: 'raw', event: 'geometry.failed', context: {
+    try { frontendLogger.add({ level: this.active?'error':'debug', component: 'raw', event: this.active?'geometry.failed':'geometry.retired', context: {
       assetId: this.confirmed.assetId, generation: this.confirmed.generation, revision: this.confirmed.revision,
       sequence: this.cropGesture?.sequence ?? null, errorCode: this.error } }); } catch { /* Optional diagnostics. */ }
   }
   beginGeometry(type: 'drag' | 'straighten' = 'drag'): Promise<void> {
     if (!this.active || this.locked || this.paused || this.historyLoading || this.historyError || !this.history)
       return Promise.reject(new RawApiError('raw_busy'));
+    if(this.options.controls!.confirmed.mutationAttempts>=Math.min(this.options.controls!.confirmed.regenerationThreshold,this.options.controls!.confirmed.mutationLimit-1))
+      return Promise.reject(new RawApiError('raw_session_regeneration_required'));
     const preceding = this.save();
-    const g = { type, id: crypto.randomUUID().replaceAll('-', ''), ready: false, sequence: 0, running: false, ending: false,
+    const g = { type, id: crypto.randomUUID().replaceAll('-', ''), sequence: 0, ending: false,
       started: Promise.resolve() } as NonNullable<typeof this.cropGesture>;
     this.cropGesture = g;
     g.started = new Promise<void>((resolve, reject) => this.options.schedule(async () => {
@@ -160,9 +162,7 @@ export class RawRecipeSave {
         if (!this.active || this.cropGesture !== g) throw new RawApiError('raw_document_closed');
         const confirmed = await beginRawGeometry(this.options.controls!.confirmed, g.id, type);
         this.confirmed = this.options.controls!.confirmed = confirmed;
-        g.ready = true;
         this.options.controls!.beginPreview();
-        this.pumpGeometry();
         resolve();
       } catch (cause) { g.error = cause; this.cropFailure(cause); reject(cause); }
       finally { this.options.changed(); }
@@ -176,47 +176,51 @@ export class RawRecipeSave {
     if (operation.type !== g.type) return;
     if (operation.type === 'drag') g.action = operation.params.handle === 'move' ? 'move' : 'resize';
     g.latest = structuredClone(operation);
-    this.pumpGeometry();
   }
-  private pumpGeometry() {
-    const g = this.cropGesture;
-    if (!g || !g.ready || g.running || g.error || !g.latest) return;
-    g.running = true;
-    this.options.schedule(async () => {
-      try {
-        while (g.latest && !g.error) {
-          const intent = g.latest; g.latest = undefined;
-          // One owner and latest unsent point. An unknown update is never reconstructed/replayed.
-          const next = await updateRawGeometry(this.options.controls!.confirmed, g.id, g.sequence, intent);
-          this.confirmed = this.options.controls!.confirmed = next; g.sequence++;
-          this.options.changed(); this.options.controls!.refreshPreview();
-        }
-      } catch (cause) { g.error = cause; this.cropFailure(cause); }
-      finally { g.running = false; this.options.changed(); }
-    });
+  cancelGeometry(): Promise<void> {
+    const g=this.cropGesture;
+    if(!g)return Promise.resolve();
+    // Once Drop has reserved its final request, cancellation must drain that owner.
+    if(g.error)return Promise.reject(new RawApiError('raw_geometry_recovery_required'));
+    if(g.end)return g.end;
+    g.cancelled=true;g.latest=undefined;
+    return this.finishGeometry();
   }
   finishGeometry(): Promise<void> {
     const g = this.cropGesture;
     if (!g) return Promise.resolve();
+    if(g.error)return Promise.reject(g.error);
     if (g.end) return g.end;
     g.ending = true;
     // Reserve the fence synchronously, including same-event unmount/departure.
     g.end = new Promise<void>((resolve, reject) => this.options.schedule(async () => {
         try {
           await g.started;
+          if(!this.active)throw new RawApiError('raw_document_closed');
           if (g.error) throw g.error;
-          while (g.latest) {
-            const intent = g.latest; g.latest = undefined;
-            const next = await updateRawGeometry(this.options.controls!.confirmed, g.id, g.sequence, intent);
-            this.confirmed = this.options.controls!.confirmed = next; g.sequence++;
+          if(g.cancelled){
+            const result=await recoverRawGeometry(this.options.controls!.confirmed);
+            const data=await readRawHistory(result);
+            if(data.historyPending || data.nativeState!=='synced' || !data.nativeMatchesRecipe || data.recipeRevision!==result.recipeRevision || result.recipeFingerprint!==result.settingsFingerprint || data.recipeFingerprint!==result.settingsFingerprint)throw new RawApiError('raw_save_unconfirmed');
+            this.confirmed=this.options.controls!.confirmed=result;this.history=data.history;this.steps=data.steps;
+            this.revision=result.recipeRevision;this.savedFingerprint=result.settingsFingerprint;
+          } else if(g.latest){
+            // Move only replaces this local intent. Drop reserves one immutable Native request.
+            g.updateDoc ??= structuredClone(this.options.controls!.confirmed);
+            try {
+              const next=await updateRawGeometry(g.updateDoc,g.id,0,g.latest);
+              this.confirmed=this.options.controls!.confirmed=next;g.sequence=1;g.latest=undefined;
+            } catch(cause){
+              g.rejected=cause instanceof RawApiError && ['raw_session_edit_limit','raw_busy','raw_busy_timeout','raw_revision_conflict','raw_invalid_request'].includes(cause.code);
+              throw cause;
+            }
             this.options.changed();
           }
-          if (!g.commit) g.commit = { doc: structuredClone(this.options.controls!.confirmed), action: 'commit',
+          if (!g.cancelled && !g.commit) g.commit = { doc: structuredClone(this.options.controls!.confirmed), action: 'commit',
             expectedRecipeRevision: this.revision, saveId: createEditStateSaveId(), geometryCommit: { gestureId: g.id, operation: g.type, ...(g.action ? { action: g.action } : {}) } };
-          this.retryRequest = g.commit;
-          await this.sendHistory();
+          if(!g.cancelled){this.retryRequest = g.commit;await this.sendHistory();}
           this.cropGesture = undefined; this.error = undefined;
-          this.options.controls!.endPreview(); this.options.controls!.refreshPreview();
+          this.options.controls!.endPreview(); if(!g.cancelled)this.options.controls!.refreshPreview();
           resolve();
         } catch (cause) { g.error = cause; this.cropFailure(cause); reject(cause); }
         finally { this.options.changed(); }
@@ -292,7 +296,13 @@ export class RawRecipeSave {
   resume() { this.paused = false; this.observe(this.confirmed, true); }
   save(retry = false, force = false): Promise<void> {
     if (this.cropGesture) {
-      if (retry && this.cropGesture.commit) { this.cropGesture.end = undefined; this.cropGesture.error = undefined; this.error = undefined; }
+      const g=this.cropGesture;
+      if(retry && g.error){
+        const retryRejected=g.rejected && g.error instanceof RawApiError && ['raw_busy','raw_busy_timeout'].includes(g.error.code);
+        if(!g.commit && !retryRejected)return Promise.reject(new RawApiError('raw_geometry_recovery_required'));
+        // Only persistence or a certified pre-send refusal may reuse an immutable request.
+        g.end=undefined;g.error=undefined;this.error=undefined;
+      }
       return this.finishGeometry();
     }
     if (this.operation) return this.operation;
@@ -353,6 +363,7 @@ export class RawRecipeSave {
     return operation;
   }
   private async sendHistory() {
+    if(!this.active)throw new RawApiError('raw_document_closed');
     const controls = this.options.controls!;
     // Preview failure can coexist with verified readback. As in C3 settle(), only
     // unconfirmed desired/native work prevents saving that confirmed edit.

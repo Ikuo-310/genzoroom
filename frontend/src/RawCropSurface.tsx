@@ -5,7 +5,7 @@ import { CROP_HANDLES, cropPoint, projectRawCrop, type CropHandle, type CropMatr
 import type { Point } from './viewerMath';
 export type RawCropBinding = { active: boolean; canStart: boolean; presentation?: CropPresentation;
   surface?: { url: string; frame: RawGeometry; display: RawCropDisplay };
-  begin: () => Promise<void>; update: (operation: RawGeometryOperation) => void; end: () => Promise<void> };
+  begin: () => Promise<void>; update: (operation: RawGeometryOperation) => void; cancel?: () => Promise<void>; end: () => Promise<void> };
 export function RawCropSurface({ binding, viewport, scale, pan, busy }: {
   binding: RawCropBinding; viewport: Point; scale: number; pan: Point; busy: (value: boolean) => void }) {
   const root = useRef<HTMLDivElement>(null);
@@ -21,16 +21,16 @@ export function RawCropSurface({ binding, viewport, scale, pan, busy }: {
     const p=projection!.handles[handle],r=projection!.rect;
     return (p.x<r.left+r.width/2)===(p.y<r.top+r.height/2)?'nwse-resize':'nesw-resize';
   };
-  const finish = () => {
+  const finish = (cancel=false) => {
     const g = gesture.current; if (!g) return;
     gesture.current = null;
     if (root.current?.hasPointerCapture(g.id)) root.current.releasePointerCapture(g.id);
-    busy(false); void g.owner.end().catch(() => {});
+    busy(false); void (cancel && g.owner.cancel ? g.owner.cancel() : g.owner.end()).catch(() => {});
   };
-  useEffect(()=>{window.addEventListener('blur',finish);return ()=>window.removeEventListener('blur',finish);});
+  useEffect(()=>{const blur=()=>finish(true);window.addEventListener('blur',blur);return ()=>window.removeEventListener('blur',blur);});
   useEffect(() => () => { const g = gesture.current; if (g) { gesture.current = null;
     if (root.current?.hasPointerCapture(g.id)) root.current.releasePointerCapture(g.id);
-    busy(false); void g.owner.end().catch(() => {}); } }, [busy]);
+    busy(false); void (g.owner.cancel?.() ?? g.owner.end()).catch(() => {}); } }, [busy]);
   const update = (event: PointerEvent) => {
     const g = gesture.current; if (!g || g.id !== event.pointerId) return;
     event.stopPropagation();
@@ -50,10 +50,10 @@ export function RawCropSurface({ binding, viewport, scale, pan, busy }: {
       gesture.current = { id: event.pointerId, matrix: projection.viewportToCanonical, bounds, handle: handle ?? 'move',
         view:{viewport:{...viewport},scale,pan:{...pan}},cursor:cursor(handle ?? 'move'), from: [from.x,from.y], start: [rect.x0,rect.y0,rect.x1,rect.y1], owner: binding };
       event.currentTarget.setPointerCapture(event.pointerId); busy(true);
-      void binding.begin().catch(() => finish());
+      void binding.begin().catch(() => finish(true));
     }} onPointerMove={update} onPointerUp={event => { if (gesture.current?.id === event.pointerId) { update(event); finish(); } }}
-    onPointerCancel={event => { if (gesture.current?.id === event.pointerId) { event.stopPropagation(); finish(); } }}
-    onLostPointerCapture={event => { if (gesture.current?.id === event.pointerId) finish(); }}>
+    onPointerCancel={event => { if (gesture.current?.id === event.pointerId) { event.stopPropagation(); finish(true); } }}
+    onLostPointerCapture={event => { if (gesture.current?.id === event.pointerId) finish(true); }}>
     {surface && projection && <>
       <img src={surface.url} alt="" draggable={false} style={{ position:'absolute', width:surface.frame.fullWidth,
         height:surface.frame.fullHeight, maxWidth:'none', transformOrigin:'0 0', transform:`matrix(${projection.bitmapToViewport.join(',')})`, pointerEvents:'none' }} />

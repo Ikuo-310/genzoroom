@@ -30,6 +30,8 @@
     }
   },
   "desktopLifecycle": {
+    "discard": "Discard unsaved changes and close",
+    "confirmDiscard": "Discard uncommitted RAW changes and close? Already committed saves remain.",
     "title": "Closing GenzoRoom",
     "saving": "Saving edits before closing…",
     "waiting": "Waiting for the current export and Backend to finish…",
@@ -280,6 +282,7 @@
     "expandGrading": "Expand Color Grading",
     "enableGrading": "Enable Color Grading",
     "disableGrading": "Disable Color Grading",
+    "rawFailure": {"limit": "The RAW session edit limit was reached. Recover the saved recipe or discard unsaved changes.", "regeneration": "The RAW session is being renewed. Start the gesture again when ready.", "recovery": "The outcome must be checked. Recover the saved recipe before editing again.", "failed": "The operation could not be confirmed.", "confirmGalleryDiscard": "Discard uncommitted RAW changes and return to Photos? Already committed saves remain.", "cancelDiscard": "Cancel", "confirmDiscard": "Discard changes", "discardGallery": "Discard unsaved changes and return to Photos"},
     "rawCrop": {
       "category": "RAW editing category",
       "develop": "Develop",

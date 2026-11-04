@@ -1,5 +1,25 @@
 # GenzoRoom 開発ノート
 
+## RAW Crop Phase 4.2：Drop確定・編集予算・保存失敗からの退出（2026-11-04）
+
+利用者提供の`genzoroom-all-logs-20261103T234109Z.json`を診断資料として読み、作業指示とは区別した。ログにはgeometry開始256件、確定255件、generation 1 / revision 257での`raw_session_edit_limit`による終端失敗があった。現行コードはMoveごとにNative更新を送信し、gesture中はdirtyのため再生成できず、失敗したcompletion PromiseをRetryでも再利用していた。`raw_stale_handle`は同一原因と断定せず、owner不一致として別扱いにした。ログや写真データはリポジトリへ追加していない。
+
+既存begin/update/commitと所有queueを再利用し、Downはbaseline取得のみ、Move／Straighten連続入力は表示用intentの更新だけに変更した。確定時は最終intentを1回送信し、Native readback後に1 History step（Native no-opは追加なし）を保存する。PointerUp、数値Enter／blur、keyboard操作境界、制御されたcategory／保存／退出はcommit。PointerCancel、capture loss、window blur、予期しないunmountは、Drop未予約ならsaved Recipe回復でbeginを解除しHistoryを追加しない。Drop予約済みなら受理済み処理をdrainする。数値blurがwindow blurより先にcommitを予約する場合はその確定を維持する。通常JPEG／scalar sliderの既存境界は維持した。
+
+枠ドラッグの暫定表示は、開始時sourceと既存corner containmentを使い、開始rectから候補rectへの二分探索で保守的に写真内へ制約する。aspectと方向を保持する表示制約でありNative refitの移植ではない。元の最終Pointer intentをNativeへ渡し、その補正結果だけを保存する。Straightenも入力中Native mutationは0回、確定時は原則1回。既存bitmap／metadata identityと最終Previewの検証は維持した。
+
+gesture開始前にconfirmed revision／fingerprintと表示documentを照合し、既存200 attempts閾値または`limit - 1`安全境界で新規gestureを拒否して、durable Recipe／Historyから既存再生成を実行する。199／200／255／256 attempts境界を自動検証した。Native上限・sequence上限は増やしていない。新generationでsourceを再取得してから操作を再開し、旧angle ownerを引き継がない。
+
+Retryは、History保存失敗なら同一saveId／body、送信前と判定できるbusy／busy-timeoutなら凍結した同一最終updateを再試行する。未知のmutation結果、上限拒否、begin失敗は自動再送せず明示的なsaved-Recipe Recoveryを要求し、新しい拒否Promiseを返す。RecoveryはHistory同期、Recipe revision、Native／public fingerprintを検証する。相対Rotate等はreplayしない。Crop／退出画面に失敗原因codeと日本語・英語の説明を表示し、ログ既定OFFは変更していない。
+
+保存不能時は「留まる／Retry／未保存変更の破棄」を提示し、破棄には追加確認を要求する。Frontendは旧saver／documentをretireし、workspace HTTP待機をabortする。これはNative cancelではなく、受理済み処理はBackendがdrainする。遅延応答からHistory保存を開始できない。新規POST `/workspaces/{id}/discard`は通常の混雑枠とは別にadmissionを閉じ、既存API／image処理完了後、未保存状態をcheckpointせずworkspaceを解放する。既にDBへ確定した保存は返信不明でも保持する。厳密document identityまたは再生成途中用の明示workspace scopeを検証し、同じ破棄のjoin／retryを許可する。別workspaceは解放しない。通常release失敗時は旧Native閉鎖を確認してからcacheを解放し、不要なNative再起動を行わない。このfallback後のRAW再利用は健全なengine起動が必要になる場合がある。cleanup失敗を成功にはしない。
+
+Galleryは破棄と他JPEG保存が成功してから戻り、thumbnailはdurable Recipeの既存経路を使う。Desktopは確認済み破棄後の新しいclose requestに`saved:false, discarded:true`を返し、Rust側も保存成功とは別の承認として扱う。失敗／未承認の破棄や処理途中は閉じない。通常保存とshutdown checkpointを維持した。Backend routeとDesktop protocolは拡張したが、Native command／patch／manifest／artifact receipt、DB schema、Recipe／History version、通常Preview／Region／Before／WB、Exportの処理は変更していない。
+
+検証：Frontend関連20ファイル907件成功。Backend関連11ファイル338件成功後、最終のgeometry／History／Windows API関連3ファイル128件成功。これらは重複する範囲であり件数を合算しない。実managed Nativeを使用する既存synthetic DNGの写真外Drop回帰も成功。Desktop Rust lifecycle 10件成功。連続入力0 mutation／確定1 mutation、History、cancel、budget再生成、busyと不明結果、保存Retry、返信遅延、破棄drainと失敗、Gallery／Desktop確認、JPEG保存を対象にした。Frontend TypeScript／production build成功（既存500 kB超chunk警告あり）。共有ViewerのSSRテストで露見した`window`参照にはブラウザ動作を変えないDPR fallbackを追加した。Rust test時のincremental hardlink fallback警告は残る。
+
+実写真・実ブラウザ、実Desktop終了、NAS／Firefoxでの受入は未実施。自動テストはこれらの操作感・実環境の成功を保証しない。Native source holes／crop-relative effects、最終Native refitまでの表示差、engine障害後の復旧は残る制約。Phase 5、README／CHANGELOG更新、Nativeアルゴリズム変更には着手していない。
+
 ## RAW Crop Phase 4.1：表示保持・即時操作・Fit修正（2026-11-04）
 
 ユーザーのPhase 4実写真／実ブラウザ受入で、ドラッグ開始時のブラックアウト、Straightenごとの消失・フラッシュと約3秒の再表示待ち、縦横Aspectで異なる倍率、端のハンドル、白いselect、crosshairカーソルの問題が報告された。本作業で実ブラウザを操作した結果ではない。

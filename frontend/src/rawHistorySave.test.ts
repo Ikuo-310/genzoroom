@@ -418,10 +418,10 @@ it('drains the final geometry update before one immutable History commit and rej
   const end=saver.finishGeometry();expect(saver.finishGeometry()).toBe(end);
   held.resolve({...controls.confirmed,revision:1,settingsFingerprint:fp(1001),gestureId:'g',sequence:0});
   await end;
-  expect(api.updateRawGeometry).toHaveBeenCalledTimes(2);
-  expect(vi.mocked(api.updateRawGeometry).mock.calls[1][3]).toEqual(drag(.7));
+  expect(api.updateRawGeometry).toHaveBeenCalledTimes(1);
+  expect(vi.mocked(api.updateRawGeometry).mock.calls[0][3]).toEqual(drag(.7));
   const commits=vi.mocked(api.saveRawHistory).mock.calls.map(([r])=>r).filter(r=>r.action==='commit');
-  expect(commits).toHaveLength(1);expect(commits[0].doc.revision).toBe(2);expect(commits[0].geometryCommit?.operation).toBe('drag');
+  expect(commits).toHaveLength(1);expect(commits[0].doc.revision).toBe(1);expect(commits[0].geometryCommit?.operation).toBe('drag');
   expect(saver.locked).toBe(false);expect(saver.dirty).toBe(false);
 });
 it('does not resend an unknown geometry mutation or commit it as a successful gesture',async()=>{
@@ -430,7 +430,7 @@ it('does not resend an unknown geometry mutation or commit it as a successful ge
   vi.mocked(api.updateRawGeometry).mockRejectedValue(new api.RawApiError('raw_connection_failed'));
   await saver.beginGeometry();saver.updateGeometry(drag(.5));await drain();
   await expect(saver.finishGeometry()).rejects.toThrow('raw_connection_failed');
-  await expect(saver.save(true)).rejects.toThrow('raw_connection_failed');
+  await expect(saver.save(true)).rejects.toThrow('raw_geometry_recovery_required');
   expect(api.updateRawGeometry).toHaveBeenCalledOnce();expect(saver.locked).toBe(true);
   expect(vi.mocked(api.saveRawHistory).mock.calls.filter(([r])=>r.action==='commit')).toHaveLength(0);
 });
@@ -474,8 +474,8 @@ it('coalesces Straighten on the same geometry owner and commits its final angle 
  saver.updateGeometry({type:'straighten',params:{angle:-45}});await drain();
  saver.updateGeometry({type:'straighten',params:{angle:0}});saver.updateGeometry({type:'straighten',params:{angle:45}});
  await expect(saver.beginGeometry()).rejects.toThrow('raw_busy');await saver.operate({kind:'geometry',metadata:{operation:'rotateRight'},geometry:{type:'rotateRight',params:{}}});
- const end=saver.finishGeometry();held.resolve({...controls.confirmed,revision:1,settingsFingerprint:fp(1001),gestureId:'g',sequence:0});await end;
- expect(api.updateRawGeometry).toHaveBeenCalledTimes(2);expect(vi.mocked(api.updateRawGeometry).mock.calls.at(-1)![3]).toEqual({type:'straighten',params:{angle:45}});
+ const end=saver.finishGeometry();held.resolve({...controls.confirmed,revision:1,settingsFingerprint:fp(1001),gestureId:'g',sequence:0,crop:{geometry:{rect:{x0:.3,y0:.3,x1:.7,y1:.7},angle:45},aspect:null,flip_h:false,flip_v:false}});await end;
+ expect(api.updateRawGeometry).toHaveBeenCalledTimes(1);expect(vi.mocked(api.updateRawGeometry).mock.calls.at(-1)![3]).toEqual({type:'straighten',params:{angle:45}});
  const commits=vi.mocked(api.saveRawHistory).mock.calls.filter(([r])=>r.action==='commit');expect(commits).toHaveLength(1);expect(commits[0][0].geometryCommit?.operation).toBe('straighten');
  expect(controls.confirmed.crop?.geometry.angle).toBe(45);expect(saver.locked).toBe(false);
 });
@@ -487,4 +487,50 @@ it('allows explicit saved-recipe recovery when Native geometry cannot be publish
  vi.mocked(api.readRawSettings).mockRejectedValueOnce(new api.RawApiError('raw_invalid_geometry'));
  vi.mocked(api.recoverRawGeometry).mockResolvedValue(saved);await saver.recoverGeometry();expect(saver.locked).toBe(false);
  expect(api.recoverRawGeometry).toHaveBeenCalledWith(saved);
+});
+
+it.each(['topLeft','topRight','bottomRight','bottomLeft','top','right','bottom','left','move','straighten'])('sends zero Native mutations for 100 %s inputs and exactly one immutable final Drop',async(handle)=>{
+ const {saver,controls}=owner();await saver.save();
+ vi.mocked(api.beginRawGeometry).mockReset().mockImplementation(async(doc,id)=>({...doc,gestureId:id,sequence:-1}));
+ vi.mocked(api.updateRawGeometry).mockReset().mockImplementation(async(doc,id,sequence)=>({...doc as api.RawSettings,revision:doc.revision+1,mutationAttempts:1,settingsFingerprint:fp(1001),gestureId:id,sequence}));
+ await saver.beginGeometry(handle==='straighten'?'straighten':'drag');
+ for(let n=0;n<100;n++){saver.updateGeometry(handle==='straighten'?{type:'straighten',params:{angle:-45+n*.9}}:{type:'drag',params:{handle:handle as 'move',from:[.5,.5],to:[.5+n/1000,.5],start:[.2,.2,.8,.8]}});await drain();}
+ expect(api.updateRawGeometry).not.toHaveBeenCalled();expect(controls.confirmed.mutationAttempts).toBe(0);
+ const end=saver.finishGeometry();expect(saver.finishGeometry()).toBe(end);await end;
+ expect(api.updateRawGeometry).toHaveBeenCalledOnce();expect(vi.mocked(api.updateRawGeometry).mock.calls[0][2]).toBe(0);
+ const intent=vi.mocked(api.updateRawGeometry).mock.calls[0][3];expect(intent.type==='straighten'?intent.params.angle:intent.type==='drag'?intent.params.to[0]:0).toBeCloseTo(handle==='straighten'?44.1:.599);
+ expect(vi.mocked(api.saveRawHistory).mock.calls.filter(([r])=>r.action==='commit')).toHaveLength(1);expect(controls.confirmed.mutationAttempts).toBe(1);
+});
+it('cancels an unsent gesture without Native mutation or a History step',async()=>{
+ const {saver}=owner();await saver.save();vi.mocked(api.beginRawGeometry).mockImplementation(async(doc,id)=>({...doc,gestureId:id,sequence:-1}));
+ vi.mocked(api.updateRawGeometry).mockReset();vi.mocked(api.recoverRawGeometry).mockImplementation(async doc=>doc);
+ await saver.beginGeometry();saver.updateGeometry(drag(.7));await saver.cancelGeometry();
+ expect(api.updateRawGeometry).not.toHaveBeenCalled();expect(vi.mocked(api.saveRawHistory).mock.calls.filter(([r])=>r.action==='commit')).toHaveLength(0);expect(saver.locked).toBe(false);
+});
+it.each([200,255,256])('requires renewal before beginning at %s attempts',async(mutationAttempts)=>{
+ const {saver}=owner({...initial(),mutationAttempts});await saver.save();vi.mocked(api.beginRawGeometry).mockClear();
+ await expect(saver.beginGeometry()).rejects.toThrow('raw_session_regeneration_required');expect(api.beginRawGeometry).not.toHaveBeenCalled();expect(saver.cropping).toBe(false);
+});
+it('distinguishes known pre-send refusal and retries the exact request without reusing a rejected promise',async()=>{
+ const {saver}=owner();await saver.save();vi.mocked(api.beginRawGeometry).mockImplementation(async(doc,id)=>({...doc,gestureId:id,sequence:-1}));
+ vi.mocked(api.updateRawGeometry).mockReset().mockRejectedValueOnce(new api.RawApiError('raw_busy',409)).mockImplementation(async(doc,id,sequence)=>({...doc as api.RawSettings,revision:doc.revision+1,settingsFingerprint:fp(1001),gestureId:id,sequence}));
+ await saver.beginGeometry();saver.updateGeometry(drag(.7));const first=saver.finishGeometry();await expect(first).rejects.toThrow('raw_busy');
+ const retry=saver.save(true);expect(retry).not.toBe(first);await retry;
+ expect(vi.mocked(api.updateRawGeometry).mock.calls[0]).toEqual(vi.mocked(api.updateRawGeometry).mock.calls[1]);expect(saver.locked).toBe(false);
+});
+
+it.each(['raw_session_edit_limit','raw_connection_failed'])('never reuses a rejected end or replays an unconfirmed Drop on %s',async(code)=>{
+ const {saver}=owner();await saver.save();vi.mocked(api.beginRawGeometry).mockImplementation(async(doc,id)=>({...doc,gestureId:id,sequence:-1}));
+ vi.mocked(api.updateRawGeometry).mockReset().mockRejectedValue(new api.RawApiError(code,code==='raw_session_edit_limit'?502:undefined));
+ await saver.beginGeometry();saver.updateGeometry(drag(.7));const end=saver.finishGeometry();await expect(end).rejects.toThrow(code);
+ const next=saver.finishGeometry();expect(next).not.toBe(end);await expect(next).rejects.toThrow(code);
+ const retry=saver.save(true);expect(retry).not.toBe(end);await expect(retry).rejects.toThrow('raw_geometry_recovery_required');expect(api.updateRawGeometry).toHaveBeenCalledOnce();
+});
+
+it('never submits History after an accepted Drop reply arrives past explicit retirement',async()=>{
+ const {saver,controls}=owner();await saver.save();vi.mocked(api.beginRawGeometry).mockImplementation(async(doc,id)=>({...doc,gestureId:id,sequence:-1}));
+ const pending=gate<api.RawGeometryGesture>();vi.mocked(api.updateRawGeometry).mockReset().mockImplementation(()=>pending.promise);
+ await saver.beginGeometry();saver.updateGeometry(drag(.7));const end=saver.finishGeometry();const caught=end.catch(()=>{});await drain();
+ saver.dispose();controls.dispose();pending.resolve({...controls.confirmed,revision:1,settingsFingerprint:fp(1001),gestureId:'g',sequence:0});await caught;
+ expect(vi.mocked(api.saveRawHistory).mock.calls.filter(([r])=>r.action==='commit')).toHaveLength(0);
 });

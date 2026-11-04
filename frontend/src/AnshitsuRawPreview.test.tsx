@@ -30,7 +30,7 @@ vi.mock('./AdjustedImage', () => ({ AdjustedImage: (props: unknown) => { adjuste
 vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(),
   rawCapability: vi.fn(), createRawWorkspace: vi.fn(async () => 'workspace'), openRawDocument: vi.fn(async (workspaceId, assetId) => ({
     workspaceId, assetId, handle: 'handle', generation: 1, documentToken: 'token', revision: 1 })),
-  beginRawGeometry:vi.fn(), updateRawGeometry:vi.fn(), rawPreview: vi.fn(), readRawDocument: vi.fn(async doc => doc), readRawSettings: vi.fn(async doc => rawSettings(doc)),
+  discardRawWorkspace:vi.fn(async()=>{}), beginRawGeometry:vi.fn(), updateRawGeometry:vi.fn(), rawPreview: vi.fn(), readRawDocument: vi.fn(async doc => doc), readRawSettings: vi.fn(async doc => rawSettings(doc)),
   setRawControls: vi.fn(async (doc, patch) => ({ ...rawSettings(doc), revision: doc.revision + 1,
     settingsFingerprint: String(doc.revision + 1).padStart(64, '0'),
     values: { ...rawSettings(doc).values, ...patch } })), releaseRawWorkspace: vi.fn(async () => {}),
@@ -1534,4 +1534,16 @@ it('commits keyboard Straighten before Undo and displays the restored Native ang
  await act(async()=>host.querySelector<HTMLButtonElement>('.edit-actions button')!.click());await flush();
  expect(vi.mocked(rawApi.saveRawHistory).mock.calls.map(([r])=>r.action)).toEqual(['initialize','commit','undo']);
  expect(host.querySelector<HTMLInputElement>('.adjustment-number')!.value).toBe('0.0');
+});
+
+it('requires explicit RAW discard confirmation before Gallery return and never autosaves after detachment',async()=>{
+ commitHistory.mockRejectedValue(new rawApi.RawSaveError('raw_session_edit_limit','unknown'));
+ await mount();await editRaw();await clickText(i18n.t('workspace.backToPhotos'));await flush();
+ expect(host.querySelector('[role=alertdialog]')?.textContent).toContain('raw_session_edit_limit');
+ await clickText(i18n.t('workspace.rawFailure.discardGallery'));expect(rawApi.discardRawWorkspace).not.toHaveBeenCalled();
+ await clickText(i18n.t('workspace.rawFailure.cancelDiscard'));expect(rawApi.discardRawWorkspace).not.toHaveBeenCalled();
+ await clickText(i18n.t('workspace.rawFailure.discardGallery'));const count=vi.mocked(rawApi.saveRawHistory).mock.calls.length;
+ await clickText(i18n.t('workspace.rawFailure.confirmDiscard'));await flush();
+ expect(rawApi.discardRawWorkspace).toHaveBeenCalledOnce();expect(host.querySelector('[data-gallery]')).not.toBeNull();
+ expect(rawApi.saveRawHistory).toHaveBeenCalledTimes(count);
 });

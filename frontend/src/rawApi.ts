@@ -121,9 +121,18 @@ export async function readBounded(response: Response, limit: number): Promise<Ui
   } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
 }
 
+const workspaceTransports=new Map<string,AbortController>();
+export function abortRawWorkspaceRequests(workspaceId:string){
+  workspaceTransports.get(workspaceId)?.abort();
+}
 async function request(path: string, init: RequestInit = {}) {
-  const response = await fetch(`/api/raw${path}`, { ...init, cache: 'no-store', credentials: 'same-origin',
-    signal: init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(180_000)]) : AbortSignal.timeout(180_000) });
+  let workspaceId=new Headers(init.headers).get('X-Raw-Workspace');
+  if(!workspaceId && typeof init.body==='string'){
+    try{const body=JSON.parse(init.body);if(typeof body.workspaceId==='string')workspaceId=body.workspaceId;}catch{/* Validation belongs to the endpoint. */}
+  }
+  const ownerSignal=workspaceId?workspaceTransports.get(workspaceId)?.signal:undefined;
+  const signals=[AbortSignal.timeout(180_000),...(init.signal?[init.signal]:[]),...(ownerSignal?[ownerSignal]:[])];
+  const response = await fetch(`/api/raw${path}`, { ...init, cache: 'no-store', credentials: 'same-origin',signal:AbortSignal.any(signals) });
   if (!response.ok) {
     let code = response.status === 404 ? 'raw_unsupported' : 'raw_request_failed';
     try {
@@ -239,6 +248,7 @@ export async function rawRegion(doc: RawDocument, target: RegionRequest | Region
 export async function createRawWorkspace() {
   const value = await json('/workspaces', post({}));
   if (!opaque(value.workspaceId)) throw new RawApiError('raw_invalid_response');
+  workspaceTransports.set(value.workspaceId,new AbortController());
   return value.workspaceId as string;
 }
 function document(value: RawDocument, workspaceId: string, assetId?: string) {
@@ -256,8 +266,13 @@ export async function readRawDocument(doc: RawDocument, signal?: AbortSignal) {
     throw new RawApiError('raw_stale_handle');
   return next;
 }
+export async function discardRawWorkspace(doc: RawDocument | {workspaceId:string}) {
+  await request(`/workspaces/${doc.workspaceId}/discard`, post('handle' in doc?{handle:doc.handle,generation:doc.generation,documentToken:doc.documentToken}:{scope:'workspace'}));
+  workspaceTransports.delete(doc.workspaceId);
+}
 export async function releaseRawWorkspace(workspaceId: string) {
   await request(`/workspaces/${workspaceId}`, { method: 'DELETE' });
+  workspaceTransports.delete(workspaceId);
 }
 export async function resetRawEdits(assetId: string, doc?: RawSettings) {
   const body = doc ? { workspaceId: doc.workspaceId, handle: doc.handle, generation: doc.generation,

@@ -33,3 +33,11 @@ it('rejects bitmap rebinding across owner/orientation/flip/development changes',
  expect(reusableCropBitmap(snapshot,{...doc,crop:provisionalCrop(crop,{type:'straighten',params:{angle:20}})})).toBe(true);
  for(const patch of [{assetId:'b'},{documentToken:'other'},{generation:2},{orientation:'Rotate90'},{crop:{...crop,flip_h:true}},{values:{...doc.values,'light.exposure':1}}])expect(reusableCropBitmap(snapshot,{...doc,...patch})).toBe(false);
 });
+
+it.each([0,30,-45])('conservatively bounds out-of-photo provisional dragging at %s degrees without changing the Native intent',angle=>{
+ const start={...crop,geometry:{rect:{x0:.4,y0:.4,x1:.6,y1:.6},angle},aspect:[4,3] as [number,number]};
+ const operation={type:'drag' as const,params:{handle:'move' as const,from:[.5,.5] as [number,number],to:[100,-100] as [number,number]}};
+ const draft=provisionalCrop(start,operation,frame);
+ expect(projectRawCrop(draft,frame,{x:800,y:600},.1,{x:0,y:0})).toBeTruthy();expect(operation.params.to).toEqual([100,-100]);
+ expect(draft.geometry.rect.x1-draft.geometry.rect.x0).toBeCloseTo(.2);expect(draft.geometry.rect.y1-draft.geometry.rect.y0).toBeCloseTo(.2);
+});

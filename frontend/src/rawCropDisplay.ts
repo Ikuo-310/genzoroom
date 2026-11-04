@@ -1,3 +1,4 @@
+import { projectRawCrop } from './rawCropMath';
 import type { RawCrop, RawCropDisplay, RawGeometry, RawGeometryOperation, RawSettings } from './rawApi';
 export type CropSnapshot = { url: string; frame: RawGeometry; display: RawCropDisplay; doc: RawSettings; mode: 'crop-edit' };
 export type CropPresentation = { snapshot: CropSnapshot; crop: RawCrop; phase: 'provisional' | 'readback'; revision: number; fingerprint: string };
@@ -13,13 +14,13 @@ export function reusableCropBitmap(snapshot: CropSnapshot, doc: RawSettings) {
     && a.crop?.flip_h===doc.crop.flip_h && a.crop?.flip_v===doc.crop.flip_v
     && JSON.stringify([a.values,a.sections,a.process,a.wb,a.vignetteStyle])===JSON.stringify([doc.values,doc.sections,doc.process,doc.wb,doc.vignetteStyle]);
 }
-export function provisionalCrop(start: RawCrop, operation: RawGeometryOperation): RawCrop {
+export function provisionalCrop(start: RawCrop, operation: RawGeometryOperation, frame?: RawGeometry): RawCrop {
   const crop=structuredClone(start);
   if(operation.type==='straighten') { if(Number.isFinite(operation.params.angle) && Math.abs(operation.params.angle)<=45)crop.geometry.angle=operation.params.angle;return crop; }
   if(operation.type!=='drag') return crop;
   const p=operation.params,r=crop.geometry.rect,dx=p.to[0]-p.from[0],dy=p.to[1]-p.from[1],h=p.handle;
   if(![dx,dy].every(Number.isFinite))return crop;
-  if(h==='move'){r.x0+=dx;r.x1+=dx;r.y0+=dy;r.y1+=dy;return crop;}
+  if(h==='move'){r.x0+=dx;r.x1+=dx;r.y0+=dy;r.y1+=dy;return constrainDraft(start,crop,frame);}
   const left=['left','topLeft','bottomLeft'].includes(h),right=['right','topRight','bottomRight'].includes(h);
   const top=['top','topLeft','topRight'].includes(h),bottom=['bottom','bottomLeft','bottomRight'].includes(h);
   if(left)r.x0=Math.min(r.x1-1e-6,r.x0+dx);if(right)r.x1=Math.max(r.x0+1e-6,r.x1+dx);
@@ -30,5 +31,20 @@ export function provisionalCrop(start: RawCrop, operation: RawGeometryOperation)
     if(left||right){const height=w/ratio;if(top)r.y0=r.y1-height;else if(bottom)r.y1=r.y0+height;else {const cy=(r.y0+r.y1)/2;r.y0=cy-height/2;r.y1=cy+height/2;}}
     else {const width=h*ratio,cx=(r.x0+r.x1)/2;r.x0=cx-width/2;r.x1=cx+width/2;}
   }
-  return crop;
+  return constrainDraft(start,crop,frame);
+}
+function constrainDraft(start:RawCrop,draft:RawCrop,frame?:RawGeometry){
+  if(!frame)return draft;
+  const valid=(c:RawCrop)=>!!projectRawCrop(c,frame,{x:1,y:1},1,{x:0,y:0});
+  if(valid(draft))return draft;
+  if(!valid(start))return start;
+  // Conservative feedback along the drag ray, using existing corner containment.
+  // This is not Native fitting; the final unmodified pointer intent still goes to Native.
+  let lo=0,hi=1,result=start;
+  for(let n=0;n<24;n++){
+    const t=(lo+hi)/2,c=structuredClone(start),a=start.geometry.rect,b=draft.geometry.rect;
+    c.geometry.rect={x0:a.x0+(b.x0-a.x0)*t,y0:a.y0+(b.y0-a.y0)*t,x1:a.x1+(b.x1-a.x1)*t,y1:a.y1+(b.y1-a.y1)*t};
+    if(valid(c)){lo=t;result=c;}else hi=t;
+  }
+  return result;
 }

@@ -1,3 +1,4 @@
+import { RawFailure,rawFailureCode } from './RawFailure';
 import { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AdjustmentSlider } from './AdjustmentSlider';
@@ -27,7 +28,7 @@ export function cropPreset(aspect: [number,number] | null, original?: number) {
   return CROP_PRESETS.find(p=>p.includes('x') && matches(Number(p.split('x')[0])/Number(p.split('x')[1]))) ?? 'custom';
 }
 export function RawEditCategories({ raw, disabled, commit }: { raw:Raw;disabled:boolean;commit:()=>void }) {
-  const {t}=useTranslation(),name=useId();const pending=useRef(false),restoreFocus=useRef<HTMLInputElement|null>(null);const [busy,setBusy]=useState(false),[error,setError]=useState(false);
+  const {t}=useTranslation(),name=useId();const pending=useRef(false),restoreFocus=useRef<HTMLInputElement|null>(null);const [busy,setBusy]=useState(false),[error,setError]=useState(false),[failureCode,setFailureCode]=useState<string>();
   // A transient native disabled state may blur the radio; restore only if no newer focus owner intervened.
   useEffect(()=>{
     if(!busy){const element=restoreFocus.current;restoreFocus.current=null;
@@ -41,8 +42,8 @@ export function RawEditCategories({ raw, disabled, commit }: { raw:Raw;disabled:
   return <div className="raw-edit-categories" aria-busy={busy}>
     <div className="binary-radio-choice" role="radiogroup" aria-label={t('workspace.rawCrop.category')}><div className="binary-radio-options">
       {[false,true].map(crop=><label key={String(crop)}><input type="radio" name={name} checked={raw.crop.active===crop} disabled={locked}
-        onChange={event=>{if(pending.current)return;restoreFocus.current=event.currentTarget;pending.current=true;setBusy(true);setError(false);commit();
-          void raw.crop.setMode(crop).catch(()=>setError(true)).finally(()=>{pending.current=false;setBusy(false);});}}/>
+        onChange={event=>{if(pending.current)return;restoreFocus.current=event.currentTarget;pending.current=true;setBusy(true);setError(false);setFailureCode(undefined);commit();
+          void raw.crop.setMode(crop).catch(cause=>{setError(true);setFailureCode(rawFailureCode(cause));}).finally(()=>{pending.current=false;setBusy(false);});}}/>
         <span>{t(crop?'workspace.rawCrop.crop':'workspace.rawCrop.develop')}</span></label>)}
     </div></div>
     {error && <p role="alert" className="error-text">{t('workspace.rawCrop.transitionFailed')}</p>}
@@ -51,6 +52,7 @@ export function RawEditCategories({ raw, disabled, commit }: { raw:Raw;disabled:
 export function RawCropControls({ raw,disabled=false }: {raw:Raw;disabled?:boolean}) {
   const {t}=useTranslation(),panel=useRef<HTMLDivElement>(null),name=useId();
   const pending=useRef(false),angleOwner=useRef<Raw['crop'] | null>(null),ending=useRef(false);
+  const [failureCode,setFailureCode]=useState<string>();
   const [busy,setBusy]=useState(false),[error,setError]=useState(false),[angle,setAngle]=useState<number|null>(null);
   const [custom,setCustom]=useState(false),[w,setW]=useState(''),[h,setH]=useState('');
   const crop=raw.settings?.crop;
@@ -59,18 +61,21 @@ export function RawCropControls({ raw,disabled=false }: {raw:Raw;disabled?:boole
     if(pending.current || locked)return;
     if(panel.current)commitAdjustmentEdits(panel.current);
     // Reserve admission before React disables controls, so rapid clicks cannot queue relative commands.
-    pending.current=true;setBusy(true);setError(false);
-    void raw.crop.operate(operation,action).catch(()=>setError(true)).finally(()=>{pending.current=false;setBusy(false);});
+    pending.current=true;setBusy(true);setError(false);setFailureCode(undefined);
+    void raw.crop.operate(operation,action).catch(cause=>{setError(true);setFailureCode(rawFailureCode(cause));}).finally(()=>{pending.current=false;setBusy(false);});
   };
   const begin=()=>{
     if(angleOwner.current || pending.current || locked)return;
-    angleOwner.current=raw.crop;setError(false);
-    void raw.crop.begin('straighten').catch(()=>setError(true));
+    const owner=raw.crop;angleOwner.current=owner;setError(false);setFailureCode(undefined);
+    void owner.begin('straighten').catch(cause=>{if(angleOwner.current===owner){angleOwner.current=null;setAngle(null);}setError(true);setFailureCode(rawFailureCode(cause));});
   };
   const finish=()=>{
     const owner=angleOwner.current;if(!owner || ending.current)return;ending.current=true;setBusy(true);
-    void owner.end().catch(()=>setError(true)).finally(()=>{angleOwner.current=null;ending.current=false;setAngle(null);setBusy(false);});
+    void owner.end().catch(cause=>{setError(true);setFailureCode(rawFailureCode(cause));}).finally(()=>{angleOwner.current=null;ending.current=false;setAngle(null);setBusy(false);});
   };
+  const cancel=()=>{const owner=angleOwner.current;if(!owner || ending.current)return;
+    angleOwner.current=null;setAngle(null);setBusy(true);
+    void owner.cancel().catch(cause=>{setError(true);setFailureCode(rawFailureCode(cause));}).finally(()=>setBusy(false));};
   const sawAngleOwner=useRef(false);
   useEffect(()=>{
     if(raw.crop.operation==='straighten')sawAngleOwner.current=true;
@@ -78,7 +83,7 @@ export function RawCropControls({ raw,disabled=false }: {raw:Raw;disabled?:boole
       sawAngleOwner.current=false;angleOwner.current=null;setAngle(null);
     }
   },[raw.crop.operation,raw.saveError]);
-  const finishRef=useRef(finish);finishRef.current=finish;
+  const finishRef=useRef(cancel);finishRef.current=cancel;
   useEffect(()=>{ const blur=()=>finishRef.current();window.addEventListener('blur',blur);
     return ()=>window.removeEventListener('blur',blur); },[]);
   const aspect=crop?.aspect ?? null,preset=cropPreset(aspect,raw.frame?raw.frame.nativeWidth/raw.frame.nativeHeight:undefined);
@@ -112,16 +117,16 @@ export function RawCropControls({ raw,disabled=false }: {raw:Raw;disabled?:boole
       disabled={locked && !angleOwner.current || busy || ending.current} actionsDisabled={locked}
       onBegin={begin} onChange={value=>{if(!Number.isFinite(value) || value < -45 || value > 45)return;begin();
         if(angleOwner.current && !ending.current){setAngle(value);angleOwner.current.update({type:'straighten',params:{angle:value}});}}}
-      onCommit={finish} onReset={()=>run({type:'straighten',params:{angle:0}})}/>
+      onCommit={finish} onCancel={cancel} onReset={()=>run({type:'straighten',params:{angle:0}})}/>
     <p className="edit-source-note">{t('workspace.rawCrop.direction')}</p>
     <div className="raw-crop-buttons">{(['rotateLeft','rotateRight','flipHorizontal','flipVertical'] as const).map(type=><button
       key={type} type="button" className="tool-button" disabled={locked} aria-pressed={type==='flipHorizontal'?crop?.flip_h:type==='flipVertical'?crop?.flip_v:undefined}
       onClick={()=>run({type,params:{}})}>{t(`workspace.rawCrop.${type}`)}</button>)}</div>
     {raw.settings?.orientation && <p className="edit-source-note">{t('workspace.rawCrop.orientation')}: {t(`workspace.rawCrop.orientations.${raw.settings.orientation}`)}</p>}
     <button type="button" className="tool-button raw-crop-reset" disabled={locked} onClick={()=>run({type:'reset',params:{}})}>{t('workspace.rawCrop.reset')}</button>
-    {(error || raw.saveError) && <div role="alert"><p>{t('workspace.rawCrop.failed')}</p>
+    {(error || raw.saveError) && <div role="alert"><RawFailure code={failureCode ?? raw.saveError}/><p>{t('workspace.rawCrop.failed')}</p>
       <button type="button" className="tool-button" disabled={busy || disabled} onClick={()=>{if(pending.current)return;pending.current=true;setBusy(true);
-        void raw.crop.recover().then(()=>{angleOwner.current=null;setAngle(null);setError(false);}).catch(()=>setError(true)).finally(()=>{pending.current=false;setBusy(false);});}}>{t('workspace.rawCrop.recover')}</button>
+        void raw.crop.recover().then(()=>{angleOwner.current=null;setAngle(null);setError(false);}).catch(cause=>{setError(true);setFailureCode(rawFailureCode(cause));}).finally(()=>{pending.current=false;setBusy(false);});}}>{t('workspace.rawCrop.recover')}</button>
       <button type="button" className="tool-button" disabled={busy || disabled} onClick={()=>void raw.retrySave()}>{t('workspace.rawPreview.retrySave')}</button>
     </div>}
     {raw.regenerating && <p role="status">{t('workspace.rawPreview.regenerating')}</p>}

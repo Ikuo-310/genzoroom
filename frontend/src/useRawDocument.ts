@@ -1,7 +1,7 @@
 import { provisionalCrop, reusableCropBitmap, sameCropOwner, type CropSnapshot, type CropPresentation } from './rawCropDisplay';
 import { useEffect, useRef, useState } from 'react';
 import { createRawWorkspace, openRawDocument, rawCapability, rawPreview, cancelRawPreview, RawSuperseded, readRawDocument, readRawSettings,
-  releaseRawWorkspace, resetRawEdits as resetRawEditsApi, rawWorkspaceEmpty, RawApiError, type RawDocument, type RawSettings, type RawValues, type RawControlId,
+  abortRawWorkspaceRequests, discardRawWorkspace, releaseRawWorkspace, resetRawEdits as resetRawEditsApi, rawWorkspaceEmpty, RawApiError, type RawDocument, type RawSettings, type RawValues, type RawControlId,
   type RawPickTarget, type RawPickFrame, type RawHistoryResult, type RawHistoryStep, type RawHistoryOperation, type RawFrame, type RawGeometry, type RawCropDisplay, type RawGeometryOperation } from './rawApi';
 import { frontendLogger } from './frontendLogging';
 import { RawControls } from './rawControls';
@@ -74,6 +74,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   const saverRef = useRef<RawRecipeSave | null>(null);
   const frozen = useRef(false);
   const restartRef = useRef<(retry?: boolean) => Promise<void>>(async () => {});
+  const discardRef=useRef<()=>Promise<void>>(async()=>{});
   const resetRef = useRef<() => Promise<void>>(async () => {});
   const restartWaitRef = useRef<() => Promise<void>>(async () => {});
   const renewalLockedRef = useRef<() => boolean>(() => false);
@@ -95,7 +96,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   useEffect(() => {
     if (!assetId) { setState(null); return; }
     const currentSerial = ++serial.current;
-    let active = true, available = false, workspace: string | undefined, url: string | undefined;
+    let active = true, retired=false, available = false, workspace: string | undefined, url: string | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let editor: RawControls | undefined;
     let saver: RawRecipeSave | undefined;
@@ -299,7 +300,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     let oldGeneration: number | undefined;
     let resetOperation: Promise<void> | undefined;
     const controller = new AbortController();
-    const current = () => active && identity.current === assetId && serial.current === currentSerial;
+    const current = () => active && !retired && identity.current === assetId && serial.current === currentSerial;
     const revoke = () => {
       cropSnapshotRef.current=null;
       if (wholeSurfaces.current.after?.url === url) wholeSurfaces.current.after = undefined;
@@ -726,11 +727,27 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         timer = setTimeout(() => void heartbeat(), 30_000);
       } catch (error) { fail(error); }
       finally {
-        if (!current() && workspace) {
+        if (!current() && workspace && !retired) {
           try { await releaseRawWorkspace(workspace); workspace = undefined; } catch { log('raw_release_failed'); }
         }
       }
     });
+    let discarded=false,discardOperation:Promise<void>|undefined;
+    discardRef.current=()=>{
+      if(discardOperation)return discardOperation;
+      if(!active || identity.current!==assetId || serial.current!==currentSerial || !workspace)return Promise.reject(new RawApiError('raw_document_closed'));
+      const ownedWorkspace=workspace;
+      // Retire unsent intent before detaching transports. Backend independently
+      // drains already accepted requests, even when their HTTP replies were lost.
+      retired=true;frozen.current=true;saver?.dispose();editor?.dispose();invalidateDisplay();
+      abortRawWorkspaceRequests(ownedWorkspace);
+      setState(previous=>previous && {...previous,locked:true});
+      discardOperation=discardRawWorkspace({workspaceId:ownedWorkspace}).then(()=>{
+        discarded=true;workspace=undefined;cropVisualRef.current=null;setCropPresentation(null);revoke();
+        setState({assetId,status:'error',code:'raw_document_closed'});
+      }).catch(cause=>{discardOperation=undefined;throw cause;});
+      return discardOperation;
+    };
     const dispose = () => {
       if (!active) return;
       active = false;
@@ -750,7 +767,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       saver?.pause();
       // A late slider unmount cannot target a successor. Its old owner still finishes its
       // gesture on this same queue before cleanup, including transmitted native mutations.
-      const finalSave = saver?.save();
+      const finalSave = discarded ? undefined : saver?.cropping ? saver.cancelGeometry() : saver?.save();
       void finalSave?.catch(() => {});
       if (saverRef.current === saver) saverRef.current = null;
       if (editorRef.current === editor) editorRef.current = null;
@@ -758,6 +775,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       clearTimeout(timer); clearTimeout(viewTimer);
       revoke();
       enqueue(async () => {
+        if(discarded)return;
         if (saver?.dirty || saver?.error || editor?.unsettled) {
           log('raw_save_unconfirmed', 'recipe.saveFailed');
           return; // Never release an unconfirmed native document after an unexpected unmount.
@@ -775,7 +793,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     };
     window.addEventListener('pagehide', pagehide);
     const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (current() && (saver?.dirty || saver?.moving || editor?.unsettled)) { event.preventDefault(); event.returnValue = ''; }
+      if (active && identity.current===assetId && !discarded && (retired || saver?.dirty || saver?.moving || editor?.unsettled)) { event.preventDefault(); event.returnValue = ''; }
     };
     window.addEventListener('beforeunload', beforeUnload);
     return () => { window.removeEventListener('pagehide', pagehide); window.removeEventListener('beforeunload', beforeUnload); dispose(); };
@@ -971,7 +989,11 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       begin: (type: 'drag' | 'straighten' = 'drag') => {
         cancelPick();
         if(!callbackEditor() || frozen.current || !cropSaver || cropSaver.locked || !cropActiveRef.current || !cropSurface || !doc?.crop
-          || !cropSourceCurrent)return Promise.reject(new RawApiError('raw_busy'));
+          || !cropSourceCurrent || cropSaver.confirmed.revision!==doc.revision || cropSaver.confirmed.settingsFingerprint!==doc.settingsFingerprint)
+          return Promise.reject(new RawApiError('raw_busy'));
+        if(cropSaver.confirmed.mutationAttempts>=Math.min(cropSaver.confirmed.regenerationThreshold,cropSaver.confirmed.mutationLimit-1)){
+          void restartRef.current().catch(()=>{});return Promise.reject(new RawApiError('raw_session_regeneration_required'));
+        }
         // Freeze the displayed source before awaiting Native begin; an older decode
         // must not replace/revoke the gesture's bitmap while begin is queued.
         suspendDisplayRef.current();
@@ -982,13 +1004,14 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       update: (intent: RawGeometryOperation) => {
         const visual=cropVisualRef.current;
         if(callbackEditor() && !frozen.current && !cropSaver?.error && intent.type===cropSaver?.cropOperation && visual?.owner===cropSaver){
-          visual.latest=provisionalCrop(visual.start,intent);
+          visual.latest=provisionalCrop(visual.start,intent,visual.snapshot.frame);
           setCropPresentation({snapshot:visual.snapshot,crop:visual.latest,phase:'provisional',
             revision:visual.owner.confirmed.revision,fingerprint:visual.owner.confirmed.settingsFingerprint});
           cropSaver?.updateGeometry(intent);
         }
       },
       end: finishCrop,
+      cancel: () => {cropVisualRef.current=null;setCropPresentation(null);return cropSaver?.cancelGeometry() ?? Promise.resolve();},
       setMode: (enabled: boolean) => { cancelPick(); if (!callbackEditor() || !cropSaver || saverRef.current !== cropSaver) return Promise.reject(new RawApiError('raw_document_closed')); return cropModeRef.current(enabled); } },
     beforeAvailable: !!beforeKey,
     pickActive, pickAvailable,
@@ -1044,7 +1067,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     },
     beginControls: (control: RawControlId) => { cancelPick(); if (callbackEditor() && !frozen.current) saverRef.current?.begin(control); },
     flushControls: (control?: RawControlId) => { if (callbackEditor()) saverRef.current?.end(control); },
-    retryRegeneration: () => { if (callbackEditor() && visible.regenerationError) void restartRef.current(true).catch(() => {}); }, retryControls: () => callbackEditor()?.retry(), prepareSave, resumeEditing: resume,
+    retryRegeneration: () => { if (callbackEditor() && visible.regenerationError) void restartRef.current(true).catch(() => {}); }, retryControls: () => callbackEditor()?.retry(), discardChanges:()=>identity.current===assetId?discardRef.current():Promise.reject(new RawApiError('raw_stale_handle')), prepareSave, resumeEditing: resume,
     retrySave: async () => { try { await prepareSave(true); } catch (cause) {
       const code = cause instanceof RawApiError ? cause.code : 'raw_connection_failed'; log(code, 'recipe.saveFailed');
     } finally { resume(); } },

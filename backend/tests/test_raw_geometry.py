@@ -282,6 +282,11 @@ def test_actual_native_geometry_history_reload_and_preview(local, tmp_path, monk
                     assert response.status_code == 200, response.text
                     doc = response.json()
                     doc = await operation(http, doc, 'commit', body(doc) | {'kind': 'geometry', 'metadata': {'operation': 'drag'}, 'gestureId': doc['gestureId']})
+                doc = await begin(http, doc)
+                outside = await http.post(f'/api/raw/documents/{doc["handle"]}/geometry', json=update_body(doc, 0, op('drag', handle='move', **{'from':[.5,.5],'to':[100,-100]})))
+                assert outside.status_code == 200, outside.text
+                doc = outside.json()
+                doc = await operation(http, doc, 'commit', body(doc) | {'kind':'geometry','metadata':{'operation':'drag','action':'move'},'gestureId':doc['gestureId']})
                 saved = {k: doc[k] for k in ('crop', 'orientation')}
                 # Existing scalar owner remains usable after Crop.
                 response = await http.post(f'/api/raw/documents/{doc["handle"]}/controls', json=identity(doc) | {'expectedRevision': doc['revision'], 'values': {'light.exposure': .25}})
@@ -522,4 +527,115 @@ def test_geometry_action_metadata_survives_saved_history(local,tmp_path,monkeypa
                 assert (await operation(http,undone,'redo'))['crop']==doc['crop']
             finally:
                 await api.close()
+    asyncio.run(run())
+
+
+async def discard(http,doc):
+    return await http.post(f'/api/raw/workspaces/{doc["workspaceId"]}/discard',json={k:doc[k] for k in ('handle','generation','documentToken')})
+
+
+def test_begin_and_cancel_do_not_consume_native_edits(local,tmp_path,monkeypatch):
+    async def run():
+        async with client(local) as http:
+            api,child,doc=await opened(tmp_path,local,monkeypatch,http)
+            try:
+                attempts=api.raw.status().edits
+                doc=await begin(http,doc)
+                assert api.raw.status().edits==attempts
+                response=await http.post(url(doc,'recover'),json={k:v for k,v in body(doc).items() if k!='saveId'})
+                assert response.status_code==200,response.text
+                assert api.raw.status().edits==attempts and api._geometry_gesture is None
+                assert response.json()['history']['length']==0
+            finally:await api.close()
+    asyncio.run(run())
+
+
+def test_discard_recovers_exit_from_exhausted_dirty_gesture_without_writing_recipe(local,tmp_path,monkeypatch):
+    async def run():
+        async with client(local) as http:
+            api,child,doc=await opened(tmp_path,local,monkeypatch,http)
+            try:
+                durable=copy.deepcopy(api._history_identity)
+                before=store.get_raw_history(durable)
+                doc=await begin(http,doc)
+                response=await http.post(f'/api/raw/documents/{doc["handle"]}/geometry',json=update_body(doc,0,op('drag',handle='move',**{'from':[.5,.5],'to':[.6,.5]})))
+                doc=response.json();api.raw._edits=256
+                response=await http.post(url(doc,'recover'),json={k:v for k,v in body(doc).items() if k!='saveId'})
+                assert response.status_code>=400
+                response=await discard(http,doc)
+                assert response.status_code==204,response.text
+                assert api.workspace is None and api.document is None
+                assert store.get_raw_history(durable)==before
+                assert (await discard(http,doc)).status_code==204
+                _,reopened=await open_document(http)
+                assert reopened['mutationAttempts']==0 and reopened['generation']!=doc['generation']
+                assert (await discard(http,doc)).status_code==409
+                await api.close()
+            finally:
+                if api.workspace:await api.close()
+    asyncio.run(run())
+
+
+def test_discard_waits_for_accepted_write_and_rejects_new_writes(local,tmp_path,monkeypatch):
+    import threading
+    entered=threading.Event();release=threading.Event()
+    append=store.append_raw_history
+    def delayed(*args,**kwargs):
+        entered.set()
+        if not release.wait(10):raise AssertionError('write gate timed out')
+        return append(*args,**kwargs)
+    async def run():
+        async with client(local) as http:
+            api,child,doc=await opened(tmp_path,local,monkeypatch,http)
+            identity_saved=copy.deepcopy(api._history_identity)
+            monkeypatch.setattr(store,'append_raw_history',delayed)
+            try:
+                request=body(doc)|{'kind':'geometry','metadata':{'operation':'rotateRight'},'geometry':op('rotateRight')}
+                write=asyncio.create_task(http.post(url(doc,'operate'),json=request))
+                async with asyncio.timeout(5):
+                    while not entered.is_set():await asyncio.sleep(.01)
+                disposal=asyncio.create_task(discard(http,doc))
+                await asyncio.sleep(.02)
+                assert not disposal.done()
+                denied=await http.post(url(doc,'operate'),json=request)
+                assert denied.status_code==409 and denied.json()['code']=='raw_busy'
+                release.set()
+                assert (await write).status_code==200
+                assert (await disposal).status_code==204
+                saved=store.get_raw_history(identity_saved)
+                assert len(saved['history']['steps'])==1
+                denied=await http.post(url(doc,'operate'),json=request)
+                assert denied.status_code>=400
+                assert store.get_raw_history(identity_saved)==saved
+            finally:
+                release.set();await api.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('field,value',[('generation',True),('generation',999),('documentToken','f'*32),('handle','a'*32)])
+def test_discard_rejects_stale_identity(local,tmp_path,monkeypatch,field,value):
+    async def run():
+        async with client(local) as http:
+            api,child,doc=await opened(tmp_path,local,monkeypatch,http)
+            try:
+                payload={k:doc[k] for k in ('handle','generation','documentToken')};payload[field]=value
+                response=await http.post(f'/api/raw/workspaces/{doc["workspaceId"]}/discard',json=payload)
+                assert response.status_code==409 and api.workspace==doc['workspaceId']
+            finally:await api.close()
+    asyncio.run(run())
+
+
+
+def test_discard_closes_native_even_if_restart_for_normal_release_fails(local,tmp_path,monkeypatch):
+    async def run():
+        async with client(local) as http:
+            api,child,doc=await opened(tmp_path,local,monkeypatch,http)
+            old=api.raw
+            async def failed(*args,**kwargs):raise LightCraftError('raw_reset_failed')
+            monkeypatch.setattr(old,'reset_session',failed)
+            try:
+                response=await discard(http,doc)
+                assert response.status_code==204,response.text
+                assert old._closed and api.raw is not old and api.workspace is None
+            finally:await api.close()
     asyncio.run(run())

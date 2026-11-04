@@ -30,6 +30,8 @@
     }
   },
   "desktopLifecycle": {
+    "discard": "未保存の変更を破棄して終了",
+    "confirmDiscard": "未確定のRAW変更を破棄して終了しますか？ 既に保存が確定した変更は維持されます。",
     "title": "GenzoRoomの終了",
     "saving": "終了前に編集内容を保存しています…",
     "waiting": "現在の出力処理とBackendの終了を待っています…",
@@ -271,6 +273,7 @@
     "expandGrading": "カラーグレーディングを展開",
     "enableGrading": "カラーグレーディングを有効にする",
     "disableGrading": "カラーグレーディングを無効にする",
+    "rawFailure": {"limit": "RAW編集回数の上限に達しました。保存済みレシピへ復旧するか、未保存の変更を破棄してください。", "regeneration": "RAWセッションを再生成しています。準備完了後に操作をやり直してください。", "recovery": "操作結果の確認が必要です。保存済みレシピへ復旧してから編集してください。", "failed": "操作を確定できませんでした。", "confirmGalleryDiscard": "未確定のRAW変更を破棄して写真一覧へ戻りますか？ 既に保存が確定した変更は維持されます。", "cancelDiscard": "キャンセル", "confirmDiscard": "変更を破棄", "discardGallery": "未保存の変更を破棄して写真一覧へ戻る"},
     "rawCrop": {
       "category": "RAW編集カテゴリ",
       "develop": "現像",

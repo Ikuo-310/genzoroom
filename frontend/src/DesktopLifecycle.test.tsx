@@ -10,9 +10,10 @@ let host: HTMLDivElement;
 let root: Root;
 const prepare = vi.fn<() => Promise<boolean>>();
 const resume = vi.fn();
+const discard=vi.fn<()=>Promise<void>>();
 
-function GuardedApp() {
-  useDesktopCloseGuard({ prepare, resume });
+function GuardedApp({canDiscard=false}:{canDiscard?:boolean}) {
+  useDesktopCloseGuard({ prepare, resume,discard:canDiscard?discard:undefined });
   return <main>Workspace</main>;
 }
 
@@ -32,7 +33,7 @@ beforeEach(async () => {
   Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value() { this.open = false; } });
   await i18n.changeLanguage('en');
   respond.mockReset().mockResolvedValue(undefined);
-  prepare.mockReset(); resume.mockReset();
+  prepare.mockReset(); resume.mockReset();discard.mockReset().mockResolvedValue();
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   await act(async () => root.render(<DesktopLifecycleProvider><GuardedApp /></DesktopLifecycleProvider>));
 });
@@ -108,4 +109,38 @@ it('does not let a delayed rejection for an old closeResult cancel the current r
   await flush();
   expect(document.body.textContent).toContain('Waiting for the current export and Backend to finish');
   expect(document.body.textContent).not.toContain('Closing was cancelled');
+});
+
+const desktopButton=(text:string)=>Array.from(document.querySelectorAll<HTMLButtonElement>('dialog button')).find(b=>b.textContent===text)!;
+it('requires discard confirmation and a completed Backend fence before explicit discarded closeResult',async()=>{
+ await act(async()=>root.render(<DesktopLifecycleProvider><GuardedApp canDiscard/></DesktopLifecycleProvider>));
+ prepare.mockRejectedValue(Object.assign(new Error('limit'),{code:'raw_session_edit_limit'}));
+ await act(async()=>event('genzoroom:close-request',{requestId:'a'.repeat(64)}));await flush();
+ expect(document.body.textContent).toContain('raw_session_edit_limit');expect(discard).not.toHaveBeenCalled();
+ await act(async()=>desktopButton('Discard unsaved changes and close').click());expect(discard).not.toHaveBeenCalled();
+ await act(async()=>desktopButton('Cancel').click());expect(discard).not.toHaveBeenCalled();
+ await act(async()=>desktopButton('Discard unsaved changes and close').click());
+ let finish!:()=>void;discard.mockImplementation(()=>new Promise<void>(r=>finish=r));
+ await act(async()=>desktopButton('Discard changes').click());expect(respond).not.toHaveBeenCalledWith({kind:'close'});
+ await act(async()=>finish());await flush();expect(respond).toHaveBeenCalledWith({kind:'close'});
+ await act(async()=>event('genzoroom:close-request',{requestId:'b'.repeat(64)}));await flush();
+ expect(discard).toHaveBeenCalledOnce();expect(prepare).toHaveBeenCalledOnce();
+ expect(respond).toHaveBeenCalledWith({kind:'closeResult',requestId:'b'.repeat(64),saved:false,discarded:true});
+ expect(respond.mock.calls.some(([m])=>m.kind==='closeResult' && m.saved===true)).toBe(false);
+});
+it('keeps the application open when the confirmed discard fence fails',async()=>{
+ await act(async()=>root.render(<DesktopLifecycleProvider><GuardedApp canDiscard/></DesktopLifecycleProvider>));
+ prepare.mockResolvedValue(false);discard.mockRejectedValue(Object.assign(new Error('failed'),{code:'raw_workspace_cleanup_failed'}));
+ await act(async()=>event('genzoroom:close-request',{requestId:'a'.repeat(64)}));await flush();
+ await act(async()=>desktopButton('Discard unsaved changes and close').click());await act(async()=>desktopButton('Discard changes').click());await flush();
+ expect(document.body.textContent).toContain('raw_workspace_cleanup_failed');expect(respond).not.toHaveBeenCalledWith({kind:'close'});
+ expect(desktopButton(i18n.t('desktopLifecycle.back'))).toBeTruthy();
+});
+it('requests a fresh host close and passes explicit retry to the existing save guard',async()=>{
+ prepare.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+ await act(async()=>event('genzoroom:close-request',{requestId:'a'.repeat(64)}));await flush();
+ await act(async()=>desktopButton('Retry RAW save').click());await flush();
+ expect(respond).toHaveBeenCalledWith({kind:'close'});
+ await act(async()=>event('genzoroom:close-request',{requestId:'b'.repeat(64)}));await flush();
+ expect(prepare).toHaveBeenLastCalledWith(true);expect(respond).toHaveBeenCalledWith({kind:'closeResult',requestId:'b'.repeat(64),saved:true});
 });

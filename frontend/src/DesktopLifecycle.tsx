@@ -1,9 +1,10 @@
+import { RawFailure,rawFailureCode } from './RawFailure';
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
-type CloseGuard = { prepare: () => Promise<boolean>; resume: () => void };
-type Message = { kind: 'ready' | 'restart' } | { kind: 'closeResult'; requestId: string; saved: boolean };
+type CloseGuard = { prepare: (retry?:boolean) => Promise<boolean>; resume: () => void; discard?:()=>Promise<void>; failureCode?:()=>string|undefined };
+type Message = { kind: 'ready' | 'restart' | 'close' } | { kind: 'closeResult'; requestId: string; saved: boolean; discarded?:true };
 declare global {
   interface Window { __GENZOROOM_DESKTOP__?: {
     respond: (message: Message) => Promise<void>;
@@ -16,7 +17,7 @@ export function useDesktopCloseGuard(guard: CloseGuard) {
   const register = useContext(Context);
   const current = useRef(guard);
   current.current = guard;
-  useLayoutEffect(() => register({ prepare: () => current.current.prepare(), resume: () => current.current.resume() }), [register]);
+  useLayoutEffect(() => register({ prepare: retry => current.current.prepare(retry), resume: () => current.current.resume(),failureCode:()=>current.current.failureCode?.(), discard:guard.discard?()=>current.current.discard!():undefined }), [register,!!guard.discard]);
 }
 
 export function DesktopLifecycleProvider({ children }: { children: ReactNode }) {
@@ -28,9 +29,12 @@ export function DesktopLifecycleProvider({ children }: { children: ReactNode }) 
   }).current;
   const pending = useRef<string | null>(null);
   const activeGuard = useRef<CloseGuard | null>(null);
+  const failedGuard=useRef<CloseGuard|null>(null),discardNext=useRef<CloseGuard|null>(null),retryNext=useRef(false);
+  const [errorCode,setErrorCode]=useState<string>();
+  const actionBusy=useRef(false);
   const opener = useRef<HTMLElement | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
-  const [phase, setPhase] = useState<'idle' | 'saving' | 'waiting' | 'failed' | 'backendFailed' | 'startupFailed'>('idle');
+  const [phase, setPhase] = useState<'idle' | 'saving' | 'waiting' | 'failed' | 'backendFailed' | 'startupFailed' | 'confirmDiscard'>('idle');
   const busy = phase === 'saving' || phase === 'waiting';
 
   useLayoutEffect(() => {
@@ -48,6 +52,7 @@ export function DesktopLifecycleProvider({ children }: { children: ReactNode }) 
     let mounted = true;
     const fail = (backendFailed = false, requestId?: string) => {
       if (requestId && pending.current !== requestId) return;
+      if(activeGuard.current)failedGuard.current=activeGuard.current;
       activeGuard.current?.resume();
       activeGuard.current = null;
       pending.current = null;
@@ -61,16 +66,18 @@ export function DesktopLifecycleProvider({ children }: { children: ReactNode }) 
       opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       setPhase('saving');
       void (async () => {
-        let saved = false;
+        let saved = false,discarded=false;
         try {
           // Let the modal freeze input before the owning workspace captures its final snapshot.
           await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()));
-          saved = await (activeGuard.current?.prepare() ?? Promise.resolve(true));
-        } catch { saved = false; }
+          if(discardNext.current && discardNext.current===activeGuard.current){discarded=true;discardNext.current=null;}
+          else if(!actionBusy.current || retryNext.current){const retry=retryNext.current;retryNext.current=false;saved = await (activeGuard.current?.prepare(retry) ?? Promise.resolve(true));
+            if(!saved){const code=activeGuard.current?.failureCode?.();if(code)setErrorCode(code);}}
+        } catch(cause) {setErrorCode(rawFailureCode(cause)); saved = false; }
         if (!mounted || pending.current !== requestId) return;
-        if (saved) setPhase('waiting');
+        if (saved || discarded) setPhase('waiting');
         else fail();
-        try { await bridge.respond({ kind: 'closeResult', requestId, saved }); }
+        try { await bridge.respond({ kind: 'closeResult', requestId, saved, ...(discarded?{discarded:true as const}:{}) }); }
         catch { fail(false, requestId); }
       })();
     };
@@ -112,13 +119,40 @@ export function DesktopLifecycleProvider({ children }: { children: ReactNode }) 
     return () => { window.removeEventListener('keydown', block, true); window.removeEventListener('keyup', block, true); };
   }, [busy]);
 
+  const requestAgain=async()=>{
+    if(actionBusy.current)return;actionBusy.current=true;
+    retryNext.current=true;setPhase('saving');
+    try{await window.__GENZOROOM_DESKTOP__!.respond({kind:'close'});}catch(cause){setErrorCode(rawFailureCode(cause));setPhase('failed');}finally{actionBusy.current=false;}
+  };
+  const discardAndClose=async()=>{
+    const owner=failedGuard.current;
+    if(!owner?.discard || owner!==guard.current || actionBusy.current)return;
+    actionBusy.current=true;
+    setPhase('saving');
+    try{
+      await owner.discard();
+      // This explicit disposition is consumed by a fresh host request; saved stays false.
+      discardNext.current=owner;
+      await window.__GENZOROOM_DESKTOP__!.respond({kind:'close'});
+    }catch(cause){setErrorCode(rawFailureCode(cause));setPhase('failed');}finally{actionBusy.current=false;}
+  };
   return <Context.Provider value={register}>{children}
     {/* Shortcut guards treat ARIA dialogs as active, so idle lifecycle UI must leave the DOM. */}
     {typeof window !== 'undefined' && window.__GENZOROOM_DESKTOP__ && phase !== 'idle' && createPortal(<dialog ref={dialog} className="workspace-save-dialog"
       role={busy ? 'dialog' : 'alertdialog'} aria-label={t('desktopLifecycle.title')}
       onCancel={event => { event.preventDefault(); if (!busy && phase !== 'startupFailed') setPhase('idle'); }}>
       <p role={busy ? 'status' : undefined}>{t(`desktopLifecycle.${phase}`)}</p>
-      {!busy && phase !== 'startupFailed' && <button type="button" className="tool-button" autoFocus onClick={() => setPhase('idle')}>{t('desktopLifecycle.back')}</button>}
+      {!busy && <RawFailure code={errorCode}/>}
+      {!busy && phase !== 'startupFailed' && phase!=='confirmDiscard' && <button type="button" className="tool-button" autoFocus onClick={() => setPhase('idle')}>{t('desktopLifecycle.back')}</button>}
+      {phase==='failed' && <>
+        <button type="button" className="tool-button" onClick={()=>void requestAgain()}>{t('workspace.rawPreview.retrySave')}</button>
+        {failedGuard.current?.discard && <button type="button" className="tool-button" onClick={()=>setPhase('confirmDiscard')}>{t('desktopLifecycle.discard')}</button>}
+      </>}
+      {phase==='confirmDiscard' && <>
+        <button type="button" className="tool-button" onClick={()=>setPhase('failed')}>{t('workspace.rawFailure.cancelDiscard')}</button>
+        <button type="button" className="tool-button" onClick={()=>void discardAndClose()}>{t('workspace.rawFailure.confirmDiscard')}</button>
+      </>}
+
     </dialog>, document.body)}
   </Context.Provider>;
 }

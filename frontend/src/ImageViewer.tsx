@@ -94,7 +94,7 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame, rawRegionDisp
   const cropSize = rawCrop?.active && cropSizeRef.current?.identity === imageIdentity ? cropSizeRef.current.size : undefined;
   const logicalWidth = cropSize?.x ?? rawFrame?.nativeWidth ?? bitmapSize.x, logicalHeight = cropSize?.y ?? rawFrame?.nativeHeight ?? bitmapSize.y;
   const imageSize = useMemo(() => ({ x: logicalWidth, y: logicalHeight }), [logicalWidth, logicalHeight]);
-  const [dpr, setDpr] = useState(() => window.devicePixelRatio || 1);
+  const [dpr, setDpr] = useState(() => typeof window==='undefined'?1:window.devicePixelRatio || 1);
   useEffect(() => {
     const media = window.matchMedia?.(`(resolution: ${dpr}dppx)`);
     const changed = () => setDpr(window.devicePixelRatio || 1);
