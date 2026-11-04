@@ -85,6 +85,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   const suspendDisplayRef = useRef<() => void>(() => {});
   const [cropPresentation,setCropPresentation]=useState<CropPresentation|null>(null);
   const [straightenTool,setStraightenTool]=useState(false);
+  const [overlay,setOverlay]=useState<import('./rawCropOverlay').CropOverlay>('thirds');
+  const [spiralDirection,setSpiralDirection]=useState(0);
   useEffect(()=>{setStraightenTool(false);},[assetId]);
   const cropSnapshotRef=useRef<CropSnapshot|null>(null);
   const cropVisualRef=useRef<{snapshot:CropSnapshot;start:NonNullable<RawSettings['crop']>;latest:NonNullable<RawSettings['crop']>;owner:RawRecipeSave}|null>(null);
@@ -973,7 +975,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     },cause=>{if(cropVisualRef.current===visual){cropVisualRef.current=null;setCropPresentation(null);}throw cause;});
   };
   return visible && { ...visible,
-    crop: { operation: cropSaver?.cropOperation, straightenTool, setStraightenTool:(value:boolean)=>setStraightenTool(value),
+    crop: { operation: cropSaver?.cropOperation, overlay,setOverlay,spiralDirection,setSpiralDirection:(v:number)=>setSpiralDirection(((v%360)+360)%360), straightenTool, setStraightenTool:(value:boolean)=>setStraightenTool(value),
       operate: (operation: RawGeometryOperation, action?: import('./rawApi').RawGeometryAction) => {
         cancelPick();
         if (!callbackEditor() || frozen.current || !cropSaver || cropSaver.locked || !cropActiveRef.current || !cropSourceCurrent) return Promise.reject(new RawApiError('raw_busy'));

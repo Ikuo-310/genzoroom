@@ -1,16 +1,19 @@
 import type { CropPresentation } from './rawCropDisplay';
-import { useEffect, useRef, useState, type PointerEvent } from 'react';
+import { useEffect, useId, useRef, useState, type PointerEvent } from 'react';
 import type { RawCropDisplay, RawGeometry, RawGeometryOperation } from './rawApi';
 import { CROP_HANDLES, cropPoint, projectRawCrop, type CropHandle, type CropMatrix } from './rawCropMath';
 import type { Point } from './viewerMath';
 import { straightenFromLine } from './rawStraightenTool';
+import { cropOverlayPaths,type CropOverlay } from './rawCropOverlay';
 export type RawCropBinding = { active: boolean; canStart: boolean; presentation?: CropPresentation;
   straightenTool?:boolean;setStraightenTool?:(active:boolean)=>void;
+  overlay?:CropOverlay;spiralDirection?:number;
   surface?: { url: string; frame: RawGeometry; display: RawCropDisplay };
   begin: (type?:'drag'|'straighten') => Promise<void>; update: (operation: RawGeometryOperation) => void; cancel?: () => Promise<void>; end: () => Promise<void> };
 export function RawCropSurface({ binding, viewport, scale, pan, busy, handTool=false, panning=false }: {
   binding: RawCropBinding; viewport: Point; scale: number; pan: Point; busy: (value: boolean) => void; handTool?:boolean;panning?:boolean }) {
   const root = useRef<HTMLDivElement>(null);
+  const clipId=useId();
   const [line,setLine]=useState<{id:number;start:Point;end:Point}|null>(null);
   const gesture = useRef<{ id: number; matrix: CropMatrix; bounds: DOMRect; handle: CropHandle;
     view: {viewport:Point;scale:number;pan:Point}; cursor:string; from: [number, number]; start: [number, number, number, number]; owner: RawCropBinding;
@@ -92,10 +95,10 @@ export function RawCropSurface({ binding, viewport, scale, pan, busy, handTool=f
       <svg width="100%" height="100%" style={{ position:'absolute', inset:0, pointerEvents:'none' }}>
         <path fill="rgba(0,0,0,.55)" fillRule="evenodd" d={`M0 0H${viewport.x}V${viewport.y}H0Z M${projection.rect.left} ${projection.rect.top}h${projection.rect.width}v${projection.rect.height}h${-projection.rect.width}Z`} />
         <rect x={projection.rect.left} y={projection.rect.top} width={projection.rect.width} height={projection.rect.height} fill="none" stroke="white" />
-        {[1,2].map(n => <g key={n} stroke="rgba(255,255,255,.6)">
-          <line x1={projection.rect.left+projection.rect.width*n/3} x2={projection.rect.left+projection.rect.width*n/3} y1={projection.rect.top} y2={projection.rect.top+projection.rect.height} />
-          <line y1={projection.rect.top+projection.rect.height*n/3} y2={projection.rect.top+projection.rect.height*n/3} x1={projection.rect.left} x2={projection.rect.left+projection.rect.width} />
-        </g>)}
+        <defs><clipPath id={clipId}><rect x={projection.rect.left} y={projection.rect.top} width={projection.rect.width} height={projection.rect.height}/></clipPath></defs>
+        <g clipPath={`url(#${clipId})`} fill="none" stroke="rgba(255,255,255,.62)" strokeWidth="1" vectorEffect="non-scaling-stroke" pointerEvents="none">
+          {cropOverlayPaths(binding.overlay??'thirds',projection.rect.width,projection.rect.height,binding.spiralDirection).map((d,i)=><path key={i} d={d} transform={`translate(${projection.rect.left} ${projection.rect.top})`}/>)}
+        </g>
       </svg>
       {CROP_HANDLES.filter(h => h !== 'move').map(handle => <div key={handle} data-crop-handle={handle}
         style={{ position:'absolute', left:projection.handles[handle].x-12, top:projection.handles[handle].y-12,

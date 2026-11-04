@@ -2107,3 +2107,12 @@ Crop panelに一時選択・一回操作の「角度補正ツール」／`Straig
 純粋関数`straightenFromLine`は画面上の線方向を水平／垂直の最近傍へ正規化し、線の向きを逆にしても同一残差を得る。exact ±45°はmodulo規則で一貫して決定する。現在angleから表示線残差を減算し、0.1°丸め後±45°へclampする。画面座標は既にorientation／flip／既存Straightenを含むため元画像座標へ再変換しない。確定は既存begin/update/end straighten gestureへ接続し成功後にツールを解除。別Native API、Recipe形式、History機構なし。
 
 純粋角度関数と既存Crop Controls／Surface／Viewer／document hook関連Frontend 275件成功。TypeScript、本番build、`git diff --check`成功。既存大容量chunk警告あり。複合orientation／flip画像、線表示・pointer capture、実写真での方向受入は実ブラウザ／Desktopで未確認。Native角度制限によるclamp後の残差はあり得る。
+
+
+## RAW Crop Phase 4.5：構図オーバーレイ切替（2026-11-04）
+
+Crop枠固定の三分割表示を、三分割／グリッド／黄金比／対角線／二分割／螺旋／なしへ切替可能にした。既定は三分割。選択時はbutton `aria-pressed`を更新するだけでNative／Recipe／Historyを操作しない。螺旋のみ90°回転操作を表示し、0／90／180／270°の方向を同一Asset画面内で保持する。stateは`useRawDocument`のFrontend一時値でAsset切替を越えて共有し、暗室hook破棄で初期化。
+
+`rawCropOverlay.ts`の純粋関数がCrop frame内SVG pathを作り、clipPathで矩形に制限する。線はpointer-events noneかつnon-scaling stroke。枠、暗幕、handlesはoverlay種類から独立して維持。通常グリッドは均等分割、黄金比は0.382／0.618、対角線はX字、螺旋は正規化座標上の黄金比減衰spiralを四方向へ回す。写真／ExportへSVGを合成せず、Preview要求も増やさない。
+
+overlay geometry・RAW Crop／Surface／Controls／Viewer／document関連Frontend 277件成功。TypeScript、本番build、`git diff --check`成功。既存500 kB超chunk警告あり。実ブラウザ／Desktopで縦横極端なCrop、線の視認性、リサイズ時の螺旋品質、アクセシビリティ操作は未実施。螺旋は正規化frame内の表示用曲線であり、LightCraftのピクセル一致を保証しない。

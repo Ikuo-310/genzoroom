@@ -56,6 +56,7 @@ export function RawCropControls({ raw,disabled=false }: {raw:Raw;disabled?:boole
   const [busy,setBusy]=useState(false),[error,setError]=useState(false),[angle,setAngle]=useState<number|null>(null);
   const [custom,setCustom]=useState(false),[w,setW]=useState(''),[h,setH]=useState('');
   const crop=raw.settings?.crop;
+  const overlays=['thirds','grid','golden','diagonals','halves','spiral','none'] as const;
   const locked=disabled || busy || !!raw.locked || raw.status!=='ready' || !crop || !raw.crop.surface || raw.crop.canStart === false || !!raw.historyError || !!raw.historyLoading || !!raw.editError;
   const run=(operation:RawGeometryOperation,action?:RawGeometryAction)=>{
     if(pending.current || locked)return;
@@ -99,6 +100,8 @@ export function RawCropControls({ raw,disabled=false }: {raw:Raw;disabled?:boole
       {CROP_PRESETS.map((p,i)=><option key={p} value={p}>{presetLabels[i] || t(`workspace.rawCrop.${p}`)}</option>)}
     </select></label>
     <p className="edit-source-note">{aspect?`${aspect[0]/100} : ${aspect[1]/100}`:t('workspace.rawCrop.free')}</p>
+    <fieldset className="raw-crop-overlay"><legend>{t('workspace.rawCrop.overlay')}</legend><div className="raw-crop-buttons">{overlays.map(mode=><button key={mode} type="button" className="tool-button" aria-pressed={raw.crop.overlay===mode} onClick={()=>raw.crop.setOverlay(mode)}>{t(`workspace.rawCrop.overlays.${mode}`)}</button>)}</div>
+      {raw.crop.overlay==='spiral'&&<button type="button" className="tool-button" onClick={()=>raw.crop.setSpiralDirection((raw.crop.spiralDirection+90)%360)}>{t('workspace.rawCrop.rotateOverlay')}</button>}</fieldset>
     <div className="raw-crop-buttons">
       <button type="button" className="tool-button" disabled={locked} onClick={()=>run({type:'swap',params:{}})}>{t('workspace.rawCrop.swap')}</button>
       <button type="button" className="tool-button" disabled={locked} aria-pressed={!!aspect}
