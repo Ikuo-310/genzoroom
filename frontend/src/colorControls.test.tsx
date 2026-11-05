@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { commitAdjustmentsInScope } from './adjustmentFocus';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -88,14 +89,14 @@ describe('production Color controls', () => {
     expect(color().querySelectorAll('.adjustment-power')).toHaveLength(0);
   });
 
-  it('supports keyboard, wheel, Shift+wheel, direct input, inactivity commit, and individual Reset', () => {
+  it('supports keyboard, wheel, Shift+wheel, direct input, operation-boundary commit, and individual Reset', () => {
     act(() => slider().focus());
     key('ArrowRight', slider());
     key('ArrowUp', slider());
     expect(wheel(1, true).defaultPrevented).toBe(true);
     expect(recipe().adjustments.vibrance).toBe(10);
     act(() => vi.advanceTimersByTime(500));
-    expect(history()).toEqual(['Vibrance 0 → +10']);
+    expect(history()).toEqual([]);
 
     expect(wheel(-1).defaultPrevented).toBe(true);
     act(() => vi.advanceTimersByTime(500));
@@ -104,7 +105,7 @@ describe('production Color controls', () => {
     change(number(), '-25.6');
     key('Enter', number());
     expect(recipe().adjustments.vibrance).toBe(-26);
-    expect(history()[0]).toBe('Vibrance +20 → -26');
+    expect(history()[0]).toBe('Vibrance 0 → -26');
 
     click(slider().closest('.adjustment-control')!.querySelector<HTMLElement>('.adjustment-reset')!);
     expect(recipe().adjustments.vibrance).toBe(0);
@@ -166,6 +167,7 @@ describe('production Color controls', () => {
     click(color().querySelector<HTMLElement>('[aria-pressed]')!);
     wheel(-1);
     act(() => vi.advanceTimersByTime(500));
+    act(() => commitAdjustmentsInScope(host));
     expect(history()[0]).toBe('自然な彩度 0 → +10');
   });
 });

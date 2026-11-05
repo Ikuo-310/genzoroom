@@ -666,9 +666,25 @@ Medium FindingはDeveloper JSON保存（保存先なし・連続自動ダウン�
 初回FrontendがReadyにならない場合は、React rootを`inert`に保ったまま、ホストが既存ManagedControlのprepare／graceful shutdownを実行して終了できる。Ready後の再読み込み中に終了する場合は、未保存内容が失われる可能性をWindows確認ダイアログで示し、拒否すれば継続、確認すればBackendの正常停止を待つ。実WebView2隔離smokeはbootstrap認証失敗・React ready応答失敗からの終了とBackend子プロセス消滅を確認する。Backend停止後に旧画面が残るケースは使い捨てLOCALAPPDATAで再現し、旧Tauriが生存する間の2つ目のホストを名前付きMutexで拒否してBackendを起動しない。旧画面のCookieを別Backendへ直接送る試験は行わず、二重起動を成立させない経路を確認した。
 
 `--environment-backend`のSettings metadataは環境変数の有効URLとキー設定有無だけを表示する。保存済みURLや保存済み資格情報状態は診断接続先として返さない。通常の保存済み接続管理とDockerの環境変数経路は維持する。限定再検証ではRust17件、Backend接続・managed・export関連115件、Frontend lifecycle／Recipe保存／History編集182件、初回Frontend未準備・旧WebView隔離WebView2 smoke3件が成功し、TypeScript／Vite build、Clippy、Rust fmt、通常／smoke build、`git diff --check`も成功した。未保存編集終了の最終実機確認、Reloading確認ダイアログの手動操作、保存失敗の実機注入、Export終了、OSログオフ／終了通知、Cookieの別Backend送信直接試験は未実施事項として記録し、Phase完了を妨げない。外部ライブラリ由来シングル素材のSTACK COVER／Gallery表示不具合はWindows・Docker共通Exportの既知別課題で、今回の完了判定に含めない。
+## サムネイル固定幅化の実装・実機確認完了（2026-11-05）
+
+列数を保存していた`homeThumbnailColumns`を、カード幅プリセットを保存する`homeThumbnailWidth`へ移行した。標準幅は200px、プリセットは140 / 160 / 180 / 200 / 220 / 240 / 260 / 280pxの8段階。新しい保存キーがない場合は旧3〜10列を幅へ換算して新キーへ保存し、以降のリサイズでは幅設定を維持する。
+
+Gallery写真グリッド（Recent / Favorites / Calendar / Album詳細）とAlbum一覧は固定幅の`auto-fill`でカードを左詰めに配置し、右側の余白を残す。Export管理とSTACK管理は表示領域とカード幅から列数を再計算する。いずれもカードを引き伸ばさず、狭い領域では1列まで減る。Gallery / Album / Exportのカード間隔は16px、STACK管理は候補・未分類・グループ内部で従来どおり12px。STACKグループのspanと内部折返し、候補と未分類の列幅一致を維持する。詳細は`architecture.md`の「Shared thumbnail sizing」を参照。
+
+実装Commit：`62bde40`（`feat: use fixed thumbnail card widths`）。Frontend関連テスト13ファイル・401件PASS、Frontend production build成功。利用者による実機ブラウザー確認もOKとの報告を受けた。実機確認は自動テスト・ビルドとは別の確認結果である。
+
+## JPEG共通仕様 Phase 1C-C4-Eのmainバックポート（2026-10-26）
+
+LightCraft統合ブランチで先行していたJPEG共通仕様がmainに未反映だったため、Phase 1C-C4-EをJPEG共通部分に限定してバックポートした。暗室カテゴリをColor（Temperature / Tint / Vibrance / Saturation）→ Basic → Color Gradingへ整理し、個別Adjustment ON/OFF UIとコンテキスト操作を廃止した。個別Reset、Basic／Color GradingカテゴリON/OFF、Color Gradingの各range ON/OFF、History／Undo／Redoは維持した。Color Toggleは`whiteBalanceEnabled`と`colorEnabled`を同期する1件のHistory operationとし、Color Resetは4値を1件でResetしてReset前のAND有効状態へ同期する。
+
+Recipe v18とSQLite schemaは維持し、形式変更とDB migrationを回避した。16個の`adjustmentEnabled`をlegacy storageとして保存・読込する。既存のtrue／falseを読み込み時に書き換えず、Frontend／BackendのJPEG processingとedited-state判定では個別bypassとして無視する。旧個別Toggleと独立Color Historyの読込互換を保ち、新しい`toggleAdjustment`はno-opとした。JPEG画素処理式、Before／After、Export、rendered thumbnail、既存のoperation-boundary Historyを維持した。RAW／Windows／LightCraft固有コードは持ち込んでいない。
+
+自動テスト、TypeScript typecheck、production buildは成功した。実ブラウザーとNASでの表示・動作確認は別途必要。Commitは`57b4cb72e8592c7669776aeb0f1329e2352f63ee`。
+
 ## JPEG Historyを操作境界で確定（2026-10-26）
 
-JPEG暗室のkeyboard／wheel調整は、同じAdjustmentを続けて操作する間、入力間隔やAutosaveでHistoryを分割しない。別Adjustmentの操作開始、Viewer操作、Undo／Redo、History Jump、Adjustment Reset、Category Reset／Toggle、Individual Adjustment Toggle、All Reset、Paste、Asset／Filmstrip切替、暗室離脱や保存・終了処理でgestureを確定する。pointer dragはpointer終了、数値入力はEnter／blurで確定する従来の境界を維持する。
+JPEG暗室のkeyboard／wheel調整は、同じAdjustmentを続けて操作する間、入力間隔やAutosaveでHistoryを分割しない。別Adjustmentの操作開始、Viewer操作、Undo／Redo、History Jump、Adjustment Reset、Category Reset／Toggle、Color Grading range Toggle、All Reset、Paste、Asset／Filmstrip切替、暗室離脱や保存・終了処理でgestureを確定する。個別Adjustment Toggleは新しい操作として作成しない。pointer dragはpointer終了、数値入力はEnter／blurで確定する従来の境界を維持する。
 
 Autosaveはpending gestureを含む保存用snapshotを作るが、live sessionのgestureは継続する。History圧縮は既存機能として維持し、gesture確定の代わりには使わない。保存形式や既存Historyの書き換えは伴わない。
 

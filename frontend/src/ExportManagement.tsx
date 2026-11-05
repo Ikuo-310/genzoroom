@@ -12,6 +12,7 @@ import { useShortcutDisplay } from './useShortcutDisplay';
 import { StackRedetectDialog } from './StackRedetectDialog';
 import { thumbnailUrl } from './thumbnailUrl';
 import type { RecentAsset } from './assets';
+import { useStackColumns } from './useStackColumns';
 
 type PreviewActions = {
   onPreviewRequest?: (asset: RecentAsset) => void;
@@ -120,14 +121,15 @@ function ExportQueueCard({ entry: { item, asset }, management, onPreviewRequest,
 export function ExportManagementContent({ management, thumbnailRefreshKey, ...previewActions }:
   { management: ExportManagementState; thumbnailRefreshKey?: string } & PreviewActions) {
   const { t } = useTranslation();
-  const columns = useAppSettings().homeThumbnailColumns;
+  const width = useAppSettings().homeThumbnailWidth;
+  const { contentRef, effectiveColumns } = useStackColumns(width, 16, 4);
   const { queue, message, rows } = management;
-  return <div id="home-export-panel" className="home-tab-panel export-content" role="tabpanel" aria-labelledby="home-export-tab"
+  return <div ref={contentRef} id="home-export-panel" className="home-tab-panel export-content" role="tabpanel" aria-labelledby="home-export-tab"
     aria-busy={queue.loading || message === 'metadataLoading'}>
     {management.removalError && <p className="gallery-message export-removal-error" role="alert">{t(`exportManagement.${management.removalError}`)}</p>}
     {message ? <p className="gallery-message" role={message.endsWith('Failed') ? 'alert' : message === 'empty' ? undefined : 'status'}>
       {t(`exportManagement.${message}`)}</p>
-      : <div className="export-queue-grid" style={{ '--export-columns': columns } as CSSProperties}>
+      : <div className="export-queue-grid" style={{ '--export-card-width': `${width}px`, '--export-columns': effectiveColumns } as CSSProperties}>
         {rows.map(row => row.kind === 'asset'
           ? <ExportQueueCard key={row.entry.item.assetId} entry={row.entry} management={management} thumbnailRefreshKey={thumbnailRefreshKey} {...previewActions} />
           : <section key={`stack-${row.stackId}`} className="export-stack-group" data-stack-id={row.stackId}

@@ -67,7 +67,7 @@ beforeEach(async () => {
   await i18n.changeLanguage('en');
   sessionStorage.clear();
   writePhotoFilterMode('both', 'recent'); writePhotoFilterMode('both', 'albums'); writePhotoFilterMode('both', 'calendar');
-  updateSetting('recentPhotoCount', 100); updateSetting('homeThumbnailColumns', 6);
+  updateSetting('recentPhotoCount', 100); updateSetting('homeThumbnailWidth', 200);
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   api.recent.mockReset().mockResolvedValue(recent);
   api.albums.mockReset().mockResolvedValue([albumA, albumB]);
@@ -79,7 +79,7 @@ beforeEach(async () => {
 afterEach(() => {
   act(() => root.unmount()); host.remove(); sessionStorage.clear();
   writePhotoFilterMode('both', 'recent'); writePhotoFilterMode('both', 'albums'); writePhotoFilterMode('both', 'calendar');
-  updateSetting('recentPhotoCount', 100); updateSetting('homeThumbnailColumns', 6); vi.unstubAllGlobals();
+  updateSetting('recentPhotoCount', 100); updateSetting('homeThumbnailWidth', 200); vi.unstubAllGlobals();
 });
 
 describe('album photo view', () => {

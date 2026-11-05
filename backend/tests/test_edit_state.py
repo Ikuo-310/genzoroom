@@ -451,6 +451,27 @@ class EditStateApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.request("GET").json()["state"], saved)
 
+    def test_legacy_independent_color_history_and_false_flags_roundtrip_unchanged(self):
+        saved = self.v18_state()
+        before = copy.deepcopy(saved["history"][0]["before"])
+        before["adjustments"].update(temperature=25, vibrance=30, exposure=1)
+        for key in ("exposure", "tint", "shadowsTemperature"):
+            before["adjustmentEnabled"][key] = False
+        toggled = copy.deepcopy(before)
+        toggled["colorEnabled"] = False
+        reset = copy.deepcopy(toggled)
+        reset["adjustments"]["vibrance"] = 0
+        saved.update(currentRecipe=reset, historyCursor=2, history=[
+            {"kind": "colorToggle", "before": before, "after": toggled},
+            {"kind": "colorReset", "before": toggled, "after": reset},
+        ])
+        self.assertEqual(self.request("PUT", payload(saved)).status_code, 200)
+        with self.database() as db:
+            original = db.execute("SELECT * FROM asset_edit_states").fetchone()
+        self.assertEqual(self.request("GET").json()["state"], saved)
+        with self.database() as db:
+            self.assertEqual(db.execute("SELECT * FROM asset_edit_states").fetchone(), original)
+
     def test_integrated_color_toggle_and_reset_validate_as_single_operations(self):
         saved = self.v18_state()
         saved["history"] = []

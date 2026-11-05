@@ -4,6 +4,7 @@ import i18n from 'i18next';
 export const DATE_LOCALE_KEY = 'genzoroom.dateLocale';
 export const WEEK_START_KEY = 'genzoroom.weekStart';
 export const INITIAL_IMAGE_KEY = 'genzoroom.initialImage';
+export const HOME_THUMBNAIL_WIDTH_KEY = 'genzoroom.homeThumbnailWidth';
 export const HOME_THUMBNAIL_COLUMNS_KEY = 'genzoroom.homeThumbnailColumns';
 export const RECENT_PHOTO_COUNT_KEY = 'genzoroom.recentPhotoCount';
 export const SHOW_KEYBOARD_SHORTCUTS_KEY = 'genzoroom.showKeyboardShortcuts';
@@ -21,13 +22,13 @@ export type DateLocale = typeof DATE_LOCALE_CHOICES[number];
 const LANGUAGE_DATE_LOCALES: Record<string, string> = { ja: 'ja-JP', en: 'en-US' };
 export type WeekStart = 'auto' | 'sunday' | 'monday';
 export type InitialImage = 'auto' | 'original' | 'preview';
-export const HOME_THUMBNAIL_COLUMNS = [3, 4, 5, 6, 7, 8, 9, 10] as const;
-export type HomeThumbnailColumns = typeof HOME_THUMBNAIL_COLUMNS[number];
+export const HOME_THUMBNAIL_WIDTHS = [140, 160, 180, 200, 220, 240, 260, 280] as const;
+export type HomeThumbnailWidth = typeof HOME_THUMBNAIL_WIDTHS[number];
 export const RECENT_PHOTO_COUNTS = [50, 100, 150, 200, 250, 300, 350, 400, 450, 500] as const;
 export type RecentPhotoCount = typeof RECENT_PHOTO_COUNTS[number];
 export const ZOOM_NAVIGATOR_POSITIONS = ['off', 'top-left', 'top-right', 'bottom-left', 'bottom-right'] as const;
 export type ZoomNavigatorPosition = typeof ZOOM_NAVIGATOR_POSITIONS[number];
-export type Settings = { dateLocale: DateLocale; weekStart: WeekStart; initialImage: InitialImage; homeThumbnailColumns: HomeThumbnailColumns; recentPhotoCount: RecentPhotoCount; showKeyboardShortcuts: boolean; anshitsuInitialSelection: AnshitsuInitialSelection; zoomNavigatorPosition: ZoomNavigatorPosition };
+export type Settings = { dateLocale: DateLocale; weekStart: WeekStart; initialImage: InitialImage; homeThumbnailWidth: HomeThumbnailWidth; recentPhotoCount: RecentPhotoCount; showKeyboardShortcuts: boolean; anshitsuInitialSelection: AnshitsuInitialSelection; zoomNavigatorPosition: ZoomNavigatorPosition };
 
 export function browserStorage(): Storage | undefined {
   try { return typeof window === 'undefined' ? undefined : window.localStorage; }
@@ -38,7 +39,7 @@ export function readSetting<T extends string>(key: string, choices: readonly T[]
   catch { return 'auto'; }
 }
 export function readSettings(storage = browserStorage()): Settings {
-  let homeThumbnailColumns: HomeThumbnailColumns = 6;
+  let homeThumbnailWidth: HomeThumbnailWidth = 200;
   let recentPhotoCount: RecentPhotoCount = 100;
   let showKeyboardShortcuts = true;
   let anshitsuInitialSelection: AnshitsuInitialSelection = 'nonRaw';
@@ -54,8 +55,17 @@ export function readSettings(storage = browserStorage()): Settings {
     if (ZOOM_NAVIGATOR_POSITIONS.includes(value as ZoomNavigatorPosition)) zoomNavigatorPosition = value as ZoomNavigatorPosition;
   } catch { /* Invalid or blocked storage keeps the default Navigator position. */ }
   try {
-    const value = Number(storage?.getItem(HOME_THUMBNAIL_COLUMNS_KEY));
-    if (HOME_THUMBNAIL_COLUMNS.includes(value as HomeThumbnailColumns)) homeThumbnailColumns = value as HomeThumbnailColumns;
+    const width = storage?.getItem(HOME_THUMBNAIL_WIDTH_KEY);
+    const savedWidth = Number(width);
+    if (HOME_THUMBNAIL_WIDTHS.includes(savedWidth as HomeThumbnailWidth)) homeThumbnailWidth = savedWidth as HomeThumbnailWidth;
+    else if (width === null || width === undefined) {
+      const legacyRaw = storage?.getItem(HOME_THUMBNAIL_COLUMNS_KEY);
+      const legacyColumns = Number(legacyRaw);
+      if (legacyRaw !== null && Number.isInteger(legacyColumns) && legacyColumns >= 3 && legacyColumns <= 10) {
+        homeThumbnailWidth = (340 - legacyColumns * 20) as HomeThumbnailWidth;
+        storage?.setItem(HOME_THUMBNAIL_WIDTH_KEY, String(homeThumbnailWidth));
+      }
+    }
   } catch { /* Invalid or blocked storage keeps the default grid size. */ }
   try {
     const storedValue = storage?.getItem(RECENT_PHOTO_COUNT_KEY);
@@ -66,7 +76,7 @@ export function readSettings(storage = browserStorage()): Settings {
     dateLocale: readSetting(DATE_LOCALE_KEY, DATE_LOCALE_CHOICES, storage),
     weekStart: readSetting(WEEK_START_KEY, ['sunday', 'monday'] as const, storage),
     initialImage: readSetting(INITIAL_IMAGE_KEY, ['original', 'preview'] as const, storage),
-    homeThumbnailColumns,
+    homeThumbnailWidth,
     recentPhotoCount,
     showKeyboardShortcuts,
     anshitsuInitialSelection,
@@ -79,7 +89,7 @@ export function updateSetting<K extends keyof Settings>(key: K, value: Settings[
   if (key === 'zoomNavigatorPosition' && !ZOOM_NAVIGATOR_POSITIONS.includes(value as ZoomNavigatorPosition)) return;
   if (key === 'anshitsuInitialSelection' && !ANSHITSU_INITIAL_SELECTIONS.includes(value as AnshitsuInitialSelection)) return;
   settings = { ...settings, [key]: value };
-  const storageKey = { dateLocale: DATE_LOCALE_KEY, weekStart: WEEK_START_KEY, initialImage: INITIAL_IMAGE_KEY, homeThumbnailColumns: HOME_THUMBNAIL_COLUMNS_KEY, recentPhotoCount: RECENT_PHOTO_COUNT_KEY, showKeyboardShortcuts: SHOW_KEYBOARD_SHORTCUTS_KEY, anshitsuInitialSelection: ANSHITSU_INITIAL_SELECTION_KEY, zoomNavigatorPosition: ZOOM_NAVIGATOR_POSITION_KEY }[key];
+  const storageKey = { dateLocale: DATE_LOCALE_KEY, weekStart: WEEK_START_KEY, initialImage: INITIAL_IMAGE_KEY, homeThumbnailWidth: HOME_THUMBNAIL_WIDTH_KEY, recentPhotoCount: RECENT_PHOTO_COUNT_KEY, showKeyboardShortcuts: SHOW_KEYBOARD_SHORTCUTS_KEY, anshitsuInitialSelection: ANSHITSU_INITIAL_SELECTION_KEY, zoomNavigatorPosition: ZOOM_NAVIGATOR_POSITION_KEY }[key];
   try { browserStorage()?.setItem(storageKey, String(value)); } catch { /* Keep session preferences when storage is blocked. */ }
   listeners.forEach(listener => listener());
 }

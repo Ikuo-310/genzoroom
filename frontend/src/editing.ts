@@ -104,6 +104,7 @@ export function effectiveAdjustments(recipe: EditRecipe): EditRecipe['adjustment
     if (!recipe.gradingMidtonesEnabled) colorGrading = { ...colorGrading, midtonesTemperature: 0, midtonesTint: 0 };
     if (!recipe.gradingHighlightsEnabled) colorGrading = { ...colorGrading, highlightsTemperature: 0, highlightsTint: 0 };
   }
+  // Preserve legacy v18 flags in stored recipes without bypassing their numeric values.
   return colorGrading;
 }
 

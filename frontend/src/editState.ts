@@ -240,7 +240,10 @@ function validateEntry(value: unknown, index: number, stateFormatVersion: unknow
   const reset = RESET_EDIT_KEYS[kind];
   const colorCategoryFlags = ['whiteBalanceEnabled', 'colorEnabled'] as const;
   const colorCategoryEnabled = before.whiteBalanceEnabled && before.colorEnabled;
-  const valid = kind === 'allReset' || (numeric && changedFlags.length === 0 && changedAdjustments.every((key) => key === numeric))
+  // Legacy Color entries remain valid verbatim, including independently toggled category flags.
+  const legacyColor = (kind === 'colorToggle' && changedAdjustments.length === 0 && changedFlags.every(key => key === 'colorEnabled'))
+    || (kind === 'colorReset' && changedFlags.length === 0 && changedAdjustments.every(key => key === 'vibrance' || key === 'saturation'));
+  const valid = legacyColor || kind === 'allReset' || (numeric && changedFlags.length === 0 && changedAdjustments.every((key) => key === numeric))
     || (kind === 'colorToggle' && changedAdjustments.length === 0 && changedFlags.length > 0
       && changedFlags.every((key) => colorCategoryFlags.includes(key as typeof colorCategoryFlags[number]))
       && after.whiteBalanceEnabled === after.colorEnabled)

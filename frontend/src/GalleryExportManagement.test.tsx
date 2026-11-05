@@ -35,7 +35,7 @@ let root: Root;
 
 function Probe() {
   const location = useLocation();
-  return <output data-path={location.pathname}>{useAppSettings().homeThumbnailColumns}</output>;
+  return <output data-path={location.pathname}>{useAppSettings().homeThumbnailWidth}</output>;
 }
 async function mount(tab: HomeTab = 'recent', contentScrollTop = 0, active = true) {
   await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: '/', state: { homeReturn: {
@@ -68,7 +68,7 @@ beforeEach(async () => {
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function () { this.open = true; } });
   Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: function () { this.open = false; } });
   sessionStorage.clear(); clearWorkspaceSession(); await i18n.changeLanguage('en');
-  updateSetting('showKeyboardShortcuts', true); updateSetting('homeThumbnailColumns', 5);
+  updateSetting('showKeyboardShortcuts', true); updateSetting('homeThumbnailWidth', 240);
   for (const reader of [api.recent, api.favorites, api.album, api.day]) reader.mockReset().mockResolvedValue(photos);
   api.albums.mockReset().mockResolvedValue([album]); api.minYear.mockReset().mockResolvedValue(2002);
   api.heatmap.mockReset().mockResolvedValue({ year: 2026, month: 9, days: [] });
@@ -176,7 +176,7 @@ describe('Home Export management', () => {
     expect(toolbar.querySelectorAll('.export-action-group button')).toHaveLength(1);
     expect(toolbar.querySelector('[aria-haspopup], [role="menu"], #home-stacks-tab, .home-open-workspace')).toBeNull();
     await click('.thumbnail-size-icon:last-of-type');
-    expect(host.querySelector('output')?.textContent).toBe('4');
+    expect(host.querySelector('output')?.textContent).toBe('260');
   });
 
   it.each(['recent', 'favorites', 'albums', 'calendar'] as const)('retains %s detail, selection, anchor and scroll across Export with saved type filter ignored', async tab => {
@@ -373,7 +373,7 @@ describe('Export immersive Preview', () => {
     await openQueue([queued('a'), queued('b'), queued('c')]);
     await click('.export-selection .selection-all'); vi.useFakeTimers();
     await cardClick('b', { detail: 1 }); expect(exportSelected()).toEqual(['a', 'c', 'b']);
-    await act(async () => updateSetting('homeThumbnailColumns', 4));
+    await act(async () => updateSetting('homeThumbnailWidth', 260));
     await act(async () => vi.advanceTimersByTime(399)); expect(exportSelected()).toEqual(['a', 'c', 'b']);
     await act(async () => vi.advanceTimersByTime(1)); expect(exportSelected()).toEqual(['b']);
     await cardClick('a', { detail: 1, shiftKey: true }); expect(exportSelected()).toEqual(['a', 'c', 'b']);

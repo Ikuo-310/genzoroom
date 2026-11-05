@@ -6,10 +6,16 @@ Internal changes are omitted unless they affect users.
 
 ## [Unreleased]
 
+### Changed
+
 - Updated the Windows RAW engine to LightCraft v0.18.0, preserving compatibility with existing RAW Preview, White Balance, Color Grading, Export, and saved RAW Recipes while incorporating upstream RAW and GPU improvements. RAW support remains available for formats accepted by LightCraft without a manufacturer-specific restriction.
 - Windows LightCraft RAW development now includes three-band Color Grading for Shadows, Midtones, and Highlights, with Hue, Saturation, and Luminance sliders plus shared Blending and Balance controls. Hue uses a rainbow slider. Grading follows existing RAW saving, History, Undo/Redo, Reset, Export, and rendered-thumbnail paths, with improved compatibility for older RAW Recipes. JPEG Color Grading remains unchanged.
 - Windows RAW photos now show the existing Edited badge in Home and the Filmstrip when their saved or current DevelopSettings differ from that photo's import defaults. Stack aggregation and the Edited filter include RAW edit status.
 - Windows native RAW darkroom now offers one-shot Auto White Balance and a WB eyedropper for sampling a neutral point in the image. Both apply through existing RAW History, Undo/Redo, and Recipe saving; the picker supports Before/After views and Viewer Zoom/Pan.
+- Gallery (Recent, Favorites, Calendar, and Album details), the Album list, Export, and STACK now share eight fixed card-width presets from 140px to 280px (200px by default). Cards stay left-aligned at their selected width with fixed gaps; columns adapt to the available width, and existing saved column settings migrate to the equivalent width.
+
+- Reorganized JPEG development controls into Color, Basic, and Color Grading. Temperature and Tint now live under Color with Vibrance and Saturation. Per-adjustment ON/OFF switches were removed while retaining compatibility with existing saved Recipes.
+
 - JPEG History now groups repeated keyboard and wheel adjustments to the same control into one entry until another operation begins; idle time and Autosave no longer split it.
 - RAW History now displays all retained steps on initial load instead of paging in groups of 20.
 - Repeated keyboard and wheel adjustments to the same RAW control now stay in one History entry until an operation boundary.

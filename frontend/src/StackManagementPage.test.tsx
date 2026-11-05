@@ -9,7 +9,7 @@ import { SettingsProvider } from './SettingsDialog';
 import { PhotoSelectionBar } from './PhotoSelectionBar';
 import i18n from './i18n';
 import { frontendLogger } from './frontendLogging';
-import { HOME_THUMBNAIL_COLUMNS_KEY, updateSetting } from './appSettings';
+import { HOME_THUMBNAIL_WIDTH_KEY, updateSetting } from './appSettings';
 vi.mock('./useDevelopmentExclusions', () => ({ useDevelopmentExclusions: () => ({
   stateFor: () => ({ target: null, excluded: false, known: true }), setExcluded: async () => {}, generation: 0, failure: null,
 }) }));
@@ -41,7 +41,7 @@ beforeEach(async () => {
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function () { this.open = true; } });
   Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: function () { this.open = false; } });
   vi.stubGlobal('fetch', vi.fn(async () => new Response('{}')));
-  await i18n.changeLanguage('en'); sessionStorage.clear(); localStorage.clear(); updateSetting('showKeyboardShortcuts', true); updateSetting('homeThumbnailColumns', 6);
+  await i18n.changeLanguage('en'); sessionStorage.clear(); localStorage.clear(); updateSetting('showKeyboardShortcuts', true); updateSetting('homeThumbnailWidth', 200);
   api.detail.mockReset().mockImplementation(async (id: string) => ({ ...photos.find(a => a.id === id), exif: {}, preview_url: '/preview' }));
   api.resolve.mockReset().mockRejectedValue(new Error('No Stack fixture'));
   api.refresh.mockReset().mockImplementation(async (ids: string[], signal: AbortSignal) => ids.some(id => /^[0-9a-f]{8}-/i.test(id)) ? api.resolve([], signal) : []);
@@ -502,14 +502,14 @@ it('reuses the saved thumbnail controller outside content and updates shared col
   expect(host.querySelector('#stack-unmatched-heading')?.parentElement?.classList.contains('stack-unmatched-empty')).toBe(false);
   expect(host.querySelector('.stack-control-bar .thumbnail-size-control')).not.toBeNull(); expect(host.querySelector('.stack-content .thumbnail-size-control')).toBeNull();
   const page = host.querySelector<HTMLElement>('.stack-management-page')!;
-  expect(page.style.getPropertyValue('--stack-columns')).toBe('6');
+  expect(page.style.getPropertyValue('--stack-card-width')).toBe('200px');
   await click('.thumbnail-size-control [aria-label="Make thumbnails larger"]');
-  expect(localStorage.getItem(HOME_THUMBNAIL_COLUMNS_KEY)).toBe('5'); expect(page.style.getPropertyValue('--stack-columns')).toBe('5');
+  expect(localStorage.getItem(HOME_THUMBNAIL_WIDTH_KEY)).toBe('220'); expect(page.style.getPropertyValue('--stack-card-width')).toBe('220px');
   expect(host.querySelectorAll('.stack-candidate-grid, .stack-unmatched-grid')).toHaveLength(2);
   const slider = host.querySelector<HTMLInputElement>('.thumbnail-size-control input')!;
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(slider, '7'); slider.dispatchEvent(new Event('input', { bubbles: true })); });
-  expect(localStorage.getItem(HOME_THUMBNAIL_COLUMNS_KEY)).toBe('3'); expect(page.style.getPropertyValue('--stack-columns')).toBe('3');
-  await click('.stack-home-title'); expect(host.querySelector('.thumbnail-size-control input')?.getAttribute('aria-valuetext')).toBe('3 columns');
+  expect(localStorage.getItem(HOME_THUMBNAIL_WIDTH_KEY)).toBe('280'); expect(page.style.getPropertyValue('--stack-card-width')).toBe('280px');
+  await click('.stack-home-title'); expect(host.querySelector('.thumbnail-size-control input')?.getAttribute('aria-valuetext')).toBe('280 pixels');
 });
 
 it('exposes translated status text and tooltips while labels stay English', async () => {
@@ -578,9 +578,9 @@ it('clamps both grids to content width without writing the shared preference and
  expect(observed).not.toHaveBeenCalledWith(host.querySelector('.stack-content'));
  const page=host.querySelector<HTMLElement>('.stack-management-page')!;
  const change = async (width:number) => act(async () => resize([{contentRect:{width}} as ResizeObserverEntry], {} as ResizeObserver));
- await change(358); expect(page.style.getPropertyValue('--stack-effective-columns')).toBe('2');
- expect(page.style.getPropertyValue('--stack-columns')).toBe('6'); expect(localStorage.getItem(HOME_THUMBNAIL_COLUMNS_KEY)).toBe('6');
- await change(1200); expect(page.style.getPropertyValue('--stack-effective-columns')).toBe('6');
+ await change(358); expect(page.style.getPropertyValue('--stack-effective-columns')).toBe('1');
+ expect(page.style.getPropertyValue('--stack-card-width')).toBe('200px'); expect(localStorage.getItem(HOME_THUMBNAIL_WIDTH_KEY)).toBe('200');
+ await change(1200); expect(page.style.getPropertyValue('--stack-effective-columns')).toBe('5');
 });
 
 it('provides explicit error text for failed detail in addition to color', async () => {
@@ -869,7 +869,7 @@ it('blocks all manual editing until detail completion and cannot roll back subse
  await act(async()=>pending.splice(0).forEach(resolve=>resolve()));
  expect(host.querySelector<HTMLButtonElement>('.stack-purge-group')?.disabled).toBe(false);
  await click('.stack-purge-group');
- await act(async()=>{ updateSetting('homeThumbnailColumns',5); });
+ await act(async()=>{ updateSetting('homeThumbnailWidth',240); });
  expect(host.querySelectorAll('.stack-candidate-group')).toHaveLength(0); expect(unmatched()).toHaveLength(4);
 });
 it('asks before discarding edits, focuses Cancel, retains state on Cancel and resets on Continue', async () => {

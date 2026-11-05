@@ -89,3 +89,4 @@ Desktop.ini
 
 # Generated Tauri frontend assets; synchronized from frontend/dist by build scripts.
 /desktop/assets/
+/desktop/index.html

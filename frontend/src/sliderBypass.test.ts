@@ -45,6 +45,28 @@ function legacyEffective(recipe: ReturnType<typeof legacySnapshot>['currentRecip
 }
 
 describe('legacy individual flags and integrated Color category', () => {
+  it('restores independent legacy Color History without changing snapshots or false flags', () => {
+    const before = defaultRecipe();
+    Object.assign(before.adjustmentEnabled, { exposure: false, tint: false, shadowsTemperature: false });
+    Object.assign(before.adjustments, { temperature: 25, vibrance: 30, exposure: 1 });
+    const toggled = { ...before, colorEnabled: false };
+    const reset = { ...toggled, adjustments: { ...toggled.adjustments, vibrance: 0 } };
+    const saved = { ...snapshot(), currentRecipe: reset, historyCursor: 2, history: [
+      { kind: 'colorToggle' as const, before, after: toggled },
+      { kind: 'colorReset' as const, before: toggled, after: reset },
+    ] };
+    const original = structuredClone(saved);
+    const restored = restoreEditSession(saved);
+    expect(restored.ok).toBe(true);
+    if (!restored.ok) throw new Error(JSON.stringify(restored.issues));
+    expect(snapshot(restored.value)).toEqual(saved);
+    expect(saved).toEqual(original);
+    expect(editSession(restored.value, { type: 'undo' }).recipe).toEqual(toggled);
+    const pending = editSession(restored.value, { type: 'exposure', value: 2 });
+    expect(editSession(pending, { type: 'toggleAdjustment', id: 'exposure' })).toBe(pending);
+    expect(effectiveAdjustments(reset)).toMatchObject({ temperature: 0, vibrance: 0, exposure: 1 });
+  });
+
   it('keeps all sixteen v18 fields but ignores them in effective and pixel rendering', () => {
     const recipe = defaultRecipe();
     for (const key of ADJUSTMENT_IDS) recipe.adjustments[key] = key === 'exposure' ? 1 : 20;
