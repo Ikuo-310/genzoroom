@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { expect, it } from 'vitest';
 it('uses shared responsive columns for both grids and keeps excess group members inside their group', () => {
   const css = readFileSync('src/style.css', 'utf8');
-  expect(css).toContain('.stack-candidate-grid, .stack-unmatched-grid { display: grid; grid-template-columns: repeat(var(--stack-effective-columns), var(--stack-card-width));');
+  expect(css).toContain('.stack-candidate-grid, .stack-unmatched-grid { display: grid; grid-template-columns: repeat(var(--stack-effective-columns), var(--stack-card-width)); justify-content: center;');
   expect(css).toContain('grid-column: span min(var(--stack-member-count), var(--stack-effective-columns))');
   expect(css).toContain('.stack-group-members { display: grid; grid-template-columns: repeat(min(var(--stack-member-count), var(--stack-effective-columns)), var(--stack-card-width))');
   expect(css).not.toContain('grid-auto-flow: dense');

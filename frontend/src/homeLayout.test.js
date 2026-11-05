@@ -108,6 +108,7 @@ describe('Home and thumbnail layout', () => {
     const group = getComputedStyle(content.querySelector('.export-stack-group'));
     const members = getComputedStyle(content.querySelector('.export-stack-members'));
     expect(grid.display).toBe('grid');
+    expect(grid.justifyContent).toBe('center');
     expect(grid.gridTemplateColumns).toContain('var(--export-columns)');
     expect(grid.minWidth).toBe('0');
     expect(group.gridColumn).toBe('span var(--export-group-columns)');
@@ -490,6 +491,7 @@ describe('Home and thumbnail layout', () => {
     const grid = document.createElement('div'); grid.className = 'album-grid';
     grid.style.setProperty('--album-card-width', '200px'); host.append(grid);
     expect(getComputedStyle(grid).gridTemplateColumns).toContain('var(--album-card-width, 200px)');
+    expect(getComputedStyle(grid).justifyContent).toBe('center');
     expect(getComputedStyle(grid).gap).toBe('16px');
   });
   it('keeps date-detail arrows beside the shrinking centered title without shrinking the buttons', () => {
