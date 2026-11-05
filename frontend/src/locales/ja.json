@@ -652,6 +652,8 @@
     "reset": "リセット",
     "basicOn": "ON",
     "collapseDetail": "ディテールを折りたたむ",
+    "collapseLensCorrections": "レンズ補正を折りたたむ",
+    "expandLensCorrections": "レンズ補正を展開する",
     "collapseEffects": "エフェクトを折りたたむ",
     "expandEffects": "エフェクトを展開する",
     "enableEffects": "エフェクトを有効にする",

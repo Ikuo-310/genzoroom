@@ -518,17 +518,12 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .raw-adjustment-controls .adjustment-control.is-dependent-disabled .adjustment-number,
 .raw-adjustment-controls .adjustment-control.is-dependent-disabled .adjustment-reset { cursor: not-allowed; }
 .raw-optics-panel { min-width: 0; }
-.raw-optics-header { display: flex; min-width: 0; align-items: center; gap: 4px; margin: 3px 0 5px; border-left: 2px solid #626266; border-radius: 3px; background: #232325; padding: 4px 5px 4px 7px; }
-.raw-optics-header h4 { flex: 1 1 auto; min-width: 0; margin: 0; overflow: hidden; color: #e0e0e2; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.03em; text-overflow: ellipsis; white-space: nowrap; }
-.raw-optics-header .adjustment-category-icon, .raw-optics-header .adjustment-category-reset { height: 24px; }
-.raw-optics-header .adjustment-category-icon { width: 24px; }
+.raw-optics-header { margin: 3px 0 5px; }
 .raw-optics-profile-status, .raw-optics-unavailable { margin: 2px 0 7px; color: #aaa; font-size: 0.66rem; line-height: 1.35; overflow-wrap: anywhere; }
 .raw-optics-unavailable { color: #c7a28b; }
-.raw-optics-flag-row { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 5px; min-height: 26px; }
-.raw-optics-flag { display: flex; min-width: 0; align-items: center; gap: 5px; color: #ddd; font-size: 0.7rem; }
+.raw-optics-flag { display: flex; min-width: 0; min-height: 26px; align-items: center; gap: 5px; color: #ddd; font-size: 0.7rem; }
 .raw-optics-flag input { flex: 0 0 auto; margin: 0; accent-color: #9caec4; }
 .raw-optics-flag span { min-width: 0; overflow-wrap: anywhere; }
-.raw-optics-flag-row .adjustment-reset { flex: 0 0 auto; color: #d8d8da; background: #242426; border: 1px solid #48484b; border-radius: 4px; padding: 2px 5px; font: inherit; font-size: 0.64rem; }
 .raw-optics-fold-header { display: flex; min-width: 0; align-items: center; gap: 4px; margin: 5px 0 3px; border-radius: 4px; background: #232325; padding: 2px 4px; }
 .raw-optics-fold-header .adjustment-category-title { flex: 1 1 auto; min-height: 25px; font-size: 0.7rem; font-weight: 700; }
 .raw-optics-color-heading.is-purple { color: #c18ad3; }

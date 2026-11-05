@@ -662,6 +662,8 @@
     "reset": "Reset",
     "basicOn": "ON",
     "collapseDetail": "Collapse Detail",
+    "collapseLensCorrections": "Collapse Lens Corrections",
+    "expandLensCorrections": "Expand Lens Corrections",
     "collapseEffects": "Collapse Effects",
     "expandEffects": "Expand Effects",
     "enableEffects": "Enable Effects",

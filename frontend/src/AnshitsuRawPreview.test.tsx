@@ -209,9 +209,15 @@ it('places all RAW optics controls after NR, uses readback History flags and pre
       recipeRevision: request.expectedRecipeRevision + 1, recipeFingerprint: fingerprint, settingsFingerprint: fingerprint,
       lensProfileInfo: { cameraMake: 'Example', cameraModel: 'Body', lensMake: 'Example', lensModel: 'Lens', lensId: 'lens-id',
         profileAvailable: true, profileSource: 'database' as const, profileName: 'Example Lens Profile', profileApplied: false } };
-    if (request.operation?.kind === 'opticsFlag') next.opticsFlags = { ...next.opticsFlags,
-      remove_ca: request.operation.metadata.enabled };
+    if (request.operation?.kind === 'opticsFlag') {
+      const { control, enabled } = request.operation.metadata;
+      next.opticsFlags = { ...next.opticsFlags, [control === 'optics.lens_profile' ? 'lens_profile' : 'remove_ca']: enabled };
+    }
     if (request.operation?.kind === 'sectionToggle') next.sections[request.operation.metadata.section] = request.operation.metadata.enabled;
+    if (request.operation?.kind === 'sectionReset' && request.operation.metadata.section === 'optics') {
+      next.sections.optics = true;
+      next.opticsFlags = { remove_ca: false, lens_profile: false };
+    }
     return rawHistoryResult({ ...request, doc: next });
   });
   await mount();
@@ -220,7 +226,22 @@ it('places all RAW optics controls after NR, uses readback History flags and pre
   expect(titles.slice(-2)).toEqual(['Noise Reduction', 'Color Noise Reduction']);
   const optics = category.querySelector<HTMLElement>('.raw-optics-panel')!;
   expect(optics).not.toBeNull();
+  const opticsTitle = optics.querySelector<HTMLButtonElement>('.raw-optics-header .adjustment-category-title')!;
+  expect(opticsTitle.getAttribute('aria-expanded')).toBe('true');
+  expect(optics.getAttribute('aria-label')).toBe('Lens Corrections');
+  const historyBeforeFold = commitHistory.mock.calls.length;
+  act(() => opticsTitle.click());
+  expect(opticsTitle.getAttribute('aria-expanded')).toBe('false');
+  expect(optics.querySelector('.raw-optics-content')).toBeNull();
+  expect(optics.querySelectorAll('.adjustment-category-actions button')).toHaveLength(2);
+  expect(optics.querySelector('.raw-optics-header .adjustment-category-reset')).not.toBeNull();
+  expect(commitHistory).toHaveBeenCalledTimes(historyBeforeFold);
+  act(() => opticsTitle.click());
+  expect(opticsTitle.getAttribute('aria-expanded')).toBe('true');
   expect(optics.querySelectorAll('.adjustment-range')).toHaveLength(5);
+  const flags = [...optics.querySelectorAll<HTMLLabelElement>('.raw-optics-flag')];
+  expect(flags).toHaveLength(2);
+  expect(flags.map(label => label.children.length)).toEqual([2, 2]);
   expect(optics.textContent).toContain('Profile: Lens database · Example Lens Profile');
   const removeCaFlag = [...optics.querySelectorAll<HTMLLabelElement>('.raw-optics-flag')]
     .find(label => label.textContent?.includes('Remove Chromatic Aberration'))!.querySelector<HTMLInputElement>('input')!;
@@ -228,9 +249,22 @@ it('places all RAW optics controls after NR, uses readback History flags and pre
   expect(commitHistory).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'operate', operation: {
     kind: 'opticsFlag', metadata: { control: 'optics.remove_ca', enabled: true } } }));
   expect([...optics.querySelectorAll<HTMLInputElement>('.raw-optics-flag input')][0].checked).toBe(true);
+  act(() => optics.querySelector<HTMLInputElement>('.raw-optics-flag input')!.click()); await flush();
+  expect(commitHistory).toHaveBeenLastCalledWith(expect.objectContaining({ operation: {
+    kind: 'opticsFlag', metadata: { control: 'optics.remove_ca', enabled: false } } }));
+  expect([...optics.querySelectorAll<HTMLInputElement>('.raw-optics-flag input')][0].checked).toBe(false);
   expect(optics.querySelectorAll('.adjustment-range')).toHaveLength(5);
   expect(optics.querySelector<HTMLInputElement>('[data-adjustment-id="optics.profileDistortion"]')?.value).toBe('100');
   expect(optics.querySelector<HTMLInputElement>('[data-adjustment-id="optics.profileVignetting"]')?.value).toBe('100');
+  const profileFlag = flags[1].querySelector<HTMLInputElement>('input')!;
+  act(() => profileFlag.click()); await flush();
+  expect(commitHistory).toHaveBeenLastCalledWith(expect.objectContaining({ operation: {
+    kind: 'opticsFlag', metadata: { control: 'optics.lens_profile', enabled: false } } }));
+  expect(optics.querySelector('[data-adjustment-id="optics.profileDistortion"]')).toBeNull();
+  act(() => [...optics.querySelectorAll<HTMLInputElement>('.raw-optics-flag input')][1].click()); await flush();
+  expect(commitHistory).toHaveBeenLastCalledWith(expect.objectContaining({ operation: {
+    kind: 'opticsFlag', metadata: { control: 'optics.lens_profile', enabled: true } } }));
+  expect(optics.querySelector<HTMLInputElement>('[data-adjustment-id="optics.profileDistortion"]')?.value).toBe('100');
   const detailToggle = category.querySelector<HTMLButtonElement>('[data-category-switch]')!;
   act(() => detailToggle.click()); await flush();
   expect(optics.querySelector<HTMLInputElement>('[data-adjustment-id="optics.distortion"]')!.disabled).toBe(false);
@@ -253,6 +287,29 @@ it('places all RAW optics controls after NR, uses readback History flags and pre
   }
   expect(optics.querySelector<HTMLInputElement>('[data-adjustment-id="optics.defringePurpleHueLo"]')!.disabled).toBe(true);
   expect(optics.querySelector<HTMLInputElement>('[data-adjustment-id="optics.caRed"]')!.disabled).toBe(false);
+  const gradient = (id: string) => optics.querySelector<HTMLInputElement>(`[data-adjustment-id="${id}"]`)!.style.getPropertyValue('--adjustment-track-gradient');
+  expect(gradient('optics.defringePurpleHueLo')).toBe('linear-gradient(to right, #3d70d5 0%, #9957bd 100%)');
+  expect(gradient('optics.defringePurpleHueHi')).toBe(gradient('optics.defringePurpleHueLo'));
+  expect(gradient('optics.defringeGreenHueLo')).toBe('linear-gradient(to right, #c8d449 0%, #42b85e 100%)');
+  expect(gradient('optics.defringeGreenHueHi')).toBe(gradient('optics.defringeGreenHueLo'));
+  for (const [control, expected] of [['optics.defringePurpleHueLo', '30'], ['optics.defringePurpleHueHi', '70'],
+    ['optics.defringeGreenHueLo', '40'], ['optics.defringeGreenHueHi', '60']])
+    expect(optics.querySelector<HTMLInputElement>(`[data-adjustment-id="${control}"]`)!.value).toBe(expected);
+  const historyBeforeNestedFold = commitHistory.mock.calls.length;
+  act(() => opticsTitle.click());
+  expect(optics.querySelector('.raw-optics-content')).toBeNull();
+  expect(commitHistory).toHaveBeenCalledTimes(historyBeforeNestedFold);
+  act(() => opticsTitle.click());
+  expect(optics.querySelector('.raw-optics-fold-header button')?.getAttribute('aria-expanded')).toBe('true');
+  expect(optics.querySelector<HTMLInputElement>('[data-adjustment-id="optics.distortion"]')?.value).toBe('0');
+  const opticsPower = optics.querySelector<HTMLButtonElement>('.raw-optics-header [aria-pressed]')!;
+  act(() => opticsPower.click()); await flush();
+  expect(commitHistory).toHaveBeenLastCalledWith(expect.objectContaining({ operation: {
+    kind: 'sectionToggle', metadata: { section: 'optics', enabled: false } } }));
+  expect(optics.querySelector('.raw-optics-header .adjustment-category-reset')).not.toBeNull();
+  act(() => optics.querySelector<HTMLButtonElement>('.raw-optics-header .adjustment-category-reset')!.click()); await flush();
+  expect(commitHistory).toHaveBeenLastCalledWith(expect.objectContaining({ operation: {
+    kind: 'sectionReset', metadata: { section: 'optics' } } }));
   act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[2].click()); await flush();
   expect(host.querySelector('.raw-optics-panel')?.textContent).toContain('Profile information is unavailable');
   expect(host.querySelector('[data-adjustment-id="optics.profileDistortion"]')).toBeNull();
@@ -482,7 +539,7 @@ it.each(['ja', 'en'])('separates NR subheadings, accessible Detail names and zer
   const category = host.querySelectorAll('.raw-adjustment-category')[4];
   expect([...category.querySelectorAll('.raw-detail-controls h4')].map(item => item.textContent)).toEqual(language === 'ja'
     ? ['シャープネス', 'ノイズリダクション', 'カラーノイズリダクション'] : ['Sharpening', 'Noise Reduction', 'Color Noise Reduction']);
-  expect(category.querySelector('.raw-optics-header h4')?.textContent).toBe(language === 'ja' ? 'レンズ補正' : 'Lens Corrections');
+  expect(category.querySelector('.raw-optics-header .adjustment-category-label')?.textContent).toBe(language === 'ja' ? 'レンズ補正' : 'Lens Corrections');
   expect(category.querySelector('.raw-optics-flag')?.textContent).toContain(language === 'ja' ? '色収差を除去' : 'Remove Chromatic Aberration');
   const lum = category.querySelector<HTMLInputElement>('[data-adjustment-id="detail.nrDetail"]')!;
   const color = category.querySelector<HTMLInputElement>('[data-adjustment-id="detail.nrColorDetail"]')!;

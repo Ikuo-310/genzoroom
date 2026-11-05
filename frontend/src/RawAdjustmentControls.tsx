@@ -230,6 +230,8 @@ function RawLensCorrections({ raw, locked, operate }: {
   const { t } = useTranslation();
   const settings = raw.settings!;
   const [defringeOpen, setDefringeOpen] = useState(false);
+  const [expanded, setExpanded] = useState(true);
+  const contentId = useId();
   const baseDisabled = locked || !settings.sections.optics;
   const info = settings.lensProfileInfo;
   const profileUnavailable = info.profileAvailable === false;
@@ -252,30 +254,34 @@ function RawLensCorrections({ raw, locked, operate }: {
       resetDisabled={locked || dependent || control.startsWith('optics.profile') && profileUnavailable}
       onChange={next => raw.changeControls({ [control]: next })} onCommit={() => raw.flushControls(control)} />;
   };
-  const flag = (id: RawOpticsFlagId, key: string, checked: boolean) => <div className="raw-optics-flag-row" key={id}>
-    <label className="raw-optics-flag"><input type="checkbox" checked={checked} disabled={locked || !settings.sections.optics}
+  const flag = (id: RawOpticsFlagId, key: string, checked: boolean) => <label className="raw-optics-flag" key={id}>
+    <input type="checkbox" checked={checked} disabled={locked || !settings.sections.optics}
       onChange={event => operate({ kind: 'opticsFlag', metadata: { control: id, enabled: event.currentTarget.checked } })} />
-      <span>{t(`workspace.rawPreview.${key}`)}</span></label>
-    <button className="adjustment-reset" type="button" disabled={locked}
-      onClick={() => operate({ kind: 'opticsFlagReset', metadata: { control: id } })}
-      aria-label={t(`workspace.rawPreview.${key}Reset`)} title={t(`workspace.rawPreview.${key}Reset`)}>{t('workspace.reset')}</button>
-  </div>;
-  const purpleHue = 'linear-gradient(to right, #777 0%, #ad65bd 25%, #8756b4 55%, #ce75bf 82%, #777 100%)';
-  const greenHue = 'linear-gradient(to right, #777 0%, #8bb548 25%, #40ad76 55%, #9dbd52 82%, #777 100%)';
+    <span>{t(`workspace.rawPreview.${key}`)}</span></label>;
+  const purpleHue = 'linear-gradient(to right, #3d70d5 0%, #9957bd 100%)';
+  const greenHue = 'linear-gradient(to right, #c8d449 0%, #42b85e 100%)';
   return <div className="raw-optics-panel" aria-label={t('workspace.rawPreview.lensCorrections')}>
     <div className="raw-adjustment-subcategory-divider" aria-hidden="true" />
-    <div className="raw-optics-header">
-      <h4>{t('workspace.rawPreview.lensCorrections')}</h4>
-      <button type="button" className={`adjustment-category-icon${settings.sections.optics ? '' : ' is-off'}`}
-        disabled={locked} aria-pressed={settings.sections.optics}
-        aria-label={t(`workspace.rawPreview.${settings.sections.optics ? 'disable' : 'enable'}LensCorrections`)}
-        title={t(`workspace.rawPreview.${settings.sections.optics ? 'disable' : 'enable'}LensCorrections`)}
-        onClick={() => operate({ kind: 'sectionToggle', metadata: { section: 'optics', enabled: !settings.sections.optics } })}>⏻</button>
-      <button type="button" className="adjustment-category-reset" disabled={locked}
-        aria-label={t('workspace.rawPreview.resetLensCorrections')} title={t('workspace.rawPreview.resetLensCorrections')}
-        onClick={() => operate({ kind: 'sectionReset', metadata: { section: 'optics' } })}>{t('workspace.reset')}</button>
+    <div className="adjustment-category-header raw-optics-header">
+      <h3><button type="button" className="adjustment-category-title" aria-expanded={expanded} aria-controls={contentId}
+        aria-label={t(`workspace.${expanded ? 'collapse' : 'expand'}LensCorrections`)}
+        onClick={() => setExpanded(value => !value)} onFocus={focusAdjustmentCategory}
+        onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>
+        <span className="adjustment-category-chevron" aria-hidden="true">{expanded ? '▾' : '▸'}</span>
+        <span className="adjustment-category-label">{t('workspace.rawPreview.lensCorrections')}</span>
+      </button></h3>
+      <div className="adjustment-category-actions">
+        <button type="button" className={`adjustment-category-icon${settings.sections.optics ? '' : ' is-off'}`}
+          disabled={locked} aria-pressed={settings.sections.optics}
+          aria-label={t(`workspace.rawPreview.${settings.sections.optics ? 'disable' : 'enable'}LensCorrections`)}
+          title={t(`workspace.rawPreview.${settings.sections.optics ? 'disable' : 'enable'}LensCorrections`)}
+          onClick={() => operate({ kind: 'sectionToggle', metadata: { section: 'optics', enabled: !settings.sections.optics } })}>⏻</button>
+        <button type="button" className="adjustment-category-reset" disabled={locked}
+          aria-label={t('workspace.rawPreview.resetLensCorrections')} title={t('workspace.rawPreview.resetLensCorrections')}
+          onClick={() => operate({ kind: 'sectionReset', metadata: { section: 'optics' } })}>{t('workspace.reset')}</button>
+      </div>
     </div>
-    <div className="raw-optics-content">
+    {expanded && <div id={contentId} className="adjustment-category-content"><div className="raw-optics-content">
       {flag('optics.remove_ca', 'removeChromaticAberration', settings.opticsFlags.remove_ca)}
       {flag('optics.lens_profile', 'enableProfileCorrections', settings.opticsFlags.lens_profile)}
       <p className="raw-optics-profile-status" role="status">
@@ -314,6 +320,6 @@ function RawLensCorrections({ raw, locked, operate }: {
         {slider('optics.caRed', 'caRed')}
         {slider('optics.caBlue', 'caBlue')}
       </>}
-    </div>
+    </div></div>}
   </div>;
 }
