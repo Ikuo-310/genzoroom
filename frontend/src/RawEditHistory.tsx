@@ -28,17 +28,17 @@ const labels: Record<RawHistoryControlId, string> = {
   'detail.nrLuminance': 'rawPreview.nrLuminance', 'detail.nrDetail': 'rawPreview.nrDetailName',
   'detail.nrColor': 'rawPreview.nrColor', 'detail.nrColorDetail': 'rawPreview.nrColorDetailName',
   'detail.nrColorSmoothness': 'rawPreview.nrColorSmoothness',
-  'optics.distortion': 'rawPreview.opticsControls.distortion', 'optics.vignetting': 'rawPreview.opticsControls.vignetting',
-  'optics.vignettingMidpoint': 'rawPreview.opticsControls.vignettingMidpoint',
-  'optics.profileDistortion': 'rawPreview.opticsControls.profileDistortion',
-  'optics.profileVignetting': 'rawPreview.opticsControls.profileVignetting',
-  'optics.defringePurple': 'rawPreview.opticsControls.defringePurple',
-  'optics.defringePurpleHueLo': 'rawPreview.opticsControls.defringePurpleHueLo',
-  'optics.defringePurpleHueHi': 'rawPreview.opticsControls.defringePurpleHueHi',
-  'optics.defringeGreen': 'rawPreview.opticsControls.defringeGreen',
-  'optics.defringeGreenHueLo': 'rawPreview.opticsControls.defringeGreenHueLo',
-  'optics.defringeGreenHueHi': 'rawPreview.opticsControls.defringeGreenHueHi',
-  'optics.caRed': 'rawPreview.opticsControls.caRed', 'optics.caBlue': 'rawPreview.opticsControls.caBlue' } as const;
+  'optics.distortion': 'rawPreview.opticsDistortion', 'optics.vignetting': 'rawPreview.opticsVignetting',
+  'optics.vignettingMidpoint': 'rawPreview.vignettingMidpoint',
+  'optics.profileDistortion': 'rawPreview.profileDistortion',
+  'optics.profileVignetting': 'rawPreview.profileVignetting',
+  'optics.defringePurple': 'rawPreview.purpleAmount',
+  'optics.defringePurpleHueLo': 'rawPreview.purpleHueLo',
+  'optics.defringePurpleHueHi': 'rawPreview.purpleHueHi',
+  'optics.defringeGreen': 'rawPreview.greenAmount',
+  'optics.defringeGreenHueLo': 'rawPreview.greenHueLo',
+  'optics.defringeGreenHueHi': 'rawPreview.greenHueHi',
+  'optics.caRed': 'rawPreview.caRed', 'optics.caBlue': 'rawPreview.caBlue' } as const;
 const formatters: Record<RawHistoryControlId, (value: number) => string> = {
   'grading.shadows.hue': value => value.toFixed(0) + '°',
   'grading.shadows.sat': value => value.toFixed(0),
@@ -69,7 +69,11 @@ const formatters: Record<RawHistoryControlId, (value: number) => string> = {
   'optics.defringeGreenHueHi': value => value.toFixed(0), 'optics.caRed': value => value.toFixed(0),
   'optics.caBlue': value => value.toFixed(0) };
 const flagLabels: Record<RawOpticsFlagId, string> = {
-  'optics.remove_ca': 'rawPreview.opticsControls.removeCa', 'optics.lens_profile': 'rawPreview.opticsControls.lensProfile',
+  'optics.remove_ca': 'rawPreview.removeChromaticAberration', 'optics.lens_profile': 'rawPreview.enableProfileCorrections',
+};
+const flagResetLabels: Record<RawOpticsFlagId, string> = {
+  'optics.remove_ca': 'workspace.rawPreview.removeChromaticAberrationReset',
+  'optics.lens_profile': 'workspace.rawPreview.enableProfileCorrectionsReset',
 };
 
 function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t']) {
@@ -77,10 +81,10 @@ function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t'
   if (step.kind === 'vignetteStyle')
     return `${t('workspace.rawPreview.vignetteMode')}: ${t(`workspace.rawPreview.vignetteStyles.${step.metadata.style}`)}`;
   if (step.kind === 'opticsFlag' || step.kind === 'opticsFlagReset') {
-    const flag = step.metadata.control as RawOpticsFlagId, label = t(`workspace.${flagLabels[flag]}`);
+    const flag = step.metadata.control as RawOpticsFlagId;
+    const label = t(step.kind === 'opticsFlagReset' ? flagResetLabels[flag] : `workspace.${flagLabels[flag]}`);
     const change = step.flagChanges?.find(item => item.control === flag);
-    return label + (step.kind === 'opticsFlagReset' ? ` ${t('workspace.reset')}` : '')
-      + (change ? ` ${t(change.before ? 'workspace.basicOn' : 'workspace.basicOff')} → ${t(change.after ? 'workspace.basicOn' : 'workspace.basicOff')}` : '');
+    return label + (change ? ` ${t(change.before ? 'workspace.basicOn' : 'workspace.basicOff')} → ${t(change.after ? 'workspace.basicOn' : 'workspace.basicOff')}` : '');
   }
   const control = step.metadata.control as RawHistoryControlId | undefined;
   const reset = step.kind === 'controlReset';
@@ -94,11 +98,13 @@ function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t'
     const change = step.changes?.find(item => item.control === control);
     return label + (change ? ` ${pair(change)}` : '');
   }
+  const opticsSection = step.metadata.section === 'optics';
   const operation = step.kind === 'wbPick' ? t('workspace.rawPreview.wbPick') : step.kind === 'wbAuto' ? t('workspace.rawPreview.aw') : step.kind === 'allReset' ? t('workspace.allReset')
-    : t(step.metadata.section === 'grading' ? 'workspace.rawPreview.gradingCategory' : step.metadata.section === 'vignette' ? 'workspace.rawPreview.vignette'
+    : opticsSection && step.kind === 'sectionReset' ? t('workspace.rawPreview.resetLensCorrections')
+      : t(step.metadata.section === 'grading' ? 'workspace.rawPreview.gradingCategory' : step.metadata.section === 'vignette' ? 'workspace.rawPreview.vignette'
       : step.metadata.section === 'effects' ? step.kind === 'sectionReset' ? 'workspace.rawPreview.basicEffects' : 'workspace.rawPreview.effectsCategory'
       : step.metadata.section === 'light' ? 'workspace.basic' : step.metadata.section === 'detail'
-      ? 'workspace.rawPreview.detailCategory' : step.metadata.section === 'optics' ? 'workspace.rawPreview.opticsCategory' : 'workspace.rawPreview.colorCategory')
+      ? 'workspace.rawPreview.detailCategory' : opticsSection ? 'workspace.rawPreview.lensCorrections' : 'workspace.rawPreview.colorCategory')
       + ' ' + t(step.kind === 'sectionToggle' ? step.metadata.enabled ? 'workspace.basicOn' : 'workspace.basicOff' : 'workspace.reset');
   const changes = step.changes;
   const numeric = changes?.map(change => `${name(change.control)} ${pair(change)}`) ?? [];

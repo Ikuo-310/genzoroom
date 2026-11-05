@@ -165,3 +165,53 @@ it.each(['ja','en'])('distinguishes move/resize and lock/unlock metadata in %s',
  const markup=renderToStaticMarkup(<RawEditHistory raw={rawHistory(steps,4) as never} disabled={false} onReset={()=>{}}/>);
  for(const label of language==='en'?['Crop Move','Crop Resize','Aspect Lock','Aspect Unlock']:['切り抜き移動','切り抜きサイズ変更','縦横比の固定','縦横比の固定解除'])expect(markup).toContain(label);
 });
+
+it.each(['ja', 'en'])('uses registered Optics labels for controls, resets, flags, and section operations in %s', async language => {
+  await i18n.changeLanguage(language);
+  const controls = [
+    ['optics.distortion', ['ゆがみ', 'Distortion'], ['ゆがみをリセット', 'Reset distortion']],
+    ['optics.vignetting', ['周辺光量補正', 'Vignetting'], ['周辺光量補正をリセット', 'Reset vignetting']],
+    ['optics.vignettingMidpoint', ['中心点', 'Midpoint'], ['中心点をリセット', 'Reset vignetting midpoint']],
+    ['optics.profileDistortion', ['ゆがみ補正量', 'Profile Distortion'], ['ゆがみ補正量をリセット', 'Reset profile distortion']],
+    ['optics.profileVignetting', ['周辺光量補正量', 'Profile Vignetting'], ['周辺光量補正量をリセット', 'Reset profile vignetting']],
+    ['optics.defringePurple', ['パープルの適用量', 'Purple Amount'], ['パープルの適用量をリセット', 'Reset purple amount']],
+    ['optics.defringePurpleHueLo', ['パープルの色相下限', 'Purple Hue Lower Bound'], ['パープルの色相下限をリセット', 'Reset purple hue lower bound']],
+    ['optics.defringePurpleHueHi', ['パープルの色相上限', 'Purple Hue Upper Bound'], ['パープルの色相上限をリセット', 'Reset purple hue upper bound']],
+    ['optics.defringeGreen', ['グリーンの適用量', 'Green Amount'], ['グリーンの適用量をリセット', 'Reset green amount']],
+    ['optics.defringeGreenHueLo', ['グリーンの色相下限', 'Green Hue Lower Bound'], ['グリーンの色相下限をリセット', 'Reset green hue lower bound']],
+    ['optics.defringeGreenHueHi', ['グリーンの色相上限', 'Green Hue Upper Bound'], ['グリーンの色相上限をリセット', 'Reset green hue upper bound']],
+    ['optics.caRed', ['赤／シアンのフリンジ', 'Red/Cyan Fringing'], ['赤／シアン補正をリセット', 'Reset red/cyan correction']],
+    ['optics.caBlue', ['青／黄のフリンジ', 'Blue/Yellow Fringing'], ['青／黄補正をリセット', 'Reset blue/yellow correction']],
+  ] as const;
+  const steps: RawHistoryStep[] = controls.flatMap(([control], index) => [
+    { stepId: `${index}-edit`, kind: 'control', metadata: { control }, createdAt: '', changes: [{ control, before: 0, after: 1 }] },
+    { stepId: `${index}-reset`, kind: 'controlReset', metadata: { control }, createdAt: '', changes: [{ control, before: 1, after: 0 }] },
+  ]);
+  steps.push(
+    { stepId: 'remove-ca', kind: 'opticsFlag', metadata: { control: 'optics.remove_ca', enabled: true }, createdAt: '',
+      changes: [], flagChanges: [{ control: 'optics.remove_ca', before: false, after: true }] },
+    { stepId: 'lens-profile', kind: 'opticsFlag', metadata: { control: 'optics.lens_profile', enabled: false }, createdAt: '',
+      changes: [], flagChanges: [{ control: 'optics.lens_profile', before: true, after: false }] },
+    { stepId: 'remove-ca-reset', kind: 'opticsFlagReset', metadata: { control: 'optics.remove_ca' }, createdAt: '',
+      changes: [], flagChanges: [{ control: 'optics.remove_ca', before: true, after: false }] },
+    { stepId: 'lens-profile-reset', kind: 'opticsFlagReset', metadata: { control: 'optics.lens_profile' }, createdAt: '',
+      changes: [], flagChanges: [{ control: 'optics.lens_profile', before: true, after: false }] },
+    { stepId: 'section-off', kind: 'sectionToggle', metadata: { section: 'optics', enabled: false }, createdAt: '', changes: [] },
+    { stepId: 'section-reset', kind: 'sectionReset', metadata: { section: 'optics' }, createdAt: '', changes: [
+      { control: 'optics.distortion', before: 1, after: 0 }, { control: 'optics.caRed', before: 2, after: 0 },
+    ] },
+  );
+  const markup = renderToStaticMarkup(<RawEditHistory raw={rawHistory(steps, steps.length) as never} disabled={false} onReset={() => {}} />);
+  const localeIndex = language === 'ja' ? 0 : 1;
+  for (const [, label, reset] of controls) {
+    expect(markup).toContain(label[localeIndex]);
+    expect(markup).toContain(reset[localeIndex]);
+  }
+  for (const label of language === 'ja'
+    ? ['色収差を除去 OFF → ON', 'レンズ補正を有効にする ON → OFF', '色収差除去をリセット ON → OFF',
+      'レンズ補正をリセット ON → OFF', 'レンズ補正 OFF', 'レンズ補正をリセット:']
+    : ['Remove Chromatic Aberration OFF → ON', 'Enable Profile Corrections ON → OFF', 'Reset chromatic aberration removal ON → OFF',
+      'Reset profile corrections ON → OFF', 'Lens Corrections OFF', 'Reset lens corrections:']) expect(markup).toContain(label);
+  expect(markup).not.toContain('rawPreview.opticsControls');
+  expect(markup).not.toContain('workspace.');
+});
