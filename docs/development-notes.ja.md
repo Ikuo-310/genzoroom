@@ -6,7 +6,9 @@ Optics数値13項目を既存の数値Control Historyへ接続し、`control`／
 
 既存Recipe形式／DB schema／独立History ownerは変更しない。Optics sectionがない旧RecipeはLightCraftへ渡すengine viewでのみv0.18.1既定値を補い、既存の保存snapshot・Receiptを遡及変更しない。History再読込・session再生成は既存のRecipe restoreとHistory ownerを再利用する。Lens補正UI、写真固有profile API、Lensfun管理などPhase 1-C以降は対象外。CHANGELOGは今回ユーザーに見える操作UIを追加していないため更新しない。
 
-検証：BackendのRAW Optics／History／Recipe／関連Native suite **238件成功**。13数値項目の操作・差分・Undo／Redo／Jump・個別Reset、2 boolの型保持・`develop.merge`・Undo／Redo／Jump・個別Reset、readback不一致時にHistoryを確定しないこと、section toggle／reset、All Reset、Recipe経由のsession再生成、旧snapshotのengine-view既定値補完を確認した。既存History／Recipe、WB、category reset、bounded response、Native fake回帰も含む。FrontendのHistory API／表示／document state **3ファイル264件成功**。TypeScriptとproduction build成功し、既存の500 kB超chunk警告が残る。`git diff --check`成功。実LightCraft binaryや実画面での手動操作は未実施。
+旧import-default fingerprintがOptics既定欄を含まない場合も、既定値のみのrecipeは未編集と判定し、非既定Optics値はExport対象となる比較を追加した。Queueのfrozen Recipe／revision保存処理は変更していない。
+
+検証：BackendのRAW Optics／History／Recipe／関連Native suite **238件成功**に加え、Export eligibility／RAW Recipe store suite **96件成功**（計334件）。13数値項目の操作・差分・Undo／Redo／Jump・個別Reset、2 boolの型保持・`develop.merge`・Undo／Redo／Jump・個別Reset、readback不一致時にHistoryを確定しないこと、section toggle／reset、All Reset、Recipe経由のsession再生成、旧snapshotのengine-view既定値補完、旧import-default fingerprintとの比較を確認した。既存History／Recipe、WB、category reset、bounded response、Native fake回帰も含む。FrontendのHistory API／表示／document state **3ファイル264件成功**。TypeScriptとproduction build成功し、既存の500 kB超chunk警告が残る。`git diff --check`成功。実LightCraft binaryや実画面での手動操作は未実施。
 
 ## LightCraft managed engine v0.18.1追随（2026-11-05）
 

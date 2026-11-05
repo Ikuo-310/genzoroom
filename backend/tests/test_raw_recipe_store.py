@@ -376,7 +376,6 @@ def test_raw_edit_status_uses_import_baseline_and_current_complete_settings(db):
     assert initial["wb"]["mode"] == "asShot"
     assert initial["detail"]["sharpen_amount"] != 0
     assert raw.get_raw_edit_statuses([asset_id]) == {str(asset_id): False}
-
     saved = save(value=initial)
     assert raw.get_raw_edit_statuses([asset_id]) == {str(asset_id): None}
     fingerprint = raw._digest(raw._settings_json(initial, 1))
@@ -403,6 +402,19 @@ def test_raw_edit_status_uses_import_baseline_and_current_complete_settings(db):
 
     raw.delete_raw_edits(str(asset_id))
     assert raw.get_raw_edit_statuses([asset_id]) == {str(asset_id): False}
+
+
+def test_legacy_import_fingerprint_without_optics_does_not_make_neutral_recipe_exportable(db):
+    legacy_defaults = settings()
+    legacy_defaults.pop("optics")
+    fingerprint = raw._digest(raw._settings_json(legacy_defaults, 1))
+    saved = save(value=settings(), import_defaults_fingerprint=fingerprint)
+    assert raw.get_raw_saved_state(identity()["assetId"])["exportEligible"] is False
+
+    changed = settings()
+    changed["optics"]["distortion"] = 12
+    save(value=changed, revision=saved["revision"], import_defaults_fingerprint=fingerprint)
+    assert raw.get_raw_saved_state(identity()["assetId"])["exportEligible"] is True
 
 
 def test_raw_edit_status_keeps_native_baseline_for_legacy_recipe_only_row(db):

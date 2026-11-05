@@ -219,20 +219,29 @@ def select_raw_export_state(connection, asset_id):
     if current is None:
         raise StoreUnavailable()
     fingerprint = current.get("importDefaultsFingerprint")
-    from raw_controls import with_legacy_grading_defaults
+    from raw_controls import with_legacy_grading_defaults, with_legacy_optics_defaults
     settings = current["recipe"]["settings"]
     if fingerprint is not None:
         eligible = _digest(_settings_json(settings, identity["settingsSchemaVersion"])) != fingerprint
-        if eligible and "grading" not in settings:
-            eligible = _digest(_settings_json(with_legacy_grading_defaults(settings), identity["settingsSchemaVersion"])) != fingerprint
-        # A legacy import fingerprint omitted grading. A later native readback adds
-        # its defaults, which must not alone turn a neutral saved RAW into an edit.
-        if eligible and settings.get("grading") == with_legacy_grading_defaults({})["grading"]:
-            without_grading = {key: value for key, value in settings.items() if key != "grading"}
-            eligible = _digest(_settings_json(without_grading, identity["settingsSchemaVersion"])) != fingerprint
+        if eligible:
+            # Old import fingerprints can omit serde-default sections introduced later.
+            defaults = {"grading": with_legacy_grading_defaults({})["grading"],
+                        "optics": with_legacy_optics_defaults({})["optics"]}
+            normalized = with_legacy_optics_defaults(with_legacy_grading_defaults(settings))
+            candidates = [normalized]
+            omittable = [section for section, default in defaults.items() if normalized.get(section) == default]
+            for mask in range(1, 1 << len(omittable)):
+                legacy = dict(normalized)
+                for index, section in enumerate(omittable):
+                    if mask & (1 << index):
+                        legacy.pop(section, None)
+                candidates.append(legacy)
+            eligible = all(_digest(_settings_json(candidate, identity["settingsSchemaVersion"])) != fingerprint
+                           for candidate in candidates)
     else:
         eligible = None if history is None else (
-            _json(with_legacy_grading_defaults(settings)) != _json(with_legacy_grading_defaults(history["baselineSettings"])))
+            _json(with_legacy_optics_defaults(with_legacy_grading_defaults(settings)))
+            != _json(with_legacy_optics_defaults(with_legacy_grading_defaults(history["baselineSettings"]))))
     return {"currentRecipe": current["recipe"], "revision": current["revision"],
             "recipeVersion": identity["settingsSchemaVersion"],
             "processingVersion": RAW_EXPORT_PROCESSING_VERSION, "exportEligible": eligible}
