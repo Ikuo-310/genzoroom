@@ -1,5 +1,10 @@
 # GenzoRoom 開発ノート
 
+## RAW Before切替のGeometry制約修正（2026-11-05）
+
+レンズ補正OFF時に正常取得したBeforeがAfterとのGeometry不一致でエラーになる問題を修正。Before所有者からAfter Geometryを除き、表示可否は所有権・URL・デコード寸法で判定する。ViewerへBefore frameを渡し独立した寸法でfit／zoomする。Region照合とCrop編集中の制限は保持。関連Frontend限定4ファイル238件、TypeScript／production build成功。実Desktopで補正ON/OFF、異なる縦横比のfit／Zoom／Panは要確認。既存build警告のみ。Backend／Native変更なし。
+
+
 ## RAWレンズ補正 Phase 6：Preview／Region／Export整合性（2026-11-05）
 
 製品コードに再現可能なGenzoRoom固有の問題は見つからなかった。既存のOptics Crop実Native probeへprofile flag／量0・100、周辺光量、defringeの境界ケースを補い、CPU／DX12各13ケースでWhole／Region Geometry、JPEG寸法、readback／Recipe restore／Resetが成功した。Export QueueのOptics＋Straighten設定固定とRegistrarへの引渡しを限定mock testで補った。既存の実Native geometry testが古い`target-managed`を固定参照してreceipt gateで拒否されていたため、既存managed executable resolverへ修正し成功した。Native／製品設定／描画／Before・Afterは変更していない。

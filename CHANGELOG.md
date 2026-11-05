@@ -33,6 +33,8 @@ Internal changes are omitted unless they affect users.
 
 ### Fixed
 
+- RAW Before/After switching now permits independently framed images after lens correction changes, retaining Region geometry checks.
+
 - Leaving the RAW darkroom now requests an updated thumbnail promptly after saving, and resetting RAW edits restores the original Immich image.
 - RAW preview StageCache now accounts for GPU buffer capacity and checks budgets against decoded sources and render plans. RAW diagnostics distinguish completed GPU renders from CPU execution and fallback.
 - RAW slider drags now send coalesced updates during continuous input and show acknowledged Draft previews, then request the final Full preview when the gesture ends.

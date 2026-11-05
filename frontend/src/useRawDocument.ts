@@ -805,8 +805,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   const beforeKey = !state?.cropMode && state?.assetId === assetId ? state.document?.beforeKey : null;
   const generation = state?.document?.generation, token = state?.document?.documentToken;
   useEffect(() => { beforeSerial.current = 0; }, [generation, token]);
-  const afterQuality = state?.quality ?? 'full', afterGeometry = state?.frame?.geometryId, afterSide = state?.requestSide ?? 1024;
-  const beforeOwner = `${assetId}:${generation}:${token}:${beforeKey}:${afterQuality}:${afterGeometry}:${afterSide}`;
+  const afterQuality = state?.quality ?? 'full', afterSide = state?.requestSide ?? 1024;
+  const beforeOwner = `${assetId}:${generation}:${token}:${beforeKey}:${afterQuality}:${afterSide}`;
   useEffect(() => {
     const controller = new AbortController();
     let url: string | undefined, operation = false, failed = false;
@@ -883,12 +883,9 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   // Hide old ownership synchronously, before passive effects revoke its URLs.
   const visible = assetId ? state?.assetId === assetId ? state : { assetId, status: 'loading' as const } : null;
   const beforeMatches = before?.owner === beforeOwner && before?.key === beforeKey;
-  const beforeSizeMatches = beforeMatches && !visible?.pending && visible?.imageRevision === visible?.document?.revision
-    && before?.width === visible?.width && before?.height === visible?.height
-    && before?.quality === visible?.quality && (visible?.frame
-      ? before?.frame?.geometryId === visible.frame.geometryId && before.frame.nativeWidth === visible.frame.nativeWidth
-        && before.frame.nativeHeight === visible.frame.nativeHeight
-      : !before?.frame && before?.width === visible?.width && before?.height === visible?.height);
+  // Whole switching owns an independent decoded image; shared Region geometry is checked separately.
+  const beforeSizeMatches = beforeMatches && !visible?.cropMode && !visible?.pending
+    && !!before?.url && (before.width ?? 0) > 0 && (before.height ?? 0) > 0;
   // A departing slider's commit callback must never flush the successor document's owner.
   const activeEditor = () => identity.current === assetId && editorRef.current?.confirmed.assetId === assetId ? editorRef.current : null;
   const callbackEditor = () => {
@@ -1053,7 +1050,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     },
     retryPreview: () => { if (callbackEditor() && !frozen.current) viewRef.current(); },
     beforeUrl: beforeMatches && beforeSizeMatches ? before?.url : undefined,
-    beforeStatus: beforeMatches ? before?.status === 'ready' && !beforeSizeMatches ? 'error' as const : before?.status : undefined,
+    beforeFrame: beforeMatches && beforeSizeMatches ? before?.frame : undefined,
+    beforeStatus: beforeMatches ? before?.status : undefined,
     retryBefore: () => requestBeforeRef.current(true),
     undo: () => moveHistory('undo'), redo: () => moveHistory('redo'),
     operate: (operation: RawHistoryOperation) => {

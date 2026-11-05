@@ -1,5 +1,8 @@
 # Provisional Architecture
 
+RAW Whole Before switching validates Asset, generation, token, Before key and decoded-image ownership independently of After geometry. Its cache owner excludes After Geometry ID. Viewer uses the selected Before frame dimensions for fit/zoom. Region overlays retain shared-geometry checks, and Crop editing still disables comparison.
+
+
 ## RAW Export (P0–P4 complete, 2026-10-29)
 
 JPEG assets retain GenzoRoom's existing JPEG render/encoder. RAW assets use LightCraft to decode and develop RAW and encode a full-resolution sRGB JPEG; GenzoRoom updates EXIF/XMP without recompressing JPEG data and produces the existing `ExportArtifact`. The common boundary is the existing Export Queue/Runtime and `ImmichExportRegistrar`; there is no RAW Queue, Runtime or Registrar.

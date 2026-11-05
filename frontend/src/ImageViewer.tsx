@@ -35,6 +35,7 @@ type ImageViewerProps = {
   previewPixels?: boolean;
   beforeAvailable?: boolean;
   beforeSrc?: string;
+  beforeFrame?: { nativeWidth: number; nativeHeight: number; geometryId: string };
   beforeStatus?: 'loading' | 'ready' | 'error';
   onBeforeRetry?: () => void;
   editSource?: EditImageSource;
@@ -69,7 +70,7 @@ const EMPTY_IMAGE_SIZE: Point = { x: 0, y: 0 };
 const NAVIGATOR_LONG_EDGE = 180;
 const PICK_CURSOR = `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="m14 5 5 5M16 3l5 5-3 3-1-1-10 10-4 1 1-4L14 7l-1-1z" fill="white" stroke="black" stroke-width="1.5"/></svg>')}") 3 21, crosshair`;
 
-export function ImageViewer({ src, documentKey, rawCrop, rawFrame, rawRegionDisplay, rawRegionOutline = false, rawPickActive = false, rawPickTargets, onRawPick, onRawPickCancel, onRawViewChange, rawDiagnosticView, previewStatus, statusNote, previewPixels = false, beforeAvailable = true, beforeSrc, beforeStatus, onBeforeRetry, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, onInteractionStart, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
+export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, beforeFrame, rawRegionDisplay, rawRegionOutline = false, rawPickActive = false, rawPickTargets, onRawPick, onRawPickCancel, onRawViewChange, rawDiagnosticView, previewStatus, statusNote, previewPixels = false, beforeAvailable = true, beforeSrc, beforeStatus, onBeforeRetry, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, onInteractionStart, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
   const { t } = useTranslation();
   const settings = useAppSettings();
   const shortcut = useShortcutDisplay();
@@ -95,6 +96,10 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame, rawRegionDisp
   const cropSizeRef = useRef<{ identity: string; size: Point } | null>(null);
   if (rawCrop?.surface) cropSizeRef.current = { identity: imageIdentity, size: {x:rawCrop.surface.frame.nativeWidth,y:rawCrop.surface.frame.nativeHeight} };
   const cropSize = rawCrop?.active && cropSizeRef.current?.identity === imageIdentity ? cropSizeRef.current.size : undefined;
+  const [backslashHeld, setBackslashHeld] = useState(false);
+  const showBeforeAdjustments = !rawCrop?.active && beforeAvailable && (persistentBeforeAdjustments || backslashHeld);
+  // Whole images use independent dimensions; Region still validates shared geometry.
+  const rawFrame = showBeforeAdjustments && previewPixels ? beforeFrame ?? afterFrame : afterFrame;
   const logicalWidth = cropSize?.x ?? rawFrame?.nativeWidth ?? bitmapSize.x, logicalHeight = cropSize?.y ?? rawFrame?.nativeHeight ?? bitmapSize.y;
   const imageSize = useMemo(() => ({ x: logicalWidth, y: logicalHeight }), [logicalWidth, logicalHeight]);
   const [dpr, setDpr] = useState(() => typeof window==='undefined'?1:window.devicePixelRatio || 1);
@@ -178,8 +183,6 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame, rawRegionDisp
       nativeWidth: rawFrame.nativeWidth, nativeHeight: rawFrame.nativeHeight, geometryId: rawFrame.geometryId, fit: fitMode,
       panX: pan.x, panY: pan.y, interacting: viewInteracting });
   }, [scale, dpr, rawFrame?.geometryId, rawFrame?.nativeWidth, rawFrame?.nativeHeight, viewportSize.x, viewportSize.y, fitMode, pan.x, pan.y, viewInteracting]);
-  const [backslashHeld, setBackslashHeld] = useState(false);
-  const showBeforeAdjustments = !rawCrop?.active && beforeAvailable && (persistentBeforeAdjustments || backslashHeld);
   const regionDisplay = rawRegionDisplay?.after.metadata.geometryId === rawFrame?.geometryId
     && (!showBeforeAdjustments || !!rawRegionDisplay?.before && !!rawRegionDisplay.wholeBefore) ? rawRegionDisplay : undefined;
   const regionLayer = showBeforeAdjustments ? regionDisplay?.before : regionDisplay?.after;

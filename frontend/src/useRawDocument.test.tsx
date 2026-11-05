@@ -623,14 +623,14 @@ describe('RAW native Before cache', () => {
     expect(api.setRawControls).toHaveBeenCalledOnce();
   });
 
-  it('refuses a native Before pair with a different geometry while keeping saving usable', async () => {
+  it('displays an independent Before with different geometry while keeping saving usable', async () => {
     enableBefore();
     const implementation = vi.mocked(api.rawPreview).getMockImplementation()!;
     vi.mocked(api.rawPreview).mockImplementation(async (...args) => ({ ...await implementation(...args),
       quality: args[4]?.quality ?? 'full', frame: { geometryId: (args[3] === 'before' ? 'b' : 'a').repeat(64),
         nativeWidth: 6000, nativeHeight: 4500, aspect: 4 / 3, fullWidth: 16, fullHeight: 12, window: null } }));
     await render('a', true); await flush();
-    expect(current?.beforeUrl).toBeUndefined(); expect(current?.beforeStatus).toBe('error');
+    expect(current?.beforeUrl).toBeTruthy(); expect(current?.beforeStatus).toBe('ready');
     expect(current?.frame?.nativeWidth).toBe(6000); expect(current?.width).toBe(16);
     await act(async () => current!.prepareSave());
     expect(current?.saveError).toBeUndefined();

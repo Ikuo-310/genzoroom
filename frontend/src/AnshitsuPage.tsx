@@ -807,6 +807,7 @@ export function AnshitsuPage() {
           onRawPick={rawDocument?.pick}
           onRawPickCancel={rawDocument?.cancelPick}
           rawFrame={rawDocument?.frame}
+          beforeFrame={rawDocument?.beforeFrame}
           rawCrop={rawDocument?.crop}
           rawRegionDisplay={rawDocument?.regionDisplay}
           rawRegionOutline={rawDocument?.regionOutline}
