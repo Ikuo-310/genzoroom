@@ -94,6 +94,7 @@ class RawPreviewApi:
         self._reset_owner = None
         self.app = Starlette(routes=[
             Route("/capabilities", self.capabilities),
+            Route("/lens-database", self.lens_database, methods=["GET", "POST"]),
             Route("/workspaces", self.endpoint, methods=["POST"]),
             Route("/workspaces/{workspace}", self.endpoint, methods=["DELETE"]),
             Route("/workspaces/{workspace}/discard", self.endpoint, methods=["POST"]),
@@ -119,6 +120,68 @@ class RawPreviewApi:
         self.raw, self.manager = raw, manager
         self._closing = False
         self._close_task = None
+
+    async def lens_database(self, request):
+        try:
+            if request.method == "POST" and await self._body(request):
+                raise LightCraftError("raw_invalid_request")
+            self._ready()
+            async with self._lock:
+                status = await self.raw.lens_database_status()
+                value = self._lens_database_state(status)
+                if request.method == "POST":
+                    if value["download"]["state"] == "running":
+                        raise LightCraftError("raw_busy")
+                    if self.manager.lensfun_override_configured():
+                        raise LightCraftError("raw_lens_database_user_directory")
+                    try:
+                        result = await self.raw.download_lens_database()
+                    except LightCraftError:
+                        raise LightCraftError("raw_lens_database_download_failed") from None
+                    if not isinstance(result, dict) or result.get("started") is not True or not isinstance(result.get("dir"), str):
+                        raise LightCraftError("raw_lens_database_download_failed")
+                    lightcraft_log("lensDatabase.download.started", level="info", generation=self.manager.status().generation,
+                                   available=value["available"])
+                    status = await self.raw.lens_database_status()
+                    value = self._lens_database_state(status)
+                return JSONResponse(value, headers={"Cache-Control": "no-store"})
+        except LightCraftError as error:
+            code = error.code
+            if code not in {"raw_invalid_request", "raw_busy", "raw_unavailable", "raw_lens_database_user_directory",
+                            "raw_lens_database_download_failed", "raw_invalid_lens_database_response"}:
+                code = "raw_lens_database_unavailable"
+            status = 400 if code == "raw_invalid_request" else 409 if code in {"raw_busy", "raw_lens_database_user_directory"} else 503 if code == "raw_unavailable" else 502
+            lightcraft_log("lensDatabase.request.failed", level="warn" if status < 500 else "error",
+                           generation=self.manager.status().generation if self.manager else None, errorCode=code)
+            return JSONResponse({"code": code}, status_code=status, headers={"Cache-Control": "no-store"})
+        except Exception:
+            lightcraft_log("lensDatabase.request.failed", level="error", errorCode="raw_lens_database_unavailable")
+            return JSONResponse({"code": "raw_lens_database_unavailable"}, status_code=503,
+                                headers={"Cache-Control": "no-store"})
+
+    def _lens_database_state(self, value):
+        if not isinstance(value, dict) or not isinstance(value.get("download"), dict) or \
+                value.get("dir") is not None and not isinstance(value.get("dir"), str) or \
+                type(value.get("lenses")) is not int or value["lenses"] < 0:
+            raise LightCraftError("raw_invalid_lens_database_response")
+        download = value["download"]
+        state = download.get("state")
+        if state not in {"idle", "running", "done", "failed", "cancelled"}:
+            raise LightCraftError("raw_invalid_lens_database_response")
+        if state == "running":
+            done, total = download.get("bytes"), download.get("total")
+            if type(done) is not int or type(total) is not int or not 0 <= done <= total or total <= 0:
+                raise LightCraftError("raw_invalid_lens_database_response")
+            progress = {"state": state, "bytes": done, "total": total}
+        elif state == "done":
+            if type(download.get("files")) is not int or download["files"] <= 0:
+                raise LightCraftError("raw_invalid_lens_database_response")
+            progress = {"state": state, "files": download["files"]}
+        else:
+            progress = {"state": state}
+        return {"available": value["lenses"] > 0, "lensCount": value["lenses"],
+                "userDirectoryConfigured": self.manager.lensfun_override_configured(),
+                "download": progress}
 
     def _ready(self):
         if self._closing or self.manager is None or self.manager.status().state != "ready":

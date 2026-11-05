@@ -76,7 +76,7 @@ def child_environment(parent, *, gpu_backend="dx12", temp_directory=None):
     # Copy only OS runtime locations; arbitrary inherited keys can contain credentials.
     allowed = {"SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP", "LOCALAPPDATA", "APPDATA",
                "USERPROFILE", "PROGRAMDATA", "HOMEDRIVE", "HOMEPATH", "NUMBER_OF_PROCESSORS",
-               "PROCESSOR_ARCHITECTURE"}
+               "PROCESSOR_ARCHITECTURE", "LIGHTCRAFT_LENSFUN_DIR"}
     result = {key.upper(): value for key, value in parent.items() if key.upper() in allowed}
     root = result.get("SYSTEMROOT") or result.get("WINDIR")
     if root:
@@ -295,6 +295,10 @@ class LightCraftManager:
 
     def status(self):
         return LightCraftStatus(self._state, self._generation, self._version, self._sha256, self._error)
+
+    def lensfun_override_configured(self):
+        return any(key.upper() == "LIGHTCRAFT_LENSFUN_DIR" and bool(value)
+                   for key, value in self._environment.items())
 
     def diagnostic_manager(self, gpu_backend):
         # Copy trusted startup configuration, never the editing process or its native state.
@@ -552,6 +556,7 @@ class LightCraftManager:
         if command not in {"library.import", "library.select", "photo.inspect", "photo.lensProfileInfo", "develop.get", "develop.set",
                            "develop.merge", "develop.reset", "develop.sectionEnabled", "develop.resetControl",
                            "develop.resetSection", "develop.wb", "beforeAfter.setBefore", "app.memoryBudget", "library.memory",
+                           "library.refreshLensProfiles", "lens.downloadDatabase", "lens.databaseStatus",
                            "crop.set", "crop.drag", "crop.aspect", "crop.rotateAspect", "crop.reset", "crop.straighten",
                            "photo.rotateLeft", "photo.rotateRight", "photo.flipHorizontal", "photo.flipVertical"}:
             raise LightCraftError("lightcraft_unsupported_raw_command")

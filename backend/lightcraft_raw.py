@@ -704,6 +704,27 @@ class LightCraftRawSession:
         finally:
             self._operations.discard(task)
 
+    async def _refresh_lens_profile_info(self, photo, deadline):
+        try:
+            refreshed = await self._command("library.refreshLensProfiles", {"ids": [photo.photo_id], "all": True}, deadline)
+            if not isinstance(refreshed, dict) or type(refreshed.get("checked")) is not int or \
+                    type(refreshed.get("database")) is not bool or not isinstance(refreshed.get("found"), list) or \
+                    any(type(value) is not int or value <= 0 for value in refreshed["found"]):
+                raise LightCraftError("raw_invalid_lens_database_response")
+        except LightCraftError as error:
+            if isinstance(error, MCPTransportError):
+                raise
+            lightcraft_log("raw.lensProfileInfo.refreshUnavailable", level="warn", generation=self._generation,
+                           errorCode=error.code)
+        try:
+            lens_info = await self._command("photo.lensProfileInfo", {"id": photo.photo_id}, deadline)
+            photo.lens_profile_info_json = _lens_profile_info_json(lens_info)
+        except LightCraftError as error:
+            if isinstance(error, MCPTransportError):
+                raise
+            lightcraft_log("raw.lensProfileInfo.unavailable", level="warn", generation=self._generation,
+                           errorCode=error.code)
+
     async def _import(self, key, path, fingerprint, previous, deadline):
         if not self._budget_set:
             budget = await self._command("app.memoryBudget", {"mb": 1024}, deadline)
@@ -746,14 +767,17 @@ class LightCraftRawSession:
             photo = _Photo(handle, path, fingerprint, info["content_hash"], photo_id, "")
             photo.source_size = (info["width"], info["height"])
             await self._command("library.select", {"ids": [photo_id], "active": photo_id, "mode": "replace"}, deadline)
-            try:
-                lens_info = await self._command("photo.lensProfileInfo", {"id": photo_id}, deadline)
-                photo.lens_profile_info_json = _lens_profile_info_json(lens_info)
-            except LightCraftError as error:
-                if isinstance(error, MCPTransportError):
-                    raise
-                lightcraft_log("raw.lensProfileInfo.unavailable", level="warn", generation=self._generation,
-                               errorCode=error.code)
+            if previous is not None:
+                await self._refresh_lens_profile_info(photo, deadline)
+            else:
+                try:
+                    lens_info = await self._command("photo.lensProfileInfo", {"id": photo_id}, deadline)
+                    photo.lens_profile_info_json = _lens_profile_info_json(lens_info)
+                except LightCraftError as error:
+                    if isinstance(error, MCPTransportError):
+                        raise
+                    lightcraft_log("raw.lensProfileInfo.unavailable", level="warn", generation=self._generation,
+                                   errorCode=error.code)
             # Import defaults are native Session state, never a copy of the persisted After recipe.
             try:
                 supported = await self.manager._raw_before_supported(self._generation)
@@ -816,6 +840,7 @@ class LightCraftRawSession:
             if previous is not None and previous.photo_id is not None:
                 photo = previous
                 await self._command("library.select", {"ids": [photo.photo_id], "active": photo.photo_id, "mode": "replace"}, deadline)
+                await self._refresh_lens_profile_info(photo, deadline)
                 photo.handle = RawHandle(source_key, uuid.uuid4().hex, self._generation)
                 self._commit(photo, await self._read_settings(photo, deadline))
             else:
@@ -877,6 +902,16 @@ class LightCraftRawSession:
                 photo.requested_revision = photo.applied_revision
             return self._snapshot(photo)
 
+        return await self._submit(action, self._timeouts.command)
+
+    async def lens_database_status(self):
+        async def action(deadline):
+            return await self._command("lens.databaseStatus", {}, deadline)
+        return await self._submit(action, self._timeouts.command)
+
+    async def download_lens_database(self):
+        async def action(deadline):
+            return await self._command("lens.downloadDatabase", {}, deadline)
         return await self._submit(action, self._timeouts.command)
 
     async def _restore(self, photo, encoded, deadline, *, count_attempts=False):

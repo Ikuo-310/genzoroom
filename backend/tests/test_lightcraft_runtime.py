@@ -242,11 +242,14 @@ def test_environment_is_allowlisted_and_parent_is_unchanged():
     parent = {"SystemRoot": "C:\\Windows", "LOCALAPPDATA": "C:\\Users\\test", "TEMP": "C:\\Temp",
               "IMMICH_API_KEY": "secret", "CUSTOM_PASSWORD": "secret", "PATH": "private python path",
               "LIGHTCRAFT_GPU": "0", "LIGHTCRAFT_GPU_ADAPTER": "wrong", "LIGHTCRAFT_GPU_BACKEND": "vulkan",
-              "WGPU_DX12_COMPILER": "dxc", "RUST_LOG": "trace", "PYTHONPATH": "private"}
+              "LIGHTCRAFT_LENSFUN_DIR": "C:\\Users\\test\\Lensfun", "WGPU_DX12_COMPILER": "dxc",
+              "RUST_LOG": "trace", "PYTHONPATH": "private"}
     before = dict(parent)
     env = child_environment(parent)
     assert parent == before
-    assert set(env) == {"SYSTEMROOT", "LOCALAPPDATA", "TEMP", "PATH", "LIGHTCRAFT_GPU_BACKEND", "LIGHTCRAFT_LOG"}
+    assert set(env) == {"SYSTEMROOT", "LOCALAPPDATA", "TEMP", "PATH", "LIGHTCRAFT_GPU_BACKEND", "LIGHTCRAFT_LOG",
+                        "LIGHTCRAFT_LENSFUN_DIR"}
+    assert env["LIGHTCRAFT_LENSFUN_DIR"] == "C:\\Users\\test\\Lensfun"
     assert env["LIGHTCRAFT_GPU_BACKEND"] == "dx12"
     assert "private" not in json.dumps(env) and "secret" not in json.dumps(env)
 

@@ -205,6 +205,8 @@ class RawProcess(FakeProcess):
                 value["preview_only"] = self.preview_only
         elif command == "photo.lensProfileInfo":
             value = copy.deepcopy(self.lens_profile_info)
+        elif command == "library.refreshLensProfiles":
+            value = {"checked": len(params.get("ids", [])), "database": True, "found": []}
         elif command == "library.select":
             self.active = params["active"]
             value = {"selected": 1}
@@ -411,9 +413,14 @@ def test_reopen_rotates_token_and_reuses_photo_without_import(tmp_path):
         raw, _, children, files = await create(tmp_path)
         try:
             old, _ = await raw.open_raw("same", files[0])
-            new, _ = await raw.open_raw("same", files[0])
+            children[0].lens_profile_info["profileName"] = "Updated Testcam 18-55mm"
+            new, state = await raw.open_raw("same", files[0])
             assert new.document_token != old.document_token
             assert sum(c == "library.import" for c, _ in children[0].commands) == 1
+            refreshes = [(command, params) for command, params in children[0].commands
+                         if command == "library.refreshLensProfiles"]
+            assert refreshes == [("library.refreshLensProfiles", {"ids": [1], "all": True})]
+            assert state.lens_profile_info["profileName"] == "Updated Testcam 18-55mm"
             with pytest.raises(LightCraftError, match="raw_stale_handle"):
                 await raw.get_settings(old)
             assert (await raw.get_settings(new)).handle == new

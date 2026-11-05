@@ -39,6 +39,42 @@ afterEach(() => {
   Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal'); Reflect.deleteProperty(HTMLDialogElement.prototype, 'close');
 });
 describe('shared Settings modal', () => {
+  it('opens Lensfun management only from the desktop event and performs an explicit download', async () => {
+    const methods: string[] = [];
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (_url === '/api/raw/lens-database') {
+        methods.push(init?.method ?? 'GET');
+        return new Response(JSON.stringify(init?.method === 'POST'
+          ? { available: true, lensCount: 120, userDirectoryConfigured: false, download: { state: 'done', files: 2 } }
+          : { available: false, lensCount: 0, userDirectoryConfigured: false, download: { state: 'idle' } }),
+          { headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ status: 'ok' }), { headers: { 'Content-Type': 'application/json' } });
+    });
+    window.dispatchEvent(new Event('genzoroom:open-lens-database'));
+    expect(host.querySelector('dialog')).toBeNull();
+    Object.defineProperty(window, '__GENZOROOM_DESKTOP__', { configurable: true, value: { respond: vi.fn().mockResolvedValue(undefined) } });
+    await act(async () => window.dispatchEvent(new Event('genzoroom:open-lens-database')));
+    expect(host.querySelector('dialog')?.textContent).toContain('Lensfun database');
+    expect(host.querySelector('dialog')?.textContent).toContain('unavailable');
+    await click([...host.querySelectorAll<HTMLButtonElement>('dialog button')].find(button => button.textContent === 'Download')!);
+    expect(methods).toEqual(['GET', 'POST']);
+    expect(host.querySelector('dialog')?.textContent).toContain('The database was installed.');
+    expect(host.querySelector('dialog')?.textContent).toContain('next time you open a RAW photo');
+    await act(async () => changeAppLanguage('ja'));
+    expect(host.querySelector('dialog')?.textContent).toContain('Lensfunデータベース');
+    expect(host.querySelector('dialog')?.textContent).toContain('次回RAW写真を開いたとき');
+  });
+
+  it('respects a configured Lensfun directory and disables the managed download action', async () => {
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ available: false, lensCount: 0, userDirectoryConfigured: true,
+      download: { state: 'idle' } }), { headers: { 'Content-Type': 'application/json' } }));
+    Object.defineProperty(window, '__GENZOROOM_DESKTOP__', { configurable: true, value: { respond: vi.fn().mockResolvedValue(undefined) } });
+    await act(async () => window.dispatchEvent(new Event('genzoroom:open-lens-database')));
+    expect(host.querySelector('dialog')?.textContent).toContain('LIGHTCRAFT_LENSFUN_DIR');
+    expect([...host.querySelectorAll<HTMLButtonElement>('dialog button')].find(button => button.textContent === 'Download')?.disabled).toBe(true);
+  });
+
   it('persists the Navigator position choices and falls back to bottom-right for invalid storage', async () => {
     expect(readSettings().zoomNavigatorPosition).toBe('bottom-right');
     await click(host.querySelector('button')!);

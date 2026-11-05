@@ -159,6 +159,13 @@ fn run() -> Result<(), &'static str> {
         .menu(|app| {
             let preferences =
                 MenuItem::with_id(app, "preferences", "Preferences", true, Some("Ctrl+P"))?;
+            let lens_database = MenuItem::with_id(
+                app,
+                "lens-database",
+                "Manage Lens Database…",
+                true,
+                None::<&str>,
+            )?;
             let file_separator = PredefinedMenuItem::separator(app)?;
             let exit = MenuItem::with_id(app, "exit", "Exit", true, Some("Ctrl+Q"))?;
             let file = Submenu::with_id_and_items(
@@ -166,7 +173,7 @@ fn run() -> Result<(), &'static str> {
                 "file",
                 "File",
                 true,
-                &[&preferences, &file_separator, &exit],
+                &[&preferences, &lens_database, &file_separator, &exit],
             )?;
             let fullscreen =
                 MenuItem::with_id(app, "fullscreen", "Full screen", true, None::<&str>)?;
@@ -192,6 +199,7 @@ fn run() -> Result<(), &'static str> {
         .on_menu_event(move |app, event| match event.id().as_ref() {
             "diagnostics" => open_diagnostics(app, port),
             "preferences" => dispatch_main_event(app, "genzoroom:open-settings"),
+            "lens-database" => dispatch_main_event(app, "genzoroom:open-lens-database"),
             "about" => dispatch_main_event(app, "genzoroom:show-about"),
             "exit" => {
                 if let Some(window) = app.get_webview_window("main") {
@@ -297,6 +305,7 @@ fn dispatch_main_event(app: &tauri::AppHandle, event_name: &str) {
 struct NativeMenuLabels {
     file: &'static str,
     preferences: &'static str,
+    lens_database: &'static str,
     exit: &'static str,
     view: &'static str,
     fullscreen: &'static str,
@@ -310,6 +319,7 @@ fn native_menu_labels(language: &str) -> Result<NativeMenuLabels, &'static str> 
         "ja" => Ok(NativeMenuLabels {
             file: "ファイル",
             preferences: "環境設定",
+            lens_database: "レンズデータベースを管理…",
             exit: "終了",
             view: "表示",
             fullscreen: "全画面表示",
@@ -320,6 +330,7 @@ fn native_menu_labels(language: &str) -> Result<NativeMenuLabels, &'static str> 
         "en" => Ok(NativeMenuLabels {
             file: "File",
             preferences: "Preferences",
+            lens_database: "Manage Lens Database…",
             exit: "Exit",
             view: "View",
             fullscreen: "Full Screen",
@@ -362,7 +373,7 @@ fn set_native_menu_language(app: tauri::AppHandle, language: String) -> Result<(
             .set_text(title)
             .map_err(|_| "native_menu_update_failed".to_owned())?;
         let item_labels: &[(&str, &str)] = match submenu_id {
-            "file" => &[("preferences", labels.preferences), ("exit", labels.exit)],
+            "file" => &[("preferences", labels.preferences), ("lens-database", labels.lens_database), ("exit", labels.exit)],
             "view" => &[("fullscreen", labels.fullscreen)],
             _ => &[("diagnostics", labels.diagnostics), ("about", labels.about)],
         };
@@ -413,6 +424,7 @@ mod native_menu_tests {
             Ok(NativeMenuLabels {
                 file: "ファイル",
                 preferences: "環境設定",
+                lens_database: "レンズデータベースを管理…",
                 exit: "終了",
                 view: "表示",
                 fullscreen: "全画面表示",
@@ -426,6 +438,7 @@ mod native_menu_tests {
             Ok(NativeMenuLabels {
                 file: "File",
                 preferences: "Preferences",
+                lens_database: "Manage Lens Database…",
                 exit: "Exit",
                 view: "View",
                 fullscreen: "Full Screen",

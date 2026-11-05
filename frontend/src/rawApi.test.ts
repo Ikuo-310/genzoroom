@@ -3,6 +3,7 @@ import { LIGHTCRAFT_ENGINE } from './lightcraftEngine';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRawWorkspace,abortRawWorkspaceRequests,discardRawWorkspace, rawCapability, rawPreview, readRawSettings, setRawControls, saveRawRecipe, saveRawHistory, readRawHistory, readRawRecipe, rawWorkspaceEmpty,
   RAW_CONTROL_IDS, RawSaveError, type RawDocument, type RawHistoryRequest, type RawHistoryOperation } from './rawApi';
+import { downloadRawLensDatabase, readRawLensDatabaseStatus } from './rawApi';
 import { rawSettings } from './test/rawSettings';
 import { RawSuperseded } from './rawApi';
 import { rawHistoryResult, rawHistoryData } from './test/rawHistory';
@@ -16,6 +17,31 @@ function response(patch: Record<string, string> = {}, bytes = png) {
     'X-Raw-Epoch': '1', 'X-Raw-Sequence': '1', 'X-Raw-Width': '16', 'X-Raw-Height': '12', ...patch } });
 }
 afterEach(() => vi.unstubAllGlobals());
+
+describe('Lensfun database API', () => {
+  it('reads sanitized progress and starts an explicit download through the RAW API', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ available: false, lensCount: 0, userDirectoryConfigured: false,
+        download: { state: 'running', bytes: 10, total: 20 } }), { headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ available: true, lensCount: 120, userDirectoryConfigured: false,
+        download: { state: 'done', files: 2 } }), { headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetch);
+    expect(await readRawLensDatabaseStatus()).toMatchObject({ download: { state: 'running', bytes: 10, total: 20 } });
+    expect(await downloadRawLensDatabase()).toMatchObject({ available: true, lensCount: 120, download: { state: 'done', files: 2 } });
+    expect(fetch.mock.calls.map(call => call[0])).toEqual(['/api/raw/lens-database', '/api/raw/lens-database']);
+    expect((fetch.mock.calls[1]![1] as RequestInit).method).toBe('POST');
+  });
+
+  it.each([
+    { available: 1, lensCount: 0, userDirectoryConfigured: false, download: { state: 'idle' } },
+    { available: false, lensCount: -1, userDirectoryConfigured: false, download: { state: 'idle' } },
+    { available: false, lensCount: 0, userDirectoryConfigured: false, download: { state: 'running', bytes: 21, total: 20 } },
+    { available: false, lensCount: 0, userDirectoryConfigured: false, download: { state: 'done', files: 0 } },
+  ])('rejects malformed status %#', async value => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } })));
+    await expect(readRawLensDatabaseStatus()).rejects.toThrow('raw_invalid_response');
+  });
+});
 
 it.each([undefined, 1, 2])('keeps Whole availability independent of optional Region capability %s', async regionContract => {
   const fetch = vi.fn<typeof globalThis.fetch>(async () => new Response(JSON.stringify({ available: true, version: LIGHTCRAFT_ENGINE.version,

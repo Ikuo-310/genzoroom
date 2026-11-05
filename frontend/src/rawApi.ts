@@ -52,6 +52,8 @@ export type RawValues = Record<RawSettingControlId, number>;
 export type RawLensProfileInfo = { cameraMake: string | null; cameraModel: string | null; lensMake: string | null;
   lensModel: string | null; lensId: string | null; profileAvailable: boolean | null;
   profileSource: 'file' | 'database' | 'none' | 'unknown'; profileName: string | null; profileApplied: boolean | null };
+export type RawLensDatabaseState = { available: boolean; lensCount: number; userDirectoryConfigured: boolean;
+  download: { state: 'idle' | 'running' | 'done' | 'failed' | 'cancelled'; bytes?: number; total?: number; files?: number } };
 export type RawControlValues = Partial<RawValues> & Partial<Record<RawOpticsFlagId, boolean>>;
 export const RAW_GEOMETRY_OPERATIONS = ['set', 'drag', 'aspect', 'swap', 'reset', 'straighten', 'rotateLeft', 'rotateRight', 'flipHorizontal', 'flipVertical'] as const;
 export type RawGeometryOperationId = typeof RAW_GEOMETRY_OPERATIONS[number];
@@ -175,6 +177,29 @@ export async function rawCapability(signal?: AbortSignal) {
   const value = await json('/capabilities', { signal });
   if (typeof value.available !== 'boolean' || value.available && value.version !== LIGHTCRAFT_ENGINE.version) throw new RawApiError('raw_invalid_response');
   return value.available as boolean;
+}
+
+function checkLensDatabaseState(value: unknown): RawLensDatabaseState {
+  if (!value || typeof value !== 'object') throw new RawApiError('raw_invalid_response');
+  const state = value as Record<string, unknown>;
+  const download = state.download;
+  if (typeof state.available !== 'boolean' || !Number.isSafeInteger(state.lensCount) || (state.lensCount as number) < 0
+    || typeof state.userDirectoryConfigured !== 'boolean' || !download || typeof download !== 'object')
+    throw new RawApiError('raw_invalid_response');
+  const details = download as Record<string, unknown>;
+  if (!['idle', 'running', 'done', 'failed', 'cancelled'].includes(String(details.state))) throw new RawApiError('raw_invalid_response');
+  if (details.state === 'running' && (!Number.isSafeInteger(details.bytes) || !Number.isSafeInteger(details.total)
+    || (details.bytes as number) < 0 || (details.total as number) <= 0 || (details.bytes as number) > (details.total as number)))
+    throw new RawApiError('raw_invalid_response');
+  if (details.state === 'done' && (!Number.isSafeInteger(details.files) || (details.files as number) <= 0))
+    throw new RawApiError('raw_invalid_response');
+  return state as unknown as RawLensDatabaseState;
+}
+export async function readRawLensDatabaseStatus(signal?: AbortSignal) {
+  return checkLensDatabaseState(await json('/lens-database', signal ? { signal } : undefined));
+}
+export async function downloadRawLensDatabase(signal?: AbortSignal) {
+  return checkLensDatabaseState(await json('/lens-database', { ...post({}), ...(signal ? { signal } : {}) }));
 }
 
 export async function rawRegionOwner(doc: RawDocument, signal: AbortSignal) {

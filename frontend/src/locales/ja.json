@@ -833,6 +833,27 @@
     "english": "English",
     "japanese": "日本語"
   },
+  "lensDatabase": {
+    "title": "レンズデータベースを管理",
+    "statusTitle": "Lensfunデータベース",
+    "checking": "状態を確認しています…",
+    "available": "利用可能（レンズ {{count}} 件）",
+    "notInstalled": "レンズデータベースは利用できません。",
+    "description": "LightCraftが使用する固定版Lensfunデータベースを導入すると、対応レンズのプロファイルを利用できます。",
+    "userDirectory": "LIGHTCRAFT_LENSFUN_DIRで指定された場所を尊重するため、この画面からの導入・更新は無効です。",
+    "download": "ダウンロード",
+    "update": "データベースを更新",
+    "starting": "ダウンロードを開始しています…",
+    "downloading": "ダウンロード中 {{done}} / {{total}} bytes",
+    "verifying": "検証してインストールしています…",
+    "completed": "データベースを導入しました。",
+    "reopen": "開いている写真には遡及適用されません。次回RAW写真を開いたときにプロファイルを再照合します。",
+    "failed": "データベースを取得できませんでした。既存のデータベースは保持されています。",
+    "cancelled": "ダウンロードは完了しませんでした。既存のデータベースは保持されています。",
+    "requestFailed": "データベースの状態を取得できませんでした。LightCraftの状態を確認してください。",
+    "retry": "再試行",
+    "close": "閉じる"
+  },
   "settings": {
     "showKeyboardShortcuts": "キーボードショートカットの表示",
     "anshitsuInitialSelection": "暗室送りの初期設定",

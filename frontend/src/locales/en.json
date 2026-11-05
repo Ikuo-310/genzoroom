@@ -843,6 +843,27 @@
     "english": "English",
     "japanese": "日本語"
   },
+  "lensDatabase": {
+    "title": "Manage Lens Database",
+    "statusTitle": "Lensfun database",
+    "checking": "Checking status…",
+    "available": "Available ({{count}} lenses)",
+    "notInstalled": "The lens database is unavailable.",
+    "description": "Installing LightCraft's pinned Lensfun database makes profiles available for supported lenses.",
+    "userDirectory": "Downloads and updates are disabled here to respect the directory set by LIGHTCRAFT_LENSFUN_DIR.",
+    "download": "Download",
+    "update": "Update database",
+    "starting": "Starting download…",
+    "downloading": "Downloading {{done}} / {{total}} bytes",
+    "verifying": "Verifying and installing…",
+    "completed": "The database was installed.",
+    "reopen": "The change is not applied retroactively to open photos. Lens profiles are checked again the next time you open a RAW photo.",
+    "failed": "The database could not be retrieved. The existing database was preserved.",
+    "cancelled": "The download did not complete. The existing database was preserved.",
+    "requestFailed": "The database status could not be read. Check that LightCraft is available.",
+    "retry": "Retry",
+    "close": "Close"
+  },
   "settings": {
     "showKeyboardShortcuts": "Show keyboard shortcuts",
     "anshitsuInitialSelection": "Default Darkroom Selection",

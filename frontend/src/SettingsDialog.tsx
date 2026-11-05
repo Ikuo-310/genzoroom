@@ -9,6 +9,7 @@ import { BinaryRadioChoice } from './BinaryRadioChoice';
 import { isPrimaryModifier } from './shortcutModifiers';
 import { BUILD_INFO } from './buildInfo';
 import { WindowsConnectionSettings } from './WindowsConnectionSettings';
+import { LensDatabaseDialog } from './LensDatabaseDialog';
 
 type GpuStatus = { enabled: boolean; availability: GpuAvailability; active: boolean; setPreference: (value: boolean) => void };
 const SettingsContext = createContext({ open: () => {}, isOpen: false, publishGpu: (_value: GpuStatus | null) => {} });
@@ -28,6 +29,7 @@ export function SettingsButton() {
 }
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [isOpen, setOpen] = useState(false);
+  const [isLensDatabaseOpen, setLensDatabaseOpen] = useState(false);
   const [isAboutOpen, setAboutOpen] = useState(false);
   const [gpu, publishGpu] = useState<GpuStatus | null>(null);
   const open = useCallback(() => setOpen(true), []);
@@ -35,11 +37,20 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const openSettings = () => open();
     const showAbout = () => setAboutOpen(true);
+    const openLensDatabase = () => {
+      if (window.__GENZOROOM_DESKTOP__) {
+        setOpen(false);
+        setAboutOpen(false);
+        setLensDatabaseOpen(true);
+      }
+    };
     window.addEventListener('genzoroom:open-settings', openSettings);
     window.addEventListener('genzoroom:show-about', showAbout);
+    window.addEventListener('genzoroom:open-lens-database', openLensDatabase);
     return () => {
       window.removeEventListener('genzoroom:open-settings', openSettings);
       window.removeEventListener('genzoroom:show-about', showAbout);
+      window.removeEventListener('genzoroom:open-lens-database', openLensDatabase);
     };
   }, [open]);
   useEffect(() => {
@@ -53,9 +64,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     i18n.on('languageChanged', synchronize);
     return () => { i18n.off('languageChanged', synchronize); };
   }, []);
-  return <SettingsContext.Provider value={{ open, isOpen, publishGpu }}>
+  return <SettingsContext.Provider value={{ open, isOpen: isOpen || isLensDatabaseOpen, publishGpu }}>
     {children}
     {isOpen && <SettingsDialog gpu={gpu} onClose={close} />}
+    {isLensDatabaseOpen && window.__GENZOROOM_DESKTOP__ && <LensDatabaseDialog onClose={() => setLensDatabaseOpen(false)} />}
     {isAboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
   </SettingsContext.Provider>;
 }

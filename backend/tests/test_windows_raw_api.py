@@ -64,6 +64,48 @@ def test_raw_edit_status_route_uses_raw_store_without_open_workspace(local, tmp_
     asyncio.run(run())
 
 
+def test_lens_database_status_and_update_use_sanitized_existing_raw_api(local, tmp_path, monkeypatch):
+    async def run():
+        api, manager, _, _ = await setup(tmp_path, local, monkeypatch)
+        state = {"dir": "C:\\Users\\PRIVATE\\Lensfun", "lenses": 12,
+                 "download": {"state": "running", "bytes": 100, "total": 200}}
+        calls = 0
+
+        async def status():
+            return state
+
+        async def download():
+            nonlocal calls
+            calls += 1
+            return {"started": True, "dir": state["dir"]}
+
+        monkeypatch.setattr(api.raw, "lens_database_status", status)
+        monkeypatch.setattr(api.raw, "download_lens_database", download)
+        monkeypatch.setattr(manager, "lensfun_override_configured", lambda: False)
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                response = await http.get("/api/raw/lens-database")
+                assert response.status_code == 200
+                assert response.json() == {"available": True, "lensCount": 12, "userDirectoryConfigured": False,
+                                           "download": {"state": "running", "bytes": 100, "total": 200}}
+                assert "PRIVATE" not in response.text and "C:\\Users" not in response.text
+                response = await http.post("/api/raw/lens-database", json={})
+                assert response.status_code == 409 and response.json()["code"] == "raw_busy"
+                assert calls == 0
+                state["download"] = {"state": "idle"}
+                response = await http.post("/api/raw/lens-database", json={})
+                assert response.status_code == 200 and calls == 1
+                assert response.json()["download"] == {"state": "idle"}
+                monkeypatch.setattr(manager, "lensfun_override_configured", lambda: True)
+                response = await http.post("/api/raw/lens-database", json={})
+                assert response.status_code == 409 and response.json()["code"] == "raw_lens_database_user_directory"
+                assert calls == 1
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
 def preview_body(doc, serial=1):
     return {key: doc[key] for key in ("workspaceId", "generation", "documentToken", "revision")} | {"serial": serial}
 
