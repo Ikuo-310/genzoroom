@@ -1324,7 +1324,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
 
   function renderPhotoGrid() {
     return <div className="photo-grid"
-      style={{ '--photo-column-width': `calc(${100 / settings.homeThumbnailColumns}% - ${16 * (settings.homeThumbnailColumns - 1) / settings.homeThumbnailColumns}px)` } as CSSProperties}>{visibleAssets.map((asset) => {
+      style={{ '--photo-card-width': `${settings.homeThumbnailWidth}px` } as CSSProperties}>{visibleAssets.map((asset) => {
       const queue = queueStateFor(asset);
       const queueVisible = !!asset.stackId && queue.memberIds.some(id => exportQueue.hasAsset(id) === true);
       const selectionCard = asset.stackId ? stackSelections.currentCard(asset) : asset;
@@ -1531,7 +1531,7 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
             ? <p className="gallery-message" role="status">{t('albums.loading')}</p>
             : albumState === 'error' ? <p className="gallery-message error-text" role="alert">{t('albums.loadFailed')}</p>
               : albums.length === 0 ? <p className="gallery-message">{t('albums.empty')}</p>
-                : <div className="album-grid" style={{ '--album-column-width': `calc(${100 / settings.homeThumbnailColumns}% - ${16 * (settings.homeThumbnailColumns - 1) / settings.homeThumbnailColumns}px)` } as CSSProperties}>{albums.map(album => <AlbumCard key={album.id} album={album} onOpen={() => openAlbum(album)} />)}</div>}
+                : <div className="album-grid" style={{ '--album-card-width': `${settings.homeThumbnailWidth}px` } as CSSProperties}>{albums.map(album => <AlbumCard key={album.id} album={album} onOpen={() => openAlbum(album)} />)}</div>}
         </div> : <div id="home-calendar-panel" className="home-tab-panel" role="tabpanel" aria-labelledby="home-calendar-tab">
           {selectedCalendarDate ? <>
             {calendarAssetState === 'idle' || calendarAssetState === 'loading'

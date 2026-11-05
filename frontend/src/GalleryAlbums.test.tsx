@@ -41,7 +41,7 @@ beforeEach(async () => {
   await i18n.changeLanguage('en');
   sessionStorage.clear();
   writePhotoFilterMode('both', 'recent'); writePhotoFilterMode('both', 'albums'); writePhotoFilterMode('both', 'calendar');
-  updateSetting('dateLocale', 'en-US'); updateSetting('recentPhotoCount', 100); updateSetting('homeThumbnailColumns', 6);
+  updateSetting('dateLocale', 'en-US'); updateSetting('recentPhotoCount', 100); updateSetting('homeThumbnailWidth', 200);
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   api.recent.mockReset().mockResolvedValue([photo]);
   api.albums.mockReset().mockResolvedValue([album]);
@@ -52,7 +52,7 @@ beforeEach(async () => {
 afterEach(() => {
   act(() => root.unmount()); host.remove(); sessionStorage.clear();
   writePhotoFilterMode('both', 'recent'); writePhotoFilterMode('both', 'albums'); writePhotoFilterMode('both', 'calendar');
-  updateSetting('dateLocale', 'auto'); updateSetting('homeThumbnailColumns', 6); vi.unstubAllGlobals();
+  updateSetting('dateLocale', 'auto'); updateSetting('homeThumbnailWidth', 200); vi.unstubAllGlobals();
 });
 
 describe('Home album tab', () => {
@@ -106,14 +106,14 @@ describe('Home album tab', () => {
     const albumGrid = host.querySelector<HTMLElement>('.album-grid')!;
     const slider = host.querySelector<HTMLInputElement>('.home-toolbar-controls input[type="range"]')!;
     act(() => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(slider, '6');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(slider, '3');
       slider.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    expect(host.querySelector<HTMLInputElement>('.home-toolbar-controls input[type="range"]')?.getAttribute('aria-valuetext')).toBe('4 columns');
-    expect(albumGrid.style.getPropertyValue('--album-column-width')).toBe('calc(25% - 12px)');
+    expect(host.querySelector<HTMLInputElement>('.home-toolbar-controls input[type="range"]')?.getAttribute('aria-valuetext')).toBe('200 pixels');
+    expect(albumGrid.style.getPropertyValue('--album-card-width')).toBe('200px');
     clickTab('#home-recent-tab');
-    expect(host.querySelector<HTMLInputElement>('.home-toolbar-controls input[type="range"]')?.getAttribute('aria-valuetext')).toBe('4 columns');
-    expect(host.querySelector<HTMLElement>('.photo-grid')?.style.getPropertyValue('--photo-column-width')).toBe('calc(25% - 12px)');
+    expect(host.querySelector<HTMLInputElement>('.home-toolbar-controls input[type="range"]')?.getAttribute('aria-valuetext')).toBe('200 pixels');
+    expect(host.querySelector<HTMLElement>('.photo-grid')?.style.getPropertyValue('--photo-card-width')).toBe('200px');
   });
 
   it('shows a cover placeholder, no period, and zero items for an empty album', async () => {

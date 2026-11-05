@@ -81,7 +81,7 @@ beforeEach(async () => {
   vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-15T12:00:00Z'));
   await i18n.changeLanguage('en'); sessionStorage.clear();
   updateSetting('recentPhotoCount', 150); updateSetting('showKeyboardShortcuts', true);
-  updateSetting('dateLocale', 'en-US'); updateSetting('homeThumbnailColumns', 6);
+  updateSetting('dateLocale', 'en-US'); updateSetting('homeThumbnailWidth', 200);
   for (const tab of ['recent', 'favorites', 'albums', 'calendar'] as const) {
     writeEditStatusFilterMode('both', tab); writeDevelopStatusFilterMode('both', tab);
   }
@@ -235,7 +235,7 @@ describe('Gallery manual refresh', () => {
     expect(page.scrollTop).toBe(50); expect(content.scrollTop).toBe(320);
     expect((host.querySelector('.recent-count-control select') as HTMLSelectElement).value).toBe('150');
     expect((host.querySelector('.develop-status-filter-control select') as HTMLSelectElement).value).toBe('undeveloped');
-    expect(host.querySelector('.photo-grid')?.getAttribute('style')).toContain('6');
+    expect(host.querySelector('.photo-grid')?.getAttribute('style')).toContain('--photo-card-width: 200px');
   });
 
   it.each(['favorites', 'album-detail', 'calendar-day'])('retains only surviving selection in %s', async view => {

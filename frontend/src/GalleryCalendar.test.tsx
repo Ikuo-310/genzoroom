@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GalleryPage } from './GalleryPage';
-import { HOME_THUMBNAIL_COLUMNS_KEY, resolveDateLocale, updateSetting } from './appSettings';
+import { HOME_THUMBNAIL_WIDTH_KEY, resolveDateLocale, updateSetting } from './appSettings';
 import type { RecentAsset } from './assets';
 import type { CalendarHeatmap } from './HomeCalendar';
 import { EDIT_STATUS_FILTER_SESSION_KEYS, PHOTO_FILTER_SESSION_KEYS, writeEditStatusFilterMode, writePhotoFilterMode } from './photoFilters';
@@ -85,7 +85,7 @@ beforeEach(async () => {
   writePhotoFilterMode('both', 'recent'); writePhotoFilterMode('both', 'albums'); writePhotoFilterMode('both', 'calendar');
   writeEditStatusFilterMode('both', 'recent'); writeEditStatusFilterMode('both', 'albums'); writeEditStatusFilterMode('both', 'calendar');
   updateSetting('weekStart', 'sunday'); updateSetting('dateLocale', 'en-US');
-  updateSetting('recentPhotoCount', 100); updateSetting('homeThumbnailColumns', 6);
+  updateSetting('recentPhotoCount', 100); updateSetting('homeThumbnailWidth', 200);
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   api.recent.mockReset().mockResolvedValue(recent);
   api.albums.mockReset().mockResolvedValue([]);
@@ -102,7 +102,7 @@ afterEach(() => {
   writePhotoFilterMode('both', 'recent'); writePhotoFilterMode('both', 'albums'); writePhotoFilterMode('both', 'calendar');
   writeEditStatusFilterMode('both', 'recent'); writeEditStatusFilterMode('both', 'albums'); writeEditStatusFilterMode('both', 'calendar');
   updateSetting('weekStart', 'auto'); updateSetting('dateLocale', 'auto');
-  updateSetting('recentPhotoCount', 100); updateSetting('homeThumbnailColumns', 6); vi.unstubAllGlobals(); vi.useRealTimers();
+  updateSetting('recentPhotoCount', 100); updateSetting('homeThumbnailWidth', 200); vi.unstubAllGlobals(); vi.useRealTimers();
 });
 
 describe('Home calendar', () => {
@@ -596,24 +596,24 @@ describe('Home calendar', () => {
         slider.dispatchEvent(new Event('input', { bubbles: true }));
       });
     }
-    const gridWidth = () => host.querySelector<HTMLElement>('.photo-grid')?.style.getPropertyValue('--photo-column-width');
+    const gridWidth = () => host.querySelector<HTMLElement>('.photo-grid')?.style.getPropertyValue('--photo-card-width');
     await mount();
     expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
     setSize('0');
-    expect(gridWidth()).toBe('calc(10% - 14.4px)');
+    expect(gridWidth()).toBe('140px');
     click('#home-albums-tab'); await settle();
-    expect(host.querySelector<HTMLElement>('.album-grid')?.style.getPropertyValue('--album-column-width')).toBe('calc(10% - 14.4px)');
+    expect(host.querySelector<HTMLElement>('.album-grid')?.style.getPropertyValue('--album-card-width')).toBe('140px');
     click('.album-card'); await settle();
     expect(host.querySelectorAll('.photo-card')).toHaveLength(2);
-    expect(gridWidth()).toBe('calc(10% - 14.4px)');
+    expect(gridWidth()).toBe('140px');
     click('#home-calendar-tab'); await settle(); click('.calendar-day.has-assets'); await settle();
     expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
-    expect(gridWidth()).toBe('calc(10% - 14.4px)');
+    expect(gridWidth()).toBe('140px');
     setSize('6');
-    expect(gridWidth()).toBe('calc(25% - 12px)');
-    expect(localStorage.getItem(HOME_THUMBNAIL_COLUMNS_KEY)).toBe('4');
-    click('#home-recent-tab'); expect(gridWidth()).toBe('calc(25% - 12px)');
-    click('#home-albums-tab'); expect(gridWidth()).toBe('calc(25% - 12px)');
+    expect(gridWidth()).toBe('260px');
+    expect(localStorage.getItem(HOME_THUMBNAIL_WIDTH_KEY)).toBe('260');
+    click('#home-recent-tab'); expect(gridWidth()).toBe('260px');
+    click('#home-albums-tab'); expect(gridWidth()).toBe('260px');
   });
   it('opens on the current month with localized weekdays, and supports year, month, and boundary navigation', async () => {
     await mount();

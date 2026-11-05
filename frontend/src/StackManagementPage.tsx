@@ -544,8 +544,8 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
     setConfirmRedetect(false);
     runRedetect();
   };
-  const { homeThumbnailColumns } = useAppSettings();
-  const { contentRef, effectiveColumns } = useStackColumns(homeThumbnailColumns);
+  const { homeThumbnailWidth } = useAppSettings();
+  const { contentRef, effectiveColumns } = useStackColumns(homeThumbnailWidth);
   const { isOpen: settingsOpen } = useSettingsDialog();
   useLayoutEffect(() => {
     if (settingsOpen || trashMenu) cancelPendingClick();
@@ -625,7 +625,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
     selectedIds, displayed.unmatched, ready, busy, sending, redetecting, trashMenu, editedPreview]);
 
   const Container = sessionAssets ? 'div' : 'main';
-  return <Container className="stack-management-page" style={{ '--stack-columns': homeThumbnailColumns, '--stack-effective-columns': effectiveColumns } as CSSProperties}
+  return <Container className="stack-management-page" style={{ '--stack-card-width': `${homeThumbnailWidth}px`, '--stack-effective-columns': effectiveColumns } as CSSProperties}
     onClickCapture={cancelPendingClick} onContextMenuCapture={cancelPendingClick}
     onDragOverCapture={event => moveDragPreview(event.clientX, event.clientY)}>
     {!sessionAssets && <header className="stack-management-header">

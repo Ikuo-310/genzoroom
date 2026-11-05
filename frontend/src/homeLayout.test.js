@@ -486,10 +486,10 @@ describe('Home and thumbnail layout', () => {
       && rule.style.getPropertyValue('justify-content') === 'flex-start')).toBe(true);
   });
 
-  it('lets the Album grid use the shared thumbnail column width setting', () => {
+  it('keeps Album cards at the shared preset width and leaves the remaining row space empty', () => {
     const grid = document.createElement('div'); grid.className = 'album-grid';
-    grid.style.setProperty('--album-column-width', 'calc(25% - 12px)'); host.append(grid);
-    expect(getComputedStyle(grid).gridTemplateColumns).toContain('var(--album-column-width, 220px)');
+    grid.style.setProperty('--album-card-width', '200px'); host.append(grid);
+    expect(getComputedStyle(grid).gridTemplateColumns).toContain('var(--album-card-width, 200px)');
     expect(getComputedStyle(grid).gap).toBe('16px');
   });
   it('keeps date-detail arrows beside the shrinking centered title without shrinking the buttons', () => {

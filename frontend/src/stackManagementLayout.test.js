@@ -3,9 +3,9 @@ import { readFileSync } from 'node:fs';
 import { expect, it } from 'vitest';
 it('uses shared responsive columns for both grids and keeps excess group members inside their group', () => {
   const css = readFileSync('src/style.css', 'utf8');
-  expect(css).toContain('.stack-candidate-grid, .stack-unmatched-grid { display: grid; grid-template-columns: repeat(var(--stack-effective-columns), minmax(0, 1fr));');
+  expect(css).toContain('.stack-candidate-grid, .stack-unmatched-grid { display: grid; grid-template-columns: repeat(var(--stack-effective-columns), var(--stack-card-width));');
   expect(css).toContain('grid-column: span min(var(--stack-member-count), var(--stack-effective-columns))');
-  expect(css).toContain('.stack-group-members { display: grid; grid-template-columns: repeat(min(var(--stack-member-count), var(--stack-effective-columns)), minmax(0, 1fr))');
+  expect(css).toContain('.stack-group-members { display: grid; grid-template-columns: repeat(min(var(--stack-member-count), var(--stack-effective-columns)), var(--stack-card-width))');
   expect(css).not.toContain('grid-auto-flow: dense');
 });
 
@@ -16,7 +16,7 @@ it('fits the editor within the Home viewport while preserving Stack chrome and c
   expect(css).toContain('.stack-content { display: flex; min-height: 0; min-width: 0; flex-direction: column; gap: 8px; overflow: hidden; padding: 16px 0 16px 24px; background: var(--bg-content);');
   expect(css).toContain('.stack-management-header { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 12px; padding: 10px 16px; background: var(--bg-panel);');
   expect(css).toContain('.stack-control-bar { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 8px 16px; background: var(--bg-panel);');
-  expect(css).toContain('.stack-candidate-group { grid-column: span min(var(--stack-member-count), var(--stack-effective-columns)); min-width: 0; background: var(--bg-panel);');
+  expect(css).toContain('.stack-candidate-group { grid-column: span min(var(--stack-member-count), var(--stack-effective-columns)); width: calc(100% + 14px); min-width: 0; background: var(--bg-panel);');
   expect(css).toContain('.stack-frame { position: relative; min-height: 0; min-width: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 10px 24px 10px 0; border: 0; border-radius: 0; scrollbar-color: var(--border-subtle) var(--bg-content);');
   expect(css).toContain('.stack-candidate-grid, .stack-unmatched-grid { min-width: 0; }');
   expect(css).toContain('.stack-frame:hover { scrollbar-color: #93969d var(--bg-content); }');

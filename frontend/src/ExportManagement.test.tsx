@@ -24,7 +24,7 @@ async function render(items: ExportQueueItem[] = [], extra: Partial<Queue> = {})
 }
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); await i18n.changeLanguage('en');
-  updateSetting('homeThumbnailColumns', 5);
+  updateSetting('homeThumbnailWidth', 240);
   api.refreshStacks.mockReset().mockResolvedValue([{ id: 'stack-x', primaryAssetId: '0', assets: ['0','2','3','4'].map(id => ({
     id, filename: id, date: '', thumbnail_url: '', format: 'DNG', is_raw: true, stackId: 'stack-x',
     primaryAssetId: '0', stackAssetCount: 4 })) }]);
@@ -107,12 +107,25 @@ it('renders all statuses, noninteractive Gallery cards, Stack groups and shared 
   expect(host.querySelector('.format-badge.raw')?.textContent).toBe('DNG');
   expect(host.querySelectorAll('.photo-selection-input')).toHaveLength(5);
   expect(host.querySelector('[draggable="true"], .cover-badge, .stack-candidate-lights, .photo-card-badges')).toBeNull();
-  expect(host.querySelector<HTMLElement>('.export-queue-grid')?.style.getPropertyValue('--export-columns')).toBe('5');
-  await act(async () => updateSetting('homeThumbnailColumns', 3));
-  expect(host.querySelector<HTMLElement>('.export-queue-grid')?.style.getPropertyValue('--export-columns')).toBe('3');
+  expect(host.querySelector<HTMLElement>('.export-queue-grid')?.style.getPropertyValue('--export-columns')).toBe('1');
+  await act(async () => updateSetting('homeThumbnailWidth', 280));
+  expect(host.querySelector<HTMLElement>('.export-queue-grid')?.style.getPropertyValue('--export-columns')).toBe('1');
   await render(items.map(row => ({ ...row, status: 'failed' })), { loading: true });
   expect(host.querySelectorAll('.export-queue-card')).toHaveLength(5); expect(api.fetchDetail).toHaveBeenCalledTimes(5);
   expect([...host.querySelectorAll<HTMLElement>('.export-queue-card')].every(card => card.dataset.queueStatus === 'failed')).toBe(true);
+});
+
+it('recalculates Export group columns from available width while keeping the saved card width', async () => {
+  let resize!: ResizeObserverCallback;
+  vi.stubGlobal('ResizeObserver', class { constructor(callback: ResizeObserverCallback) { resize = callback; } observe() {} disconnect() {} });
+  const items = [item('a', 'queued'), item('b', 'queued'), item('c', 'queued'), item('d', 'queued')];
+  await render(items);
+  const grid = host.querySelector<HTMLElement>('.export-queue-grid')!;
+  expect(grid.style.getPropertyValue('--export-card-width')).toBe('240px');
+  await act(async () => resize([{ contentRect: { width: 912 } } as ResizeObserverEntry], {} as ResizeObserver));
+  expect(grid.style.getPropertyValue('--export-columns')).toBe('3');
+  await act(async () => resize([{ contentRect: { width: 440 } } as ResizeObserverEntry], {} as ResizeObserver));
+  expect(grid.style.getPropertyValue('--export-columns')).toBe('1');
 });
 it('uses the shared middle-ellipsis filename display and keeps the full name in its title', async () => {
   const filename = 'PXL_20260402_105016-Genzo01.jpg';

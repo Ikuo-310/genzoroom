@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { HOME_THUMBNAIL_COLUMNS_KEY, SHOW_KEYBOARD_SHORTCUTS_KEY, updateSetting } from './appSettings';
+import { HOME_THUMBNAIL_WIDTH_KEY, SHOW_KEYBOARD_SHORTCUTS_KEY, updateSetting } from './appSettings';
 import { changeAppLanguage } from './i18n';
 import { HomeThumbnailSizeControl } from './HomeThumbnailSizeControl';
 import { formatShortcut } from './shortcutDisplay';
@@ -18,11 +18,11 @@ async function change(control: HTMLElement, value: string) {
 }
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-  localStorage.clear(); updateSetting('homeThumbnailColumns', 6); updateSetting('showKeyboardShortcuts', true); await changeAppLanguage('en');
+  localStorage.clear(); updateSetting('homeThumbnailWidth', 200); updateSetting('showKeyboardShortcuts', true); await changeAppLanguage('en');
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   await act(async () => root.render(<HomeThumbnailSizeControl />));
 });
-afterEach(() => { act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); updateSetting('homeThumbnailColumns', 6); });
+afterEach(() => { act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); updateSetting('homeThumbnailWidth', 200); });
 
 describe('Home thumbnail size controls', () => {
   function dispatch(code: string, key: string, target: EventTarget = window, modifiers: KeyboardEventInit = {}) {
@@ -38,39 +38,39 @@ describe('Home thumbnail size controls', () => {
 
   it('moves one step per icon click and disables both limits', async () => {
     const home = host.querySelector<HTMLElement>('.thumbnail-size-control')!;
-    expect(home.querySelector('input')!.getAttribute('aria-valuetext')).toBe('6 columns');
+    expect(home.querySelector('input')!.getAttribute('aria-valuetext')).toBe('200 pixels');
     await act(async () => home.querySelector<HTMLButtonElement>('[aria-label="Make thumbnails smaller"]')!.click());
-    expect(localStorage.getItem(HOME_THUMBNAIL_COLUMNS_KEY)).toBe('7');
-    for (let i = 0; i < 4; i++) await act(async () => home.querySelector<HTMLButtonElement>('[aria-label="Make thumbnails smaller"]')!.click());
+    expect(localStorage.getItem(HOME_THUMBNAIL_WIDTH_KEY)).toBe('180');
+    for (let i = 0; i < 2; i++) await act(async () => home.querySelector<HTMLButtonElement>('[aria-label="Make thumbnails smaller"]')!.click());
     expect(home.querySelector<HTMLButtonElement>('[aria-label="Make thumbnails smaller"]')!.disabled).toBe(true);
-    expect(home.querySelector('input')!.getAttribute('aria-valuetext')).toBe('10 columns');
+    expect(home.querySelector('input')!.getAttribute('aria-valuetext')).toBe('140 pixels');
     for (let i = 0; i < 7; i++) await act(async () => home.querySelector<HTMLButtonElement>('[aria-label="Make thumbnails larger"]')!.click());
     expect(home.querySelector<HTMLButtonElement>('[aria-label="Make thumbnails larger"]')!.disabled).toBe(true);
-    expect(home.querySelector('input')!.getAttribute('aria-valuetext')).toBe('3 columns');
+    expect(home.querySelector('input')!.getAttribute('aria-valuetext')).toBe('280 pixels');
   });
   it('updates the saved Home setting immediately while the slider moves', async () => {
     const home = host.querySelector<HTMLElement>('.thumbnail-size-control')!;
     const slider = home.querySelector<HTMLInputElement>('input[type="range"]')!;
     expect(slider.min).toBe('0'); expect(slider.max).toBe('7');
     await change(home, '0');
-    expect(localStorage.getItem(HOME_THUMBNAIL_COLUMNS_KEY)).toBe('10');
+    expect(localStorage.getItem(HOME_THUMBNAIL_WIDTH_KEY)).toBe('140');
     expect(home.querySelector('input')!.value).toBe('0');
     await change(home, '7');
-    expect(home.querySelector('input')!.getAttribute('aria-valuetext')).toBe('3 columns');
+    expect(home.querySelector('input')!.getAttribute('aria-valuetext')).toBe('280 pixels');
   });
 
   it('uses physical numpad codes and shares the button step callbacks', async () => {
     await act(async () => dispatch('NumpadSubtract', '-'));
-    expect(localStorage.getItem(HOME_THUMBNAIL_COLUMNS_KEY)).toBe('7');
+    expect(localStorage.getItem(HOME_THUMBNAIL_WIDTH_KEY)).toBe('180');
     await act(async () => dispatch('NumpadAdd', '+'));
-    expect(localStorage.getItem(HOME_THUMBNAIL_COLUMNS_KEY)).toBe('6');
+    expect(localStorage.getItem(HOME_THUMBNAIL_WIDTH_KEY)).toBe('200');
     for (const [code, key] of [['Minus', '-'], ['Equal', '=']] as const) await act(async () => dispatch(code, key));
-    expect(localStorage.getItem(HOME_THUMBNAIL_COLUMNS_KEY)).toBe('6');
+    expect(localStorage.getItem(HOME_THUMBNAIL_WIDTH_KEY)).toBe('200');
     await act(async () => dispatch('NumpadAdd', '+', window, { ctrlKey: true }));
     await act(async () => dispatch('NumpadSubtract', '-', window, { altKey: true }));
-    expect(localStorage.getItem(HOME_THUMBNAIL_COLUMNS_KEY)).toBe('6');
+    expect(localStorage.getItem(HOME_THUMBNAIL_WIDTH_KEY)).toBe('200');
     await act(async () => dispatch('NumpadSubtract', '-', window, { repeat: true }));
-    expect(localStorage.getItem(HOME_THUMBNAIL_COLUMNS_KEY)).toBe('6');
+    expect(localStorage.getItem(HOME_THUMBNAIL_WIDTH_KEY)).toBe('200');
   });
 
   it.each(['input', 'range', 'textarea', 'select', 'contenteditable'] as const)('ignores numpad sizing while editing in %s', async kind => {
@@ -80,18 +80,18 @@ describe('Home thumbnail size controls', () => {
     document.body.append(target);
     try {
       await act(async () => dispatch('NumpadSubtract', '-', target));
-      expect(localStorage.getItem(HOME_THUMBNAIL_COLUMNS_KEY)).toBe('6');
+      expect(localStorage.getItem(HOME_THUMBNAIL_WIDTH_KEY)).toBe('200');
     } finally { target.remove(); }
   });
 
   it('keeps numpad actions inert at the same min and max limits as the buttons', async () => {
-    await act(async () => updateSetting('homeThumbnailColumns', 10));
+    await act(async () => updateSetting('homeThumbnailWidth', 140));
     await act(async () => dispatch('NumpadSubtract', '-'));
-    expect(localStorage.getItem(HOME_THUMBNAIL_COLUMNS_KEY)).toBe('10');
+    expect(localStorage.getItem(HOME_THUMBNAIL_WIDTH_KEY)).toBe('140');
     expect(host.querySelector<HTMLButtonElement>('[aria-label="Make thumbnails smaller"]')!.disabled).toBe(true);
-    await act(async () => updateSetting('homeThumbnailColumns', 3));
+    await act(async () => updateSetting('homeThumbnailWidth', 280));
     await act(async () => dispatch('NumpadAdd', '+'));
-    expect(localStorage.getItem(HOME_THUMBNAIL_COLUMNS_KEY)).toBe('3');
+    expect(localStorage.getItem(HOME_THUMBNAIL_WIDTH_KEY)).toBe('280');
     expect(host.querySelector<HTMLButtonElement>('[aria-label="Make thumbnails larger"]')!.disabled).toBe(true);
   });
 
@@ -102,7 +102,7 @@ describe('Home thumbnail size controls', () => {
     document.body.append(overlay);
     try {
       await act(async () => dispatch('NumpadSubtract', '-'));
-      expect(localStorage.getItem(HOME_THUMBNAIL_COLUMNS_KEY)).toBe('6');
+      expect(localStorage.getItem(HOME_THUMBNAIL_WIDTH_KEY)).toBe('200');
     } finally { overlay.remove(); }
   });
 

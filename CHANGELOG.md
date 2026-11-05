@@ -8,6 +8,8 @@ Internal changes are omitted unless they affect users.
 
 ### Changed
 
+- Gallery, Album, Export, and STACK thumbnails now use a shared eight-step card-width setting (140–280px, default 200px). Card widths stay fixed while columns adapt to the available width; existing saved column settings migrate to the equivalent width.
+
 - Reorganized JPEG development controls into Color, Basic, and Color Grading. Temperature and Tint now live under Color with Vibrance and Saturation. Per-adjustment ON/OFF switches were removed while retaining compatibility with existing saved Recipes.
 
 - JPEG History now groups repeated keyboard and wheel adjustments to the same control into one entry until another operation begins; idle time and Autosave no longer split it.
