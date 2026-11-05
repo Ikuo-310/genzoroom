@@ -927,8 +927,19 @@ class LightCraftRawSession:
 
     async def set_controls(self, handle, values, expected_revision):
         values = json.loads(_object_json(values, MAX_PATCH_BYTES))
-        if not values or any(not isinstance(k, str) or type(v) not in (float, int) for k, v in values.items()):
+        if not values or any(not isinstance(k, str) or type(v) not in (float, int, bool) for k, v in values.items()):
             raise LightCraftError("raw_invalid_controls")
+        if any(type(value) is bool for value in values.values()):
+            if any(not key.startswith("optics.") for key in values):
+                raise LightCraftError("raw_invalid_controls")
+            from raw_controls import CONTROL_PATHS
+            partial = {}
+            for key, value in values.items():
+                field = CONTROL_PATHS[key][-1]
+                section = partial.setdefault("optics", {})
+                section[field] = value
+            # The native numeric control command cannot write Optics' boolean settings.
+            return await self._mutate(handle, "develop.merge", {"settings": partial}, expected_revision)
         return await self._mutate(handle, "develop.set", {"values": values}, expected_revision)
 
     async def apply_geometry(self, handle, operation, expected_revision):

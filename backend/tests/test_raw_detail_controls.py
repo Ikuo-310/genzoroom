@@ -111,9 +111,21 @@ def test_nr_history_retry_reset_off_reopen_and_hidden_state(local, tmp_path, mon
 def test_published_control_and_section_contract_matches_frontend_and_history():
     source = (Path(__file__).parents[2] / 'frontend/src/rawApi.ts').read_text(encoding='utf-8')
     ids = source.split('export const RAW_CONTROL_IDS = [', 1)[1].split('] as const', 1)[0]
+    setting_ids = source.split('export const RAW_SETTINGS_CONTROL_IDS = [...RAW_CONTROL_IDS,', 1)[1].split('] as const', 1)[0]
     sections = source.split('export const RAW_SECTION_IDS = [', 1)[1].split('] as const', 1)[0]
-    assert set(re.findall(r"'([^']+)'", ids)) == set(CONTROLS) == store.HISTORY_CONTROLS
-    assert set(re.findall(r"'([^']+)'", sections)) == set(SECTIONS) == store.HISTORY_SECTIONS
+    frontend_controls = set(re.findall(r"'([^']+)'", ids))
+    frontend_sections = set(re.findall(r"'([^']+)'", sections))
+    optics_controls = {f"optics.{name}" for name in (
+        "profileDistortion", "profileVignetting", "distortion", "vignetting", "vignettingMidpoint",
+        "defringePurple", "defringePurpleHueLo", "defringePurpleHueHi", "defringeGreen", "defringeGreenHueLo",
+        "defringeGreenHueHi", "caRed", "caBlue")}
+    frontend_optics_controls = set(re.findall(r"'([^']+)'", setting_ids))
+    assert frontend_optics_controls == optics_controls
+    frontend_settings_controls = frontend_controls | frontend_optics_controls
+    assert frontend_controls == store.HISTORY_CONTROLS
+    assert frontend_settings_controls == set(CONTROLS)
+    assert frontend_sections == store.HISTORY_SECTIONS
+    assert frontend_sections == set(SECTIONS)
     assert CONTROL_PATHS['detail.sharpenAmount'] == ('detail', 'sharpen_amount')
     assert CONTROL_PATHS['detail.sharpenMasking'] == ('detail', 'sharpen_masking')
 

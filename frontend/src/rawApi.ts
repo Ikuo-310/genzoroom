@@ -20,7 +20,7 @@ export class RawSuperseded extends Error {
   constructor(public readonly reason: 'revision' | 'replaced' | 'cancelled') { super(reason); }
 }
 const RAW_PREVIEW_MAX_SIDE = RAW_WHOLE_MAX_SIDE;
-// Match the Backend bound for 36 control specs, full-precision values and a History receipt.
+// Match the Backend bound for the RAW control specs, flags, full-precision values and History receipt.
 const RAW_SETTINGS_RESPONSE_BYTES = 16384;
 export const RAW_CONTROL_IDS = ['light.exposure', 'light.contrast', 'light.highlights', 'light.shadows', 'light.whites', 'light.blacks',
   'grading.shadows.hue', 'grading.shadows.sat', 'grading.shadows.lum',
@@ -31,13 +31,22 @@ export const RAW_CONTROL_IDS = ['light.exposure', 'light.contrast', 'light.highl
   'detail.sharpenAmount', 'detail.sharpenMasking',
   'detail.nrLuminance', 'detail.nrDetail', 'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'] as const;
 export type RawControlId = typeof RAW_CONTROL_IDS[number];
+export const RAW_SETTINGS_CONTROL_IDS = [...RAW_CONTROL_IDS,
+  'optics.distortion', 'optics.vignetting', 'optics.vignettingMidpoint', 'optics.profileDistortion', 'optics.profileVignetting',
+  'optics.defringePurple', 'optics.defringePurpleHueLo', 'optics.defringePurpleHueHi', 'optics.defringeGreen',
+  'optics.defringeGreenHueLo', 'optics.defringeGreenHueHi', 'optics.caRed', 'optics.caBlue'] as const;
+export type RawSettingControlId = typeof RAW_SETTINGS_CONTROL_IDS[number];
+const RAW_HISTORY_CONTROL_IDS: readonly RawControlId[] = RAW_CONTROL_IDS;
 export const RAW_SECTION_IDS = ['light', 'color', 'grading', 'effects', 'detail'] as const;
 export type RawSectionId = typeof RAW_SECTION_IDS[number];
+export const RAW_SETTINGS_SECTION_IDS = [...RAW_SECTION_IDS, 'optics'] as const;
+export type RawSettingsSectionId = typeof RAW_SETTINGS_SECTION_IDS[number];
 export const RAW_RESET_SECTION_IDS = [...RAW_SECTION_IDS, 'vignette'] as const;
 export type RawResetSectionId = typeof RAW_RESET_SECTION_IDS[number];
 export const RAW_VIGNETTE_STYLES = ['highlightPriority', 'colorPriority', 'paintOverlay'] as const;
 export type RawVignetteStyle = typeof RAW_VIGNETTE_STYLES[number];
-export type RawValues = Record<RawControlId, number>;
+export type RawValues = Record<RawSettingControlId, number>;
+export type RawControlValues = Partial<RawValues> & Partial<{ 'optics.remove_ca': boolean; 'optics.lens_profile': boolean }>;
 export const RAW_GEOMETRY_OPERATIONS = ['set', 'drag', 'aspect', 'swap', 'reset', 'straighten', 'rotateLeft', 'rotateRight', 'flipHorizontal', 'flipVertical'] as const;
 export type RawGeometryOperationId = typeof RAW_GEOMETRY_OPERATIONS[number];
 export type RawCropRect = [number, number, number, number];
@@ -52,10 +61,10 @@ export type RawGeometryOperation = { type: 'set'; params: { rect?: RawCropRect; 
 export type RawSettings = RawDocument & { settingsFingerprint: string; recipeRevision: number; recipeFingerprint: string | null;
   crop?: RawCrop; orientation?: string;
   importDefaultsFingerprint: string;
-  sections: Record<RawSectionId, boolean>;
+  sections: Record<RawSettingsSectionId, boolean>;
   mutationAttempts: number; mutationLimit: number; regenerationThreshold: number;
-  values: RawValues; vignetteStyle: RawVignetteStyle; process: number; wbAutoAvailable?: boolean;
-  controls: { id: RawControlId; min: number; max: number; step: number; default: number; precision: number }[];
+  values: RawValues; opticsFlags: { remove_ca: boolean; lens_profile: boolean }; vignetteStyle: RawVignetteStyle; process: number; wbAutoAvailable?: boolean;
+  controls: { id: RawSettingControlId; min: number; max: number; step: number; default: number; precision: number }[];
   wb: { available: boolean; mode: string; scale: string } };
 export class RawApiError extends Error {
   constructor(public readonly code: string, public readonly status?: number) { super(code); }
@@ -290,12 +299,13 @@ function settings(value: RawSettings, doc: RawDocument): RawSettings {
     || value.mutationAttempts > value.mutationLimit || !integer(value.process) || !value.wb || typeof value.wb.available !== 'boolean'
     || typeof value.wb.mode !== 'string' || value.wb.mode.length > 32 || typeof value.wb.scale !== 'string' || value.wb.scale.length > 32
     || value.wbAutoAvailable !== undefined && typeof value.wbAutoAvailable !== 'boolean'
+    || !value.opticsFlags || typeof value.opticsFlags.remove_ca !== 'boolean' || typeof value.opticsFlags.lens_profile !== 'boolean'
     || !RAW_VIGNETTE_STYLES.includes(value.vignetteStyle)
-    || !value.sections || !RAW_SECTION_IDS.every(section => typeof value.sections[section] === 'boolean')
-    || !value.values || !RAW_CONTROL_IDS.every(id => Number.isFinite(value.values[id]))
-    || !Array.isArray(value.controls) || value.controls.length !== RAW_CONTROL_IDS.length
-    || new Set(value.controls.map(c => c.id)).size !== RAW_CONTROL_IDS.length
-    || value.controls.some(c => !RAW_CONTROL_IDS.includes(c.id) || ![c.min, c.max, c.step, c.default].every(Number.isFinite)
+    || !value.sections || !RAW_SETTINGS_SECTION_IDS.every(section => typeof value.sections[section] === 'boolean')
+    || !value.values || !RAW_SETTINGS_CONTROL_IDS.every(id => Number.isFinite(value.values[id]))
+    || !Array.isArray(value.controls) || value.controls.length !== RAW_SETTINGS_CONTROL_IDS.length
+    || new Set(value.controls.map(c => c.id)).size !== RAW_SETTINGS_CONTROL_IDS.length
+    || value.controls.some(c => !RAW_SETTINGS_CONTROL_IDS.includes(c.id) || ![c.min, c.max, c.step, c.default].every(Number.isFinite)
       || c.min >= c.max || c.step <= 0 || !integer(c.precision) || c.precision > 4)) throw new RawApiError('raw_invalid_response');
   return value;
 }
@@ -303,7 +313,7 @@ const identityBody = (doc: RawDocument) => ({ workspaceId: doc.workspaceId, gene
 export async function readRawSettings(doc: RawDocument): Promise<RawSettings> {
   return settings(await json(`/documents/${doc.handle}/settings`, post(identityBody(doc)), RAW_SETTINGS_RESPONSE_BYTES), doc);
 }
-export async function setRawControls(doc: RawDocument, values: Partial<RawValues>): Promise<RawSettings> {
+export async function setRawControls(doc: RawDocument, values: RawControlValues): Promise<RawSettings> {
   const result = settings(await json(`/documents/${doc.handle}/controls`, post({ ...identityBody(doc), expectedRevision: doc.revision, values }), RAW_SETTINGS_RESPONSE_BYTES), doc);
   if (result.revision <= doc.revision) throw new RawApiError('raw_invalid_response');
   return result;
@@ -410,15 +420,15 @@ export async function readRawHistory(doc: RawDocument): Promise<RawHistoryData> 
     if (!step || !uuid(step.stepId) || ids.has(step.stepId) || typeof step.createdAt !== 'string' || !Number.isFinite(Date.parse(step.createdAt))
       || !m || typeof m !== 'object' || Array.isArray(m)
       || (step.kind === 'geometry' ? !validGeometryMetadata(m)
-        : step.kind === 'control' || step.kind === 'controlReset' ? Object.keys(m).length !== 1 || !RAW_CONTROL_IDS.includes(m.control)
+        : step.kind === 'control' || step.kind === 'controlReset' ? Object.keys(m).length !== 1 || !RAW_HISTORY_CONTROL_IDS.includes(m.control as RawControlId)
         : step.kind === 'sectionToggle' ? Object.keys(m).length !== 2 || !RAW_SECTION_IDS.includes(m.section) || typeof m.enabled !== 'boolean'
         : step.kind === 'sectionReset' ? Object.keys(m).length !== 1 || !RAW_RESET_SECTION_IDS.includes(m.section)
         : step.kind === 'vignetteStyle' ? Object.keys(m).length !== 1 || !RAW_VIGNETTE_STYLES.includes(m.style)
         : !['allReset', 'wbAuto', 'wbPick'].includes(step.kind) || Object.keys(m).length !== 0)
-      || !(step.changes === null || Array.isArray(step.changes) && step.changes.length <= RAW_CONTROL_IDS.length
+      || !(step.changes === null || Array.isArray(step.changes) && step.changes.length <= RAW_HISTORY_CONTROL_IDS.length
         && step.changes.every((change: unknown, index: number, changes: unknown[]) => {
           const item = change as { control?: unknown; before?: unknown; after?: unknown } | null;
-          return !!item && RAW_CONTROL_IDS.includes(item.control as RawControlId)
+          return !!item && RAW_HISTORY_CONTROL_IDS.includes(item.control as RawControlId)
             && typeof item.before === 'number' && Number.isFinite(item.before)
             && typeof item.after === 'number' && Number.isFinite(item.after)
             && changes.findIndex(other => (other as { control?: unknown } | null)?.control === item.control) === index;

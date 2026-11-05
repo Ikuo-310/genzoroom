@@ -1038,7 +1038,7 @@ describe('bounded RAW session renewal', () => {
     vi.mocked(api.saveRawHistory).mockImplementation(async request => {
       if (request.action === 'initialize') return rawHistoryResult(request, saved ? { history: saved.history } : {});
       const next = { ...request.doc, revision: request.doc.revision + 1, mutationAttempts: 201,
-        settingsFingerprint: '8'.repeat(64), recipeFingerprint: '8'.repeat(64), sections: { light: true, color: false, grading: true, effects: true, detail: true },
+        settingsFingerprint: '8'.repeat(64), recipeFingerprint: '8'.repeat(64), sections: { light: true, color: false, grading: true, effects: true, detail: true, optics: true },
         values: { ...request.doc.values, 'wb.temp': 4875, 'wb.tint': 13 } };
       saved = rawHistoryResult({ ...request, doc: next }, { history: { initialized: true, length: 1, cursor: 1, selectedStepId: request.saveId } });
       return saved;

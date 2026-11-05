@@ -12,7 +12,7 @@ export function reusableCropBitmap(snapshot: CropSnapshot, doc: RawSettings) {
   // crop-edit omits rect/angle; orientation, Warp and flips must never be rebound here.
   return sameCropOwner(a,doc) && !!doc.crop && a.orientation===doc.orientation
     && a.crop?.flip_h===doc.crop.flip_h && a.crop?.flip_v===doc.crop.flip_v
-    && JSON.stringify([a.values,a.sections,a.process,a.wb,a.vignetteStyle])===JSON.stringify([doc.values,doc.sections,doc.process,doc.wb,doc.vignetteStyle]);
+    && JSON.stringify([a.values,a.sections,a.opticsFlags,a.process,a.wb,a.vignetteStyle])===JSON.stringify([doc.values,doc.sections,doc.opticsFlags,doc.process,doc.wb,doc.vignetteStyle]);
 }
 export function provisionalCrop(start: RawCrop, operation: RawGeometryOperation, frame?: RawGeometry): RawCrop {
   const crop=structuredClone(start);

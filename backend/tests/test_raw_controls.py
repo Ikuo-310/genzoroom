@@ -20,6 +20,51 @@ def test_invalid_control_values(values):
         validate_controls(values, True)
 
 
+def test_optics_specs_and_typed_switches_match_lightcraft():
+    from raw_controls import controls_state
+    expected = {'profileDistortion': (0, 200, 100), 'profileVignetting': (0, 200, 100),
+        'distortion': (-100, 100, 0), 'vignetting': (-100, 100, 0), 'vignettingMidpoint': (0, 100, 50),
+        'defringePurple': (0, 20, 0), 'defringePurpleHueLo': (0, 90, 30),
+        'defringePurpleHueHi': (10, 100, 70), 'defringeGreen': (0, 20, 0),
+        'defringeGreenHueLo': (0, 90, 40), 'defringeGreenHueHi': (10, 100, 60),
+        'caRed': (-100, 100, 0), 'caBlue': (-100, 100, 0)}
+    assert all(CONTROLS[f'optics.{name}'][:2] + (CONTROLS[f'optics.{name}'][3],) == spec
+               for name, spec in expected.items())
+    for flag in ('optics.remove_ca', 'optics.lens_profile'):
+        assert validate_controls({flag: True}, True) == {flag: True}
+        with pytest.raises(LightCraftError, match='raw_invalid_controls'):
+            validate_controls({flag: 1}, True)
+    with pytest.raises(LightCraftError, match='raw_invalid_controls'):
+        validate_controls({'optics.remove_ca': True, 'light.exposure': 1}, True)
+
+
+def test_optics_numeric_and_boolean_settings_use_native_merge_and_readback(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                _, doc = await open_document(http)
+                values = {'optics.profileDistortion': 125, 'optics.defringeGreen': 7,
+                          'optics.remove_ca': True, 'optics.lens_profile': True}
+                response = await http.post(f'/api/raw/documents/{doc["handle"]}/controls',
+                    json=identity(doc) | {'expectedRevision': doc['revision'], 'values': values})
+                assert response.status_code == 200, response.text
+                result = response.json()
+                assert result['values']['optics.profileDistortion'] == 125
+                assert result['values']['optics.defringeGreen'] == 7
+                assert result['opticsFlags'] == {'remove_ca': True, 'lens_profile': True}
+                assert result['sections']['optics'] is True
+                assert children[0].commands[-2][0] == 'develop.merge'
+                assert children[0].commands[-2][1]['settings']['optics'] == {
+                    'profile_distortion': 125, 'defringe_green_amount': 7,
+                    'remove_ca': True, 'lens_profile': True}
+                assert result['revision'] > doc['revision']
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
 def test_controls_readback_revision_and_preview(local, tmp_path, monkeypatch):
     async def run():
         api, _, children, _ = await setup(tmp_path, local, monkeypatch)
@@ -33,7 +78,7 @@ def test_controls_readback_revision_and_preview(local, tmp_path, monkeypatch):
                 initial = (await http.post(settings_url, json=identity(doc))).json()
                 assert initial["wb"] == {"available": True, "mode": "custom", "scale": "kelvin"}
                 assert {c["id"] for c in initial["controls"]} == set(CONTROLS)
-                patch = {key: 5500 if key == "wb.temp" else 1 for key in CONTROLS}
+                patch = {key: 5500 if key == "wb.temp" else spec[3] for key, spec in CONTROLS.items()}
                 children[0].mismatch = True
                 response = await http.post(controls_url, json=identity(doc) | {"expectedRevision": doc["revision"], "values": patch})
                 assert response.status_code == 200, response.text

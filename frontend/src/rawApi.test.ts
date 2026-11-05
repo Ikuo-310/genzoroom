@@ -85,7 +85,7 @@ describe('RAW History transport', () => {
     const data = rawHistoryData(rawSettings(doc));
     data.steps = Array.from({ length: 200 }, (_, i) => ({ stepId: `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`,
       kind: 'allReset', metadata: {}, createdAt: '2026-10-27T00:00:00Z',
-      changes: RAW_CONTROL_IDS.map(control => ({ control, before: -9.876543210987654e100, after: 1.234567890123456e200 })) }));
+      changes: RAW_CONTROL_IDS.filter(control => !control.startsWith('optics.')).map(control => ({ control, before: -9.876543210987654e100, after: 1.234567890123456e200 })) }));
     data.history = { initialized: true, cursor: 200, length: 200, selectedStepId: data.steps[199].stepId };
     const encoded = JSON.stringify(data);
     expect(new TextEncoder().encode(encoded).length).toBeGreaterThan(256 * 1024);
@@ -266,6 +266,19 @@ describe('bounded RAW binary contract', () => {
       documentToken: doc.documentToken, expectedRevision: doc.revision, values: { [control]: 1 } });
     expect((await readRawSettings(doc)).revision).toBe(result.revision);
     expect(fetch.mock.calls[1][0]).toBe(`/api/raw/documents/${doc.handle}/settings`);
+  });
+  it('accepts Optics boolean settings in the existing controls request and validates flag readback', async () => {
+    const fetch = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({
+      ...rawSettings(doc), revision: doc.revision + 1, opticsFlags: { remove_ca: true, lens_profile: false },
+    }), { headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetch);
+    const values = { 'optics.profileDistortion': 125, 'optics.remove_ca': true, 'optics.lens_profile': false } as const;
+    const result = await setRawControls(doc, values);
+    expect(result.opticsFlags).toEqual({ remove_ca: true, lens_profile: false });
+    expect(JSON.parse(fetch.mock.calls[0][1]!.body as string)).toMatchObject({ values });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ...rawSettings(doc), revision: doc.revision + 1,
+      opticsFlags: { remove_ca: 1, lens_profile: false } }), { headers: { 'Content-Type': 'application/json' } })));
+    await expect(setRawControls(doc, values)).rejects.toThrow('raw_invalid_response');
   });
   it('rejects stale identity and malformed control metadata in settings responses', async () => {
     for (const patch of [{ generation: doc.generation + 1 }, { documentToken: 'other' }, { controls: [] }, { values: {} },

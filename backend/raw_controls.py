@@ -30,9 +30,19 @@ CONTROLS = {
     "detail.nrColor": (0, 100, 1, 0, 0),
     "detail.nrColorDetail": (0, 100, 1, 50, 0),
     "detail.nrColorSmoothness": (0, 100, 1, 50, 0),
+    **{f"optics.{name}": spec for name, spec in {
+        "distortion": (-100, 100, 1, 0, 0), "vignetting": (-100, 100, 1, 0, 0),
+        "vignettingMidpoint": (0, 100, 1, 50, 0), "profileDistortion": (0, 200, 1, 100, 0),
+        "profileVignetting": (0, 200, 1, 100, 0), "defringePurple": (0, 20, 1, 0, 0),
+        "defringePurpleHueLo": (0, 90, 1, 30, 0), "defringePurpleHueHi": (10, 100, 1, 70, 0),
+        "defringeGreen": (0, 20, 1, 0, 0), "defringeGreenHueLo": (0, 90, 1, 40, 0),
+        "defringeGreenHueHi": (10, 100, 1, 60, 0), "caRed": (-100, 100, 1, 0, 0), "caBlue": (-100, 100, 1, 0, 0),
+    }.items()},
 }
 
 SECTIONS = ("light", "color", "grading", "effects", "detail")
+SETTINGS_SECTIONS = (*SECTIONS, "optics")
+HISTORY_CONTROLS = frozenset(control for control in CONTROLS if not control.startswith("optics."))
 # Vignette has a Native reset section, but its eye belongs to Effects.
 RESET_SECTIONS = (*SECTIONS, "vignette")
 VIGNETTE_STYLES = ("highlightPriority", "colorPriority", "paintOverlay")
@@ -45,6 +55,14 @@ CONTROL_PATHS = {control: tuple(control.split(".")) for control in CONTROLS} | {
     "detail.nrColor": ("detail", "nr_color"),
     "detail.nrColorDetail": ("detail", "nr_color_detail"),
     "detail.nrColorSmoothness": ("detail", "nr_color_smoothness"),
+    **{f"optics.{name}": ("optics", field) for name, field in {
+        "distortion": "distortion", "vignetting": "vignetting", "vignettingMidpoint": "vignetting_midpoint",
+        "profileDistortion": "profile_distortion", "profileVignetting": "profile_vignetting",
+        "defringePurple": "defringe_purple_amount", "defringePurpleHueLo": "defringe_purple_hue_lo",
+        "defringePurpleHueHi": "defringe_purple_hue_hi", "defringeGreen": "defringe_green_amount",
+        "defringeGreenHueLo": "defringe_green_hue_lo", "defringeGreenHueHi": "defringe_green_hue_hi",
+        "caRed": "ca_red", "caBlue": "ca_blue"}.items()},
+    "optics.remove_ca": ("optics", "remove_ca"), "optics.lens_profile": ("optics", "lens_profile"),
 }
 # A native Detail reset includes controls not exposed by GenzoRoom yet.
 DETAIL_RESET_DEFAULTS = dict(sharpen_amount=0, sharpen_radius=1, sharpen_detail=25, sharpen_masking=0,
@@ -87,8 +105,12 @@ def controls_state(snapshot):
     if type(disabled) is not list or any(type(section) is not str for section in disabled):
         raise LightCraftError("raw_invalid_settings")
     from raw_geometry import geometry_state
-    return {**geometry_state(settings), "values": values, "vignetteStyle": style, "wbAutoAvailable": snapshot.wb_auto and snapshot.wb_kelvin,
-            "sections": {section: section not in disabled for section in SECTIONS},
+    optics = settings.get("optics", {})
+    flags = {name: optics.get(name) for name in ("remove_ca", "lens_profile")}
+    if any(type(value) is not bool for value in flags.values()):
+        raise LightCraftError("raw_invalid_settings")
+    return {**geometry_state(settings), "values": values, "opticsFlags": flags, "vignetteStyle": style, "wbAutoAvailable": snapshot.wb_auto and snapshot.wb_kelvin,
+            "sections": {section: section not in disabled for section in SETTINGS_SECTIONS},
             "controls": [dict(id=key, min=v[0], max=v[1], step=v[2], default=v[3], precision=v[4])
                                            for key, v in CONTROLS.items()],
             "wb": {"available": snapshot.wb_kelvin and wb.get("scale") == "kelvin",
@@ -96,9 +118,16 @@ def controls_state(snapshot):
 
 
 def validate_controls(values, wb_available):
-    if not isinstance(values, dict) or not 1 <= len(values) <= len(CONTROLS):
+    if not isinstance(values, dict) or not 1 <= len(values) <= len(CONTROLS) + 2:
+        raise LightCraftError("raw_invalid_controls")
+    has_optics_flag = any(key in ("optics.remove_ca", "optics.lens_profile") for key in values)
+    if has_optics_flag and any(not key.startswith("optics.") for key in values):
         raise LightCraftError("raw_invalid_controls")
     for key, value in values.items():
+        if key in ("optics.remove_ca", "optics.lens_profile"):
+            if type(value) is not bool:
+                raise LightCraftError("raw_invalid_controls")
+            continue
         if key not in CONTROLS or type(value) not in (int, float) or not math.isfinite(value):
             raise LightCraftError("raw_invalid_controls")
         lo, hi, *_ = CONTROLS[key]
@@ -118,7 +147,7 @@ def validate_history_operation(kind, metadata):
             raise LightCraftError('raw_invalid_request')
         return
     valid = (kind == "controlReset" and set(metadata) == {"control"}
-             and type(metadata["control"]) is str and metadata["control"] in CONTROLS
+             and type(metadata["control"]) is str and metadata["control"] in HISTORY_CONTROLS
              or kind == "sectionReset" and set(metadata) == {"section"}
              and type(metadata["section"]) is str and metadata["section"] in RESET_SECTIONS
              or kind == "sectionToggle" and set(metadata) == {"section", "enabled"}

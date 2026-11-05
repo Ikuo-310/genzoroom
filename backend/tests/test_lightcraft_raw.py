@@ -33,6 +33,10 @@ DEFAULT = {"version": 1, "process": 2, "wb": {"mode": "custom", "temp": 6500., "
            "detail": {"sharpen_amount": 40., "sharpen_radius": 1., "sharpen_detail": 25., "sharpen_masking": 0.,
                       "nr_luminance": 0., "nr_detail": 50., "nr_contrast": 0., "nr_color": 25.,
                       "nr_color_detail": 50., "nr_color_smoothness": 50.},
+           "optics": {"remove_ca": False, "lens_profile": False, "profile_distortion": 100., "profile_vignetting": 100.,
+                      "defringe_purple_amount": 0., "defringe_purple_hue_lo": 30., "defringe_purple_hue_hi": 70.,
+                      "defringe_green_amount": 0., "defringe_green_hue_lo": 40., "defringe_green_hue_hi": 60.,
+                      "distortion": 0., "vignetting": 0., "vignetting_midpoint": 50., "ca_red": 0., "ca_blue": 0.},
            "enhance": {"denoise": 0., "raw_details": False, "super_resolution": False},
            "curve": {"master": [{"x": 0., "y": 0.}, {"x": 1., "y": 1.}]}}
 QUICK = RawTimeouts(admission=.5, command=1, import_raw=2, preview=1, validation=1, ready=1)
@@ -40,6 +44,13 @@ NATIVE_DETAIL_CONTROLS = {
     'sharpenAmount': ('sharpen_amount', 0), 'sharpenMasking': ('sharpen_masking', 0),
     'nrLuminance': ('nr_luminance', 0), 'nrDetail': ('nr_detail', 50), 'nrColor': ('nr_color', 0),
     'nrColorDetail': ('nr_color_detail', 50), 'nrColorSmoothness': ('nr_color_smoothness', 50),
+}
+NATIVE_OPTICS_CONTROLS = {
+    'profileDistortion': 'profile_distortion', 'profileVignetting': 'profile_vignetting',
+    'vignettingMidpoint': 'vignetting_midpoint', 'defringePurple': 'defringe_purple_amount',
+    'defringePurpleHueLo': 'defringe_purple_hue_lo', 'defringePurpleHueHi': 'defringe_purple_hue_hi',
+    'defringeGreen': 'defringe_green_amount', 'defringeGreenHueLo': 'defringe_green_hue_lo',
+    'defringeGreenHueHi': 'defringe_green_hue_hi', 'caRed': 'ca_red', 'caBlue': 'ca_blue',
 }
 
 
@@ -246,6 +257,7 @@ class RawProcess(FakeProcess):
                     for parent in parents:
                         target = target.get(parent, {})
                     key = NATIVE_DETAIL_CONTROLS[key][0] if section == 'detail' and key in NATIVE_DETAIL_CONTROLS else key
+                    key = NATIVE_OPTICS_CONTROLS.get(key, key) if section == 'optics' else key
                     if key not in target:
                         return self.tool(message, error=True)
                     target[key] = v
