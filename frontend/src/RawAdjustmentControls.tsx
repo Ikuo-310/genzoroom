@@ -5,7 +5,7 @@ import { commitAdjustmentEdits, focusAdjustmentCategory, navigateAdjustments, pr
   preservePendingAdjustmentFocus, restorePendingAdjustmentFocus } from './adjustmentFocus';
 import type { SliderAdjustmentId } from './adjustmentSliderIds';
 import { TINT_TRACK_GRADIENT, TEMPERATURE_TRACK_GRADIENT } from './WhiteBalanceAdjustmentControls';
-import { RAW_VIGNETTE_STYLES, type RawControlId, type RawHistoryOperation, type RawSectionId, type RawVignetteStyle } from './rawApi';
+import { RAW_VIGNETTE_STYLES, type RawControlId, type RawHistoryControlId, type RawHistoryOperation, type RawOpticsFlagId, type RawSectionId, type RawVignetteStyle } from './rawApi';
 import type { useRawDocument } from './useRawDocument';
 
 type RawCategoryId = 'basic' | 'color' | 'grading' | 'effects' | 'detail';
@@ -91,7 +91,7 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
           </label>)}
         </div>
       </div>}
-      {(category === 'grading' ? [`grading.${gradingBand}.hue`, `grading.${gradingBand}.sat`, `grading.${gradingBand}.lum`, 'grading.blending', 'grading.balance'] as RawControlId[] : controls).map((control, index) => {
+      <div className={category === 'detail' ? 'raw-detail-controls' : undefined}>{(category === 'grading' ? [`grading.${gradingBand}.hue`, `grading.${gradingBand}.sat`, `grading.${gradingBand}.lum`, 'grading.blending', 'grading.balance'] as RawControlId[] : controls).map((control, index) => {
         const spec = settings.controls.find(spec => spec.id === control)!;
         const id = category === 'grading' ? control : ids[index];
         const value = raw.desired?.[control] ?? settings.values[control];
@@ -122,7 +122,8 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
           disabled={locked || !enabled || dependent || control.startsWith('wb.') && !settings.wb.available}
           resetDisabled={actionsLocked || dependent || control.startsWith('wb.') && !settings.wb.available}
           onChange={value => raw.changeControls({ [control]: value })} onCommit={() => raw.flushControls(control)} /></Fragment>;
-      })}
+      })}</div>
+      {category === 'detail' && <RawLensCorrections key={raw.assetId} raw={raw} locked={actionsLocked} operate={operate} />}
     </RawCategory>)}
     {raw.operationError && <p role="alert">{t(`workspace.rawPreview.${wbErrors[raw.operationError] ?? 'awFailed'}`)}</p>}
     {raw.regenerating && <p role="status">{t('workspace.rawPreview.regenerating')}</p>}
@@ -187,7 +188,7 @@ function RawCategory({ category, enabled, disabled, resetDisabled, autoWhiteBala
   const contentId = useId();
   const title = t(category === 'basic' ? 'workspace.basic' : `workspace.rawPreview.${category}Category`);
   const titleKey = category[0].toUpperCase() + category.slice(1);
-  return <section className={`adjustment-category raw-adjustment-category${enabled ? '' : ' is-disabled'}`}>
+  return <section className={`adjustment-category raw-adjustment-category is-${category}${enabled ? '' : ' is-disabled'}`}>
     <div className="adjustment-category-header">
       <h3><button type="button" className="adjustment-category-title" aria-expanded={expanded}
         aria-controls={contentId} aria-label={t(`workspace.${expanded ? 'collapse' : 'expand'}${titleKey}`)}
@@ -221,4 +222,98 @@ function RawCategory({ category, enabled, disabled, resetDisabled, autoWhiteBala
     </div>
     {expanded && <div id={contentId} className="adjustment-category-content">{children}</div>}
   </section>;
+}
+
+function RawLensCorrections({ raw, locked, operate }: {
+  raw: NonNullable<ReturnType<typeof useRawDocument>>; locked: boolean; operate: (operation: RawHistoryOperation) => void;
+}) {
+  const { t } = useTranslation();
+  const settings = raw.settings!;
+  const [defringeOpen, setDefringeOpen] = useState(false);
+  const baseDisabled = locked || !settings.sections.optics;
+  const info = settings.lensProfileInfo;
+  const profileUnavailable = info.profileAvailable === false;
+  const profileStatus = info.profileSource === 'file' ? t('workspace.rawPreview.profileSourceFile')
+    : info.profileSource === 'database' ? t('workspace.rawPreview.profileSourceDatabase')
+      : info.profileSource === 'none' ? t('workspace.rawPreview.profileMissing')
+        : t('workspace.rawPreview.profileUnknown');
+  const value = (control: RawHistoryControlId) => raw.desired?.[control] ?? settings.values[control];
+  const slider = (control: Extract<RawHistoryControlId, `optics.${string}`>, key: string, dependent = false, gradient?: string) => {
+    const spec = settings.controls.find(item => item.id === control)!;
+    return <AdjustmentSlider key={control} adjustmentId={control} commitPolicy="operation-boundary" hideToggle
+      className={dependent ? 'is-dependent-disabled' : undefined} trackGradient={gradient}
+      valueSuffix={control.includes('Hue') ? '°' : undefined}
+      label={t(`workspace.rawPreview.${key}`)} enabled={settings.sections.optics} onToggle={() => {}}
+      onReset={() => operate({ kind: 'controlReset', metadata: { control } })} onBegin={() => raw.beginControls(control)}
+      value={value(control)} min={spec.min} max={spec.max} step={spec.step} precision={spec.precision} defaultValue={spec.default}
+      resetLabel={t(`workspace.rawPreview.${key}Reset`)} valueLabel={t(`workspace.rawPreview.${key}Value`)}
+      valueText={`${value(control).toFixed(spec.precision)}${control.includes('Hue') ? '°' : ''}`}
+      disabled={baseDisabled || dependent || control.startsWith('optics.profile') && profileUnavailable}
+      resetDisabled={locked || dependent || control.startsWith('optics.profile') && profileUnavailable}
+      onChange={next => raw.changeControls({ [control]: next })} onCommit={() => raw.flushControls(control)} />;
+  };
+  const flag = (id: RawOpticsFlagId, key: string, checked: boolean) => <div className="raw-optics-flag-row" key={id}>
+    <label className="raw-optics-flag"><input type="checkbox" checked={checked} disabled={locked || !settings.sections.optics}
+      onChange={event => operate({ kind: 'opticsFlag', metadata: { control: id, enabled: event.currentTarget.checked } })} />
+      <span>{t(`workspace.rawPreview.${key}`)}</span></label>
+    <button className="adjustment-reset" type="button" disabled={locked}
+      onClick={() => operate({ kind: 'opticsFlagReset', metadata: { control: id } })}
+      aria-label={t(`workspace.rawPreview.${key}Reset`)} title={t(`workspace.rawPreview.${key}Reset`)}>{t('workspace.reset')}</button>
+  </div>;
+  const purpleHue = 'linear-gradient(to right, #777 0%, #ad65bd 25%, #8756b4 55%, #ce75bf 82%, #777 100%)';
+  const greenHue = 'linear-gradient(to right, #777 0%, #8bb548 25%, #40ad76 55%, #9dbd52 82%, #777 100%)';
+  return <div className="raw-optics-panel" aria-label={t('workspace.rawPreview.lensCorrections')}>
+    <div className="raw-adjustment-subcategory-divider" aria-hidden="true" />
+    <div className="raw-optics-header">
+      <h4>{t('workspace.rawPreview.lensCorrections')}</h4>
+      <button type="button" className={`adjustment-category-icon${settings.sections.optics ? '' : ' is-off'}`}
+        disabled={locked} aria-pressed={settings.sections.optics}
+        aria-label={t(`workspace.rawPreview.${settings.sections.optics ? 'disable' : 'enable'}LensCorrections`)}
+        title={t(`workspace.rawPreview.${settings.sections.optics ? 'disable' : 'enable'}LensCorrections`)}
+        onClick={() => operate({ kind: 'sectionToggle', metadata: { section: 'optics', enabled: !settings.sections.optics } })}>⏻</button>
+      <button type="button" className="adjustment-category-reset" disabled={locked}
+        aria-label={t('workspace.rawPreview.resetLensCorrections')} title={t('workspace.rawPreview.resetLensCorrections')}
+        onClick={() => operate({ kind: 'sectionReset', metadata: { section: 'optics' } })}>{t('workspace.reset')}</button>
+    </div>
+    <div className="raw-optics-content">
+      {flag('optics.remove_ca', 'removeChromaticAberration', settings.opticsFlags.remove_ca)}
+      {flag('optics.lens_profile', 'enableProfileCorrections', settings.opticsFlags.lens_profile)}
+      <p className="raw-optics-profile-status" role="status">
+        {profileStatus}{info.profileName ? ` · ${info.profileName}` : ''}
+        {info.profileApplied === true ? ` · ${t('workspace.rawPreview.profileApplied')}`
+          : info.profileApplied === false && settings.opticsFlags.lens_profile && !profileUnavailable
+            ? ` · ${t('workspace.rawPreview.profileNotApplied')}` : ''}
+      </p>
+      {settings.opticsFlags.lens_profile && <>
+        {profileUnavailable && <p className="raw-optics-unavailable">{t('workspace.rawPreview.profileUnavailable')}</p>}
+        {slider('optics.profileDistortion', 'profileDistortion')}
+        {slider('optics.profileVignetting', 'profileVignetting')}
+      </>}
+      <h5 className="adjustment-subsection-title">{t('workspace.rawPreview.manual')}</h5>
+      {slider('optics.distortion', 'opticsDistortion')}
+      {slider('optics.vignetting', 'opticsVignetting')}
+      {slider('optics.vignettingMidpoint', 'vignettingMidpoint', value('optics.vignetting') === 0)}
+      <div className="raw-optics-fold-header">
+        <button type="button" className="adjustment-category-title" aria-expanded={defringeOpen}
+          onClick={() => setDefringeOpen(open => !open)} onFocus={focusAdjustmentCategory}
+          onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>
+          <span className="adjustment-category-chevron" aria-hidden="true">{defringeOpen ? '▾' : '▸'}</span>
+          <span>{t('workspace.rawPreview.defringe')}</span>
+        </button>
+      </div>
+      {defringeOpen && <>
+        <h5 className="adjustment-subsection-title raw-optics-color-heading is-purple">{t('workspace.rawPreview.purple')}</h5>
+        {slider('optics.defringePurple', 'purpleAmount')}
+        {slider('optics.defringePurpleHueLo', 'purpleHueLo', value('optics.defringePurple') <= 0, purpleHue)}
+        {slider('optics.defringePurpleHueHi', 'purpleHueHi', value('optics.defringePurple') <= 0, purpleHue)}
+        <h5 className="adjustment-subsection-title raw-optics-color-heading is-green">{t('workspace.rawPreview.green')}</h5>
+        {slider('optics.defringeGreen', 'greenAmount')}
+        {slider('optics.defringeGreenHueLo', 'greenHueLo', value('optics.defringeGreen') <= 0, greenHue)}
+        {slider('optics.defringeGreenHueHi', 'greenHueHi', value('optics.defringeGreen') <= 0, greenHue)}
+        <h5 className="adjustment-subsection-title">{t('workspace.rawPreview.lateralChromaticAberration')}</h5>
+        {slider('optics.caRed', 'caRed')}
+        {slider('optics.caBlue', 'caBlue')}
+      </>}
+    </div>
+  </div>;
 }

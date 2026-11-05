@@ -1,7 +1,7 @@
 import { createEditStateSaveId } from './editStateApi';
 import { frontendLogger } from './frontendLogging';
 import { RawApiError, RawSaveError, beginRawGeometry, updateRawGeometry, readRawSettings, recoverRawGeometry, type RawGeometryAction, type RawGeometryOperation, readRawRecipe, saveRawRecipe, saveRawHistory, readRawHistory,
-  type RawSettings, type RawRecipeRequest, type RawHistoryRequest, type RawControlId, type RawHistoryResult, type RawHistoryStep, type RawHistoryOperation } from './rawApi';
+  type RawSettings, type RawRecipeRequest, type RawHistoryRequest, type RawHistoryControlId, type RawHistoryResult, type RawHistoryStep, type RawHistoryOperation } from './rawApi';
 import type { RawControls } from './rawControls';
 
 export const RAW_AUTOSAVE_MS = 5000;
@@ -32,10 +32,10 @@ export class RawRecipeSave {
     started: Promise<void>; end?: Promise<void>; error?: unknown; cancelled?: boolean; updateDoc?: RawSettings; rejected?: boolean; commit?: RawHistoryRequest };
   get cropOperation() { return this.cropGesture?.type; }
   get cropping() { return !!this.cropGesture; }
-  private gesture?: { control: RawControlId; fingerprint: string };
+  private gesture?: { control: RawHistoryControlId; fingerprint: string };
   // One adjacent control's unsent intent is held until the preceding gesture is acknowledged.
   // It uses the same owner queue; no native mutation or second save queue starts here.
-  private handoff?: { control: RawControlId; value?: number; ended: boolean };
+  private handoff?: { control: RawHistoryControlId; value?: number; ended: boolean };
   constructor(public confirmed: RawSettings, private options: {
     schedule: (action: () => Promise<void>) => void; changed: () => void;
     controls?: RawControls;
@@ -254,7 +254,7 @@ export class RawRecipeSave {
       finally { this.options.changed(); }
     }));
   }
-  begin(control: RawControlId) {
+  begin(control: RawHistoryControlId) {
     if (!this.active || this.locked || this.paused) return;
     this.operationError = undefined;
     if (this.gesture?.control === control) return;
@@ -267,7 +267,7 @@ export class RawRecipeSave {
     this.options.controls?.beginPreview();
     this.options.changed();
   }
-  change(control: RawControlId, value: number) {
+  change(control: RawHistoryControlId, value: number) {
     if (!this.active || this.error || this.paused) return;
     if (this.handoff?.control === control) { this.handoff.value = value; return; }
     if (this.locked) return;
@@ -275,7 +275,7 @@ export class RawRecipeSave {
     if (this.handoff?.control === control) { this.handoff.value = value; return; }
     if (this.gesture?.control === control) this.options.controls?.change({ [control]: value });
   }
-  end(control?: RawControlId) {
+  end(control?: RawHistoryControlId) {
     if (this.handoff && (control === undefined || control === this.handoff.control)) { this.handoff.ended = true; return; }
     if (this.gesture && (control === undefined || control === this.gesture.control)) {
       this.options.controls?.endPreview();

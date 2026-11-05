@@ -8,6 +8,16 @@ RAW settings応答へ読取専用の`lensProfileInfo`を追加した。LightCraf
 
 Native MCP test **87件成功・1件ignore**、Lensfun profile lookup **6件成功**、pipeline WB関連 **9件成功**。Managed Release binaryのCPU／DX12 GPU、Whole／Region／WB／CropとLens Profile Info unknown-state probeが成功し、receiptを生成した。Backend／Frontendの最終限定回帰と件数は[RAW lens profile information contract](research/lightcraft/RAW_LENS_PROFILE_INFO_CONTRACT.md)を参照する。実カメラRAW・実運用Lensfun DBのprobeと画面UIは未実施。Phase 1-Bの履歴記録にある「写真固有profile APIなし」はこのPhase 3で更新された。
 
+## RAWレンズ補正 Phase 4：RAW Detail UI（2026-11-05）
+
+RAW調整のディテールカテゴリ内、NRの後にOptics UIを追加した。13数値項目は共通AdjustmentSlider、RAW RecipeSave／History／Preview ownerとsettings.controlsの範囲・step・precisionを使用し、個別Reset・Optics Section Reset・All Resetを既存経路へ接続する。2 boolは数値化せず既存`opticsFlag`操作を使用し、チェック表示はHistory Native readbackに追随する。JPEG現像画面には表示しない。
+
+profile flag ON時だけprofile distortion／vignetting量を表示する。availabilityが確実にfalseなら2スライダーと個別Resetを無効化し、unknownは未対応と表示しない。状態文は写真固有`lensProfileInfo`のsource／profileNameを使い、`profileApplied`を補助表示する。手動のゆがみ／周辺光量補正はprofile可否から独立。中心点とdefringe hueはLightCraft v0.18.1 UIと同じ依存条件で無効化する。Defringeの開閉だけは一時UI状態でHistoryへ記録しない。READMEは変更していない。
+
+関連Frontend回帰（暗室／Detail、slider gestures、RAW History、Recipe save owner、RAW settings APIの6ファイル）は最終差分で383件成功。`npm run build`（TypeScript・production build）成功。全Frontend **3908件成功・2件skip・12件失敗**。失敗はAdjustment Selection Dialog 2件、Gallery Album 2件、Calendar 2件、Favorites 3件、Gallery Development Exclusions 3件。Optics関連のVignette divider期待値は修正済み。失敗9件を対象テストだけで再実行して同様の失敗を確認し、Gallery Development Exclusionsの3件は分離実行では成功した。これらは今回変更していない既存の選択／Gallery領域で、今回差分との依存は見つからなかった。`git diff --check`成功。Backend契約・API・Nativeに変更がないためBackendテストは未実施。
+
+スクリーンショットを参考にした暗室UIの実画面確認、実RAWでの補正結果、Lensfun DB実データは未確認。
+
 ## RAWレンズ補正 Phase 1-B：既存History／Recipeへの統合（2026-11-05）
 
 Optics数値13項目を既存の数値Control Historyへ接続し、`control`／`controlReset`、section reset、All Reset、Undo／Redo／Jumpで同じsnapshot・revision・fingerprint・receipt境界を使う。`opticsFlag`／`opticsFlagReset`を追加し、`remove_ca`／`lens_profile`は数値へ変換せず、履歴レスポンスの`flagChanges`にbool差分として公開する。数値差分`changes`の型は維持した。Optics section toggleは`disabled_sections`だけを変更して値を保持し、section resetはv0.18.1既定値へ15項目を1 operationで戻す。Native更新は数値`develop.set`、bool `develop.merge`、resetは既存Native reset経路を利用し、readback照合後だけHistoryを保存する。

@@ -165,7 +165,8 @@ it('wires native Before into the shared Viewer lazily without changing RAW edits
 it('binds engine control specs to shared sliders and commits RAW values without JPEG rendering', async () => {
   await mount();
   const sliders = [...host.querySelectorAll<HTMLInputElement>('.adjustment-range')];
-  expect(sliders).toHaveLength(30);
+  expect(sliders).toHaveLength(33);
+  expect(host.querySelector('[data-adjustment-id="optics.profileDistortion"]')).toBeNull();
   expect(sliders.map(slider => slider.dataset.adjustmentId)).toEqual([
     'temperature', 'tint', 'vibrance', 'saturation', 'exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks',
     'grading.shadows.hue', 'grading.shadows.sat', 'grading.shadows.lum', 'grading.blending', 'grading.balance',
@@ -173,6 +174,7 @@ it('binds engine control specs to shared sliders and commits RAW values without 
     'vignette.amount', 'vignette.midpoint', 'vignette.feather', 'vignette.roundness', 'vignette.highlights',
     'detail.sharpenAmount', 'detail.sharpenMasking',
     'detail.nrLuminance', 'detail.nrDetail', 'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness',
+    'optics.distortion', 'optics.vignetting', 'optics.vignettingMidpoint',
   ]);
   expect(sliders[0].min).toBe('2000'); expect(sliders[0].max).toBe('50000'); expect(sliders[0].step).toBe('50');
   expect(sliders[1].min).toBe('-150'); expect(sliders[4].step).toBe('0.01');
@@ -182,9 +184,9 @@ it('binds engine control specs to shared sliders and commits RAW values without 
   expect(sliders[1].style.getPropertyValue('--adjustment-track-gradient')).toContain('#4f9b62');
   expect(sliders[1].style.getPropertyValue('--adjustment-track-gradient')).toContain('#b05aa0');
   const actions = [...host.querySelectorAll<HTMLButtonElement>('.adjustment-power, .adjustment-reset, .adjustment-category-actions button, .develop-panel .workspace-section-action')];
-  expect(actions).toHaveLength(42);
+  expect(actions).toHaveLength(47);
   expect(host.querySelectorAll('.adjustment-power')).toHaveLength(0);
-  expect(actions.filter(button => button.disabled)).toHaveLength(5);
+  expect(actions.filter(button => button.disabled)).toHaveLength(6);
   const number = sliders[4].closest('.adjustment-control')!.querySelector<HTMLInputElement>('input[type="number"]')!;
   act(() => {
     number.focus();
@@ -195,6 +197,83 @@ it('binds engine control specs to shared sliders and commits RAW values without 
   expect(rawApi.setRawControls).toHaveBeenCalledWith(expect.objectContaining({ revision: 1 }), { 'light.exposure': 1.25 });
   expect(rawApi.rawPreview).toHaveBeenCalledTimes(2); expect(adjusted).not.toHaveBeenCalled();
   expect(number.value).toBe('1.25'); expect(host.textContent).toContain('RAW recipes are autosaved');
+});
+it('places all RAW optics controls after NR, uses readback History flags and preserves independent sections', async () => {
+  vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => doc.assetId !== base.id ? rawSettings(doc) : ({ ...rawSettings(doc),
+    opticsFlags: { remove_ca: false, lens_profile: true },
+    lensProfileInfo: { cameraMake: 'Example', cameraModel: 'Body', lensMake: 'Example', lensModel: 'Lens', lensId: 'lens-id',
+      profileAvailable: true, profileSource: 'database', profileName: 'Example Lens Profile', profileApplied: true } }));
+  commitHistory.mockImplementation(async request => {
+    const fingerprint = String(request.doc.revision + 1).padStart(64, '0');
+    const next = { ...(request.doc as rawApi.RawSettings), revision: request.doc.revision + 1,
+      recipeRevision: request.expectedRecipeRevision + 1, recipeFingerprint: fingerprint, settingsFingerprint: fingerprint,
+      lensProfileInfo: { cameraMake: 'Example', cameraModel: 'Body', lensMake: 'Example', lensModel: 'Lens', lensId: 'lens-id',
+        profileAvailable: true, profileSource: 'database' as const, profileName: 'Example Lens Profile', profileApplied: false } };
+    if (request.operation?.kind === 'opticsFlag') next.opticsFlags = { ...next.opticsFlags,
+      remove_ca: request.operation.metadata.enabled };
+    if (request.operation?.kind === 'sectionToggle') next.sections[request.operation.metadata.section] = request.operation.metadata.enabled;
+    return rawHistoryResult({ ...request, doc: next });
+  });
+  await mount();
+  const category = host.querySelectorAll('.raw-adjustment-category')[4];
+  const titles = [...category.querySelectorAll('.raw-detail-controls h4')].map(item => item.textContent);
+  expect(titles.slice(-2)).toEqual(['Noise Reduction', 'Color Noise Reduction']);
+  const optics = category.querySelector<HTMLElement>('.raw-optics-panel')!;
+  expect(optics).not.toBeNull();
+  expect(optics.querySelectorAll('.adjustment-range')).toHaveLength(5);
+  expect(optics.textContent).toContain('Profile: Lens database · Example Lens Profile');
+  const removeCaFlag = [...optics.querySelectorAll<HTMLLabelElement>('.raw-optics-flag')]
+    .find(label => label.textContent?.includes('Remove Chromatic Aberration'))!.querySelector<HTMLInputElement>('input')!;
+  act(() => removeCaFlag.click()); await flush();
+  expect(commitHistory).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'operate', operation: {
+    kind: 'opticsFlag', metadata: { control: 'optics.remove_ca', enabled: true } } }));
+  expect([...optics.querySelectorAll<HTMLInputElement>('.raw-optics-flag input')][0].checked).toBe(true);
+  expect(optics.querySelectorAll('.adjustment-range')).toHaveLength(5);
+  expect(optics.querySelector<HTMLInputElement>('[data-adjustment-id="optics.profileDistortion"]')?.value).toBe('100');
+  expect(optics.querySelector<HTMLInputElement>('[data-adjustment-id="optics.profileVignetting"]')?.value).toBe('100');
+  const detailToggle = category.querySelector<HTMLButtonElement>('[data-category-switch]')!;
+  act(() => detailToggle.click()); await flush();
+  expect(optics.querySelector<HTMLInputElement>('[data-adjustment-id="optics.distortion"]')!.disabled).toBe(false);
+  expect(category.querySelector<HTMLInputElement>('[data-adjustment-id="detail.sharpenAmount"]')!.disabled).toBe(true);
+  const fold = [...optics.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('Defringe'))!;
+  act(() => fold.click());
+  expect(fold.getAttribute('aria-expanded')).toBe('true');
+  for (const control of ['optics.defringePurple', 'optics.defringePurpleHueLo', 'optics.defringePurpleHueHi',
+    'optics.defringeGreen', 'optics.defringeGreenHueLo', 'optics.defringeGreenHueHi', 'optics.caRed', 'optics.caBlue'])
+    expect(optics.querySelector(`[data-adjustment-id="${control}"]`)).not.toBeNull();
+  const opticsIds = ['optics.profileDistortion', 'optics.profileVignetting', 'optics.distortion', 'optics.vignetting',
+    'optics.vignettingMidpoint', 'optics.defringePurple', 'optics.defringePurpleHueLo', 'optics.defringePurpleHueHi',
+    'optics.defringeGreen', 'optics.defringeGreenHueLo', 'optics.defringeGreenHueHi', 'optics.caRed', 'optics.caBlue'];
+  expect([...optics.querySelectorAll<HTMLInputElement>('.adjustment-range')].map(slider => slider.dataset.adjustmentId)).toEqual(opticsIds);
+  for (const slider of optics.querySelectorAll<HTMLInputElement>('.adjustment-range')) {
+    const spec = rawSettings({ workspaceId: '', handle: '', assetId: '', generation: 0, documentToken: '', revision: 0 })
+      .controls.find(control => control.id === slider.dataset.adjustmentId)!;
+    expect([slider.min, slider.max, slider.step]).toEqual([String(spec.min), String(spec.max), String(spec.step)]);
+    expect(slider.value).toBe(String(spec.default));
+  }
+  expect(optics.querySelector<HTMLInputElement>('[data-adjustment-id="optics.defringePurpleHueLo"]')!.disabled).toBe(true);
+  expect(optics.querySelector<HTMLInputElement>('[data-adjustment-id="optics.caRed"]')!.disabled).toBe(false);
+  act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[2].click()); await flush();
+  expect(host.querySelector('.raw-optics-panel')?.textContent).toContain('Profile information is unavailable');
+  expect(host.querySelector('[data-adjustment-id="optics.profileDistortion"]')).toBeNull();
+  expect(host.querySelector('.raw-optics-fold-header button')?.getAttribute('aria-expanded')).toBe('false');
+  act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[1].click()); await flush();
+  expect(host.querySelector('.raw-optics-panel')).toBeNull();
+  act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[0].click()); await flush();
+  expect(host.querySelector('.raw-optics-panel')).not.toBeNull();
+  expect(host.querySelector('.raw-optics-panel')?.textContent).toContain('Example Lens Profile');
+});
+it.each([
+  { source: 'unknown' as const, available: null, applied: null, label: 'Profile information is unavailable', disabled: false },
+  { source: 'none' as const, available: false, applied: false, label: 'No matching profile is available', disabled: true },
+])('distinguishes profile source $source from unavailable state', async ({ source, available, applied, label, disabled }) => {
+  vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), opticsFlags: { remove_ca: false, lens_profile: true },
+    lensProfileInfo: { cameraMake: null, cameraModel: null, lensMake: null, lensModel: null, lensId: null,
+      profileAvailable: available, profileSource: source, profileName: null, profileApplied: applied } }));
+  await mount();
+  const panel = host.querySelector<HTMLElement>('.raw-optics-panel')!;
+  expect(panel.textContent).toContain(label);
+  expect(panel.querySelector<HTMLInputElement>('[data-adjustment-id="optics.profileDistortion"]')!.disabled).toBe(disabled);
 });
 it('enters RAW slider focus from the Viewer and follows the displayed row order', async () => {
   await mount();
@@ -242,15 +321,20 @@ it('enters RAW slider focus from the Viewer and follows the displayed row order'
   expect(document.activeElement).toBe(sliders[29]);
 });
 it.each(['vignette.amount', 'vignette.midpoint', 'vignette.feather', 'vignette.roundness', 'vignette.highlights', 'effects.texture', 'effects.clarity', 'effects.dehaze', 'detail.sharpenAmount', 'detail.sharpenMasking', 'detail.nrLuminance', 'detail.nrDetail', 'detail.nrColor',
-  'detail.nrColorDetail', 'detail.nrColorSmoothness'] as const)('uses existing pointer, wheel, keyboard, number and Reset gestures for %s', async control => {
+  'detail.nrColorDetail', 'detail.nrColorSmoothness', 'optics.distortion', 'optics.caRed'] as const)('uses existing pointer, wheel, keyboard, number and Reset gestures for %s', async control => {
   if (control.startsWith('vignette.') && control !== 'vignette.amount') vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), values: { ...rawSettings(doc).values, 'vignette.amount': -50 } }));
   await mount();
+  if (control === 'optics.caRed') {
+    const fold = [...host.querySelectorAll<HTMLButtonElement>('.raw-optics-fold-header button')].find(button => button.textContent?.includes('Defringe'))!;
+    act(() => fold.click());
+  }
   const range = host.querySelector<HTMLInputElement>(`[data-adjustment-id="${control}"]`)!;
   const row = range.closest('.adjustment-control')!;
   const number = row.querySelector<HTMLInputElement>('input[type="number"]')!;
-  expect(range.min).toBe(control.startsWith('effects.') || control === 'vignette.amount' || control === 'vignette.roundness' ? '-100' : '0'); expect(range.max).toBe(control.endsWith('Amount') ? '150' : '100'); expect(range.step).toBe('1');
-  expect(range.value).toBe(control.endsWith('Amount') ? '40' : control === 'detail.nrColor' ? '25'
-    : ['detail.nrDetail', 'detail.nrColorDetail', 'detail.nrColorSmoothness', 'vignette.midpoint', 'vignette.feather'].includes(control) ? '50' : '0');
+  const fixture = rawSettings({ workspaceId: '', handle: '', assetId: '', generation: 0, documentToken: '', revision: 0 });
+  const spec = fixture.controls.find(item => item.id === control)!;
+  expect([range.min, range.max, range.step]).toEqual([String(spec.min), String(spec.max), String(spec.step)]);
+  expect(range.value).toBe(String(fixture.values[control]));
   const set = (element: HTMLInputElement, value: string) => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(element, value);
     element.dispatchEvent(new Event('input', { bubbles: true }));
@@ -297,7 +381,7 @@ it('reuses Detail category collapse, action navigation, toggle and Reset', async
   expect(document.activeElement).toBe(toggle);
   historyKey('ArrowRight', { ctrlKey: false, shiftKey: true }, toggle); expect(document.activeElement).toBe(reset);
   act(() => title.click()); expect(category.querySelector('.adjustment-range')).toBeNull();
-  act(() => title.click()); expect(category.querySelectorAll('.adjustment-range')).toHaveLength(7);
+  act(() => title.click()); expect(category.querySelectorAll('.raw-detail-controls .adjustment-range')).toHaveLength(7);
   act(() => toggle.click()); await flush();
   expect(toggle.getAttribute('aria-pressed')).toBe('false');
   expect(category.querySelector<HTMLInputElement>('.adjustment-range')!.value).toBe('40');
@@ -396,8 +480,10 @@ it.each(['ja', 'en'])('separates NR subheadings, accessible Detail names and zer
   });
   await mount();
   const category = host.querySelectorAll('.raw-adjustment-category')[4];
-  expect([...category.querySelectorAll('h4')].map(item => item.textContent)).toEqual(language === 'ja'
+  expect([...category.querySelectorAll('.raw-detail-controls h4')].map(item => item.textContent)).toEqual(language === 'ja'
     ? ['シャープネス', 'ノイズリダクション', 'カラーノイズリダクション'] : ['Sharpening', 'Noise Reduction', 'Color Noise Reduction']);
+  expect(category.querySelector('.raw-optics-header h4')?.textContent).toBe(language === 'ja' ? 'レンズ補正' : 'Lens Corrections');
+  expect(category.querySelector('.raw-optics-flag')?.textContent).toContain(language === 'ja' ? '色収差を除去' : 'Remove Chromatic Aberration');
   const lum = category.querySelector<HTMLInputElement>('[data-adjustment-id="detail.nrDetail"]')!;
   const color = category.querySelector<HTMLInputElement>('[data-adjustment-id="detail.nrColorDetail"]')!;
   expect(lum.getAttribute('aria-label')).toBe(language === 'ja' ? '輝度ノイズ軽減のディテール' : 'Luminance Noise Reduction Detail');
@@ -425,7 +511,7 @@ it('disables only WB when Kelvin capability is unknown', async () => {
   await mount();
   const sliders = [...host.querySelectorAll<HTMLInputElement>('.adjustment-range')];
   expect(sliders.slice(0, 2).every(slider => slider.disabled)).toBe(true);
-  expect(sliders.slice(2).filter(slider => slider.disabled).map(slider => slider.dataset.adjustmentId)).toEqual(['vignette.midpoint', 'vignette.feather', 'vignette.roundness', 'vignette.highlights']);
+  expect(sliders.slice(2).filter(slider => slider.disabled).map(slider => slider.dataset.adjustmentId)).toEqual(['vignette.midpoint', 'vignette.feather', 'vignette.roundness', 'vignette.highlights', 'optics.vignettingMidpoint']);
 });
 
 it('shows a five-digit temperature with an overlaid K suffix while WB Reset updates both fields', async () => {
@@ -446,7 +532,7 @@ it('shows a five-digit temperature with an overlaid K suffix while WB Reset upda
   expect(input.parentElement?.classList.contains('adjustment-number-wrap')).toBe(true);
   expect(input.parentElement?.querySelector('.adjustment-number-suffix')).not.toBeNull();
   const rows = [...host.querySelectorAll<HTMLElement>('.raw-adjustment-controls .adjustment-control')];
-  expect(rows).toHaveLength(30);
+  expect(rows).toHaveLength(33);
   expect(rows.every(row => row.querySelector('.adjustment-number-wrap input[type="number"]')
     && row.querySelectorAll('.adjustment-value-controls .adjustment-reset').length === 1)).toBe(true);
   const reset = temp.querySelector<HTMLButtonElement>('.adjustment-reset')!;

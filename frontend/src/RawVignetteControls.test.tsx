@@ -44,5 +44,5 @@ it.each(['ja', 'en'])('uses desired amount for dependents and preserves values/m
   act(() => resets[1].click()); expect(operate).toHaveBeenLastCalledWith({ kind: 'sectionReset', metadata: { section: 'vignette' } });
   act(() => resets[0].click()); expect(operate).toHaveBeenLastCalledWith({ kind: 'sectionReset', metadata: { section: 'effects' } });
   expect(host.textContent).not.toContain('workspace.');
-  expect(host.querySelectorAll('.raw-adjustment-subcategory-divider')).toHaveLength(1);
+  expect(host.querySelectorAll('.raw-adjustment-subcategory-divider')).toHaveLength(2);
 });

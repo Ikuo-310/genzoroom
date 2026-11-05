@@ -1,7 +1,7 @@
 import { provisionalCrop, reusableCropBitmap, sameCropOwner, type CropSnapshot, type CropPresentation } from './rawCropDisplay';
 import { useEffect, useRef, useState } from 'react';
 import { createRawWorkspace, openRawDocument, rawCapability, rawPreview, cancelRawPreview, RawSuperseded, readRawDocument, readRawSettings,
-  abortRawWorkspaceRequests, discardRawWorkspace, releaseRawWorkspace, resetRawEdits as resetRawEditsApi, rawWorkspaceEmpty, RawApiError, type RawDocument, type RawSettings, type RawValues, type RawControlId,
+  abortRawWorkspaceRequests, discardRawWorkspace, releaseRawWorkspace, resetRawEdits as resetRawEditsApi, rawWorkspaceEmpty, RawApiError, type RawDocument, type RawSettings, type RawValues, type RawHistoryControlId,
   type RawPickTarget, type RawPickFrame, type RawHistoryResult, type RawHistoryStep, type RawHistoryOperation, type RawFrame, type RawGeometry, type RawCropDisplay, type RawGeometryOperation } from './rawApi';
 import { frontendLogger } from './frontendLogging';
 import { RawControls } from './rawControls';
@@ -1066,10 +1066,10 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     changeControls: (values: Partial<RawValues>) => {
       cancelPick();
       if (!frozen.current && callbackEditor()) for (const [control, value] of Object.entries(values))
-        saverRef.current?.change(control as RawControlId, value!);
+        saverRef.current?.change(control as RawHistoryControlId, value!);
     },
-    beginControls: (control: RawControlId) => { cancelPick(); if (callbackEditor() && !frozen.current) saverRef.current?.begin(control); },
-    flushControls: (control?: RawControlId) => { if (callbackEditor()) saverRef.current?.end(control); },
+    beginControls: (control: RawHistoryControlId) => { cancelPick(); if (callbackEditor() && !frozen.current) saverRef.current?.begin(control); },
+    flushControls: (control?: RawHistoryControlId) => { if (callbackEditor()) saverRef.current?.end(control); },
     retryRegeneration: () => { if (callbackEditor() && visible.regenerationError) void restartRef.current(true).catch(() => {}); }, retryControls: () => callbackEditor()?.retry(), discardChanges:()=>identity.current===assetId?discardRef.current():Promise.reject(new RawApiError('raw_stale_handle')), prepareSave, resumeEditing: resume,
     retrySave: async () => { try { await prepareSave(true); } catch (cause) {
       const code = cause instanceof RawApiError ? cause.code : 'raw_connection_failed'; log(code, 'recipe.saveFailed');

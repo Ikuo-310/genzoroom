@@ -22,6 +22,7 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
+- Added RAW Lens Corrections controls inside Detail, including profile status, manual and profile adjustments, defringe, and lateral chromatic aberration. All settings use the existing RAW History, Reset, Preview, and Recipe paths; JPEG development is unchanged.
 - Added non-destructive RAW Crop and Straighten editing in the Windows darkroom, with interactive crop-frame dragging and resizing, aspect-ratio presets and locking, 90° rotation, horizontal/vertical flipping, and composition overlays.
 - Added line-based Straighten correction, Space-drag panning, and Shift-drag axis locking for crop-frame movement, with boundary-aware dragging and integration with RAW History, Undo/Redo, Reset, saved Recipes, Export, and rendered thumbnails.
 - Saved RAW edits are now reflected in thumbnails across Gallery, Filmstrip, Stack Edited Preview, and immersive previews.
