@@ -1,5 +1,11 @@
 # GenzoRoom 開発ノート
 
+## RAWレンズ補正 Phase 6：Preview／Region／Export整合性（2026-11-05）
+
+製品コードに再現可能なGenzoRoom固有の問題は見つからなかった。既存のOptics Crop実Native probeへprofile flag／量0・100、周辺光量、defringeの境界ケースを補い、CPU／DX12各13ケースでWhole／Region Geometry、JPEG寸法、readback／Recipe restore／Resetが成功した。Export QueueのOptics＋Straighten設定固定とRegistrarへの引渡しを限定mock testで補った。既存の実Native geometry testが古い`target-managed`を固定参照してreceipt gateで拒否されていたため、既存managed executable resolverへ修正し成功した。Native／製品設定／描画／Before・Afterは変更していない。
+
+Backend限定343 unique testsの初回は341成功・検証用fixture等2失敗。対象修正後、該当Native geometry testとExport runtime suiteの限定再実行16件成功により両失敗を解消した。Frontend限定6ファイル339件成功、TypeScript／production build／diff check成功。全Frontendは未実施。Pixel／K-S2実RAWの画質、embedded profileの実効果、実Desktop／Immich登録は未検証。ユーザーが公式版でも確認したPixel変形とK-S2レンズ名取得制約はupstream課題として保持する。詳細なPASS／未検証一覧、Finding、テスト範囲は[Phase 6検証記録](research/lightcraft/RAW_OPTICS_PHASE6_VALIDATION.md)を参照。
+
 ## RAWレンズ補正 Phase 5：Lensfunデータベース管理（2026-11-05）
 
 WindowsデスクトップのFileメニューにLensfunデータベース管理を追加し、既存のRAW API／LightCraft v0.18.1 managed sessionを通して状態照会と明示的な導入・更新を行う。別の取得・保存基盤は作らず、Nativeの固定revision、HTTPS取得、ファイル別サイズ／SHA-256検証、stagingと旧DB復旧を利用する。BackendはNative応答からレンズ件数と安全な進捗だけを公開し、絶対パス・Nativeエラー文字列は返さない。

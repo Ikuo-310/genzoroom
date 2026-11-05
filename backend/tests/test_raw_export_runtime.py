@@ -47,6 +47,35 @@ class Recorder:
         return RegistrationResult(uuid4())
 
 
+def test_optics_frozen_recipe_reaches_export_and_registrar(db):
+    saved = settings()
+    saved['optics'].update(lens_profile=False, profile_distortion=0., profile_vignetting=100.,
+        distortion=-35., vignetting=-40., remove_ca=True, ca_red=12., ca_blue=-15.,
+        defringe_purple_amount=8., defringe_green_amount=6.)
+    saved['crop']['geometry']['angle'] = 5.
+    raw.put_raw_recipe(identity(), 0, uuid4(), saved,
+        import_defaults_fingerprint=raw._digest(raw._settings_json(settings(), 1)))
+    enqueue_export_assets([A])
+    calls, registrar = [], Recorder()
+
+    async def artifact(request):
+        calls.append(copy.deepcopy(request.settings))
+        save_raw(exposure=2, revision=1)
+        return ExportArtifact('IMG-Genzo04.jpg', b'raw-jpeg')
+
+    async def run():
+        runtime = ExportRuntime(source=MixedSource(), family=Family(), registrar=registrar, raw_artifact=artifact)
+        run_id = await runtime.start([A])
+        await runtime.wait()
+        return get_export_run(run_id)
+
+    result = asyncio.run(run())
+    assert calls == [saved]
+    assert result.items[0].recipe['settings'] == saved
+    assert result.items[0].status == 'succeeded'
+    assert len(registrar.calls) == 1 and registrar.calls[0][1].jpeg == b'raw-jpeg'
+
+
 def test_raw_eligibility_and_start_freeze(db):
     save_raw(exposure=0)
     with pytest.raises(edit_store.QueueRejected): enqueue_export_assets([A])

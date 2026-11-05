@@ -57,7 +57,17 @@ async def probe(binary, backend, version):
                 ('distortion', False, -60, 0, 0, False), ('distortion-crop', True, -60, 0, 0, False),
                 ('ca', False, 0, 100, 0, False), ('straighten', True, -60, 0, 7, False),
                 ('rotate-flip', True, -60, 100, 7, True), ('auto-ca', True, 0, 0, 0, False),
+                ('profile-off', False, 0, 0, 0, False), ('profile-zero', False, 0, 0, 0, False),
+                ('profile-full', False, 0, 0, 0, False), ('vignetting', True, -20, 0, 5, False),
+                ('defringe', True, -20, 0, 5, False),
             ]
+            optics_cases = {
+                'profile-off': {'lens_profile': False},
+                'profile-zero': {'lens_profile': True, 'profile_distortion': 0, 'profile_vignetting': 0},
+                'profile-full': {'lens_profile': True, 'profile_distortion': 100, 'profile_vignetting': 100},
+                'vignetting': {'vignetting': -50, 'vignetting_midpoint': 35},
+                'defringe': {'defringe_purple_amount': 8, 'defringe_green_amount': 7, 'ca_blue': -40},
+            }
             for label, cropped, distortion, ca, angle, rotated in cases:
                 await command('develop.reset', {'ids': [photo]})
                 await command('develop.merge', {'settings': {
@@ -65,9 +75,12 @@ async def probe(binary, backend, version):
                     'crop': {'geometry': {'rect': {'x0': 0, 'y0': .02 if cropped else 0,
                         'x1': .99 if cropped else 1, 'y1': 1}, 'angle': angle},
                         'flip_h': rotated, 'flip_v': rotated},
-                    'optics': {'distortion': distortion, 'ca_red': ca, 'remove_ca': label == 'auto-ca'},
+                    'optics': {'distortion': distortion, 'ca_red': ca, 'remove_ca': label == 'auto-ca',
+                        **optics_cases.get(label, {})},
                     'geometry': {'constrain_crop': False}}})
                 saved = await settings()
+                for key, value in optics_cases.get(label, {}).items():
+                    assert saved['structuredContent']['optics'][key] == value, (label, key)
                 fingerprint = result_fingerprint(saved)
                 meta, whole = await render({'preview_contract': 1})
                 frame = meta['frame']

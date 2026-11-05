@@ -3,6 +3,7 @@ import copy
 import json
 import importlib.util
 import os
+import sys
 from pathlib import Path
 from uuid import uuid4
 
@@ -217,8 +218,10 @@ def test_actual_native_geometry_history_reload_and_preview(local, tmp_path, monk
     from tests.test_raw_source import Original
     from tests.test_raw_recipe_restore import open_asset
     root = Path(__file__).parents[2]
-    binary = root / '.tmp/lightcraft-0.18.1/target-managed/release/lightcraft-cli.exe'
-    if not binary.is_file(): pytest.skip('managed Native artifact not available')
+    from lightcraft_artifact import resolve_managed_executable
+    binary_path = resolve_managed_executable(os.environ, sys.platform)
+    if not binary_path: pytest.skip('managed Native artifact not available')
+    binary = Path(binary_path)
     spec = importlib.util.spec_from_file_location('crop_synthetic', root / 'native/lightcraft/settings_export_probe.py')
     fixture = importlib.util.module_from_spec(spec); spec.loader.exec_module(fixture)
     data = fixture.synthetic_dng()
