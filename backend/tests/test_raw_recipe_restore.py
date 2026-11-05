@@ -592,7 +592,7 @@ def test_raw_reset_clears_recipe_history_reopens_defaults_and_saves_current_tupl
                 saved = await http.put(f'/api/raw/documents/{current["handle"]}/recipe', json=save_request)
                 assert saved.status_code == 200
                 current_identity = api._recipe_save["identity"]
-                assert current_identity["engineVersion"] == ENGINE_VERSION == "0.18.0"
+                assert current_identity["engineVersion"] == ENGINE_VERSION == "0.18.1"
                 assert current_identity["engineCommit"] == ENGINE_COMMIT
                 assert children[-1].photos[1]["settings"]["light"]["exposure"] == 1.25
         finally:

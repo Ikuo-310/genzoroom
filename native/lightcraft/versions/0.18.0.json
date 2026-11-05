@@ -1,0 +1,51 @@
+{
+  "patches": [
+    {
+      "targets": [
+        "Cargo.lock",
+        "crates/engine/src/cmd/develop.rs",
+        "crates/engine/src/media/quick.rs",
+        "crates/engine/src/media/render.rs",
+        "crates/engine/src/media/session.rs",
+        "crates/engine/src/media/tests.rs",
+        "crates/engine/src/slide_title.rs",
+        "crates/gpu/src/lib.rs",
+        "crates/gpu/src/render.rs",
+        "crates/gpu/tests/it/equivalence.rs",
+        "crates/mcp/Cargo.toml",
+        "crates/mcp/src/backend.rs",
+        "crates/mcp/src/headless.rs",
+        "crates/mcp/src/lib.rs",
+        "crates/mcp/src/preview.rs",
+        "crates/mcp/src/region.rs",
+        "crates/mcp/src/region/tests.rs",
+        "crates/mcp/src/region_contract.json",
+        "crates/mcp/src/region_fixtures.json",
+        "crates/mcp/src/region_schema.json",
+        "crates/mcp/src/tools.rs",
+        "crates/mcp/src/wb.rs",
+        "crates/mcp/src/wb/tests.rs",
+        "crates/mcp/tests/it/e2e.rs",
+        "crates/pipeline/src/auto.rs",
+        "crates/pipeline/src/geometry.rs",
+        "crates/pipeline/src/lib.rs",
+        "crates/pipeline/src/tests.rs",
+        "crates/ui-egui/src/render.rs"
+      ],
+      "file": "patches/0002-v0.18-native-contracts.patch",
+      "purpose": "Native Before, adaptive Whole and Region contract 1, geometry descriptor 2 and read-only WB estimation contract 1, read-only Crop editing display contract 1",
+      "sha256": "2efba419baca52467cef95a3a8160be3098d94fba848e28ac2951163dc556ebc"
+    }
+  ],
+  "commit": "32d569ad5d19a6b55cf8d5c077127faa0f44a83b",
+  "version": "0.18.0",
+  "geometryDescriptorContract": 2,
+  "contracts": {
+    "before": 1,
+    "preview": 1,
+    "region": 1,
+    "wb": 1
+  },
+  "developmentTargetDir": "target-managed",
+  "cropEditContract": 1
+}

@@ -173,4 +173,5 @@ def probe_crop_edit(binary, *, expected_version):
 
 
 if __name__ == '__main__':
-    probe_crop_edit(Path(sys.argv[1]).resolve(), expected_version='0.18.0')
+    version = json.loads((Path(__file__).parent / 'manifest.json').read_text(encoding='utf-8'))['version']
+    probe_crop_edit(Path(sys.argv[1]).resolve(), expected_version=version)

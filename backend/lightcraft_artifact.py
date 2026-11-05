@@ -55,8 +55,12 @@ def resolve_managed_executable(environment, platform, *, project_root=None, froz
     target = manifest.get('developmentTargetDir', 'target')
     if not isinstance(target, str) or not re.fullmatch(r'target(?:-[a-z0-9]+)*', target):
         return ''
-    candidate = root / '.tmp' / f'lightcraft-{major_minor}' / target / 'release' / 'lightcraft-cli.exe'
-    return str(candidate) if candidate.is_file() else ''
+    # Patch-version checkouts keep the previous verified executable available for comparisons.
+    for suffix in (version, major_minor):
+        candidate = root / '.tmp' / f'lightcraft-{suffix}' / target / 'release' / 'lightcraft-cli.exe'
+        if candidate.is_file():
+            return str(candidate)
+    return ''
 
 
 def verified_artifact(executable, digest, version):

@@ -110,6 +110,14 @@ def test_managed_executable_discovery_is_dev_only_and_manifest_bound(tmp_path):
     assert resolve_managed_executable({}, 'win32', project_root=root, frozen=True) == ''
     assert resolve_managed_executable({}, 'linux', project_root=root, frozen=False) == ''
 
+    exact = root / '.tmp' / f"lightcraft-{MANAGED['version']}" / MANAGED['developmentTargetDir'] / 'release' / 'lightcraft-cli.exe'
+    exact.parent.mkdir(parents=True)
+    exact.write_bytes(b'patch-version executable')
+    assert resolve_managed_executable({}, 'win32', project_root=root, frozen=False) == str(exact)
+    assert verified_artifact(exact, hashlib.sha256(exact.read_bytes()).hexdigest(), ENGINE_VERSION) is None
+    exact.unlink()
+    assert resolve_managed_executable({}, 'win32', project_root=root, frozen=False) == str(executable)
+
     write_receipt(executable)
     digest = hashlib.sha256(executable.read_bytes()).hexdigest()
     assert verified_artifact(executable, digest, ENGINE_VERSION)['version'] == ENGINE_VERSION

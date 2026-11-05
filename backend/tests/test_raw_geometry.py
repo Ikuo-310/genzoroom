@@ -217,7 +217,7 @@ def test_actual_native_geometry_history_reload_and_preview(local, tmp_path, monk
     from tests.test_raw_source import Original
     from tests.test_raw_recipe_restore import open_asset
     root = Path(__file__).parents[2]
-    binary = root / '.tmp/lightcraft-0.18/target-managed/release/lightcraft-cli.exe'
+    binary = root / '.tmp/lightcraft-0.18.1/target-managed/release/lightcraft-cli.exe'
     if not binary.is_file(): pytest.skip('managed Native artifact not available')
     spec = importlib.util.spec_from_file_location('crop_synthetic', root / 'native/lightcraft/settings_export_probe.py')
     fixture = importlib.util.module_from_spec(spec); spec.loader.exec_module(fixture)

@@ -14,8 +14,8 @@ spec.loader.exec_module(build)
 
 def test_manifest_patch_digest_and_targets():
     value = build.manifest()
-    assert value["version"] == "0.18.0"
-    assert value["commit"] == "32d569ad5d19a6b55cf8d5c077127faa0f44a83b"
+    assert value["version"] == "0.18.1"
+    assert value["commit"] == "57024f072c234e0c6c850e0940a261790f976575"
     assert value['geometryDescriptorContract'] == 2
     assert value['contracts'] == {'before': 1, 'preview': 1, 'region': 1, 'wb': 1}
     assert len(value["patches"]) == 1
@@ -37,6 +37,15 @@ def test_archived_014_manifest_preserves_the_previous_managed_tuple():
     assert value['commit'] == '03c88c166c054c009db2a47187d59991f6232b85'
     assert value['patches'][0]['sha256'] == '9308d0663de3e4d1f6fd65e564fb04cc7ac1c993b5c1a2aae29ef1f72b521063'
     assert value['contracts'] == {'before': 1, 'preview': 1, 'region': 1, 'wb': 1}
+    assert value['geometryDescriptorContract'] == 2
+
+
+def test_archived_018_manifest_preserves_the_crop_managed_tuple():
+    value = build.manifest(build.ROOT / 'versions/0.18.0.json')
+    assert value['version'] == '0.18.0'
+    assert value['commit'] == '32d569ad5d19a6b55cf8d5c077127faa0f44a83b'
+    assert value['patches'][0]['sha256'] == '2efba419baca52467cef95a3a8160be3098d94fba848e28ac2951163dc556ebc'
+    assert value['cropEditContract'] == 1
     assert value['geometryDescriptorContract'] == 2
 
 
@@ -77,7 +86,7 @@ def test_browser_identity_is_generated_from_the_managed_manifest():
     assert (build.ROOT.parents[1] / 'frontend/src/lightcraftEngine.ts').read_text(encoding='utf-8') == module.identity_source(build.manifest())
 
 
-@pytest.mark.parametrize('version', ['0.10.0', '0.14.0', '0.18.0'])
+@pytest.mark.parametrize('version', ['0.10.0', '0.14.0', '0.18.0', '0.18.1'])
 def test_shared_region_artifact_gate_cannot_be_skipped_by_version(tmp_path, monkeypatch, version):
     shared = tmp_path / 'repository'
     managed = shared / 'native/lightcraft'

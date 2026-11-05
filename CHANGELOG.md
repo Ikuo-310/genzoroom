@@ -8,7 +8,7 @@ Internal changes are omitted unless they affect users.
 
 ### Changed
 
-- Updated the Windows RAW engine to LightCraft v0.18.0, preserving compatibility with existing RAW Preview, White Balance, Color Grading, Export, and saved RAW Recipes while incorporating upstream RAW and GPU improvements. RAW support remains available for formats accepted by LightCraft without a manufacturer-specific restriction.
+- Updated the Windows RAW engine to LightCraft v0.18.1, preserving RAW Crop, Preview, Export, and saved Recipe compatibility. Lens corrections now avoid blank image edges independently of Constrain Crop; perspective corrections continue to follow that setting.
 - Windows LightCraft RAW development now includes three-band Color Grading for Shadows, Midtones, and Highlights, with Hue, Saturation, and Luminance sliders plus shared Blending and Balance controls. Hue uses a rainbow slider. Grading follows existing RAW saving, History, Undo/Redo, Reset, Export, and rendered-thumbnail paths, with improved compatibility for older RAW Recipes. JPEG Color Grading remains unchanged.
 - Windows RAW photos now show the existing Edited badge in Home and the Filmstrip when their saved or current DevelopSettings differ from that photo's import defaults. Stack aggregation and the Edited filter include RAW edit status.
 - Windows native RAW darkroom now offers one-shot Auto White Balance and a WB eyedropper for sampling a neutral point in the image. Both apply through existing RAW History, Undo/Redo, and Recipe saving; the picker supports Before/After views and Viewer Zoom/Pan.

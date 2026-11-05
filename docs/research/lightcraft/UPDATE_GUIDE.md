@@ -1,6 +1,6 @@
 # LightCraft 更新・GenzoRoomパッチ管理
 
-この手順は開発用・配布用のどちらのLightCraftにも適用する。現在の管理基準は **v0.14.0 / `03c88c166c054c009db2a47187d59991f6232b85`**（U3自動検証PASS、短いWindows実機受入待ち）。固定値とパッチdigestの正本は [`native/lightcraft/manifest.json`](../../../native/lightcraft/manifest.json)。独自変更は本家commitに含めず、同directoryのGit patchとして保存する。patchはfull-index形式とし、`.gitattributes`でLFを固定してWindows checkoutでもdigestを維持する。以下のA2〜C2記録は当時のv0.10基準の履歴であり、U3の結果は[追随調査§15](LIGHTCRAFT_0_14_UPGRADE_REVIEW.md#15-u3実装検証結果2026-10-26)を参照する。
+この手順は開発用・配布用のどちらのLightCraftにも適用する。現在の管理基準は **v0.18.1 / `57024f072c234e0c6c850e0940a261790f976575`**（自動検証結果と実機未確認事項は[追随記録](LIGHTCRAFT_0_18_1_UPGRADE_REVIEW.md)を参照）。固定値とパッチdigestの正本は [`native/lightcraft/manifest.json`](../../../native/lightcraft/manifest.json)。独自変更は本家commitに含めず、同directoryのGit patchとして保存する。patchはfull-index形式とし、`.gitattributes`でLFを固定してWindows checkoutでもdigestを維持する。以下のA2〜C2記録は当時のv0.10基準の履歴であり、U3の結果は[追随調査§15](LIGHTCRAFT_0_14_UPGRADE_REVIEW.md#15-u3実装検証結果2026-10-26)を参照する。
 
 RAW Preview統合はLightCraft v0.14.0で機能完了している。Whole Draft/Full、Native geometry/DPR、Region/Pan/Zoom、Before/After、stale result handling、Recipe restore/RAW Reset、Smoke、Developer Diagnostics RAW Benchmarkを含む。初回RAW open約2秒、cold first Region Plan約660ms（約99.96%がFull source初回生成）、同一document再Plan約0.25msはblocking issueではなく将来の性能最適化候補。条件付きmetadata-only Plan、Full source prewarm、source生成内部最適化は未実装の将来検討であり、[Region設計§18](RAW_REGION_PREVIEW_DESIGN.md#18-raw-preview機能完了と性能課題の扱い2026-10-26)に判断根拠を記録する。
 
@@ -72,10 +72,10 @@ A2では同じpatchへadaptive契約1を統合した。`quality`／`preview_cont
 2. GenzoRoomのリポジトリPythonから準備scriptを実行する（PowerShell例、`$source`は専用checkoutの絶対path）。
 
 ```powershell
-$source = Join-Path $PWD '.tmp/lightcraft-0.14'
+$source = Join-Path $PWD '.tmp/lightcraft-0.18.1'
 .\.venv\Scripts\python.exe native/lightcraft/build.py --source $source --apply
 .\.venv\Scripts\python.exe native/lightcraft/build.py --source $source --build
-.\.venv\Scripts\python.exe native/lightcraft/build.py --binary "$source\target-wb-phase1\release\lightcraft-cli.exe"
+.\.venv\Scripts\python.exe native/lightcraft/build.py --binary "$source\target-managed\release\lightcraft-cli.exe"
 ```
 
 `--apply`は固定HEAD・パッチSHA-256・clean tracked sourceを検査し、`git apply --check`の成功後だけ適用する。新規管理sourceを完全diffへ含めるため、適用時は`--intent-to-add`を使用する。これは内容のstageではなく、`git diff --cached`が空である制約を維持する。管理外の未追跡sourceは引き続き拒否する。適用済みへの`--apply`はエラーにする。既に適用済みの場合は`--apply`を外す。検証時はsource diff全体が管理patchと一致することを確認し、不一致／部分適用／余分なtracked変更／staged変更／異なるHEADではbuildを中止する。失敗したpatchを無視してbuildする経路はない。管理patch以外のsource変更を残したまま配布しない。

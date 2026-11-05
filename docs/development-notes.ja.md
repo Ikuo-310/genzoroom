@@ -1,5 +1,13 @@
 # GenzoRoom 開発ノート
 
+## LightCraft managed engine v0.18.1追随（2026-11-05）
+
+固定upstreamを`57024f072c234e0c6c850e0940a261790f976575`へ更新した。既存29 targetのpatchは競合なく適用でき、context／full-indexを更新した`0002-v0.18.1-native-contracts.patch`を採用する。Before／Preview／Region／WB各1、geometry descriptor 2、Crop編集表示1と既存APIを維持する。旧v0.18.0 manifest／patch／binaryを残し、開発時検出は完全versionの専用checkoutを優先する。実EXE SHA・receipt・manifest照合は維持した。
+
+上流のレンズ補正出力制約はConstrain Cropに関係なく適用され、遠近補正は設定に従う。変更対象は描画Frameで、保存Cropではない。`apply_crop=false`のCrop編集表示には適用しない。WBの旧テスト1件を未Crop逆変換と制約後座標の検証へ分け、描画を旧仕様へ戻していない。同一合成DNG、distortion=-60／Constrain Crop=falseの旧新版比較では、Native出力が128×96から116×87へ変化し、保存Cropは両方とも全画面のままだった。
+
+レンズUI、マスクUI、DB／Recipe形式、Immich登録／Stack処理は変更していない。Native CPU／DX12 probe、v0.18.0 Crop設定復元、Whole／Region／JPEG、標準RAW Viewer smokeと関連Backend／Frontend回帰を実施した。詳細な件数、SHA-256、警告、実Desktop未確認事項は[追随記録](research/lightcraft/LIGHTCRAFT_0_18_1_UPGRADE_REVIEW.md)を参照する。自動検証を実Desktop受入完了とは扱わない。
+
 ## RAW Crop Phase 4.2：Drop確定・編集予算・保存失敗からの退出（2026-11-04）
 
 利用者提供の`genzoroom-all-logs-20261103T234109Z.json`を診断資料として読み、作業指示とは区別した。ログにはgeometry開始256件、確定255件、generation 1 / revision 257での`raw_session_edit_limit`による終端失敗があった。現行コードはMoveごとにNative更新を送信し、gesture中はdirtyのため再生成できず、失敗したcompletion PromiseをRetryでも再利用していた。`raw_stale_handle`は同一原因と断定せず、owner不一致として別扱いにした。ログや写真データはリポジトリへ追加していない。

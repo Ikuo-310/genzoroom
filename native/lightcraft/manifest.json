@@ -32,13 +32,13 @@
         "crates/pipeline/src/tests.rs",
         "crates/ui-egui/src/render.rs"
       ],
-      "file": "patches/0002-v0.18-native-contracts.patch",
+      "file": "patches/0002-v0.18.1-native-contracts.patch",
       "purpose": "Native Before, adaptive Whole and Region contract 1, geometry descriptor 2 and read-only WB estimation contract 1, read-only Crop editing display contract 1",
-      "sha256": "2efba419baca52467cef95a3a8160be3098d94fba848e28ac2951163dc556ebc"
+      "sha256": "b2ce1c237f45adee62d09757d1ef544880f13f8a14114858b065f1ffa9dd2976"
     }
   ],
-  "commit": "32d569ad5d19a6b55cf8d5c077127faa0f44a83b",
-  "version": "0.18.0",
+  "commit": "57024f072c234e0c6c850e0940a261790f976575",
+  "version": "0.18.1",
   "geometryDescriptorContract": 2,
   "contracts": {
     "before": 1,
