@@ -300,7 +300,13 @@ describe('bounded RAW binary contract', () => {
     for (const patch of [{ generation: doc.generation + 1 }, { documentToken: 'other' }, { controls: [] }, { values: {} },
       { sections: { light: true, color: true } }, { sections: { light: true, color: true, detail: 1 } },
       { vignetteStyle: 'invalid' }, { vignetteStyle: undefined }, { vignetteStyle: 1 },
-      { mutationAttempts: -1 }, { mutationAttempts: 257 }, { mutationLimit: 999 }, { regenerationThreshold: 256 }, { wb: { available: 'yes' } }]) {
+      { mutationAttempts: -1 }, { mutationAttempts: 257 }, { mutationLimit: 999 }, { regenerationThreshold: 256 }, { wb: { available: 'yes' } },
+      { lensProfileInfo: { ...rawSettings(doc).lensProfileInfo, profileSource: 'guess' } },
+      { lensProfileInfo: { ...rawSettings(doc).lensProfileInfo, cameraMake: 'x'.repeat(513) } },
+      { lensProfileInfo: { ...rawSettings(doc).lensProfileInfo, profileSource: 'database', profileAvailable: null } },
+      { opticsFlags: { remove_ca: false, lens_profile: true },
+        lensProfileInfo: { ...rawSettings(doc).lensProfileInfo, profileApplied: false } },
+      { lensProfileInfo: { ...rawSettings(doc).lensProfileInfo, profileSource: 'file', profileAvailable: true, profileApplied: true } }]) {
       vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ...rawSettings(doc), ...patch }),
         { headers: { 'Content-Type': 'application/json' } })));
       await expect(readRawSettings(doc)).rejects.toThrow('raw_invalid_response');

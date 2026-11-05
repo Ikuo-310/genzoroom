@@ -14,7 +14,8 @@ def write_receipt(executable, **changes):
     digest = hashlib.sha256(executable.read_bytes()).hexdigest()
     value = {**{key: MANAGED[key] for key in ('version', 'commit', 'patches', 'geometryDescriptorContract')},
              'binarySha256': digest, 'beforeContract': 1, 'previewContract': 1, 'regionContract': 1, 'wbContract': 1,
-             **({'cropEditContract': 1} if MANAGED.get('cropEditContract') == 1 else {}), **changes}
+             **({'cropEditContract': 1} if MANAGED.get('cropEditContract') == 1 else {}),
+             **({'lensProfileInfoContract': 1} if MANAGED.get('lensProfileInfoContract') == 1 else {}), **changes}
     executable.with_suffix('.genzoroom.json').write_text(json.dumps(value), encoding='utf-8')
     return digest
 
@@ -24,6 +25,7 @@ def write_receipt(executable, **changes):
     {'patches': []}, {'beforeContract': 2}, {'regionContract': True}, {'geometryDescriptorContract': 1},
     {'wbContract': True}, {'wbContract': 2}, {'wbContract': None},
     {'cropEditContract': True}, {'cropEditContract': 2}, {'cropEditContract': None},
+    {'lensProfileInfoContract': True}, {'lensProfileInfoContract': 2}, {'lensProfileInfoContract': None},
 ])
 def test_receipt_mismatch_never_claims_a_managed_version(tmp_path, changes):
     executable = tmp_path / 'engine.exe'
@@ -51,6 +53,17 @@ def test_receipt_without_wb_contract_is_not_a_phase_one_artifact(tmp_path):
     path = executable.with_suffix('.genzoroom.json')
     receipt = json.loads(path.read_text(encoding='utf-8'))
     del receipt['wbContract']
+    path.write_text(json.dumps(receipt), encoding='utf-8')
+    assert verified_artifact(executable, digest, ENGINE_VERSION) is None
+
+
+def test_receipt_without_lens_profile_info_contract_is_not_managed(tmp_path):
+    executable = tmp_path / 'engine.exe'
+    executable.write_bytes(b'actual engine')
+    digest = write_receipt(executable)
+    path = executable.with_suffix('.genzoroom.json')
+    receipt = json.loads(path.read_text(encoding='utf-8'))
+    del receipt['lensProfileInfoContract']
     path.write_text(json.dumps(receipt), encoding='utf-8')
     assert verified_artifact(executable, digest, ENGINE_VERSION) is None
 

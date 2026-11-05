@@ -67,11 +67,16 @@ class DevelopSnapshot:
     _content_hash: str | None = field(default=None, repr=False)
     wb_kelvin: bool = False
     wb_auto: bool = False
+    lens_profile_info_json: str = field(default_factory=lambda: _lens_profile_info_json(None), repr=False)
 
     @property
     def settings(self):
         # Snapshots own serialized values: no caller dictionary can mutate the session's truth.
         return json.loads(self._json)
+
+    @property
+    def lens_profile_info(self):
+        return json.loads(self.lens_profile_info_json)
 
 
 @dataclass(frozen=True)
@@ -150,6 +155,7 @@ class _Photo:
     as_shot_wb: tuple[float, float] | None = field(default=None, repr=False)
     before_fingerprint: str | None = None
     source_size: tuple[int, int] | None = None
+    lens_profile_info_json: str = field(default_factory=lambda: _lens_profile_info_json(None), repr=False)
 
 
 class PreviewTicket:
@@ -248,6 +254,39 @@ def _settings_json(value):
     # Older Recipes predate Optics; normalize only the engine view so their stored receipts remain valid.
     value = with_legacy_grading_defaults(value)
     return _object_json(with_legacy_optics_defaults(value), MAX_SETTINGS_BYTES)
+
+
+def _lens_profile_info_json(value):
+    unknown = {"cameraMake": None, "cameraModel": None, "lensMake": None, "lensModel": None, "lensId": None,
+               "profileAvailable": None, "profileSource": "unknown", "profileName": None,
+               "profileHasDistortion": False, "profileHasVignetting": False}
+    if not isinstance(value, dict):
+        return json.dumps(unknown, separators=(",", ":"))
+    text_fields = ("cameraMake", "cameraModel", "lensMake", "lensModel", "lensId", "profileName")
+    source = value.get("profileSource")
+    available = value.get("profileAvailable")
+    components = (value.get("profileHasDistortion"), value.get("profileHasVignetting"))
+    def valid_text(item):
+        if item is None:
+            return True
+        if not isinstance(item, str):
+            return False
+        try:
+            return len(item.encode("utf-8")) <= 512
+        except UnicodeError:
+            return False
+    valid = (all(valid_text(value.get(key)) for key in text_fields)
+             and source in ("file", "database", "none", "unknown")
+             and (available is None or type(available) is bool)
+             and all(type(component) is bool for component in components)
+             and ((source in ("file", "database") and available is True)
+                  or (source == "none" and available is False) or (source == "unknown" and available is None)))
+    if not valid:
+        lightcraft_log("raw.lensProfileInfo.invalid", level="warn", errorCode="invalid_native_shape")
+        return json.dumps(unknown, separators=(",", ":"))
+    return json.dumps({key: value.get(key) for key in text_fields} | {
+        "profileAvailable": available, "profileSource": source, "profileHasDistortion": components[0],
+        "profileHasVignetting": components[1]}, ensure_ascii=False, separators=(",", ":"))
 
 
 def _source_info(value):
@@ -545,7 +584,8 @@ class LightCraftRawSession:
     def _snapshot(self, photo):
         return DevelopSnapshot(photo.handle, photo.applied_revision, photo.settings_json,
                                _fingerprint=photo.fingerprint, _content_hash=photo.content_hash,
-                               wb_kelvin=photo.wb_kelvin, wb_auto=photo.wb_auto)
+                               wb_kelvin=photo.wb_kelvin, wb_auto=photo.wb_auto,
+                               lens_profile_info_json=photo.lens_profile_info_json)
 
     def _discard_pending(self, error=None):
         if self._pending is not None:
@@ -706,6 +746,14 @@ class LightCraftRawSession:
             photo = _Photo(handle, path, fingerprint, info["content_hash"], photo_id, "")
             photo.source_size = (info["width"], info["height"])
             await self._command("library.select", {"ids": [photo_id], "active": photo_id, "mode": "replace"}, deadline)
+            try:
+                lens_info = await self._command("photo.lensProfileInfo", {"id": photo_id}, deadline)
+                photo.lens_profile_info_json = _lens_profile_info_json(lens_info)
+            except LightCraftError as error:
+                if isinstance(error, MCPTransportError):
+                    raise
+                lightcraft_log("raw.lensProfileInfo.unavailable", level="warn", generation=self._generation,
+                               errorCode=error.code)
             # Import defaults are native Session state, never a copy of the persisted After recipe.
             try:
                 supported = await self.manager._raw_before_supported(self._generation)

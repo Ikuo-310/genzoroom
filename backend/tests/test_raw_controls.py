@@ -65,6 +65,54 @@ def test_optics_numeric_and_boolean_settings_use_native_merge_and_readback(local
     asyncio.run(run())
 
 
+def test_photo_specific_lens_info_is_readonly_and_applied_state_tracks_settings(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            children[0].lens_profile_info["profileHasVignetting"] = True
+            async with client(local) as http:
+                await authenticate(http, local)
+                _, doc = await open_document(http)
+                settings_url = f'/api/raw/documents/{doc["handle"]}/settings'
+                initial = (await http.post(settings_url, json=identity(doc))).json()
+                info = initial["lensProfileInfo"]
+                assert info == {"cameraMake": "Testcam", "cameraModel": "TC-1", "lensMake": "Testcam",
+                    "lensModel": "18-55mm", "lensId": None, "profileAvailable": True, "profileSource": "database",
+                    "profileName": "Testcam 18-55mm", "profileApplied": False}
+                assert "lensProfileInfo" not in api.raw._photos[doc["assetId"]].settings_json
+                assert "profileName" not in initial.get("history", {})
+                response = await http.post(f'/api/raw/documents/{doc["handle"]}/controls', json=identity(doc) |
+                    {"expectedRevision": doc["revision"], "values": {"optics.lens_profile": True}})
+                assert response.status_code == 200, response.text
+                assert response.json()["lensProfileInfo"]["profileApplied"] is True
+                toggled = response.json()
+                response = await http.post(f'/api/raw/documents/{doc["handle"]}/controls', json=identity(toggled) |
+                    {"expectedRevision": toggled["revision"], "values": {"optics.profileDistortion": 0, "optics.profileVignetting": 0}})
+                assert response.status_code == 200 and response.json()["lensProfileInfo"]["profileApplied"] is False
+                assert any(command == "photo.lensProfileInfo" for command, _ in children[0].commands)
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
+def test_lens_info_failure_degrades_to_unknown_without_failing_raw_open(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        children[0].fail_commands.add("photo.lensProfileInfo")
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                _, doc = await open_document(http)
+                response = await http.post(f'/api/raw/documents/{doc["handle"]}/settings', json=identity(doc))
+                assert response.status_code == 200, response.text
+                info = response.json()["lensProfileInfo"]
+                assert info["profileSource"] == "unknown" and info["profileAvailable"] is None
+                assert info["profileApplied"] is False
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
 def test_controls_readback_revision_and_preview(local, tmp_path, monkeypatch):
     async def run():
         api, _, children, _ = await setup(tmp_path, local, monkeypatch)

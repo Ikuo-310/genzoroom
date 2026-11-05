@@ -18,11 +18,15 @@ def test_manifest_patch_digest_and_targets():
     assert value["commit"] == "57024f072c234e0c6c850e0940a261790f976575"
     assert value['geometryDescriptorContract'] == 2
     assert value['contracts'] == {'before': 1, 'preview': 1, 'region': 1, 'wb': 1}
-    assert len(value["patches"]) == 1
+    assert len(value["patches"]) == 2
     patch = (build.ROOT / value["patches"][0]["file"]).read_text(encoding="utf-8")
     assert '"before"' in patch and 'render_job(id, size, size, true, true)' in patch
     assert all(f"a/{target}" in patch for target in value["patches"][0]["targets"])
     assert 'GEOMETRY_DESCRIPTOR_CONTRACT: u64 = 2' in patch and '"nativeAspect":native_aspect' in patch
+    lens_patch = (build.ROOT / value['patches'][1]['file']).read_text(encoding='utf-8')
+    assert value['lensProfileInfoContract'] == 1
+    assert value['patches'][1]['targets'] == ['crates/engine/src/cmd/query.rs']
+    assert 'photo.lensProfileInfo' in lens_patch
 
 
 def test_archived_010_manifest_and_patch_remain_reproducible():
@@ -55,12 +59,13 @@ def test_archived_018_manifest_preserves_the_crop_managed_tuple():
     {'developmentTargetDir': None}, {'developmentTargetDir': 'target'},
     {'developmentTargetDir': '../target'}, {'developmentTargetDir': 'target/release'},
     {'cropEditContract': True}, {'cropEditContract': 2},
+    {'lensProfileInfoContract': True}, {'lensProfileInfoContract': 2},
 ])
 def test_wb_manifest_requires_a_supported_contract_and_independent_target(tmp_path, changes):
     value = {**build.manifest(), **changes}
     path = tmp_path / 'manifest.json'
     path.write_text(json.dumps(value), encoding='utf-8')
-    with pytest.raises(ValueError, match='unsupported managed contracts|invalid managed development target|unsupported crop editing contract'):
+    with pytest.raises(ValueError, match='unsupported managed contracts|invalid managed development target|unsupported crop editing contract|unsupported lens profile information contract'):
         build.manifest(path)
 
 
@@ -71,6 +76,7 @@ def test_wb_receipt_adds_only_the_independent_wb_contract(tmp_path):
     actual = build.receipt(binary, value)
     assert actual['wbContract'] == 1
     assert actual['cropEditContract'] == 1
+    assert actual['lensProfileInfoContract'] == 1
     assert all(actual[key] == 1 for key in ('beforeContract', 'previewContract', 'regionContract'))
     assert actual['geometryDescriptorContract'] == 2
     assert actual['binarySha256'] == hashlib.sha256(binary.read_bytes()).hexdigest()

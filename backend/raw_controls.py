@@ -124,7 +124,20 @@ def controls_state(snapshot):
     flags = {name: optics.get(name) for name in ("remove_ca", "lens_profile")}
     if any(type(value) is not bool for value in flags.values()):
         raise LightCraftError("raw_invalid_settings")
+    lens_info = snapshot.lens_profile_info
+    lens_applied = False
+    if flags["lens_profile"] and "optics" not in disabled:
+        if lens_info.get("profileAvailable") is None:
+            lens_applied = None
+        elif lens_info["profileAvailable"] is True:
+            lens_applied = bool(
+                lens_info["profileHasDistortion"] and optics.get("profile_distortion", 0) > 0
+                or lens_info["profileHasVignetting"] and optics.get("profile_vignetting", 0) > 0)
+    public_lens_info = {key: value for key, value in lens_info.items()
+                        if key not in ("profileHasDistortion", "profileHasVignetting")}
+    public_lens_info["profileApplied"] = lens_applied
     return {**geometry_state(settings), "values": values, "opticsFlags": flags, "vignetteStyle": style, "wbAutoAvailable": snapshot.wb_auto and snapshot.wb_kelvin,
+            "lensProfileInfo": public_lens_info,
             "sections": {section: section not in disabled for section in SETTINGS_SECTIONS},
             "controls": [dict(id=key, min=v[0], max=v[1], step=v[2], default=v[3], precision=v[4])
                                            for key, v in CONTROLS.items()],

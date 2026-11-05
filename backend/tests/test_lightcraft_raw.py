@@ -98,6 +98,9 @@ class RawProcess(FakeProcess):
         self.bad_image = False
         self.raw_tool_error = False
         self.as_shot_wb = None
+        self.lens_profile_info = {"cameraMake": "Testcam", "cameraModel": "TC-1", "lensMake": "Testcam",
+            "lensModel": "18-55mm", "lensId": None, "profileAvailable": True, "profileSource": "database",
+            "profileName": "Testcam 18-55mm", "profileHasDistortion": True, "profileHasVignetting": False}
         self.fail_commands = set()
         self.wb_mismatch = False
         self.wb_override = {}
@@ -200,6 +203,8 @@ class RawProcess(FakeProcess):
                      "content_hash": self.photos[params["id"]]["hash"], "as_shot_wb": self.as_shot_wb}
             if self.preview_only:
                 value["preview_only"] = self.preview_only
+        elif command == "photo.lensProfileInfo":
+            value = copy.deepcopy(self.lens_profile_info)
         elif command == "library.select":
             self.active = params["active"]
             value = {"selected": 1}
@@ -300,7 +305,8 @@ async def create(tmp_path, *, timeouts=QUICK):
         **{key: MANAGED[key] for key in ('version', 'commit', 'patches', 'geometryDescriptorContract')},
         'binarySha256': hashlib.sha256(b'fake').hexdigest(),
         'beforeContract': 1, 'previewContract': 1, 'regionContract': 1, 'wbContract': 1,
-        **({'cropEditContract': 1} if MANAGED.get('cropEditContract') == 1 else {})}), encoding='utf-8')
+        **({'cropEditContract': 1} if MANAGED.get('cropEditContract') == 1 else {}),
+        **({'lensProfileInfoContract': 1} if MANAGED.get('lensProfileInfoContract') == 1 else {})}), encoding='utf-8')
     children = []
 
     async def spawn(*args, **kwargs):

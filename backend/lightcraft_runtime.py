@@ -549,7 +549,7 @@ class LightCraftManager:
             self._failed(session, code)
 
     async def _raw_command(self, generation, command, params, *, timeout):
-        if command not in {"library.import", "library.select", "photo.inspect", "develop.get", "develop.set",
+        if command not in {"library.import", "library.select", "photo.inspect", "photo.lensProfileInfo", "develop.get", "develop.set",
                            "develop.merge", "develop.reset", "develop.sectionEnabled", "develop.resetControl",
                            "develop.resetSection", "develop.wb", "beforeAfter.setBefore", "app.memoryBudget", "library.memory",
                            "crop.set", "crop.drag", "crop.aspect", "crop.rotateAspect", "crop.reset", "crop.straighten",

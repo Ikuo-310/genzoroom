@@ -1,5 +1,13 @@
 # GenzoRoom 開発ノート
 
+## RAWレンズ補正 Phase 3：写真固有プロファイル情報API（2026-11-05）
+
+RAW settings応答へ読取専用の`lensProfileInfo`を追加した。LightCraft v0.18.1の`photo.lensProfileInfo`はEXIF／XMPから得られるカメラ・レンズ名、NativeがRAW import時に選択した`Photo.embedded_lens`の出所と補正要素、Lensfun DB選択時に取得可能な表示名を返す。v0.18.1に正規化Lens IDはないため`lensId`はnull。取得不能とプロファイルなしを区別し、availability/sourceはunknown／nullを許す。Nativeで取得した静的情報はBackendのphoto所有session recordへ保持し、各readbackで現在のlens_profile flag、Optics section、Native補正要素、amountから`profileApplied`だけを再計算する。
+
+情報はDevelopSettings JSONに入れず、Recipe／History／Copy-Pasteへ保存しない。RAW切替ではphotoごとのsession recordを使う。文字列は各512 UTF-8 bytes以下で検証し、情報取得失敗や不正応答はRAW importを止めずunknownへfallbackする。Lensfun DBの取得機能やUIは追加していない。managed Native追加patchは[`0003-v0.18.1-lens-profile-info.patch`](../native/lightcraft/patches/0003-v0.18.1-lens-profile-info.patch)、SHA-256 `61dc7e48a297bd3b8d7fd24873e692c5579d399bcc1cac1d6ba93f8b9fe5de0b`。`lensProfileInfoContract:1`をmanifest／receipt／Backend artifact検証へ追加し、分離target `target-lens-profile-info`を使用した。binary SHA-256は`1a2006fe083eeb15ff7dc7d054183cf5405c68cdca66c7a7bdc154d745871a3c`。
+
+Native MCP test **87件成功・1件ignore**、Lensfun profile lookup **6件成功**、pipeline WB関連 **9件成功**。Managed Release binaryのCPU／DX12 GPU、Whole／Region／WB／CropとLens Profile Info unknown-state probeが成功し、receiptを生成した。Backend／Frontendの最終限定回帰と件数は[RAW lens profile information contract](research/lightcraft/RAW_LENS_PROFILE_INFO_CONTRACT.md)を参照する。実カメラRAW・実運用Lensfun DBのprobeと画面UIは未実施。Phase 1-Bの履歴記録にある「写真固有profile APIなし」はこのPhase 3で更新された。
+
 ## RAWレンズ補正 Phase 1-B：既存History／Recipeへの統合（2026-11-05）
 
 Optics数値13項目を既存の数値Control Historyへ接続し、`control`／`controlReset`、section reset、All Reset、Undo／Redo／Jumpで同じsnapshot・revision・fingerprint・receipt境界を使う。`opticsFlag`／`opticsFlagReset`を追加し、`remove_ca`／`lens_profile`は数値へ変換せず、履歴レスポンスの`flagChanges`にbool差分として公開する。数値差分`changes`の型は維持した。Optics section toggleは`disabled_sections`だけを変更して値を保持し、section resetはv0.18.1既定値へ15項目を1 operationで戻す。Native更新は数値`develop.set`、bool `develop.merge`、resetは既存Native reset経路を利用し、readback照合後だけHistoryを保存する。

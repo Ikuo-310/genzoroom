@@ -20,6 +20,7 @@ def managed_manifest():
             or value.get('contracts') != {'before': 1, 'preview': 1, 'region': 1, 'wb': 1} \
             or any(type(version) is not int for version in value.get('contracts', {}).values()) \
             or ('cropEditContract' in value and (type(value['cropEditContract']) is not int or value['cropEditContract'] != 1)) \
+            or ('lensProfileInfoContract' in value and (type(value['lensProfileInfoContract']) is not int or value['lensProfileInfoContract'] != 1)) \
             or not isinstance(value.get('patches'), list) or not value['patches']:
         raise ValueError('invalid managed LightCraft manifest')
     return value
@@ -73,14 +74,18 @@ def verified_artifact(executable, digest, version):
         expected = {**{key: MANAGED[key] for key in ('version', 'commit', 'patches', 'geometryDescriptorContract')},
                     'binarySha256': digest, 'beforeContract': 1, 'previewContract': 1, 'regionContract': 1,
                     **({'cropEditContract': 1} if MANAGED.get('cropEditContract') == 1 else {}),
-                    **({'wbContract': 1} if MANAGED.get('contracts', {}).get('wb') == 1 else {})}
+                    **({'wbContract': 1} if MANAGED.get('contracts', {}).get('wb') == 1 else {}),
+                    **({'lensProfileInfoContract': 1} if MANAGED.get('lensProfileInfoContract') == 1 else {})}
         if not isinstance(value, dict) or any(type(value.get(key)) is not int for key in
                 ('beforeContract', 'previewContract', 'regionContract', 'geometryDescriptorContract',
                  *(['cropEditContract'] if 'cropEditContract' in expected else []),
-                 *(['wbContract'] if 'wbContract' in expected else []))) \
+                *(['wbContract'] if 'wbContract' in expected else []),
+                *(['lensProfileInfoContract'] if 'lensProfileInfoContract' in expected else []))) \
                 or value != expected or version != expected['version'] or not re.fullmatch(r'[a-f0-9]{64}', digest):
             return None
         return {'version': version, 'upstreamCommit': expected['commit'], 'managedPatch': True,
-                'geometryDescriptorContract': expected['geometryDescriptorContract']}
+                'geometryDescriptorContract': expected['geometryDescriptorContract'],
+                **({'lensProfileInfoContract': expected['lensProfileInfoContract']}
+                   if 'lensProfileInfoContract' in expected else {})}
     except (OSError, ValueError, KeyError, TypeError):
         return None

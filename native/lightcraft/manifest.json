@@ -35,6 +35,14 @@
       "file": "patches/0002-v0.18.1-native-contracts.patch",
       "purpose": "Native Before, adaptive Whole and Region contract 1, geometry descriptor 2 and read-only WB estimation contract 1, read-only Crop editing display contract 1",
       "sha256": "b2ce1c237f45adee62d09757d1ef544880f13f8a14114858b065f1ffa9dd2976"
+    },
+    {
+      "targets": [
+        "crates/engine/src/cmd/query.rs"
+      ],
+      "file": "patches/0003-v0.18.1-lens-profile-info.patch",
+      "purpose": "Read-only photo-specific lens profile information contract 1",
+      "sha256": "61dc7e48a297bd3b8d7fd24873e692c5579d399bcc1cac1d6ba93f8b9fe5de0b"
     }
   ],
   "commit": "57024f072c234e0c6c850e0940a261790f976575",
@@ -46,6 +54,7 @@
     "region": 1,
     "wb": 1
   },
-  "developmentTargetDir": "target-managed",
-  "cropEditContract": 1
+  "developmentTargetDir": "target-lens-profile-info",
+  "cropEditContract": 1,
+  "lensProfileInfoContract": 1
 }

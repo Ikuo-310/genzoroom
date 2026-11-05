@@ -1,0 +1,57 @@
+diff --git a/crates/engine/src/cmd/query.rs b/crates/engine/src/cmd/query.rs
+index 5ceacb9539e08404b1abd253678c38ec2fe06574..d945be22dbb5331567cefc163fa96146656db9df 100644
+--- a/crates/engine/src/cmd/query.rs
++++ b/crates/engine/src/cmd/query.rs
+@@ -174,6 +174,52 @@ pub fn specs() -> Vec<CommandSpec> {
+             }
+             Ok(v)
+         }),
++        cmd!(query "photo.lensProfileInfo", "Lens Profile Info", [], None, "{id?} → read-only camera, lens and selected correction profile information", always, |s, p| {
++            let id = photo_arg(s, p, "photo.lensProfileInfo")?;
++            let ph = s.catalog.photo(id).ok_or_else(|| bad("photo.lensProfileInfo", "no such photo"))?;
++            let metadata = match &ph.source {
++                lightcraft_catalog::Source::File { path } => {
++                    let bytes = match &s.media.file_bytes {
++                        Some(read) => read(path),
++                        None => std::fs::read(path).map_err(|e| format!("{path}: {e}")),
++                    }.map_err(|e| bad("photo.lensProfileInfo", e))?;
++                    lightcraft_meta::extract(&bytes)
++                }
++                lightcraft_catalog::Source::Demo { .. } => lightcraft_meta::Metadata::default(),
++            };
++            let camera = match (metadata.make.as_deref(), metadata.model.as_deref()) {
++                (Some(make), Some(model)) => Some(format!("{make} {model}")),
++                (Some(make), None) => Some(make.to_owned()),
++                _ => None,
++            };
++            let profile_name = if ph.embedded_lens.is_some_and(|lens| lens.source == lightcraft_develop::LensSource::Database) {
++                crate::lens_profiles::database().and_then(|db| {
++                    crate::lens_profiles::profile_name(&db, camera.as_deref().unwrap_or_default(), metadata.lens_model.as_deref().unwrap_or_default())
++                })
++            } else { None };
++            let database_configured = crate::lens_profiles::database().is_some();
++            let profile_available = ph.embedded_lens.map(|_| true).or_else(|| {
++                (database_configured && metadata.lens_model.is_some() && metadata.focal_length.is_some()).then_some(false)
++            });
++            let source = match ph.embedded_lens.map(|lens| lens.source) {
++                Some(lightcraft_develop::LensSource::File) => "file",
++                Some(lightcraft_develop::LensSource::Database) => "database",
++                None if profile_available == Some(false) => "none",
++                None if profile_available == Some(true) => "unknown",
++                None => "unknown",
++            };
++            let lens = ph.embedded_lens;
++            Ok(json!({
++                "cameraMake": metadata.make.as_deref().filter(|text| text.len() <= 512),
++                "cameraModel": metadata.model.as_deref().filter(|text| text.len() <= 512),
++                "lensMake": metadata.lens_make.as_deref().filter(|text| text.len() <= 512),
++                "lensModel": metadata.lens_model.as_deref().filter(|text| text.len() <= 512),
++                "lensId": Value::Null, "profileAvailable": profile_available, "profileSource": source,
++                "profileName": profile_name.as_deref().filter(|name| name.len() <= 512),
++                "profileHasDistortion": lens.is_some_and(|value| value.warp.is_some() || value.stages.iter().any(Option::is_some)),
++                "profileHasVignetting": lens.is_some_and(|value| value.vignette.is_some()),
++            }))
++        }),
+         cmd!(query "develop.get", "Get Develop Settings", [], None, "{id?} → the photo's develop settings; `process` is the rendering process they are interpreted by (see develop.updateProcess)", always, |s, p| {
+             let id = photo_arg(s, p, "develop.get")?;
+             Ok(s.develop_of(id)

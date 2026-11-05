@@ -24,6 +24,7 @@ def run(args, **kwargs):
 
 def manifest(path=None):
     value = json.loads((path or ROOT / "manifest.json").read_text(encoding="utf-8"))
+    managed_targets = set()
     for patch in value["patches"]:
         if 'geometryDescriptorContract' in value and (not isinstance(patch.get('targets'), list) or not patch['targets']):
             raise ValueError('managed patch targets are required')
@@ -34,9 +35,14 @@ def manifest(path=None):
             targets = [line.split(" b/", 1)[1] for line in text.splitlines() if line.startswith("diff --git ")]
             if targets != patch["targets"] or len(targets) != len(set(targets)):
                 raise ValueError("patch targets mismatch")
+            if managed_targets.intersection(targets):
+                raise ValueError('duplicate managed patch target')
+            managed_targets.update(targets)
     if 'geometryDescriptorContract' in value:
         if 'cropEditContract' in value and (type(value['cropEditContract']) is not int or value['cropEditContract'] != 1):
             raise ValueError('unsupported crop editing contract')
+        if 'lensProfileInfoContract' in value and (type(value['lensProfileInfoContract']) is not int or value['lensProfileInfoContract'] != 1):
+            raise ValueError('unsupported lens profile information contract')
         contracts = value.get('contracts', {'before': 1, 'preview': 1, 'region': 1})
         if type(value['geometryDescriptorContract']) is not int or value['geometryDescriptorContract'] != 2 \
                 or contracts not in ({'before': 1, 'preview': 1, 'region': 1}, {'before': 1, 'preview': 1, 'region': 1, 'wb': 1}) \
@@ -66,7 +72,10 @@ def source_state(source, spec):
     if not diff:
         return "upstream"
     patches = [(ROOT / p["file"]).read_bytes().replace(b"\r\n", b"\n") for p in spec["patches"]]
-    expected = b"".join(patch[patch.index(b"diff --git "):] for patch in patches)
+    sections = []
+    for patch in patches:
+        sections.extend(section for section in patch[patch.index(b"diff --git "):].split(b"diff --git ")[1:])
+    expected = b"".join(b"diff --git " + section for section in sorted(sections, key=lambda item: item.splitlines()[0]))
     if diff != expected:
         raise ValueError("source has unrecognized changes; refusing to build")
     return "patched"
@@ -275,6 +284,11 @@ def probe(binary, spec=None):
         crop_module = importlib.util.module_from_spec(crop_spec)
         crop_spec.loader.exec_module(crop_module)
         crop_module.probe_crop_edit(binary, expected_version=spec['version'])
+    if spec.get('lensProfileInfoContract') == 1:
+        lens_spec = importlib.util.spec_from_file_location('genzoroom_lens_profile_info_probe', ROOT / 'lens_profile_info_probe.py')
+        lens_module = importlib.util.module_from_spec(lens_spec)
+        lens_spec.loader.exec_module(lens_module)
+        lens_module.probe_lens_profile_info(binary, expected_version=spec['version'])
 
 
 def valid_execution(value):
@@ -399,7 +413,8 @@ def receipt(binary, spec):
             "binarySha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "beforeContract": 1, "previewContract": 1, "regionContract": 1,
             "geometryDescriptorContract": spec['geometryDescriptorContract'],
             **({'cropEditContract': 1} if spec.get('cropEditContract') == 1 else {}),
-            **({'wbContract': 1} if spec.get('contracts', {}).get('wb') == 1 else {})}
+            **({'wbContract': 1} if spec.get('contracts', {}).get('wb') == 1 else {}),
+            **({'lensProfileInfoContract': 1} if spec.get('lensProfileInfoContract') == 1 else {})}
 
 
 def main():

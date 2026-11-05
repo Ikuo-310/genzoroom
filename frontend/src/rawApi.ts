@@ -49,6 +49,9 @@ export type RawResetSectionId = typeof RAW_RESET_SECTION_IDS[number];
 export const RAW_VIGNETTE_STYLES = ['highlightPriority', 'colorPriority', 'paintOverlay'] as const;
 export type RawVignetteStyle = typeof RAW_VIGNETTE_STYLES[number];
 export type RawValues = Record<RawSettingControlId, number>;
+export type RawLensProfileInfo = { cameraMake: string | null; cameraModel: string | null; lensMake: string | null;
+  lensModel: string | null; lensId: string | null; profileAvailable: boolean | null;
+  profileSource: 'file' | 'database' | 'none' | 'unknown'; profileName: string | null; profileApplied: boolean | null };
 export type RawControlValues = Partial<RawValues> & Partial<Record<RawOpticsFlagId, boolean>>;
 export const RAW_GEOMETRY_OPERATIONS = ['set', 'drag', 'aspect', 'swap', 'reset', 'straighten', 'rotateLeft', 'rotateRight', 'flipHorizontal', 'flipVertical'] as const;
 export type RawGeometryOperationId = typeof RAW_GEOMETRY_OPERATIONS[number];
@@ -66,7 +69,8 @@ export type RawSettings = RawDocument & { settingsFingerprint: string; recipeRev
   importDefaultsFingerprint: string;
   sections: Record<RawSettingsSectionId, boolean>;
   mutationAttempts: number; mutationLimit: number; regenerationThreshold: number;
-  values: RawValues; opticsFlags: { remove_ca: boolean; lens_profile: boolean }; vignetteStyle: RawVignetteStyle; process: number; wbAutoAvailable?: boolean;
+  values: RawValues; opticsFlags: { remove_ca: boolean; lens_profile: boolean }; lensProfileInfo: RawLensProfileInfo;
+  vignetteStyle: RawVignetteStyle; process: number; wbAutoAvailable?: boolean;
   controls: { id: RawSettingControlId; min: number; max: number; step: number; default: number; precision: number }[];
   wb: { available: boolean; mode: string; scale: string } };
 export class RawApiError extends Error {
@@ -306,6 +310,7 @@ function settings(value: RawSettings, doc: RawDocument): RawSettings {
     || typeof value.wb.mode !== 'string' || value.wb.mode.length > 32 || typeof value.wb.scale !== 'string' || value.wb.scale.length > 32
     || value.wbAutoAvailable !== undefined && typeof value.wbAutoAvailable !== 'boolean'
     || !value.opticsFlags || typeof value.opticsFlags.remove_ca !== 'boolean' || typeof value.opticsFlags.lens_profile !== 'boolean'
+    || !validRawLensProfileInfo(value.lensProfileInfo)
     || !RAW_VIGNETTE_STYLES.includes(value.vignetteStyle)
     || !value.sections || !RAW_SETTINGS_SECTION_IDS.every(section => typeof value.sections[section] === 'boolean')
     || !value.values || !RAW_SETTINGS_CONTROL_IDS.every(id => Number.isFinite(value.values[id]))
@@ -313,7 +318,23 @@ function settings(value: RawSettings, doc: RawDocument): RawSettings {
     || new Set(value.controls.map(c => c.id)).size !== RAW_SETTINGS_CONTROL_IDS.length
     || value.controls.some(c => !RAW_SETTINGS_CONTROL_IDS.includes(c.id) || ![c.min, c.max, c.step, c.default].every(Number.isFinite)
       || c.min >= c.max || c.step <= 0 || !integer(c.precision) || c.precision > 4)) throw new RawApiError('raw_invalid_response');
+  const info = value.lensProfileInfo;
+  if (info.profileApplied === true && info.profileAvailable !== true
+    || (!value.opticsFlags.lens_profile || !value.sections.optics || info.profileAvailable === false) && info.profileApplied !== false
+    || value.opticsFlags.lens_profile && value.sections.optics && info.profileAvailable === null && info.profileApplied !== null)
+    throw new RawApiError('raw_invalid_response');
   return value;
+}
+function validRawLensProfileInfo(value: unknown): value is RawLensProfileInfo {
+  if (!value || typeof value !== 'object') return false;
+  const info = value as Record<string, unknown>;
+  const fields = ['cameraMake', 'cameraModel', 'lensMake', 'lensModel', 'lensId', 'profileName'];
+  return fields.every(key => info[key] === null || typeof info[key] === 'string' && new TextEncoder().encode(info[key] as string).byteLength <= 512)
+    && ['file', 'database', 'none', 'unknown'].includes(String(info.profileSource))
+    && (info.profileAvailable === null || typeof info.profileAvailable === 'boolean')
+    && (info.profileApplied === null || typeof info.profileApplied === 'boolean')
+    && (info.profileSource === 'file' || info.profileSource === 'database' ? info.profileAvailable === true
+      : info.profileSource === 'none' ? info.profileAvailable === false : info.profileAvailable === null);
 }
 const identityBody = (doc: RawDocument) => ({ workspaceId: doc.workspaceId, generation: doc.generation, documentToken: doc.documentToken });
 export async function readRawSettings(doc: RawDocument): Promise<RawSettings> {
