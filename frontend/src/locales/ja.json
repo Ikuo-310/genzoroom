@@ -386,6 +386,15 @@
       "wbResetAsShot": "色温度と色かぶり補正の両方を撮影時のWBへ戻す",
       "colorCategory": "カラー",
       "detailCategory": "ディテール",
+      "opticsCategory": "光学補正",
+      "opticsControls": {
+        "distortion": "歪曲収差", "vignetting": "周辺光量", "vignettingMidpoint": "周辺光量の中心点",
+        "profileDistortion": "プロファイル歪曲補正", "profileVignetting": "プロファイル周辺光量補正",
+        "defringePurple": "紫色フリンジ量", "defringePurpleHueLo": "紫色の色相下限", "defringePurpleHueHi": "紫色の色相上限",
+        "defringeGreen": "緑色フリンジ量", "defringeGreenHueLo": "緑色の色相下限", "defringeGreenHueHi": "緑色の色相上限",
+        "caRed": "赤／シアンの色収差", "caBlue": "青／黄の色収差", "removeCa": "色収差を除去",
+        "lensProfile": "レンズプロファイル補正"
+      },
       "effectsCategory": "エフェクト",
       "basicEffects": "基本エフェクト",
       "vignette": "周辺光量補正",

@@ -122,8 +122,8 @@ def test_published_control_and_section_contract_matches_frontend_and_history():
     frontend_optics_controls = set(re.findall(r"'([^']+)'", setting_ids))
     assert frontend_optics_controls == optics_controls
     frontend_settings_controls = frontend_controls | frontend_optics_controls
-    assert frontend_controls == store.HISTORY_CONTROLS
-    assert frontend_settings_controls == set(CONTROLS)
+    assert frontend_controls == store.HISTORY_CONTROLS - optics_controls
+    assert frontend_settings_controls == store.HISTORY_CONTROLS == set(CONTROLS)
     assert frontend_sections == store.HISTORY_SECTIONS
     assert frontend_sections == set(SECTIONS)
     assert CONTROL_PATHS['detail.sharpenAmount'] == ('detail', 'sharpen_amount')

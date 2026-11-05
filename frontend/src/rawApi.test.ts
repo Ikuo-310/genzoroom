@@ -108,6 +108,11 @@ describe('RAW History transport', () => {
     { kind: 'controlReset', metadata: { control: 'effects.dehaze' } },
     { kind: 'sectionToggle', metadata: { section: 'effects', enabled: false } },
     { kind: 'sectionReset', metadata: { section: 'effects' } },
+    { kind: 'controlReset', metadata: { control: 'optics.caRed' } },
+    { kind: 'opticsFlag', metadata: { control: 'optics.remove_ca', enabled: true } },
+    { kind: 'opticsFlagReset', metadata: { control: 'optics.lens_profile' } },
+    { kind: 'sectionToggle', metadata: { section: 'optics', enabled: false } },
+    { kind: 'sectionReset', metadata: { section: 'optics' } },
     { kind: 'sectionReset', metadata: { section: 'vignette' } },
     { kind: 'vignetteStyle', metadata: { style: 'highlightPriority' } },
     { kind: 'vignetteStyle', metadata: { style: 'colorPriority' } },
@@ -207,6 +212,17 @@ describe('RAW History transport', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })));
     if (invalid) return expect(readRawHistory(result)).rejects.toMatchObject({ code: 'raw_invalid_response' });
     return expect(readRawHistory(result)).resolves.toMatchObject({ steps: [{ kind, metadata: {} }] });
+  });
+  it.each([true, 1, 'true', null])('keeps Optics History flags boolean (%s)', async enabled => {
+    const request = historyRequest('commit');
+    const result = rawHistoryResult(request, { history: { initialized: true, cursor: 1, length: 1, selectedStepId: request.saveId } });
+    const data = rawHistoryData(result);
+    data.steps[0] = { ...data.steps[0], kind: 'opticsFlag', metadata: { control: 'optics.remove_ca', enabled: true },
+      changes: [], flagChanges: [{ control: 'optics.remove_ca', before: false, after: enabled as boolean }] };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })));
+    if (enabled === true) await expect(readRawHistory(result)).resolves.toMatchObject({
+      steps: [{ kind: 'opticsFlag', flagChanges: [{ control: 'optics.remove_ca', before: false, after: true }] }] });
+    else await expect(readRawHistory(result)).rejects.toMatchObject({ code: 'raw_invalid_response' });
   });
   it.each(['generation', 'rows', 'cursor', 'metadata', 'changes', 'oversize'])('rejects invalid History %s', async invalid => {
     const request = historyRequest('commit');

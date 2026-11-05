@@ -915,15 +915,19 @@ class RawPreviewApi:
 
     @staticmethod
     def _history_changes(step, before_settings, after_settings):
-        from raw_controls import with_legacy_grading_defaults
+        from raw_controls import with_legacy_grading_defaults, with_legacy_optics_defaults
         before_settings = with_legacy_grading_defaults(before_settings)
         after_settings = with_legacy_grading_defaults(after_settings)
+        before_settings = with_legacy_optics_defaults(before_settings)
+        after_settings = with_legacy_optics_defaults(after_settings)
         metadata = step["metadata"]
         if step['kind'] in ('vignetteStyle', 'geometry'):
             return []
         if step["kind"] in ("control", "controlReset"):
             controls = (["wb.temp", "wb.tint"] if step["kind"] == "controlReset"
                         and metadata["control"].startswith("wb.") else [metadata["control"]])
+        elif step["kind"] in ("opticsFlag", "opticsFlagReset"):
+            controls = []
         elif step['kind'] in ('wbAuto', 'wbPick'):
             controls = ['wb.temp', 'wb.tint']
         elif step["kind"] in ("sectionToggle", "sectionReset"):
@@ -942,6 +946,34 @@ class RawPreviewApi:
             before, after = before_group.get(key), after_group.get(key)
             if (type(before) not in (int, float) or not math.isfinite(before)
                     or type(after) not in (int, float) or not math.isfinite(after)):
+                return None
+            if before != after:
+                changes.append({"control": control, "before": before, "after": after})
+        return changes
+
+    @staticmethod
+    def _history_flag_changes(step, before_settings, after_settings):
+        from raw_controls import (HISTORY_FLAG_CONTROLS, control_location, with_legacy_grading_defaults,
+                                  with_legacy_optics_defaults)
+        before_settings = with_legacy_grading_defaults(before_settings)
+        after_settings = with_legacy_grading_defaults(after_settings)
+        before_settings = with_legacy_optics_defaults(before_settings)
+        after_settings = with_legacy_optics_defaults(after_settings)
+        kind = step['kind']
+        if kind in ('opticsFlag', 'opticsFlagReset'):
+            controls = [step['metadata']['control']]
+        elif ((kind == 'sectionReset' and step['metadata']['section'] == 'optics') or kind == 'allReset'):
+            controls = sorted(HISTORY_FLAG_CONTROLS)
+        else:
+            return []
+        changes = []
+        for control in controls:
+            before_group, key = control_location(before_settings, control)
+            after_group, _ = control_location(after_settings, control)
+            if type(before_group) is not dict or type(after_group) is not dict:
+                return None
+            before, after = before_group.get(key), after_group.get(key)
+            if type(before) is not bool or type(after) is not bool:
                 return None
             if before != after:
                 changes.append({"control": control, "before": before, "after": after})
@@ -1042,8 +1074,12 @@ class RawPreviewApi:
             public_steps = []
             for index, step in enumerate(steps):
                 before = baseline if index == 0 else steps[index - 1]["settings"]
-                public_steps.append({key: step[key] for key in ("stepId", "kind", "metadata", "createdAt")}
-                                  | {"changes": self._history_changes(step, before, step["settings"])})
+                public = {key: step[key] for key in ("stepId", "kind", "metadata", "createdAt")}
+                public["changes"] = self._history_changes(step, before, step["settings"])
+                if step['kind'] in ('opticsFlag', 'opticsFlagReset', 'allReset') or (
+                        step['kind'] == 'sectionReset' and step['metadata']['section'] == 'optics'):
+                    public['flagChanges'] = self._history_flag_changes(step, before, step["settings"])
+                public_steps.append(public)
             return self._history_json({**doc, **self._history_public(doc, state), "steps": public_steps}, MAX_HISTORY_RESPONSE_BYTES)
         action = request.url.path.rsplit("/", 1)[1]
         body = self._history_body(body, doc, action)

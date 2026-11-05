@@ -240,12 +240,14 @@ def _settings_json(value):
     wb.setdefault("scale", "legacy")
     if wb["scale"] not in ("legacy", "kelvin"):
         raise LightCraftError("raw_invalid_settings")
-    from raw_controls import with_legacy_grading_defaults
+    from raw_controls import with_legacy_grading_defaults, with_legacy_optics_defaults
     # Missing native serde-default crop fields are normalized only in the engine view.
     from raw_geometry import DEFAULT_CROP
     value.setdefault('crop', json.loads(json.dumps(DEFAULT_CROP)))
     value.setdefault('orientation', 'Normal')
-    return _object_json(with_legacy_grading_defaults(value), MAX_SETTINGS_BYTES)
+    # Older Recipes predate Optics; normalize only the engine view so their stored receipts remain valid.
+    value = with_legacy_grading_defaults(value)
+    return _object_json(with_legacy_optics_defaults(value), MAX_SETTINGS_BYTES)
 
 
 def _source_info(value):
@@ -1037,7 +1039,8 @@ class LightCraftRawSession:
                                   expected_revision, verify=verify, check=check)
 
     async def apply_history_operation(self, handle, kind, metadata, expected_revision):
-        from raw_controls import CONTROLS, CONTROL_PATHS, control_location, DETAIL_RESET_DEFAULTS, validate_history_operation
+        from raw_controls import (CONTROLS, CONTROL_PATHS, control_location, DETAIL_RESET_DEFAULTS,
+                                  HISTORY_FLAG_CONTROLS, validate_history_operation)
         validate_history_operation(kind, metadata)
         if kind in ('wbAuto', 'wbPick'):
             # WB must pass the separate read-only estimate/candidate fence before any mutation.
@@ -1054,6 +1057,11 @@ class LightCraftRawSession:
             if original.get("vignette", {}).get("style") == metadata["style"]:
                 return self.confirmed_settings(handle, expected_revision)
             commands = [("develop.merge", {"settings": {"vignette": {"style": metadata["style"]}}})]
+        elif kind in ("opticsFlag", "opticsFlagReset"):
+            control = metadata["control"]
+            field = CONTROL_PATHS[control][1]
+            value = metadata.get("enabled", False)
+            commands = [("develop.merge", {"settings": {"optics": {field: value}}})]
         elif kind == "sectionToggle":
             commands = [("develop.sectionEnabled", metadata)]
         elif kind == "controlReset":
@@ -1081,6 +1089,10 @@ class LightCraftRawSession:
                 values, key = control_location(actual, control)
                 if type(values) is not dict or type(values.get(key)) not in (int, float):
                     raise LightCraftError("raw_operation_readback_mismatch")
+            for control in HISTORY_FLAG_CONTROLS:
+                values, key = control_location(actual, control)
+                if type(values) is not dict or type(values.get(key)) is not bool:
+                    raise LightCraftError("raw_operation_readback_mismatch")
             expected_disabled = ([section for section in disabled if section != metadata["section"]]
                                  + ([] if metadata["enabled"] else [metadata["section"]])) if kind == "sectionToggle" else disabled
             if actual.get("disabled_sections", []) != expected_disabled:
@@ -1091,12 +1103,21 @@ class LightCraftRawSession:
                 if any(wb.get(key) != value for key, value in
                        (("mode", "asShot"), ("temp", temp), ("tint", tint), ("scale", "kelvin"))):
                     raise LightCraftError("raw_as_shot_mismatch")
-            if kind in ("sectionToggle", "controlReset", "vignetteStyle"):
+            if kind == "allReset":
+                expected_optics = {CONTROL_PATHS[control][1]: spec[3] for control, spec in CONTROLS.items()
+                                   if control.startswith("optics.")}
+                expected_optics.update(remove_ca=False, lens_profile=False)
+                if actual.get("optics") != expected_optics:
+                    raise LightCraftError("raw_operation_readback_mismatch")
+            if kind in ("sectionToggle", "controlReset", "opticsFlag", "opticsFlagReset", "vignetteStyle"):
                 expected = json.loads(before)
                 if kind == "vignetteStyle":
                     expected["vignette"]["style"] = metadata["style"]
                 elif kind == "sectionToggle":
                     expected["disabled_sections"] = expected_disabled
+                elif kind in ("opticsFlag", "opticsFlagReset"):
+                    parent, key = control_location(expected, metadata["control"])
+                    parent[key] = metadata.get("enabled", False)
                 elif needs_wb:
                     expected["wb"].update(mode="asShot", temp=temp, tint=tint, scale="kelvin")
                 else:
@@ -1141,6 +1162,14 @@ class LightCraftRawSession:
                             or type(enhance.get("denoise")) not in (int, float)
                             or any(type(enhance.get(key)) is not bool for key in ("raw_details", "super_resolution"))
                             or actual != expected):
+                        raise LightCraftError("raw_operation_readback_mismatch")
+                    return
+                if section == "optics":
+                    expected = json.loads(before)
+                    expected["optics"] = {CONTROL_PATHS[control][1]: spec[3] for control, spec in CONTROLS.items()
+                        if control.startswith("optics.")}
+                    expected["optics"].update({"remove_ca": False, "lens_profile": False})
+                    if actual != expected:
                         raise LightCraftError("raw_operation_readback_mismatch")
                     return
                 reset_groups = {"light", "hdr"} if section == "light" else {"color", "wb"}

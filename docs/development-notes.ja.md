@@ -1,5 +1,13 @@
 # GenzoRoom 開発ノート
 
+## RAWレンズ補正 Phase 1-B：既存History／Recipeへの統合（2026-11-05）
+
+Optics数値13項目を既存の数値Control Historyへ接続し、`control`／`controlReset`、section reset、All Reset、Undo／Redo／Jumpで同じsnapshot・revision・fingerprint・receipt境界を使う。`opticsFlag`／`opticsFlagReset`を追加し、`remove_ca`／`lens_profile`は数値へ変換せず、履歴レスポンスの`flagChanges`にbool差分として公開する。数値差分`changes`の型は維持した。Optics section toggleは`disabled_sections`だけを変更して値を保持し、section resetはv0.18.1既定値へ15項目を1 operationで戻す。Native更新は数値`develop.set`、bool `develop.merge`、resetは既存Native reset経路を利用し、readback照合後だけHistoryを保存する。
+
+既存Recipe形式／DB schema／独立History ownerは変更しない。Optics sectionがない旧RecipeはLightCraftへ渡すengine viewでのみv0.18.1既定値を補い、既存の保存snapshot・Receiptを遡及変更しない。History再読込・session再生成は既存のRecipe restoreとHistory ownerを再利用する。Lens補正UI、写真固有profile API、Lensfun管理などPhase 1-C以降は対象外。CHANGELOGは今回ユーザーに見える操作UIを追加していないため更新しない。
+
+検証：BackendのRAW Optics／History／Recipe／関連Native suite **238件成功**。13数値項目の操作・差分・Undo／Redo／Jump・個別Reset、2 boolの型保持・`develop.merge`・Undo／Redo／Jump・個別Reset、readback不一致時にHistoryを確定しないこと、section toggle／reset、All Reset、Recipe経由のsession再生成、旧snapshotのengine-view既定値補完を確認した。既存History／Recipe、WB、category reset、bounded response、Native fake回帰も含む。FrontendのHistory API／表示／document state **3ファイル264件成功**。TypeScriptとproduction build成功し、既存の500 kB超chunk警告が残る。`git diff --check`成功。実LightCraft binaryや実画面での手動操作は未実施。
+
 ## LightCraft managed engine v0.18.1追随（2026-11-05）
 
 固定upstreamを`57024f072c234e0c6c850e0940a261790f976575`へ更新した。既存29 targetのpatchは競合なく適用でき、context／full-indexを更新した`0002-v0.18.1-native-contracts.patch`を採用する。Before／Preview／Region／WB各1、geometry descriptor 2、Crop編集表示1と既存APIを維持する。旧v0.18.0 manifest／patch／binaryを残し、開発時検出は完全versionの専用checkoutを優先する。実EXE SHA・receipt・manifest照合は維持した。

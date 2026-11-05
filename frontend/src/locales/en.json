@@ -395,6 +395,15 @@
       "wbResetAsShot": "Reset both temperature and tint to As Shot",
       "colorCategory": "Color",
       "detailCategory": "Detail",
+      "opticsCategory": "Optics",
+      "opticsControls": {
+        "distortion": "Distortion", "vignetting": "Vignetting", "vignettingMidpoint": "Vignetting midpoint",
+        "profileDistortion": "Profile distortion", "profileVignetting": "Profile vignetting",
+        "defringePurple": "Purple fringe amount", "defringePurpleHueLo": "Purple hue low", "defringePurpleHueHi": "Purple hue high",
+        "defringeGreen": "Green fringe amount", "defringeGreenHueLo": "Green hue low", "defringeGreenHueHi": "Green hue high",
+        "caRed": "Red/cyan fringe", "caBlue": "Blue/yellow fringe", "removeCa": "Remove chromatic aberration",
+        "lensProfile": "Lens profile corrections"
+      },
       "effectsCategory": "Effects",
       "basicEffects": "Basic Effects",
       "vignette": "Vignette",

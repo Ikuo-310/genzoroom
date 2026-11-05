@@ -415,7 +415,11 @@ HISTORY_CONTROLS = frozenset(("wb.temp", "wb.tint", "color.vibrance", "color.sat
                             "detail.nrLuminance", "detail.nrDetail", "detail.nrColor", "detail.nrColorDetail",
                             "detail.nrColorSmoothness"))
 HISTORY_CONTROLS |= frozenset(f"grading.{band}.{field}" for band in ("shadows", "midtones", "highlights") for field in ("hue", "sat", "lum")) | {"grading.blending", "grading.balance"}
-HISTORY_SECTIONS = frozenset(("light", "color", "grading", "effects", "detail"))
+HISTORY_CONTROLS |= frozenset(f"optics.{control}" for control in ("distortion", "vignetting", "vignettingMidpoint",
+    "profileDistortion", "profileVignetting", "defringePurple", "defringePurpleHueLo", "defringePurpleHueHi",
+    "defringeGreen", "defringeGreenHueLo", "defringeGreenHueHi", "caRed", "caBlue"))
+HISTORY_FLAG_CONTROLS = frozenset(("optics.remove_ca", "optics.lens_profile"))
+HISTORY_SECTIONS = frozenset(("light", "color", "grading", "effects", "detail", "optics"))
 HISTORY_RESET_SECTIONS = HISTORY_SECTIONS | {"vignette"}
 
 
@@ -442,6 +446,11 @@ def _history_metadata(kind, metadata):
         valid = valid_metadata(metadata)
     elif kind in ("control", "controlReset"):
         valid = set(metadata) == {"control"} and type(metadata["control"]) is str and metadata["control"] in HISTORY_CONTROLS
+    elif kind == "opticsFlag":
+        valid = (set(metadata) == {"control", "enabled"} and type(metadata["control"]) is str
+                 and metadata["control"] in HISTORY_FLAG_CONTROLS and type(metadata["enabled"]) is bool)
+    elif kind == "opticsFlagReset":
+        valid = set(metadata) == {"control"} and type(metadata["control"]) is str and metadata["control"] in HISTORY_FLAG_CONTROLS
     elif kind == "sectionToggle":
         valid = (set(metadata) == {"section", "enabled"} and type(metadata["section"]) is str
                  and metadata["section"] in HISTORY_SECTIONS and type(metadata["enabled"]) is bool)

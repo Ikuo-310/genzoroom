@@ -35,18 +35,21 @@ export const RAW_SETTINGS_CONTROL_IDS = [...RAW_CONTROL_IDS,
   'optics.distortion', 'optics.vignetting', 'optics.vignettingMidpoint', 'optics.profileDistortion', 'optics.profileVignetting',
   'optics.defringePurple', 'optics.defringePurpleHueLo', 'optics.defringePurpleHueHi', 'optics.defringeGreen',
   'optics.defringeGreenHueLo', 'optics.defringeGreenHueHi', 'optics.caRed', 'optics.caBlue'] as const;
-export type RawSettingControlId = typeof RAW_SETTINGS_CONTROL_IDS[number];
-const RAW_HISTORY_CONTROL_IDS: readonly RawControlId[] = RAW_CONTROL_IDS;
-export const RAW_SECTION_IDS = ['light', 'color', 'grading', 'effects', 'detail'] as const;
+export const RAW_HISTORY_CONTROL_IDS = RAW_SETTINGS_CONTROL_IDS;
+export type RawHistoryControlId = typeof RAW_HISTORY_CONTROL_IDS[number];
+export type RawSettingControlId = RawHistoryControlId;
+export type RawOpticsFlagId = 'optics.remove_ca' | 'optics.lens_profile';
+export const RAW_OPTICS_FLAG_IDS: readonly RawOpticsFlagId[] = ['optics.remove_ca', 'optics.lens_profile'];
+export const RAW_SECTION_IDS = ['light', 'color', 'grading', 'effects', 'detail', 'optics'] as const;
 export type RawSectionId = typeof RAW_SECTION_IDS[number];
-export const RAW_SETTINGS_SECTION_IDS = [...RAW_SECTION_IDS, 'optics'] as const;
+export const RAW_SETTINGS_SECTION_IDS = RAW_SECTION_IDS;
 export type RawSettingsSectionId = typeof RAW_SETTINGS_SECTION_IDS[number];
 export const RAW_RESET_SECTION_IDS = [...RAW_SECTION_IDS, 'vignette'] as const;
 export type RawResetSectionId = typeof RAW_RESET_SECTION_IDS[number];
 export const RAW_VIGNETTE_STYLES = ['highlightPriority', 'colorPriority', 'paintOverlay'] as const;
 export type RawVignetteStyle = typeof RAW_VIGNETTE_STYLES[number];
 export type RawValues = Record<RawSettingControlId, number>;
-export type RawControlValues = Partial<RawValues> & Partial<{ 'optics.remove_ca': boolean; 'optics.lens_profile': boolean }>;
+export type RawControlValues = Partial<RawValues> & Partial<Record<RawOpticsFlagId, boolean>>;
 export const RAW_GEOMETRY_OPERATIONS = ['set', 'drag', 'aspect', 'swap', 'reset', 'straighten', 'rotateLeft', 'rotateRight', 'flipHorizontal', 'flipVertical'] as const;
 export type RawGeometryOperationId = typeof RAW_GEOMETRY_OPERATIONS[number];
 export type RawCropRect = [number, number, number, number];
@@ -83,7 +86,9 @@ export function validGeometryMetadata(m: { operation?: RawGeometryOperationId; a
   return !!m.operation && RAW_GEOMETRY_OPERATIONS.includes(m.operation) && Object.keys(m).every(k => k === 'operation' || k === 'action')
     && (m.action === undefined || (m.operation === 'drag' ? ['move','resize'] : m.operation === 'aspect' ? ['lock','unlock'] : []).includes(m.action));
 }
-export type RawHistoryOperation = { kind: 'controlReset'; metadata: { control: RawControlId } }
+export type RawHistoryOperation = { kind: 'controlReset'; metadata: { control: RawHistoryControlId } }
+  | { kind: 'opticsFlag'; metadata: { control: RawOpticsFlagId; enabled: boolean } }
+  | { kind: 'opticsFlagReset'; metadata: { control: RawOpticsFlagId } }
   | { kind: 'geometry'; metadata: { operation: RawGeometryOperationId; action?: RawGeometryAction }; geometry: RawGeometryOperation }
   | { kind: 'sectionReset'; metadata: { section: RawResetSectionId } }
   | { kind: 'vignetteStyle'; metadata: { style: RawVignetteStyle } }
@@ -91,11 +96,12 @@ export type RawHistoryOperation = { kind: 'controlReset'; metadata: { control: R
   | { kind: 'wbPick'; metadata: Record<string, never>; frame: RawPickFrame }
   | { kind: 'allReset' | 'wbAuto'; metadata: Record<string, never> };
 export type RawHistoryRequest = RawRecipeRequest & { action: 'initialize' | 'commit' | 'undo' | 'redo' | 'jump' | 'operate';
-  control?: RawControlId; targetStepId?: string | null; operation?: RawHistoryOperation;
+  control?: RawHistoryControlId; targetStepId?: string | null; operation?: RawHistoryOperation;
   geometryCommit?: { gestureId: string; operation: 'set' | 'drag' | 'straighten'; action?: RawGeometryAction } };
-export type RawHistoryStep = { stepId: string; kind: 'control' | 'controlReset' | 'sectionToggle' | 'sectionReset' | 'vignetteStyle' | 'allReset' | 'wbAuto' | 'wbPick' | 'geometry';
-  metadata: { control?: RawControlId; section?: RawResetSectionId; enabled?: boolean; style?: RawVignetteStyle; operation?: RawGeometryOperationId; action?: RawGeometryAction }; createdAt: string;
-  changes: { control: RawControlId; before: number; after: number }[] | null };
+export type RawHistoryStep = { stepId: string; kind: 'control' | 'controlReset' | 'opticsFlag' | 'opticsFlagReset' | 'sectionToggle' | 'sectionReset' | 'vignetteStyle' | 'allReset' | 'wbAuto' | 'wbPick' | 'geometry';
+  metadata: { control?: RawHistoryControlId | RawOpticsFlagId; section?: RawResetSectionId; enabled?: boolean; style?: RawVignetteStyle; operation?: RawGeometryOperationId; action?: RawGeometryAction }; createdAt: string;
+  changes: { control: RawHistoryControlId; before: number; after: number }[] | null;
+  flagChanges?: { control: RawOpticsFlagId; before: boolean; after: boolean }[] | null };
 export type RawHistoryResult = RawSettings & {
   history: { initialized: boolean; cursor: number; length: number; selectedStepId: string | null };
   historyPending: boolean; nativeState: string; nativeMatchesRecipe: boolean; replayed: boolean;
@@ -420,7 +426,9 @@ export async function readRawHistory(doc: RawDocument): Promise<RawHistoryData> 
     if (!step || !uuid(step.stepId) || ids.has(step.stepId) || typeof step.createdAt !== 'string' || !Number.isFinite(Date.parse(step.createdAt))
       || !m || typeof m !== 'object' || Array.isArray(m)
       || (step.kind === 'geometry' ? !validGeometryMetadata(m)
-        : step.kind === 'control' || step.kind === 'controlReset' ? Object.keys(m).length !== 1 || !RAW_HISTORY_CONTROL_IDS.includes(m.control as RawControlId)
+        : step.kind === 'control' || step.kind === 'controlReset' ? Object.keys(m).length !== 1 || !RAW_HISTORY_CONTROL_IDS.includes(m.control as RawHistoryControlId)
+        : step.kind === 'opticsFlag' ? Object.keys(m).length !== 2 || !RAW_OPTICS_FLAG_IDS.includes(m.control as RawOpticsFlagId) || typeof m.enabled !== 'boolean'
+        : step.kind === 'opticsFlagReset' ? Object.keys(m).length !== 1 || !RAW_OPTICS_FLAG_IDS.includes(m.control as RawOpticsFlagId)
         : step.kind === 'sectionToggle' ? Object.keys(m).length !== 2 || !RAW_SECTION_IDS.includes(m.section) || typeof m.enabled !== 'boolean'
         : step.kind === 'sectionReset' ? Object.keys(m).length !== 1 || !RAW_RESET_SECTION_IDS.includes(m.section)
         : step.kind === 'vignetteStyle' ? Object.keys(m).length !== 1 || !RAW_VIGNETTE_STYLES.includes(m.style)
@@ -428,11 +436,23 @@ export async function readRawHistory(doc: RawDocument): Promise<RawHistoryData> 
       || !(step.changes === null || Array.isArray(step.changes) && step.changes.length <= RAW_HISTORY_CONTROL_IDS.length
         && step.changes.every((change: unknown, index: number, changes: unknown[]) => {
           const item = change as { control?: unknown; before?: unknown; after?: unknown } | null;
-          return !!item && RAW_HISTORY_CONTROL_IDS.includes(item.control as RawControlId)
+          return !!item && RAW_HISTORY_CONTROL_IDS.includes(item.control as RawHistoryControlId)
             && typeof item.before === 'number' && Number.isFinite(item.before)
             && typeof item.after === 'number' && Number.isFinite(item.after)
             && changes.findIndex(other => (other as { control?: unknown } | null)?.control === item.control) === index;
-        }))) throw new RawApiError('raw_invalid_response');
+        }))
+      || step.flagChanges !== undefined && !(step.flagChanges === null || Array.isArray(step.flagChanges)
+        && step.flagChanges.length <= RAW_OPTICS_FLAG_IDS.length
+        && step.flagChanges.every((change: unknown, index: number, changes: unknown[]) => {
+          const item = change as { control?: unknown; before?: unknown; after?: unknown } | null;
+          return !!item && RAW_OPTICS_FLAG_IDS.includes(item.control as RawOpticsFlagId)
+            && typeof item.before === 'boolean' && typeof item.after === 'boolean'
+            && changes.findIndex(other => (other as { control?: unknown } | null)?.control === item.control) === index;
+        }))
+      || (step.kind === 'opticsFlag' || step.kind === 'opticsFlagReset') && !Array.isArray(step.flagChanges)
+      || step.flagChanges !== undefined && step.kind !== 'opticsFlag' && step.kind !== 'opticsFlagReset'
+        && step.kind !== 'allReset' && !(step.kind === 'sectionReset' && step.metadata.section === 'optics'))
+      throw new RawApiError('raw_invalid_response');
     ids.add(step.stepId);
   }
   if (h.cursor > 0 && value.steps[h.cursor - 1].stepId !== h.selectedStepId)
@@ -445,7 +465,8 @@ export async function readRawHistory(doc: RawDocument): Promise<RawHistoryData> 
     historyPending: value.historyPending, nativeState: value.nativeState, nativeMatchesRecipe: value.nativeMatchesRecipe,
     steps: value.steps.map((step: RawHistoryStep) => ({ stepId: step.stepId,
       kind: step.kind, metadata: { ...step.metadata }, createdAt: step.createdAt,
-      changes: step.changes?.map(change => ({ ...change })) ?? null })) };
+      changes: step.changes?.map(change => ({ ...change })) ?? null,
+      ...(step.flagChanges !== undefined ? { flagChanges: step.flagChanges?.map(change => ({ ...change })) ?? null } : {}) })) };
 }
 
 export async function recoverRawGeometry(doc: RawSettings) {

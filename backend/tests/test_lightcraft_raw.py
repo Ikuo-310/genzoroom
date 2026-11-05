@@ -94,6 +94,7 @@ class RawProcess(FakeProcess):
         self.preview_only = None
         self.import_failure = self.partial_failure = False
         self.fail_get = self.mismatch = False
+        self.optics_mismatch = False
         self.bad_image = False
         self.raw_tool_error = False
         self.as_shot_wb = None
@@ -224,7 +225,12 @@ class RawProcess(FakeProcess):
             defaults = DEFAULT
             for parent in parents:
                 target, defaults = target[parent], defaults[parent]
-            field, default = NATIVE_DETAIL_CONTROLS[key] if group == 'detail' else (key, defaults[key])
+            if group == 'detail':
+                field, default = NATIVE_DETAIL_CONTROLS[key]
+            elif group == 'optics':
+                field, default = NATIVE_OPTICS_CONTROLS.get(key, key), defaults[NATIVE_OPTICS_CONTROLS.get(key, key)]
+            else:
+                field, default = key, defaults[key]
             target[field] = default
             value = {"ok": True}
         elif command == "develop.resetSection":
@@ -265,6 +271,8 @@ class RawProcess(FakeProcess):
                         settings["wb"]["mode"] = "custom"
             else:
                 merge(settings, params["settings"])
+                if self.optics_mismatch:
+                    settings["optics"]["remove_ca"] = False
             # Independent fake clamp oracle: sent extremes must not become the adapter's truth.
             settings["light"]["exposure"] = max(-5., min(5., settings["light"]["exposure"]))
             settings["geometry"]["scale"] = max(50., min(200., settings["geometry"]["scale"]))

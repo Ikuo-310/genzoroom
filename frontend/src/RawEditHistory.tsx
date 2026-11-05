@@ -3,9 +3,9 @@ import { HistoryList } from './HistoryList';
 import type { useRawDocument } from './useRawDocument';
 import { formatContrast, formatExposure, formatHighlights, formatShadows, formatWhites,
   formatBlacks, formatTint, formatTemperature, formatVibrance, formatSaturation } from './editing';
-import type { RawControlId, RawHistoryStep } from './rawApi';
+import type { RawHistoryControlId, RawOpticsFlagId, RawHistoryStep } from './rawApi';
 
-const labels: Record<RawControlId, string> = {
+const labels: Record<RawHistoryControlId, string> = {
   'grading.shadows.hue': 'rawPreview.grading.shadows.hue',
   'grading.shadows.sat': 'rawPreview.grading.shadows.sat',
   'grading.shadows.lum': 'rawPreview.grading.shadows.lum',
@@ -27,8 +27,19 @@ const labels: Record<RawControlId, string> = {
   'detail.sharpenAmount': 'rawPreview.sharpenAmount', 'detail.sharpenMasking': 'rawPreview.sharpenMasking',
   'detail.nrLuminance': 'rawPreview.nrLuminance', 'detail.nrDetail': 'rawPreview.nrDetailName',
   'detail.nrColor': 'rawPreview.nrColor', 'detail.nrColorDetail': 'rawPreview.nrColorDetailName',
-  'detail.nrColorSmoothness': 'rawPreview.nrColorSmoothness' } as const;
-const formatters: Record<RawControlId, (value: number) => string> = {
+  'detail.nrColorSmoothness': 'rawPreview.nrColorSmoothness',
+  'optics.distortion': 'rawPreview.opticsControls.distortion', 'optics.vignetting': 'rawPreview.opticsControls.vignetting',
+  'optics.vignettingMidpoint': 'rawPreview.opticsControls.vignettingMidpoint',
+  'optics.profileDistortion': 'rawPreview.opticsControls.profileDistortion',
+  'optics.profileVignetting': 'rawPreview.opticsControls.profileVignetting',
+  'optics.defringePurple': 'rawPreview.opticsControls.defringePurple',
+  'optics.defringePurpleHueLo': 'rawPreview.opticsControls.defringePurpleHueLo',
+  'optics.defringePurpleHueHi': 'rawPreview.opticsControls.defringePurpleHueHi',
+  'optics.defringeGreen': 'rawPreview.opticsControls.defringeGreen',
+  'optics.defringeGreenHueLo': 'rawPreview.opticsControls.defringeGreenHueLo',
+  'optics.defringeGreenHueHi': 'rawPreview.opticsControls.defringeGreenHueHi',
+  'optics.caRed': 'rawPreview.opticsControls.caRed', 'optics.caBlue': 'rawPreview.opticsControls.caBlue' } as const;
+const formatters: Record<RawHistoryControlId, (value: number) => string> = {
   'grading.shadows.hue': value => value.toFixed(0) + '°',
   'grading.shadows.sat': value => value.toFixed(0),
   'grading.shadows.lum': value => value.toFixed(0),
@@ -49,15 +60,31 @@ const formatters: Record<RawControlId, (value: number) => string> = {
   'detail.sharpenAmount': value => value.toFixed(0), 'detail.sharpenMasking': value => value.toFixed(0),
   'detail.nrLuminance': value => value.toFixed(0), 'detail.nrDetail': value => value.toFixed(0),
   'detail.nrColor': value => value.toFixed(0), 'detail.nrColorDetail': value => value.toFixed(0),
-  'detail.nrColorSmoothness': value => value.toFixed(0) };
+  'detail.nrColorSmoothness': value => value.toFixed(0),
+  'optics.distortion': value => value.toFixed(0), 'optics.vignetting': value => value.toFixed(0),
+  'optics.vignettingMidpoint': value => value.toFixed(0), 'optics.profileDistortion': value => value.toFixed(0),
+  'optics.profileVignetting': value => value.toFixed(0), 'optics.defringePurple': value => value.toFixed(0),
+  'optics.defringePurpleHueLo': value => value.toFixed(0), 'optics.defringePurpleHueHi': value => value.toFixed(0),
+  'optics.defringeGreen': value => value.toFixed(0), 'optics.defringeGreenHueLo': value => value.toFixed(0),
+  'optics.defringeGreenHueHi': value => value.toFixed(0), 'optics.caRed': value => value.toFixed(0),
+  'optics.caBlue': value => value.toFixed(0) };
+const flagLabels: Record<RawOpticsFlagId, string> = {
+  'optics.remove_ca': 'rawPreview.opticsControls.removeCa', 'optics.lens_profile': 'rawPreview.opticsControls.lensProfile',
+};
 
 function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t']) {
   if (step.kind === 'geometry') return t(`workspace.rawPreview.cropHistory.${step.metadata.action ?? step.metadata.operation}`);
   if (step.kind === 'vignetteStyle')
     return `${t('workspace.rawPreview.vignetteMode')}: ${t(`workspace.rawPreview.vignetteStyles.${step.metadata.style}`)}`;
-  const control = step.metadata.control;
+  if (step.kind === 'opticsFlag' || step.kind === 'opticsFlagReset') {
+    const flag = step.metadata.control as RawOpticsFlagId, label = t(`workspace.${flagLabels[flag]}`);
+    const change = step.flagChanges?.find(item => item.control === flag);
+    return label + (step.kind === 'opticsFlagReset' ? ` ${t('workspace.reset')}` : '')
+      + (change ? ` ${t(change.before ? 'workspace.basicOn' : 'workspace.basicOff')} → ${t(change.after ? 'workspace.basicOn' : 'workspace.basicOff')}` : '');
+  }
+  const control = step.metadata.control as RawHistoryControlId | undefined;
   const reset = step.kind === 'controlReset';
-  const name = (id: RawControlId) => t(`workspace.${labels[id]}`);
+  const name = (id: RawHistoryControlId) => t(`workspace.${labels[id]}`);
   const pair = (change: NonNullable<RawHistoryStep['changes']>[number]) =>
     `${formatters[change.control](change.before)} → ${formatters[change.control](change.after)}`;
   if (control) {
@@ -71,10 +98,13 @@ function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t'
     : t(step.metadata.section === 'grading' ? 'workspace.rawPreview.gradingCategory' : step.metadata.section === 'vignette' ? 'workspace.rawPreview.vignette'
       : step.metadata.section === 'effects' ? step.kind === 'sectionReset' ? 'workspace.rawPreview.basicEffects' : 'workspace.rawPreview.effectsCategory'
       : step.metadata.section === 'light' ? 'workspace.basic' : step.metadata.section === 'detail'
-      ? 'workspace.rawPreview.detailCategory' : 'workspace.rawPreview.colorCategory')
+      ? 'workspace.rawPreview.detailCategory' : step.metadata.section === 'optics' ? 'workspace.rawPreview.opticsCategory' : 'workspace.rawPreview.colorCategory')
       + ' ' + t(step.kind === 'sectionToggle' ? step.metadata.enabled ? 'workspace.basicOn' : 'workspace.basicOff' : 'workspace.reset');
   const changes = step.changes;
-  return operation + (changes?.length ? `: ${changes.map(change => `${name(change.control)} ${pair(change)}`).join('、')}` : '');
+  const numeric = changes?.map(change => `${name(change.control)} ${pair(change)}`) ?? [];
+  const flags = step.flagChanges?.map(change => `${t(`workspace.${flagLabels[change.control]}`)} ${t(change.before ? 'workspace.basicOn' : 'workspace.basicOff')} → ${t(change.after ? 'workspace.basicOn' : 'workspace.basicOff')}`) ?? [];
+  const details = [...numeric, ...flags];
+  return operation + (details.length ? `: ${details.join('、')}` : '');
 }
 
 export function RawEditHistory({ raw, disabled, onReset }: { raw: NonNullable<ReturnType<typeof useRawDocument>>; disabled: boolean;

@@ -161,7 +161,8 @@ def test_compound_reset_keeps_bypass_one_step_and_reopens(local, tmp_path, monke
                 attempts = api.raw.status().edits
                 doc = await edit(http, doc, kind, metadata)
                 assert doc["history"]["length"] == before["history"]["length"] + 1
-                assert doc["sections"] == {"light": False, "color": False, "grading": True, "effects": True, "detail": False}
+                assert doc["sections"] == {"light": False, "color": False, "grading": True, "effects": True,
+                                            "detail": False, "optics": True}
                 actual = store.get_raw_history(api._history_identity)["recipe"]["settings"]
                 assert actual["disabled_sections"] == before_settings["disabled_sections"]
                 if kind == "sectionReset":
@@ -342,7 +343,7 @@ def test_full_history_page_with_repeated_all_reset_deltas_stays_bounded(local, t
         try:
             async with client(local) as http:
                 doc = await open_history(http, local, api)
-                values = {control: -1.234567891234567 for control in doc["values"]}
+                values = {control: -1.234567891234567 for control in doc["values"] if not control.startswith("optics.")}
                 values["wb.temp"] = 23456.123456789
                 values.update({"detail.sharpenAmount": 123.4567891234567, "detail.sharpenMasking": 98.7654321987654})
                 values.update({control: 12.34567891234567 for control in values if control.startswith('grading.') and not control.endswith('.lum') and control != 'grading.balance' or control.startswith('detail.nr') or control in ('vignette.midpoint', 'vignette.feather', 'vignette.highlights')})

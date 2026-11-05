@@ -1,4 +1,4 @@
-"""RAW allowlist from LightCraft v0.17.0 develop/src/controls.rs; never JPEG Recipe values."""
+"""RAW control allowlist from pinned LightCraft v0.18.1; never JPEG Recipe values."""
 
 import math
 
@@ -40,11 +40,12 @@ CONTROLS = {
     }.items()},
 }
 
-SECTIONS = ("light", "color", "grading", "effects", "detail")
-SETTINGS_SECTIONS = (*SECTIONS, "optics")
-HISTORY_CONTROLS = frozenset(control for control in CONTROLS if not control.startswith("optics."))
+SECTIONS = ("light", "color", "grading", "effects", "detail", "optics")
+SETTINGS_SECTIONS = SECTIONS
+HISTORY_CONTROLS = frozenset(CONTROLS)
+HISTORY_FLAG_CONTROLS = frozenset(("optics.remove_ca", "optics.lens_profile"))
 # Vignette has a Native reset section, but its eye belongs to Effects.
-RESET_SECTIONS = (*SECTIONS, "vignette")
+RESET_SECTIONS = (*SETTINGS_SECTIONS, "vignette")
 VIGNETTE_STYLES = ("highlightPriority", "colorPriority", "paintOverlay")
 # Native command IDs are not JSON field names; every readback and History delta uses this mapping.
 CONTROL_PATHS = {control: tuple(control.split(".")) for control in CONTROLS} | {
@@ -86,6 +87,20 @@ def with_legacy_grading_defaults(settings):
     return {**settings, "grading": {
         **{band: {"hue": 0., "sat": 0., "lum": 0.} for band in ("shadows", "midtones", "highlights", "global")},
         "blending": 50., "balance": 0.}}
+
+
+def with_legacy_optics_defaults(settings):
+    # Older recipes can omit this new serde-default section; keep persisted snapshots and receipts untouched.
+    optics = settings.get("optics")
+    if optics is not None and type(optics) is not dict:
+        return settings
+    defaults = {CONTROL_PATHS[control][1]: spec[3] for control, spec in CONTROLS.items()
+                if control.startswith("optics.")}
+    defaults.update(remove_ca=False, lens_profile=False)
+    if optics is None:
+        return {**settings, "optics": defaults}
+    missing = defaults.keys() - optics.keys()
+    return {**settings, "optics": {**{key: defaults[key] for key in missing}, **optics}} if missing else settings
 
 
 def controls_state(snapshot):
@@ -151,8 +166,13 @@ def validate_history_operation(kind, metadata):
              or kind == "sectionReset" and set(metadata) == {"section"}
              and type(metadata["section"]) is str and metadata["section"] in RESET_SECTIONS
              or kind == "sectionToggle" and set(metadata) == {"section", "enabled"}
-             and type(metadata["section"]) is str and metadata["section"] in SECTIONS
+             and type(metadata["section"]) is str and metadata["section"] in SETTINGS_SECTIONS
              and type(metadata["enabled"]) is bool
+             or kind == "opticsFlag" and set(metadata) == {"control", "enabled"}
+             and type(metadata["control"]) is str and metadata["control"] in HISTORY_FLAG_CONTROLS
+             and type(metadata["enabled"]) is bool
+             or kind == "opticsFlagReset" and set(metadata) == {"control"}
+             and type(metadata["control"]) is str and metadata["control"] in HISTORY_FLAG_CONTROLS
              or kind == "vignetteStyle" and set(metadata) == {"style"}
              and type(metadata["style"]) is str and metadata["style"] in VIGNETTE_STYLES
              or kind in ("allReset", "wbAuto", "wbPick") and not metadata)
