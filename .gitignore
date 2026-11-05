@@ -86,3 +86,5 @@ Desktop.ini
 /desktop/target/
 /desktop/packaging/.venv/
 /desktop/gen/
+/desktop/assets/
+/desktop/index.html
