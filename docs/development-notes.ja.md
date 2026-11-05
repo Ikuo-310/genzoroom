@@ -2,6 +2,14 @@
 
 Homeの現行仕様はGallery系4タブ（Recent / Albums / Calendar / Favorites）と管理系のSTACK管理／Export・出力管理の2タブで、Recentは50〜500件を50件刻みで選択でき、初期値は100件。以下の過去フェーズに記した件数や「未実装」は当時の仕様を示す。現在仕様はこの冒頭節、README、architecture.mdを参照する。
 
+## サムネイル固定幅化の実装・実機確認完了（2026-11-05）
+
+列数を保存していた`homeThumbnailColumns`を、カード幅プリセットを保存する`homeThumbnailWidth`へ移行した。標準幅は200px、プリセットは140 / 160 / 180 / 200 / 220 / 240 / 260 / 280pxの8段階。新しい保存キーがない場合は旧3〜10列を幅へ換算して新キーへ保存し、以降のリサイズでは幅設定を維持する。
+
+Gallery写真グリッド（Recent / Favorites / Calendar / Album詳細）とAlbum一覧は固定幅の`auto-fill`でカードを左詰めに配置し、右側の余白を残す。Export管理とSTACK管理は表示領域とカード幅から列数を再計算する。いずれもカードを引き伸ばさず、狭い領域では1列まで減る。Gallery / Album / Exportのカード間隔は16px、STACK管理は候補・未分類・グループ内部で従来どおり12px。STACKグループのspanと内部折返し、候補と未分類の列幅一致を維持する。詳細は`architecture.md`の「Shared thumbnail sizing」を参照。
+
+実装Commit：`62bde40`（`feat: use fixed thumbnail card widths`）。Frontend関連テスト13ファイル・401件PASS、Frontend production build成功。利用者による実機ブラウザー確認もOKとの報告を受けた。実機確認は自動テスト・ビルドとは別の確認結果である。
+
 ## JPEG共通仕様 Phase 1C-C4-Eのmainバックポート（2026-10-26）
 
 LightCraft統合ブランチで先行していたJPEG共通仕様がmainに未反映だったため、Phase 1C-C4-EをJPEG共通部分に限定してバックポートした。暗室カテゴリをColor（Temperature / Tint / Vibrance / Saturation）→ Basic → Color Gradingへ整理し、個別Adjustment ON/OFF UIとコンテキスト操作を廃止した。個別Reset、Basic／Color GradingカテゴリON/OFF、Color Gradingの各range ON/OFF、History／Undo／Redoは維持した。Color Toggleは`whiteBalanceEnabled`と`colorEnabled`を同期する1件のHistory operationとし、Color Resetは4値を1件でResetしてReset前のAND有効状態へ同期する。

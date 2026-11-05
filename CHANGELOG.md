@@ -8,7 +8,7 @@ Internal changes are omitted unless they affect users.
 
 ### Changed
 
-- Gallery, Album, Export, and STACK thumbnails now use a shared eight-step card-width setting (140–280px, default 200px). Card widths stay fixed while columns adapt to the available width; existing saved column settings migrate to the equivalent width.
+- Gallery (Recent, Favorites, Calendar, and Album details), the Album list, Export, and STACK now share eight fixed card-width presets from 140px to 280px (200px by default). Cards stay left-aligned at their selected width with fixed gaps; columns adapt to the available width, and existing saved column settings migrate to the equivalent width.
 
 - Reorganized JPEG development controls into Color, Basic, and Color Grading. Temperature and Tint now live under Color with Vibrance and Saturation. Per-adjustment ON/OFF switches were removed while retaining compatibility with existing saved Recipes.
 
