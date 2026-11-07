@@ -2255,3 +2255,6 @@ Crop枠内部のMove中に限り、Shiftで画面上のCSS pixel X／Y軸へ移�
 F1はprovisionalCropで得た実効矩形と固定開始矩形との差をcanonical pointer targetへ戻してShift押下・解除のアンカーにした。F2は通常GestureのEscapeを既存cancelへ接続し、基準線は別経路で破棄する。IME・既処理イベントを保護し、owner解除をcapture解放より先に行う既存順序を維持した。
 
 失敗5件は差分演算順の丸め誤差、再描画で変化するテストbusy callback、失敗テストのlistener残留、jsdomの0寸法に起因した。期待座標を緩めず、右500px超過後のShift左10pxでx0=.39を確認。関連Frontend 7ファイル331件、TypeScript、本番Build成功。既存chunk警告（約973 kB）あり。実Desktopでの手動確認は未実施。Native・Backend・Recipe形式に変更なし。
+# RAWポイントカーブ P0調査（2026-11-07）
+
+LightCraft v0.18.1／v0.19.0のNative契約とGenzoRoom既存History・Recipeへの接続案を調査し、[RAWポイントカーブ統合調査](research/lightcraft/RAW_POINT_CURVE_INTEGRATION.md)へ記録した。契約比較ではポイントカーブにNative patchは不要。未完成実装に判明した課題も同文書に未解決事項として記録している。P0は調査結果の文書化のみで、P1〜P6は計画段階。パラメトリックカーブは対象外。
