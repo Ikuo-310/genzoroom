@@ -51,3 +51,15 @@ def test_curve_history_metadata_contains_only_the_channel():
         validate_history_operation("curve", {"channel": "green", "points": [[0, 0]]})
     with pytest.raises(InvalidRawHistory):
         _history_metadata("curve", {"channel": "green", "points": [[0, 0]]})
+
+
+def test_curve_reset_metadata_allows_only_point_or_a_single_point_channel():
+    for channel in (*CURVE_CHANNELS, "point"):
+        metadata = {"channel": channel}
+        validate_history_operation("curveReset", metadata)
+        assert _history_metadata("curveReset", metadata) == metadata
+    for channel in ("all", "parametric", None):
+        with pytest.raises(LightCraftError, match="raw_invalid_request"):
+            validate_history_operation("curveReset", {"channel": channel})
+        with pytest.raises(InvalidRawHistory):
+            _history_metadata("curveReset", {"channel": channel})

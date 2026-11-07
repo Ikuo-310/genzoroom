@@ -1124,6 +1124,24 @@ class LightCraftRawSession:
     async def apply_history_operation(self, handle, kind, metadata, expected_revision, *, curve_points=None):
         from raw_controls import (CONTROLS, CONTROL_PATHS, control_location, DETAIL_RESET_DEFAULTS,
                                   HISTORY_FLAG_CONTROLS, validate_history_operation, validate_curve_input)
+        if kind == "curveReset":
+            validate_history_operation(kind, metadata)
+            channel = metadata["channel"]
+            photo = self._photo(handle, active=True)
+            expected = json.loads(photo.settings_json)
+            channels = ("master", "red", "green", "blue") if channel == "point" else (channel,)
+            if all(expected["curve"][target] == [] for target in channels):
+                return self.confirmed_settings(handle, expected_revision)
+            # Reset only point arrays so Native's parametric ToneCurve settings remain intact.
+            for target in channels:
+                expected["curve"][target] = []
+
+            def check(actual):
+                if actual != expected:
+                    raise LightCraftError("raw_operation_readback_mismatch")
+
+            return await self._mutate(handle, "curve.reset", {"channel": channel},
+                                      expected_revision, check=check)
         if kind == "curve":
             if type(metadata) is not dict or set(metadata) != {"channel"}:
                 raise LightCraftError("raw_invalid_request")

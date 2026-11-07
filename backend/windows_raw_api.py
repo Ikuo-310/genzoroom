@@ -1117,8 +1117,6 @@ class RawPreviewApi:
             if body["kind"] == "curve":
                 from raw_controls import validate_curve_operation
                 validate_curve_operation("curve", {"channel": body["metadata"].get("channel"), "points": body.get("curvePoints")})
-            elif body["kind"] == "curveReset":
-                raise LightCraftError("raw_invalid_request")
             kind, metadata = body["kind"], body["metadata"]
             if not self._wb_available and (kind in ("allReset", "wbAuto", "wbPick") or kind == "sectionReset" and metadata["section"] == "color"
                     or kind == "controlReset" and metadata["control"].startswith("wb.")):

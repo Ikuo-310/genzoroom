@@ -113,6 +113,7 @@ class RawProcess(FakeProcess):
         self.execution = None
         self.preview_arguments = []
         self.preview_error_code = None
+        self.curve_reset_mismatch = False
 
     def tool(self, message, value=None, error=False):
         result = {"isError": error, "content": [{"type": "text", "text": "PRIVATE C:/photo.raw API_KEY secret"}]}
@@ -269,6 +270,14 @@ class RawProcess(FakeProcess):
                 {"x": float(point[0]), "y": float(point[1])} for point in params["points"]
             ]
             value = {"ok": True}
+        elif command == "curve.reset":
+            curve = self.photos[self.active]["settings"]["curve"]
+            channels = ("master", "red", "green", "blue") if params["channel"] == "point" else (params["channel"],)
+            for channel in channels:
+                curve[channel] = []
+            if self.curve_reset_mismatch:
+                curve["refine_saturation"] = 99.
+            value = {"ok": True}
         elif command in ("develop.set", "develop.merge"):
             settings = self.photos[self.active]["settings"]
             if command == "develop.set":
@@ -389,6 +398,24 @@ def test_reset_twice_without_readback_keeps_restored_settings(tmp_path):
             confirmed = await raw.get_settings(second)
             assert confirmed.revision == raw._photos["pixel"].applied_revision > expected.revision
             assert confirmed.settings["light"]["exposure"] == 1.25
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+def test_curve_reset_readback_mismatch_is_not_confirmed(tmp_path):
+    async def run():
+        raw, manager, children, files = await create(tmp_path)
+        try:
+            handle, initial = await raw.open_raw("pixel", files[0])
+            edited = await raw.apply_history_operation(handle, "curve", {"channel": "red"}, initial.revision,
+                curve_points=[[0, 0], [1, 1]])
+            child = children[0]
+            child.curve_reset_mismatch = True
+            with pytest.raises(LightCraftError, match="raw_operation_readback_mismatch"):
+                await raw.apply_history_operation(handle, "curveReset", {"channel": "red"}, edited.revision)
+            assert raw._photos["pixel"].settings_json == _settings_json(edited.settings)
+            assert raw.status().state == "desynchronized"
         finally:
             await raw.close()
     asyncio.run(run())

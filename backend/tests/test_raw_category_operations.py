@@ -73,6 +73,79 @@ def test_point_curve_is_one_history_operation_with_snapshot_navigation(channel, 
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("channel", ["master", "red", "green", "blue", "point"])
+def test_point_curve_reset_is_one_history_operation(channel, local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            async with client(local) as http:
+                doc = await open_history(http, local, api)
+                commands = list(children[0].commands)
+                noop = await operation(http, doc, "operate", body(doc) | {"kind": "curveReset", "metadata": {"channel": "red"}})
+                assert noop["history"]["length"] == 0 and noop["ack"]["changed"] is False
+                assert not any(command == "curve.reset" for command, _ in children[0].commands[len(commands):])
+                doc = noop
+
+                seed_points = {name: [[0, 0], [0.4, 0.6], [1, 1]] for name in ("master", "red", "green", "blue")}
+                for name, points in seed_points.items():
+                    doc = await operation(http, doc, "operate", body(doc) | {"kind": "curve",
+                        "metadata": {"channel": name}, "curvePoints": points})
+                before = copy.deepcopy(children[0].photos[children[0].active]["settings"])
+                before_length = doc["history"]["length"]
+                last_seed_step = doc["ack"]["stepId"]
+                request = body(doc) | {"kind": "curveReset", "metadata": {"channel": channel}}
+                commands = list(children[0].commands)
+                reset = await operation(http, doc, "operate", request)
+                assert reset["history"]["length"] == before_length + 1
+                assert [command for command, _ in children[0].commands[len(commands):] if command == "curve.reset"] == ["curve.reset"]
+                assert ("curve.reset", {"channel": channel}) in children[0].commands
+                step = rows()["asset_raw_history_steps"][-1]
+                assert step[8] == "curveReset" and json.loads(step[9]) == {"channel": channel}
+
+                after = children[0].photos[children[0].active]["settings"]
+                expected = copy.deepcopy(before)
+                targets = ("master", "red", "green", "blue") if channel == "point" else (channel,)
+                for target in targets:
+                    expected["curve"][target] = []
+                assert after == expected
+
+                replay_commands = list(children[0].commands)
+                replay = await operation(http, doc, "operate", request)
+                assert replay["replayed"] and replay["history"]["length"] == before_length + 1
+                assert children[0].commands == replay_commands
+                no_op = await operation(http, reset, "operate", body(reset) | {"kind": "curveReset",
+                    "metadata": {"channel": channel}})
+                assert no_op["history"]["length"] == before_length + 1 and no_op["ack"]["changed"] is False
+
+                undo = await operation(http, no_op, "undo")
+                assert children[0].photos[children[0].active]["settings"] == before
+                redo = await operation(http, undo, "redo")
+                assert children[0].photos[children[0].active]["settings"] == expected
+                jump = await operation(http, redo, "jump", body(redo) | {"targetStepId": last_seed_step})
+                assert children[0].photos[children[0].active]["settings"] == before
+                assert jump["history"]["cursor"] == before_length
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
+def test_point_curve_reset_rejects_all_without_native_mutation(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            async with client(local) as http:
+                doc = await open_history(http, local, api)
+                commands = list(children[0].commands)
+                response = await http.post(url(doc, "operate"), json=body(doc) | {
+                    "kind": "curveReset", "metadata": {"channel": "all"}})
+                assert response.status_code == 400
+                assert not any(command == "curve.reset" for command, _ in children[0].commands[len(commands):])
+                assert store.get_raw_history(api._history_identity)["history"]["steps"] == []
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
 def test_before_cache_is_read_only_across_category_reset_and_history_branch(local, tmp_path, monkeypatch):
     async def run():
         api, _, children, _ = await setup(tmp_path, local, monkeypatch)

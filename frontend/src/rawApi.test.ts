@@ -170,6 +170,8 @@ describe('RAW History transport', () => {
     { kind: 'vignetteStyle', metadata: { style: 'highlightPriority' } },
     { kind: 'vignetteStyle', metadata: { style: 'colorPriority' } },
     { kind: 'vignetteStyle', metadata: { style: 'paintOverlay' } },
+    { kind: 'curveReset', metadata: { channel: 'master' } },
+    { kind: 'curveReset', metadata: { channel: 'point' } },
     { kind: 'allReset', metadata: {} },
   ])('sends allowlisted operation metadata for $kind without native settings', async operation => {
     const request: RawHistoryRequest = { doc: rawSettings(doc), action: 'operate', operation,

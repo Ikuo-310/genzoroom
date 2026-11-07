@@ -56,6 +56,7 @@ export type RawLensDatabaseState = { available: boolean; lensCount: number; user
   download: { state: 'idle' | 'running' | 'done' | 'failed' | 'cancelled'; bytes?: number; total?: number; files?: number } };
 export type RawControlValues = Partial<RawValues> & Partial<Record<RawOpticsFlagId, boolean>>;
 export type RawCurveChannel = 'master' | 'red' | 'green' | 'blue';
+export type RawCurveResetChannel = RawCurveChannel | 'point';
 export type RawCurvePoint = { x: number; y: number };
 export type RawCurveCommandPoint = [x: number, y: number];
 export const RAW_CURVE_CHANNELS: readonly RawCurveChannel[] = ['master', 'red', 'green', 'blue'];
@@ -101,6 +102,7 @@ export function validGeometryMetadata(m: { operation?: RawGeometryOperationId; a
 }
 export type RawHistoryOperation = { kind: 'controlReset'; metadata: { control: RawHistoryControlId } }
   | { kind: 'curve'; metadata: { channel: RawCurveChannel }; points: RawCurveCommandPoint[] }
+  | { kind: 'curveReset'; metadata: { channel: RawCurveResetChannel } }
   | { kind: 'opticsFlag'; metadata: { control: RawOpticsFlagId; enabled: boolean } }
   | { kind: 'opticsFlagReset'; metadata: { control: RawOpticsFlagId } }
   | { kind: 'geometry'; metadata: { operation: RawGeometryOperationId; action?: RawGeometryAction }; geometry: RawGeometryOperation }
@@ -112,8 +114,8 @@ export type RawHistoryOperation = { kind: 'controlReset'; metadata: { control: R
 export type RawHistoryRequest = RawRecipeRequest & { action: 'initialize' | 'commit' | 'undo' | 'redo' | 'jump' | 'operate';
   control?: RawHistoryControlId; targetStepId?: string | null; operation?: RawHistoryOperation;
   geometryCommit?: { gestureId: string; operation: 'set' | 'drag' | 'straighten'; action?: RawGeometryAction } };
-export type RawHistoryStep = { stepId: string; kind: 'control' | 'controlReset' | 'opticsFlag' | 'opticsFlagReset' | 'sectionToggle' | 'sectionReset' | 'vignetteStyle' | 'allReset' | 'wbAuto' | 'wbPick' | 'geometry' | 'curve';
-  metadata: { control?: RawHistoryControlId | RawOpticsFlagId; section?: RawResetSectionId; enabled?: boolean; style?: RawVignetteStyle; operation?: RawGeometryOperationId; action?: RawGeometryAction; channel?: RawCurveChannel }; createdAt: string;
+export type RawHistoryStep = { stepId: string; kind: 'control' | 'controlReset' | 'opticsFlag' | 'opticsFlagReset' | 'sectionToggle' | 'sectionReset' | 'vignetteStyle' | 'allReset' | 'wbAuto' | 'wbPick' | 'geometry' | 'curve' | 'curveReset';
+  metadata: { control?: RawHistoryControlId | RawOpticsFlagId; section?: RawResetSectionId; enabled?: boolean; style?: RawVignetteStyle; operation?: RawGeometryOperationId; action?: RawGeometryAction; channel?: RawCurveResetChannel }; createdAt: string;
   changes: { control: RawHistoryControlId; before: number; after: number }[] | null;
   flagChanges?: { control: RawOpticsFlagId; before: boolean; after: boolean }[] | null };
 export type RawHistoryResult = RawSettings & {
@@ -512,6 +514,7 @@ export async function readRawHistory(doc: RawDocument): Promise<RawHistoryData> 
         : step.kind === 'sectionReset' ? Object.keys(m).length !== 1 || !RAW_RESET_SECTION_IDS.includes(m.section)
         : step.kind === 'vignetteStyle' ? Object.keys(m).length !== 1 || !RAW_VIGNETTE_STYLES.includes(m.style)
         : step.kind === 'curve' ? Object.keys(m).length !== 1 || !RAW_CURVE_CHANNELS.includes(m.channel as RawCurveChannel)
+        : step.kind === 'curveReset' ? Object.keys(m).length !== 1 || ![...RAW_CURVE_CHANNELS, 'point'].includes(m.channel as RawCurveResetChannel)
         : !['allReset', 'wbAuto', 'wbPick'].includes(step.kind) || Object.keys(m).length !== 0)
       || !(step.changes === null || Array.isArray(step.changes) && step.changes.length <= RAW_HISTORY_CONTROL_IDS.length
         && step.changes.every((change: unknown, index: number, changes: unknown[]) => {
