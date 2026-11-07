@@ -16,6 +16,8 @@ export function revealAdjustment(target: HTMLElement) {
 export function adjustmentRowPosition(current: HTMLElement): HTMLElement | null {
   const row = current.closest('.adjustment-control');
   if (row) return row.querySelector('.adjustment-range');
+  if (current.matches('.raw-curve-graph') || current.closest('.raw-curve-channels'))
+    return current.closest('.raw-adjustment-category')?.querySelector('.adjustment-category-title') ?? null;
   return current.closest('.grading-range-header')?.querySelector('.grading-range-title')
     ?? current.closest('.raw-vignette-mode, .raw-grading-band')?.querySelector('input:checked')
     ?? current.closest('.raw-adjustment-subsection-header')?.querySelector('.raw-adjustment-subsection-title')

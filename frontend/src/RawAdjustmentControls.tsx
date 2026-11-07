@@ -69,7 +69,9 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
       onToggle={() => { if (category !== 'curves') operate({ kind: 'sectionToggle', metadata: { section: sections[category],
         enabled: !settings.sections[sections[category]] } }); }}
       onReset={category === 'effects' || category === 'curves' ? undefined : () => operate({ kind: 'sectionReset', metadata: { section: sections[category] } })}
-      showActions={category !== 'curves'}>
+      showActions={category !== 'curves'} headerActions={category === 'curves' ? <button type="button"
+        className="adjustment-category-reset" disabled aria-label={t('workspace.resetCategory')}
+        title={t('workspace.resetCategory')}>{t('workspace.reset')}</button> : undefined}>
       {category === 'color' && <p className="edit-source-note">{settings.wb.available
         ? `${settings.wb.mode} · Kelvin` : t('workspace.rawPreview.wbUnavailable')}</p>}
       {category === 'effects' && <RawSubcategoryHeader name={t('workspace.rawPreview.basicEffects')}
@@ -181,10 +183,10 @@ function RawSubcategoryHeader({ name, disabled, onReset, className = '' }: { nam
   </div>;
 }
 
-function RawCategory({ category, enabled, disabled, resetDisabled, autoWhiteBalance, picker, onToggle, onReset, showActions = true, children }: {
+function RawCategory({ category, enabled, disabled, resetDisabled, autoWhiteBalance, picker, onToggle, onReset, showActions = true, headerActions, children }: {
   category: RawCategoryId; enabled: boolean; disabled: boolean; resetDisabled: boolean;
   onToggle: () => void; onReset?: () => void; children: ReactNode;
-  showActions?: boolean;
+  showActions?: boolean; headerActions?: ReactNode;
   picker?: { disabled: boolean; active: boolean; run: () => void };
   autoWhiteBalance?: { disabled: boolean; run: () => void };
 }) {
@@ -202,7 +204,8 @@ function RawCategory({ category, enabled, disabled, resetDisabled, autoWhiteBala
         <span className="adjustment-category-chevron" aria-hidden="true">{expanded ? '▾' : '▸'}</span>
         <span className="adjustment-category-label">{title}</span>
       </button></h3>
-      {showActions && <div className="adjustment-category-actions">
+      {(showActions || headerActions) && <div className="adjustment-category-actions">
+        {showActions && <>
         {autoWhiteBalance && <button type="button" className="adjustment-category-icon raw-auto-wb" data-category-command disabled={autoWhiteBalance.disabled}
           onClick={autoWhiteBalance.run} aria-label={t('workspace.rawPreview.aw')} title={t('workspace.rawPreview.aw')}
           onFocus={focusAdjustmentCategory}
@@ -223,6 +226,8 @@ function RawCategory({ category, enabled, disabled, resetDisabled, autoWhiteBala
         {onReset && <button type="button" className="adjustment-category-reset" disabled={resetDisabled} onClick={onReset}
           aria-label={t('workspace.resetCategory')} title={t('workspace.resetCategory')} onFocus={focusAdjustmentCategory}
           onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>{t('workspace.reset')}</button>}
+        </>}
+        {headerActions}
       </div>}
     </div>
     {expanded && <div id={contentId} className="adjustment-category-content">{children}</div>}
