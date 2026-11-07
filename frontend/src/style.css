@@ -524,19 +524,20 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .raw-curve-channel:hover { background: #303033; }
 .raw-curve-channel[aria-pressed="true"] { color: #fff; background: #303033; border-color: #68686c; }
 .raw-curve-channel:focus-visible { outline: 2px solid #f2f2f2; outline-offset: 1px; }
-.raw-curve-graph { display: block; width: min(100%, 320px); height: auto; aspect-ratio: 1; margin: 0 auto; cursor: crosshair; }
+.raw-curve-graph { display: block; width: min(100%, 320px); height: auto; aspect-ratio: 1; margin: 0 auto; cursor: auto; }
+.raw-curve-graph.is-dragging, .raw-curve-point { cursor: crosshair; }
 .raw-curve-graph:focus-visible { outline: 2px solid #f2f2f2; outline-offset: 2px; }
 .raw-curve-background { fill: #202022; }
 .raw-curve-grid line { stroke: #414145; stroke-width: 0.8; }
 .raw-curve-frame { fill: none; stroke: #65656a; stroke-width: 1; }
 .raw-curve-identity { stroke: #929297; stroke-width: 1; stroke-dasharray: 3 3; }
-.raw-curve-line { fill: none; stroke: #f0f0f1; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.raw-curve-line { fill: none; stroke: #f0f0f1; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; pointer-events: none; }
 .raw-curve-graph.is-red .raw-curve-line, .raw-curve-graph.is-red .raw-curve-point { stroke: #ef6060; }
 .raw-curve-graph.is-green .raw-curve-line, .raw-curve-graph.is-green .raw-curve-point { stroke: #58cb7c; }
 .raw-curve-graph.is-blue .raw-curve-line, .raw-curve-graph.is-blue .raw-curve-point { stroke: #579bef; }
 .raw-curve-point { fill: #262628; stroke: #f0f0f1; stroke-width: 1.5; }
-.raw-curve-point { cursor: pointer; }
 .raw-curve-point.is-selected { fill: #fff; stroke-width: 2.5; }
+.raw-curve-point:hover { r: 5px; }
 .raw-optics-header { margin: 3px 0 5px; }
 .raw-optics-profile-status, .raw-optics-unavailable { margin: 2px 0 7px; color: #aaa; font-size: 0.66rem; line-height: 1.35; overflow-wrap: anywhere; }
 .raw-optics-unavailable { color: #c7a28b; }
