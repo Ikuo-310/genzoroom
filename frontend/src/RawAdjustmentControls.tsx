@@ -5,11 +5,12 @@ import { commitAdjustmentEdits, focusAdjustmentCategory, navigateAdjustments, pr
   preservePendingAdjustmentFocus, restorePendingAdjustmentFocus } from './adjustmentFocus';
 import type { SliderAdjustmentId } from './adjustmentSliderIds';
 import { TINT_TRACK_GRADIENT, TEMPERATURE_TRACK_GRADIENT } from './WhiteBalanceAdjustmentControls';
+import { RawPointCurveControls } from './RawPointCurveControls';
 import { RAW_VIGNETTE_STYLES, type RawControlId, type RawHistoryControlId, type RawHistoryOperation, type RawOpticsFlagId, type RawSectionId, type RawVignetteStyle } from './rawApi';
 import type { useRawDocument } from './useRawDocument';
 
-type RawCategoryId = 'basic' | 'color' | 'grading' | 'effects' | 'detail';
-const sections: Record<RawCategoryId, RawSectionId> = { basic: 'light', color: 'color', grading: 'grading', effects: 'effects', detail: 'detail' };
+type RawCategoryId = 'basic' | 'color' | 'grading' | 'curves' | 'effects' | 'detail';
+const sections: Record<Exclude<RawCategoryId, 'curves'>, RawSectionId> = { basic: 'light', color: 'color', grading: 'grading', effects: 'effects', detail: 'detail' };
 const wbErrors: Record<string, string> = {
   raw_wb_no_valid_samples: 'awNoSamples', raw_wb_geometry_mismatch: 'wbGeometryMismatch',
   raw_wb_point_outside_source: 'wbPointOutside', raw_wb_source_unavailable: 'wbSourceUnavailable',
@@ -21,6 +22,7 @@ const bindings: { category: RawCategoryId; controls: RawControlId[]; ids: Slider
   { category: 'basic', controls: ['light.exposure', 'light.contrast', 'light.highlights', 'light.whites', 'light.shadows', 'light.blacks'],
     ids: ['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks'] },
   { category: 'grading', controls: [], ids: [] },
+  { category: 'curves', controls: [], ids: [] },
   { category: 'effects', controls: ['effects.texture', 'effects.clarity', 'effects.dehaze',
     'vignette.amount', 'vignette.midpoint', 'vignette.feather', 'vignette.roundness', 'vignette.highlights'],
     ids: ['effects.texture', 'effects.clarity', 'effects.dehaze',
@@ -56,7 +58,7 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
   }}>
     <p className="edit-source-note">{t('workspace.rawPreview.temporary')}</p>
     {settings && bindings.map(({ category, controls, ids }) => <RawCategory key={category} category={category}
-      enabled={settings.sections[sections[category]]} disabled={actionsLocked}
+      enabled={category === 'curves' || settings.sections[sections[category]]} disabled={actionsLocked}
       resetDisabled={actionsLocked || category === 'color' && !settings.wb.available}
       picker={category === 'color' ? { disabled: actionsLocked || !raw.pickAvailable, active: !!raw.pickActive,
         run: () => { if (panel.current) commitAdjustmentEdits(panel.current); raw.togglePick(); } } : undefined}
@@ -64,9 +66,10 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
         disabled: actionsLocked || !settings.sections.color || !settings.wb.available || !settings.wbAutoAvailable,
         run: () => operate({ kind: 'wbAuto', metadata: {} }),
       } : undefined}
-      onToggle={() => operate({ kind: 'sectionToggle', metadata: { section: sections[category],
-        enabled: !settings.sections[sections[category]] } })}
-      onReset={category === 'effects' ? undefined : () => operate({ kind: 'sectionReset', metadata: { section: sections[category] } })}>
+      onToggle={() => { if (category !== 'curves') operate({ kind: 'sectionToggle', metadata: { section: sections[category],
+        enabled: !settings.sections[sections[category]] } }); }}
+      onReset={category === 'effects' || category === 'curves' ? undefined : () => operate({ kind: 'sectionReset', metadata: { section: sections[category] } })}
+      showActions={category !== 'curves'}>
       {category === 'color' && <p className="edit-source-note">{settings.wb.available
         ? `${settings.wb.mode} · Kelvin` : t('workspace.rawPreview.wbUnavailable')}</p>}
       {category === 'effects' && <RawSubcategoryHeader name={t('workspace.rawPreview.basicEffects')}
@@ -91,12 +94,13 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
           </label>)}
         </div>
       </div>}
+      {category === 'curves' && <RawPointCurveControls key={raw.assetId} curve={settings.curve} />}
       <div className={category === 'detail' ? 'raw-detail-controls' : undefined}>{(category === 'grading' ? [`grading.${gradingBand}.hue`, `grading.${gradingBand}.sat`, `grading.${gradingBand}.lum`, 'grading.blending', 'grading.balance'] as RawControlId[] : controls).map((control, index) => {
         const spec = settings.controls.find(spec => spec.id === control)!;
         const id = category === 'grading' ? control : ids[index];
         const value = raw.desired?.[control] ?? settings.values[control];
         const trackGradient = control.startsWith('grading.') && control.endsWith('.hue') ? 'linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)' : control === 'wb.temp' ? TEMPERATURE_TRACK_GRADIENT : control === 'wb.tint' ? TINT_TRACK_GRADIENT : undefined;
-        const enabled = settings.sections[sections[category]];
+        const enabled = category === 'curves' ? true : settings.sections[sections[category]];
         const dependent = control.startsWith('vignette.') && control !== 'vignette.amount'
           && (raw.desired?.['vignette.amount'] ?? settings.values['vignette.amount']) === 0;
         const labelKey = category === 'grading' ? `rawPreview.${control}` : category === 'detail' || category === 'effects' ? `rawPreview.${vignetteLabels[control] ?? control.split('.')[1]}` : id;
@@ -177,9 +181,10 @@ function RawSubcategoryHeader({ name, disabled, onReset, className = '' }: { nam
   </div>;
 }
 
-function RawCategory({ category, enabled, disabled, resetDisabled, autoWhiteBalance, picker, onToggle, onReset, children }: {
+function RawCategory({ category, enabled, disabled, resetDisabled, autoWhiteBalance, picker, onToggle, onReset, showActions = true, children }: {
   category: RawCategoryId; enabled: boolean; disabled: boolean; resetDisabled: boolean;
   onToggle: () => void; onReset?: () => void; children: ReactNode;
+  showActions?: boolean;
   picker?: { disabled: boolean; active: boolean; run: () => void };
   autoWhiteBalance?: { disabled: boolean; run: () => void };
 }) {
@@ -197,7 +202,7 @@ function RawCategory({ category, enabled, disabled, resetDisabled, autoWhiteBala
         <span className="adjustment-category-chevron" aria-hidden="true">{expanded ? '▾' : '▸'}</span>
         <span className="adjustment-category-label">{title}</span>
       </button></h3>
-      <div className="adjustment-category-actions">
+      {showActions && <div className="adjustment-category-actions">
         {autoWhiteBalance && <button type="button" className="adjustment-category-icon raw-auto-wb" data-category-command disabled={autoWhiteBalance.disabled}
           onClick={autoWhiteBalance.run} aria-label={t('workspace.rawPreview.aw')} title={t('workspace.rawPreview.aw')}
           onFocus={focusAdjustmentCategory}
@@ -218,7 +223,7 @@ function RawCategory({ category, enabled, disabled, resetDisabled, autoWhiteBala
         {onReset && <button type="button" className="adjustment-category-reset" disabled={resetDisabled} onClick={onReset}
           aria-label={t('workspace.resetCategory')} title={t('workspace.resetCategory')} onFocus={focusAdjustmentCategory}
           onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>{t('workspace.reset')}</button>}
-      </div>
+      </div>}
     </div>
     {expanded && <div id={contentId} className="adjustment-category-content">{children}</div>}
   </section>;

@@ -2266,3 +2266,7 @@ LightCraft v0.18.1／v0.19.0のNative契約とGenzoRoom既存History・Recipeへ
 # RAWポイントカーブ P3-C（2026-11-07）
 
 RAW Exportは保存Recipeを既存Runtimeで凍結し、Curve専用処理を介さず`develop.merge`へ渡す。Export前後の既存`get_develop`比較では、旧Recipe向けreadback期待値にP3-Bの`with_legacy_curve_defaults()`を再利用する。4チャンネル、複数チャンネル、空Curve、Curve欠落RecipeのExport用Native経路を既存fixtureで確認した。保存Recipe／receipt、Queue、Retry、Registrarのコード変更なし。readback完全比較も既存動作のままで、Managed Nativeや実RAW Exportは未検証。LightCraftの将来の通常正規化や追加設定で既存比較が失敗する可能性が残る。P4 UI未接続。
+
+# RAWポイントカーブ P4-A（2026-11-07）
+
+RAW調整パネルのカラーグレーディングとエフェクトの間に「カーブ」カテゴリを追加し、RGB／R／G／Bのローカル切替と既存設定を表示する正方形SVGグラフを実装した。折れ線とY軸反転で制御点を表示し、空配列はIdentity線にする。チャンネル切替はNative／Historyを呼び出さず、設定propsの更新とRAW文書切替に追従する。P4-B以降の制御点編集、Reset、ヒストグラム、ターゲット調整は未実装。

@@ -221,7 +221,7 @@ it('places all RAW optics controls after NR, uses readback History flags and pre
     return rawHistoryResult({ ...request, doc: next });
   });
   await mount();
-  const category = host.querySelectorAll('.raw-adjustment-category')[4];
+  const category = host.querySelectorAll('.raw-adjustment-category')[5];
   const titles = [...category.querySelectorAll('.raw-detail-controls h4')].map(item => item.textContent);
   expect(titles.slice(-2)).toEqual(['Noise Reduction', 'Color Noise Reduction']);
   const optics = category.querySelector<HTMLElement>('.raw-optics-panel')!;
@@ -352,7 +352,8 @@ it('enters RAW slider focus from the Viewer and follows the displayed row order'
     moveDown(sliders[index - 1]); expect(document.activeElement).toBe(sliders[index]);
   }
   expect(sliders.slice(4, 10).map(slider => slider.dataset.adjustmentId)).toEqual(['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks']);
-  const effectsTitle = host.querySelector<HTMLElement>('.raw-adjustment-category:nth-of-type(4) .adjustment-category-title')!;
+  const effectsTitle = host.querySelector<HTMLElement>('.raw-adjustment-category:nth-of-type(5) .adjustment-category-title')!;
+  const curvesTitle = host.querySelector<HTMLElement>('.raw-adjustment-category:nth-of-type(4) .adjustment-category-title')!;
   const effectsSubtitle = host.querySelector<HTMLElement>('.raw-adjustment-subsection-title')!;
   const gradingTitle = host.querySelector<HTMLElement>('.raw-adjustment-category:nth-of-type(3) .adjustment-category-title')!;
   moveDown(sliders[9]); expect(document.activeElement).toBe(gradingTitle);
@@ -360,11 +361,12 @@ it('enters RAW slider focus from the Viewer and follows the displayed row order'
   moveDown(gradingTitle); expect(document.activeElement).toBe(gradingBand);
   moveDown(gradingBand); expect(document.activeElement).toBe(sliders[10]);
   for (let index = 11; index < 15; index++) { moveDown(sliders[index - 1]); expect(document.activeElement).toBe(sliders[index]); }
-  moveDown(sliders[14]); expect(document.activeElement).toBe(effectsTitle);
+  moveDown(sliders[14]); expect(document.activeElement).toBe(curvesTitle);
+  moveDown(curvesTitle); expect(document.activeElement).toBe(effectsTitle);
   moveDown(effectsTitle); expect(document.activeElement).toBe(effectsSubtitle);
   moveDown(effectsSubtitle); expect(document.activeElement).toBe(sliders[15]);
   for (let index = 16; index < 18; index++) { moveDown(sliders[index - 1]); expect(document.activeElement).toBe(sliders[index]); }
-  const detailTitle = host.querySelector<HTMLElement>('.raw-adjustment-category:nth-of-type(5) .adjustment-category-title')!;
+  const detailTitle = host.querySelector<HTMLElement>('.raw-adjustment-category:nth-of-type(6) .adjustment-category-title')!;
   const vignetteTitle = host.querySelectorAll<HTMLElement>('.raw-adjustment-subsection-title')[1];
   const mode = host.querySelector<HTMLInputElement>('.raw-vignette-mode input:checked')!;
   moveDown(sliders[17]); expect(document.activeElement).toBe(vignetteTitle);
@@ -427,9 +429,9 @@ it('reuses Detail category collapse, action navigation, toggle and Reset', async
     return rawHistoryResult({ ...request, doc: next });
   });
   await mount();
-  expect([...host.querySelectorAll('.raw-adjustment-category .adjustment-category-label')].map(item => item.textContent))
-    .toEqual(['Color', 'Basic', 'Color Grading', 'Effects', 'Detail']);
-  const category = host.querySelectorAll('.raw-adjustment-category')[4];
+  expect([...host.querySelectorAll('.raw-adjustment-category > .adjustment-category-header .adjustment-category-label')].map(item => item.textContent))
+    .toEqual(['Color', 'Basic', 'Color Grading', 'Curves', 'Effects', 'Detail']);
+  const category = host.querySelectorAll('.raw-adjustment-category')[5];
   expect(category.textContent).toContain('Sharpening');
   const title = category.querySelector<HTMLButtonElement>('.adjustment-category-title')!;
   const toggle = category.querySelector<HTMLButtonElement>('[data-category-switch]')!;
@@ -491,8 +493,9 @@ it.each(['ja', 'en'])('keeps Effects eye in the category and Reset in Basic Effe
   await mount();
   const categories = host.querySelectorAll('.raw-adjustment-category');
   expect([...categories].map(category => category.querySelector('.adjustment-category-label')!.textContent)).toEqual(language === 'ja'
-    ? ['カラー', '基本補正', 'カラーグレーディング', 'エフェクト', 'ディテール'] : ['Color', 'Basic', 'Color Grading', 'Effects', 'Detail']);
-  const category = categories[3];
+    ? ['カラー', '基本補正', 'カラーグレーディング', 'カーブ', 'エフェクト', 'ディテール']
+    : ['Color', 'Basic', 'Color Grading', 'Curves', 'Effects', 'Detail']);
+  const category = categories[4];
   const title = category.querySelector<HTMLButtonElement>('.adjustment-category-title')!;
   const subtitle = category.querySelector<HTMLElement>('.raw-adjustment-subsection-title')!;
   const reset = category.querySelector<HTMLButtonElement>('.raw-adjustment-subsection-header button')!;
@@ -528,6 +531,45 @@ it.each(['ja', 'en'])('keeps Effects eye in the category and Reset in Basic Effe
   await act(async () => title.click()); await flush(); expect(ranges()).toHaveLength(3);
 });
 
+it('places display-only Curves between Grading and Effects and keeps channel switching local', async () => {
+  vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), curve: {
+    master: [{ x: 0.25, y: 0.75 }], red: [{ x: 0.5, y: 0.25 }], green: [], blue: [],
+  } }));
+  await mount();
+  const categories = [...host.querySelectorAll<HTMLElement>('.raw-adjustment-category')];
+  expect(categories.map(category => category.querySelector('.adjustment-category-label')!.textContent))
+    .toEqual(['Color', 'Basic', 'Color Grading', 'Curves', 'Effects', 'Detail']);
+  const curveCategory = categories[3];
+  expect(curveCategory.querySelector('.adjustment-category-actions')).toBeNull();
+  expect(curveCategory.querySelector<SVGPolylineElement>('[data-testid="raw-curve-line"]')!.getAttribute('points')).toBe('70,70');
+  const historyWrites = vi.mocked(rawApi.saveRawHistory).mock.calls.length;
+  const nativeWrites = vi.mocked(rawApi.setRawControls).mock.calls.length;
+  for (const channel of ['red', 'green', 'blue', 'master'])
+    act(() => curveCategory.querySelector<HTMLButtonElement>(`[data-channel="${channel}"]`)!.click());
+  expect(rawApi.saveRawHistory).toHaveBeenCalledTimes(historyWrites);
+  expect(rawApi.setRawControls).toHaveBeenCalledTimes(nativeWrites);
+  expect(curveCategory.querySelector<SVGSVGElement>('[data-testid="raw-curve-graph"]')!.dataset.channel).toBe('master');
+});
+
+it('refreshes the curve and returns to RGB when switching RAW documents', async () => {
+  vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), curve: {
+    master: doc.assetId === base.id ? [{ x: 0.25, y: 0.75 }] : [{ x: 0.75, y: 0.25 }],
+    red: [], green: [], blue: [],
+  } }));
+  await mount();
+  const channels = () => host.querySelector<HTMLButtonElement>('[data-channel="red"]')!;
+  const historyWrites = vi.mocked(rawApi.saveRawHistory).mock.calls.length;
+  act(() => channels().click());
+  expect(rawApi.saveRawHistory).toHaveBeenCalledTimes(historyWrites);
+  act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[2].click());
+  await flush();
+  const graph = host.querySelector<SVGSVGElement>('[data-testid="raw-curve-graph"]')!;
+  expect(rawApi.openRawDocument).toHaveBeenLastCalledWith('workspace', rawB.id);
+  expect(graph.dataset.channel).toBe('master');
+  expect(host.querySelector<SVGPolylineElement>('[data-testid="raw-curve-line"]')!.getAttribute('points')).toBe('186,186');
+  expect(rawApi.setRawControls).not.toHaveBeenCalled();
+});
+
 it.each(['ja', 'en'])('separates NR subheadings, accessible Detail names and zero-amount dependents in %s', async language => {
   await i18n.changeLanguage(language);
   vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => {
@@ -536,7 +578,7 @@ it.each(['ja', 'en'])('separates NR subheadings, accessible Detail names and zer
     return settings;
   });
   await mount();
-  const category = host.querySelectorAll('.raw-adjustment-category')[4];
+  const category = host.querySelectorAll('.raw-adjustment-category')[5];
   expect([...category.querySelectorAll('.raw-detail-controls h4')].map(item => item.textContent)).toEqual(language === 'ja'
     ? ['シャープネス', 'ノイズリダクション', 'カラーノイズリダクション'] : ['Sharpening', 'Noise Reduction', 'Color Noise Reduction']);
   expect(category.querySelector('.raw-optics-header .adjustment-category-label')?.textContent).toBe(language === 'ja' ? 'レンズ補正' : 'Lens Corrections');
@@ -622,7 +664,7 @@ it('retains values across category OFF/ON and permits Reset while OFF on the sam
   });
   await mount();
   const categories = host.querySelectorAll('.raw-adjustment-category');
-  expect(categories).toHaveLength(5);
+  expect(categories).toHaveLength(6);
   expect(categories[0].querySelector('.adjustment-category-label')!.textContent).toBe('Color');
   const toggle = categories[1].querySelector<HTMLButtonElement>('.adjustment-category-icon')!;
   const reset = categories[1].querySelector<HTMLButtonElement>('.adjustment-category-reset')!;
