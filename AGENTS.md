@@ -4,6 +4,48 @@
 
 These instructions apply repository-wide to all future GenzoRoom development tasks. Phase-specific implementation requirements belong in individual task instructions, not this file.
 
+## 開発の基本方針（最優先）
+
+GenzoRoomは現在開発中のソフトウェアであり、機能の完成度、操作性、実装の単純さを優先する。この節は、このファイル内の矛盾する指示より優先する。
+
+### 破壊的変更
+
+- 旧バージョンとの後方互換性は原則として保証しない。
+- 既存Recipe、History、内部DB、API形式を変更する場合、旧データの移行処理は原則不要とする。
+- 互換レイヤー、旧形式のフォールバック、非推奨APIの維持を要求しない。
+- 必要なら既存実装を置き換え、不要になったコードを削除する。
+
+### 動作する機能を優先
+
+- 最初に、ユーザーが期待する操作と結果を実現する。
+- 基本機能が未完成の段階で、将来の障害や拡張を想定した複雑な仕組みを先行実装しない。
+- Phase分割は必要最小限とし、機能が実際に使用できる状態を重視する。
+- 暫定実装を許容する。完成前にすべての例外条件を解決する必要はない。
+
+### 責任範囲
+
+- 写真原本の管理はImmichが担当する。
+- RAW現像アルゴリズムとNative設定の解釈はLightCraftが担当する。
+- GenzoRoomはUI、操作、保存、History、各システムとの連携を担当する。
+- 外部システムが保証する内部動作をGenzoRoomで重複検証・再実装しない。
+
+### 安全対策
+
+- 安全対策は、具体的に説明できる故障モードやデータ損失リスクに対して実装する。
+- 仮定上の将来問題だけを理由に、状態管理、検証、Recovery、抽象化を追加しない。
+- 複雑な実装を提案する場合は、それが何を防ぐために必要なのかを明示する。
+- 既存の安全機構も無条件に維持せず、必要性が失われた場合は簡素化する。
+- Immichの写真原本を意図せず変更・削除しない境界は維持する。
+
+### 実装・設計判断
+
+- 指示されていない互換性対応や防御機構を独自判断で追加しない。
+- 要求された機能に直接関係しない変更を広げない。
+- テストは変更範囲に応じて必要最小限とする。
+- 過剰設計の懸念がある場合は、まず単純な実装方法を検討する。
+- 将来の完成形を理由に、現在必要な操作性の実現を後回しにしない。
+- この方針は開発速度と実用性を優先するものであり、写真原本の保護や明確なデータ破損の防止は維持する。
+
 ## Code comments
 
 - Add concise English comments for non-obvious design decisions, invariants, compatibility requirements, defensive code, and complex event ordering.
