@@ -55,6 +55,12 @@ export type RawLensProfileInfo = { cameraMake: string | null; cameraModel: strin
 export type RawLensDatabaseState = { available: boolean; lensCount: number; userDirectoryConfigured: boolean;
   download: { state: 'idle' | 'running' | 'done' | 'failed' | 'cancelled'; bytes?: number; total?: number; files?: number } };
 export type RawControlValues = Partial<RawValues> & Partial<Record<RawOpticsFlagId, boolean>>;
+export type RawCurveChannel = 'master' | 'red' | 'green' | 'blue';
+export type RawCurvePoint = { x: number; y: number };
+export type RawCurveCommandPoint = [x: number, y: number];
+export const RAW_CURVE_CHANNELS: readonly RawCurveChannel[] = ['master', 'red', 'green', 'blue'];
+export const RAW_CURVE_MAX_POINTS = 4096;
+export const RAW_CURVE_MAX_BYTES = 64 * 1024;
 export const RAW_GEOMETRY_OPERATIONS = ['set', 'drag', 'aspect', 'swap', 'reset', 'straighten', 'rotateLeft', 'rotateRight', 'flipHorizontal', 'flipVertical'] as const;
 export type RawGeometryOperationId = typeof RAW_GEOMETRY_OPERATIONS[number];
 export type RawCropRect = [number, number, number, number];
@@ -67,6 +73,7 @@ export type RawGeometryOperation = { type: 'set'; params: { rect?: RawCropRect; 
   | { type: 'straighten'; params: { angle: number } }
   | { type: 'swap' | 'reset' | 'rotateLeft' | 'rotateRight' | 'flipHorizontal' | 'flipVertical'; params: Record<string, never> };
 export type RawSettings = RawDocument & { settingsFingerprint: string; recipeRevision: number; recipeFingerprint: string | null;
+  curve: Record<RawCurveChannel, RawCurvePoint[]>;
   crop?: RawCrop; orientation?: string;
   importDefaultsFingerprint: string;
   sections: Record<RawSettingsSectionId, boolean>;
@@ -93,6 +100,7 @@ export function validGeometryMetadata(m: { operation?: RawGeometryOperationId; a
     && (m.action === undefined || (m.operation === 'drag' ? ['move','resize'] : m.operation === 'aspect' ? ['lock','unlock'] : []).includes(m.action));
 }
 export type RawHistoryOperation = { kind: 'controlReset'; metadata: { control: RawHistoryControlId } }
+  | { kind: 'curve'; metadata: { channel: RawCurveChannel }; points: RawCurveCommandPoint[] }
   | { kind: 'opticsFlag'; metadata: { control: RawOpticsFlagId; enabled: boolean } }
   | { kind: 'opticsFlagReset'; metadata: { control: RawOpticsFlagId } }
   | { kind: 'geometry'; metadata: { operation: RawGeometryOperationId; action?: RawGeometryAction }; geometry: RawGeometryOperation }
@@ -104,8 +112,8 @@ export type RawHistoryOperation = { kind: 'controlReset'; metadata: { control: R
 export type RawHistoryRequest = RawRecipeRequest & { action: 'initialize' | 'commit' | 'undo' | 'redo' | 'jump' | 'operate';
   control?: RawHistoryControlId; targetStepId?: string | null; operation?: RawHistoryOperation;
   geometryCommit?: { gestureId: string; operation: 'set' | 'drag' | 'straighten'; action?: RawGeometryAction } };
-export type RawHistoryStep = { stepId: string; kind: 'control' | 'controlReset' | 'opticsFlag' | 'opticsFlagReset' | 'sectionToggle' | 'sectionReset' | 'vignetteStyle' | 'allReset' | 'wbAuto' | 'wbPick' | 'geometry';
-  metadata: { control?: RawHistoryControlId | RawOpticsFlagId; section?: RawResetSectionId; enabled?: boolean; style?: RawVignetteStyle; operation?: RawGeometryOperationId; action?: RawGeometryAction }; createdAt: string;
+export type RawHistoryStep = { stepId: string; kind: 'control' | 'controlReset' | 'opticsFlag' | 'opticsFlagReset' | 'sectionToggle' | 'sectionReset' | 'vignetteStyle' | 'allReset' | 'wbAuto' | 'wbPick' | 'geometry' | 'curve';
+  metadata: { control?: RawHistoryControlId | RawOpticsFlagId; section?: RawResetSectionId; enabled?: boolean; style?: RawVignetteStyle; operation?: RawGeometryOperationId; action?: RawGeometryAction; channel?: RawCurveChannel }; createdAt: string;
   changes: { control: RawHistoryControlId; before: number; after: number }[] | null;
   flagChanges?: { control: RawOpticsFlagId; before: boolean; after: boolean }[] | null };
 export type RawHistoryResult = RawSettings & {
@@ -339,6 +347,7 @@ function settings(value: RawSettings, doc: RawDocument): RawSettings {
     || !RAW_VIGNETTE_STYLES.includes(value.vignetteStyle)
     || !value.sections || !RAW_SETTINGS_SECTION_IDS.every(section => typeof value.sections[section] === 'boolean')
     || !value.values || !RAW_SETTINGS_CONTROL_IDS.every(id => Number.isFinite(value.values[id]))
+    || !validRawCurve(value.curve)
     || !Array.isArray(value.controls) || value.controls.length !== RAW_SETTINGS_CONTROL_IDS.length
     || new Set(value.controls.map(c => c.id)).size !== RAW_SETTINGS_CONTROL_IDS.length
     || value.controls.some(c => !RAW_SETTINGS_CONTROL_IDS.includes(c.id) || ![c.min, c.max, c.step, c.default].every(Number.isFinite)
@@ -349,6 +358,27 @@ function settings(value: RawSettings, doc: RawDocument): RawSettings {
     || value.opticsFlags.lens_profile && value.sections.optics && info.profileAvailable === null && info.profileApplied !== null)
     throw new RawApiError('raw_invalid_response');
   return value;
+}
+export function validRawCurve(value: unknown): value is Record<RawCurveChannel, RawCurvePoint[]> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const curve = value as Record<string, unknown>;
+  if (Object.keys(curve).length !== RAW_CURVE_CHANNELS.length || !RAW_CURVE_CHANNELS.every(channel => channel in curve)) return false;
+  return RAW_CURVE_CHANNELS.every(channel => {
+    const points = curve[channel];
+    return Array.isArray(points) && points.length <= RAW_CURVE_MAX_POINTS && points.every(point =>
+      !!point && typeof point === 'object' && !Array.isArray(point)
+      && Object.keys(point).length === 2 && 'x' in point && 'y' in point
+      && Number.isFinite((point as RawCurvePoint).x) && Number.isFinite((point as RawCurvePoint).y)
+      && (point as RawCurvePoint).x >= 0 && (point as RawCurvePoint).x <= 1
+      && (point as RawCurvePoint).y >= 0 && (point as RawCurvePoint).y <= 1);
+  });
+}
+export function validRawCurveInput(channel: unknown, points: unknown): points is RawCurveCommandPoint[] {
+  return typeof channel === 'string' && RAW_CURVE_CHANNELS.includes(channel as RawCurveChannel)
+    && Array.isArray(points) && points.length <= RAW_CURVE_MAX_POINTS
+    && new TextEncoder().encode(JSON.stringify({ channel, points })).byteLength <= RAW_CURVE_MAX_BYTES
+    && points.every(point => Array.isArray(point) && point.length === 2
+      && point.every(value => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1));
 }
 function validRawLensProfileInfo(value: unknown): value is RawLensProfileInfo {
   if (!value || typeof value !== 'object') return false;
@@ -428,13 +458,16 @@ export async function saveRawRecipe(request: RawRecipeRequest): Promise<RawRecip
 /** A retry keeps the exact document/body; current metadata is independent of the original ack. */
 export async function saveRawHistory(request: RawHistoryRequest): Promise<RawHistoryResult> {
   const { doc, action, expectedRecipeRevision, saveId, control, targetStepId, operation } = request;
+  if (action === 'operate' && operation?.kind === 'curve' && !validRawCurveInput(operation.metadata.channel, operation.points))
+    throw new RawSaveError('raw_invalid_request', 'rejected', 422);
   let accepted = false;
   try {
     const value = await json(`/documents/${doc.handle}/history/${action}`, post({ ...identityBody(doc),
       documentRevision: doc.revision, settingsFingerprint: doc.settingsFingerprint, expectedRecipeRevision, saveId,
       ...(action === 'commit' ? request.geometryCommit ? { kind: 'geometry', metadata: { operation: request.geometryCommit.operation, ...(request.geometryCommit.action ? { action: request.geometryCommit.action } : {}) },
         gestureId: request.geometryCommit.gestureId } : { kind: 'control', metadata: { control } } : {}),
-      ...(action === 'operate' ? operation : {}),
+      ...(action === 'operate' && operation ? { kind: operation.kind, metadata: operation.metadata,
+        ...(operation.kind === 'curve' ? { curvePoints: operation.points } : {}) } : {}),
       ...(action === 'jump' ? { targetStepId } : {}) }), RAW_SETTINGS_RESPONSE_BYTES);
     accepted = true;
     settings(value, doc);
@@ -478,6 +511,7 @@ export async function readRawHistory(doc: RawDocument): Promise<RawHistoryData> 
         : step.kind === 'sectionToggle' ? Object.keys(m).length !== 2 || !RAW_SECTION_IDS.includes(m.section) || typeof m.enabled !== 'boolean'
         : step.kind === 'sectionReset' ? Object.keys(m).length !== 1 || !RAW_RESET_SECTION_IDS.includes(m.section)
         : step.kind === 'vignetteStyle' ? Object.keys(m).length !== 1 || !RAW_VIGNETTE_STYLES.includes(m.style)
+        : step.kind === 'curve' ? Object.keys(m).length !== 1 || !RAW_CURVE_CHANNELS.includes(m.channel as RawCurveChannel)
         : !['allReset', 'wbAuto', 'wbPick'].includes(step.kind) || Object.keys(m).length !== 0)
       || !(step.changes === null || Array.isArray(step.changes) && step.changes.length <= RAW_HISTORY_CONTROL_IDS.length
         && step.changes.every((change: unknown, index: number, changes: unknown[]) => {

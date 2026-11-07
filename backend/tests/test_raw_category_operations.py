@@ -31,6 +31,48 @@ async def edit(http, doc, kind, metadata):
     return await operation(http, doc, "operate", body(doc) | {"kind": kind, "metadata": metadata})
 
 
+@pytest.mark.parametrize("channel", ["master", "red", "green", "blue"])
+def test_point_curve_is_one_history_operation_with_snapshot_navigation(channel, local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            async with client(local) as http:
+                doc = await open_history(http, local, api)
+                native_before = copy.deepcopy(children[0].photos[children[0].active]["settings"])
+                channel_points = [[0, 0], [0.4, 0.7], [1, 1]]
+                request = body(doc) | {"kind": "curve", "metadata": {"channel": channel}, "curvePoints": channel_points}
+                result = await operation(http, doc, "operate", request)
+                assert result["history"]["length"] == 1
+                commands = list(children[0].commands)
+                replay = await operation(http, doc, "operate", request)
+                assert replay["replayed"] and replay["history"]["length"] == 1
+                assert children[0].commands == commands
+                no_op = await operation(http, result, "operate", body(result) | {"kind": "curve",
+                    "metadata": {"channel": channel}, "curvePoints": channel_points})
+                assert no_op["history"]["length"] == 1 and no_op["ack"]["changed"] is False
+                step = rows()["asset_raw_history_steps"][0]
+                metadata = json.loads(step[9])
+                assert metadata == {"channel": channel}
+                native_after = children[0].photos[children[0].active]["settings"]
+                assert native_after["curve"][channel] == [{"x": x, "y": y} for x, y in channel_points]
+                for other in ("master", "red", "green", "blue"):
+                    if other != channel:
+                        assert native_after["curve"][other] == native_before["curve"][other]
+                for field in ("highlights", "lights", "darks", "shadows", "split_shadows", "split_mid",
+                              "split_highlights", "refine_saturation"):
+                    assert native_after["curve"][field] == native_before["curve"][field]
+                undo = await operation(http, no_op, "undo")
+                assert children[0].photos[children[0].active]["settings"]["curve"] == native_before["curve"]
+                redo = await operation(http, undo, "redo")
+                assert children[0].photos[children[0].active]["settings"]["curve"][channel] == native_after["curve"][channel]
+                jump = await operation(http, redo, "jump", body(redo) | {"targetStepId": None})
+                assert children[0].photos[children[0].active]["settings"]["curve"] == native_before["curve"]
+                assert jump["history"]["cursor"] == 0
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
 def test_before_cache_is_read_only_across_category_reset_and_history_branch(local, tmp_path, monkeypatch):
     async def run():
         api, _, children, _ = await setup(tmp_path, local, monkeypatch)

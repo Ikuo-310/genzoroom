@@ -1069,6 +1069,8 @@ class RawPreviewApi:
             required |= {"kind", "metadata"}
             if body.get('kind') == 'geometry':
                 required.add('geometry' if action == 'operate' else 'gestureId')
+            if action == 'operate' and body.get('kind') == 'curve':
+                required.add('curvePoints')
         elif action == "jump":
             required.add("targetStepId")
         if action == 'operate' and body.get('kind') == 'wbPick':
@@ -1112,6 +1114,11 @@ class RawPreviewApi:
                 raise LightCraftError("raw_invalid_request")
         elif action == "operate":
             validate_history_operation(body["kind"], body["metadata"])
+            if body["kind"] == "curve":
+                from raw_controls import validate_curve_operation
+                validate_curve_operation("curve", {"channel": body["metadata"].get("channel"), "points": body.get("curvePoints")})
+            elif body["kind"] == "curveReset":
+                raise LightCraftError("raw_invalid_request")
             kind, metadata = body["kind"], body["metadata"]
             if not self._wb_available and (kind in ("allReset", "wbAuto", "wbPick") or kind == "sectionReset" and metadata["section"] == "color"
                     or kind == "controlReset" and metadata["control"].startswith("wb.")):
@@ -1258,7 +1265,8 @@ class RawPreviewApi:
                                 pending['stage'] = 'readback'
                             raise
                     else:
-                        snapshot = await self.raw.apply_history_operation(self._raw_handle, body["kind"], body["metadata"], snapshot.revision)
+                        snapshot = await self.raw.apply_history_operation(self._raw_handle, body["kind"], body["metadata"], snapshot.revision,
+                            curve_points=body.get("curvePoints"))
                     self._history_verify(doc)
                     self._confirmed(doc, snapshot)
                 # Keep supported legacy omission of WB scale in saved snapshots; the adapter has

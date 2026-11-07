@@ -46,6 +46,9 @@ HISTORY_CONTROLS = frozenset(CONTROLS)
 HISTORY_FLAG_CONTROLS = frozenset(("optics.remove_ca", "optics.lens_profile"))
 # Vignette has a Native reset section, but its eye belongs to Effects.
 RESET_SECTIONS = (*SETTINGS_SECTIONS, "vignette")
+CURVE_CHANNELS = ("master", "red", "green", "blue")
+MAX_CURVE_POINTS = 4096
+MAX_CURVE_BYTES = 64 * 1024
 VIGNETTE_STYLES = ("highlightPriority", "colorPriority", "paintOverlay")
 # Native command IDs are not JSON field names; every readback and History delta uses this mapping.
 CONTROL_PATHS = {control: tuple(control.split(".")) for control in CONTROLS} | {
@@ -103,6 +106,66 @@ def with_legacy_optics_defaults(settings):
     return {**settings, "optics": {**{key: defaults[key] for key in missing}, **optics}} if missing else settings
 
 
+def with_legacy_curve_defaults(settings):
+    # Native serde defaults old snapshots, but full readback comparisons need the same engine view.
+    if "curve" not in settings:
+        return {**settings, "curve": {"highlights": 0.0, "lights": 0.0, "darks": 0.0, "shadows": 0.0,
+            "split_shadows": 25.0, "split_mid": 50.0, "split_highlights": 75.0,
+            **{channel: [] for channel in CURVE_CHANNELS}, "refine_saturation": 100.0}}
+    return settings
+
+
+def validate_curve_operation(kind, metadata):
+    import json
+    if kind == "curve":
+        if type(metadata) is not dict or set(metadata) != {"channel", "points"}:
+            raise LightCraftError("raw_invalid_request")
+        if len(json.dumps(metadata, separators=(",", ":")).encode()) > MAX_CURVE_BYTES:
+            raise LightCraftError("raw_invalid_request")
+        validate_curve_input(metadata["channel"], metadata["points"])
+        return
+    if kind == "curveReset" and type(metadata) is dict and set(metadata) == {"channel"} and metadata["channel"] in (*CURVE_CHANNELS, "point"):
+        return
+    raise LightCraftError("raw_invalid_request")
+
+
+def validate_curve_input(channel, points):
+    """Validate Native command pair-array input; Native readback uses object points instead."""
+    import json
+    if type(channel) is not str or channel not in CURVE_CHANNELS or type(points) is not list or len(points) > MAX_CURVE_POINTS:
+        raise LightCraftError("raw_invalid_request")
+    if len(json.dumps({"channel": channel, "points": points}, separators=(",", ":")).encode("utf-8")) > MAX_CURVE_BYTES:
+        raise LightCraftError("raw_invalid_request")
+    for point in points:
+        if type(point) is not list or len(point) != 2 or any(
+                type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1
+                for value in point):
+            raise LightCraftError("raw_invalid_request")
+    return points
+
+
+def curve_readback(settings):
+    """Validate Native DevelopSettings object points before publishing pair-array API values."""
+    curve = settings.get("curve") if type(settings) is dict else None
+    if type(curve) is not dict:
+        raise LightCraftError("raw_invalid_settings")
+    result = {}
+    for channel in CURVE_CHANNELS:
+        points = curve.get(channel)
+        if type(points) is not list or len(points) > MAX_CURVE_POINTS:
+            raise LightCraftError("raw_invalid_settings")
+        converted = []
+        for point in points:
+            if type(point) is not dict or set(point) != {"x", "y"}:
+                raise LightCraftError("raw_invalid_settings")
+            x, y = point["x"], point["y"]
+            if any(type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1 for value in (x, y)):
+                raise LightCraftError("raw_invalid_settings")
+            converted.append({"x": x, "y": y})
+        result[channel] = converted
+    return result
+
+
 def controls_state(snapshot):
     settings = snapshot.settings
     values = {}
@@ -136,7 +199,8 @@ def controls_state(snapshot):
     public_lens_info = {key: value for key, value in lens_info.items()
                         if key not in ("profileHasDistortion", "profileHasVignetting")}
     public_lens_info["profileApplied"] = lens_applied
-    return {**geometry_state(settings), "values": values, "opticsFlags": flags, "vignetteStyle": style, "wbAutoAvailable": snapshot.wb_auto and snapshot.wb_kelvin,
+    curve_points = curve_readback(settings)
+    return {**geometry_state(settings), "values": values, "curve": curve_points, "opticsFlags": flags, "vignetteStyle": style, "wbAutoAvailable": snapshot.wb_auto and snapshot.wb_kelvin,
             "lensProfileInfo": public_lens_info,
             "sections": {section: section not in disabled for section in SETTINGS_SECTIONS},
             "controls": [dict(id=key, min=v[0], max=v[1], step=v[2], default=v[3], precision=v[4])
@@ -188,6 +252,8 @@ def validate_history_operation(kind, metadata):
              and type(metadata["control"]) is str and metadata["control"] in HISTORY_FLAG_CONTROLS
              or kind == "vignetteStyle" and set(metadata) == {"style"}
              and type(metadata["style"]) is str and metadata["style"] in VIGNETTE_STYLES
+             or kind == "curve" and set(metadata) == {"channel"}
+             and type(metadata["channel"]) is str and metadata["channel"] in CURVE_CHANNELS
              or kind in ("allReset", "wbAuto", "wbPick") and not metadata)
     if not valid:
         raise LightCraftError("raw_invalid_request")

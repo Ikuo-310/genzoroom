@@ -2,7 +2,7 @@
 import { LIGHTCRAFT_ENGINE } from './lightcraftEngine';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRawWorkspace,abortRawWorkspaceRequests,discardRawWorkspace, rawCapability, rawPreview, readRawSettings, setRawControls, saveRawRecipe, saveRawHistory, readRawHistory, readRawRecipe, rawWorkspaceEmpty,
-  RAW_CONTROL_IDS, RawSaveError, type RawDocument, type RawHistoryRequest, type RawHistoryOperation } from './rawApi';
+  RAW_CONTROL_IDS, RawSaveError, type RawDocument, type RawHistoryRequest, type RawHistoryOperation, validRawCurve, validRawCurveInput } from './rawApi';
 import { downloadRawLensDatabase, readRawLensDatabaseStatus } from './rawApi';
 import { rawSettings } from './test/rawSettings';
 import { RawSuperseded } from './rawApi';
@@ -17,6 +17,33 @@ function response(patch: Record<string, string> = {}, bytes = png) {
     'X-Raw-Epoch': '1', 'X-Raw-Sequence': '1', 'X-Raw-Width': '16', 'X-Raw-Height': '12', ...patch } });
 }
 afterEach(() => vi.unstubAllGlobals());
+
+describe('RAW point curve readback contract', () => {
+  it('accepts all four channels as finite object points', () => {
+    expect(validRawCurve({ master: [{ x: 0, y: 0 }], red: [], green: [], blue: [{ x: 1, y: 1 }] })).toBe(true);
+  });
+  it.each([
+    { master: [], red: [], green: [] },
+    { master: [{ x: NaN, y: 0 }], red: [], green: [], blue: [] },
+    { master: [{ x: 0, y: Infinity }], red: [], green: [], blue: [] },
+    { master: [{ x: -0.1, y: 0 }], red: [], green: [], blue: [] },
+    { master: [{ x: 0, y: 1.1 }], red: [], green: [], blue: [] },
+    { master: [[0, 0]], red: [], green: [], blue: [] },
+    { master: [], red: [], green: [], blue: [], extra: [] },
+  ])('rejects malformed readback %#', curve => expect(validRawCurve(curve)).toBe(false));
+});
+describe('RAW point curve Native input contract', () => {
+  it('accepts pair arrays for each supported channel', () => {
+    for (const channel of ['master', 'red', 'green', 'blue']) expect(validRawCurveInput(channel, [[0, 0], [1, 1]])).toBe(true);
+  });
+  it.each(['rgb', 'parametric', '', null])('rejects unsupported channel %s', channel => expect(validRawCurveInput(channel, [])).toBe(false));
+  it.each([[NaN, 0], [0, Infinity], [-0.1, 0], [0, 1.1], [0], [0, 0, 1], { x: 0, y: 1 }])
+    ('rejects invalid pair point %#', point => expect(validRawCurveInput('master', [point])).toBe(false));
+  it('enforces point count and serialized request bounds', () => {
+    expect(validRawCurveInput('master', Array.from({ length: 4097 }, () => [0, 0]))).toBe(false);
+    expect(validRawCurveInput('master', Array.from({ length: 4096 }, () => [0.1234567890123456, 0.8765432109876543]))).toBe(false);
+  });
+});
 
 describe('Lensfun database API', () => {
   it('reads sanitized progress and starts an explicit download through the RAW API', async () => {

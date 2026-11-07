@@ -430,6 +430,7 @@ HISTORY_CONTROLS |= frozenset(f"optics.{control}" for control in ("distortion", 
 HISTORY_FLAG_CONTROLS = frozenset(("optics.remove_ca", "optics.lens_profile"))
 HISTORY_SECTIONS = frozenset(("light", "color", "grading", "effects", "detail", "optics"))
 HISTORY_RESET_SECTIONS = HISTORY_SECTIONS | {"vignette"}
+HISTORY_CURVE_CHANNELS = frozenset(("master", "red", "green", "blue", "point"))
 
 
 class InvalidRawHistory(InvalidRawRecipe):
@@ -468,6 +469,8 @@ def _history_metadata(kind, metadata):
     elif kind == "vignetteStyle":
         valid = (set(metadata) == {"style"} and type(metadata["style"]) is str
                  and metadata["style"] in ("highlightPriority", "colorPriority", "paintOverlay"))
+    elif kind == "curve":
+        valid = set(metadata) == {"channel"} and type(metadata["channel"]) is str and metadata["channel"] in HISTORY_CURVE_CHANNELS - {"point"}
     else:
         valid = kind in ("allReset", "wbAuto", "wbPick") and not metadata
     if not valid:

@@ -38,7 +38,10 @@ DEFAULT = {"version": 1, "process": 2, "wb": {"mode": "custom", "temp": 6500., "
                       "defringe_green_amount": 0., "defringe_green_hue_lo": 40., "defringe_green_hue_hi": 60.,
                       "distortion": 0., "vignetting": 0., "vignetting_midpoint": 50., "ca_red": 0., "ca_blue": 0.},
            "enhance": {"denoise": 0., "raw_details": False, "super_resolution": False},
-           "curve": {"master": [{"x": 0., "y": 0.}, {"x": 1., "y": 1.}]}}
+           "curve": {"highlights": 0., "lights": 0., "darks": 0., "shadows": 0.,
+                     "split_shadows": 25., "split_mid": 50., "split_highlights": 75.,
+                     "master": [{"x": 0., "y": 0.}, {"x": 1., "y": 1.}],
+                     "red": [], "green": [], "blue": [], "refine_saturation": 100.}}
 QUICK = RawTimeouts(admission=.5, command=1, import_raw=2, preview=1, validation=1, ready=1)
 NATIVE_DETAIL_CONTROLS = {
     'sharpenAmount': ('sharpen_amount', 0), 'sharpenMasking': ('sharpen_masking', 0),
@@ -260,6 +263,12 @@ class RawProcess(FakeProcess):
                                                              tint=tint, scale="kelvin")
             self.photos[self.active]["settings"]["wb"].update(self.wb_override)
             value = {"temp": temp, "tint": tint}
+        elif command == "develop.curve":
+            settings = self.photos[self.active]["settings"]
+            settings["curve"][params["channel"]] = [
+                {"x": float(point[0]), "y": float(point[1])} for point in params["points"]
+            ]
+            value = {"ok": True}
         elif command in ("develop.set", "develop.merge"):
             settings = self.photos[self.active]["settings"]
             if command == "develop.set":

@@ -17,7 +17,7 @@ from PIL import Image, ImageCms, ExifTags, TiffImagePlugin
 from export_artifact import ExportArtifact, next_export_filename
 from edit_store import _json
 from raw_recipe_store import MAX_SETTINGS_BYTES
-from raw_controls import with_legacy_grading_defaults
+from raw_controls import with_legacy_grading_defaults, with_legacy_curve_defaults
 import jpeg_metadata as metadata
 from lightcraft_runtime import LightCraftManager, lightcraft_log
 from lightcraft_mcp import MCPToolError
@@ -313,7 +313,7 @@ async def export_raw_artifact(request: RawExportInput, *, manager=None, temp_roo
         if len(encoded_settings.encode("utf-8")) > MAX_SETTINGS_BYTES:
             raise ValueError
         settings = json.loads(encoded_settings)
-        expected_settings = with_legacy_grading_defaults(settings)
+        expected_settings = with_legacy_curve_defaults(with_legacy_grading_defaults(settings))
     except (TypeError, ValueError, RecursionError) as error:
         raise RawExportError("raw_export_invalid_settings") from error
     source = bytes(request.source)

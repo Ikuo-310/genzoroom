@@ -246,14 +246,14 @@ def _settings_json(value):
     wb.setdefault("scale", "legacy")
     if wb["scale"] not in ("legacy", "kelvin"):
         raise LightCraftError("raw_invalid_settings")
-    from raw_controls import with_legacy_grading_defaults, with_legacy_optics_defaults
+    from raw_controls import with_legacy_grading_defaults, with_legacy_optics_defaults, with_legacy_curve_defaults
     # Missing native serde-default crop fields are normalized only in the engine view.
     from raw_geometry import DEFAULT_CROP
     value.setdefault('crop', json.loads(json.dumps(DEFAULT_CROP)))
     value.setdefault('orientation', 'Normal')
     # Older Recipes predate Optics; normalize only the engine view so their stored receipts remain valid.
     value = with_legacy_grading_defaults(value)
-    return _object_json(with_legacy_optics_defaults(value), MAX_SETTINGS_BYTES)
+    return _object_json(with_legacy_curve_defaults(with_legacy_optics_defaults(value)), MAX_SETTINGS_BYTES)
 
 
 def _lens_profile_info_json(value):
@@ -1121,9 +1121,24 @@ class LightCraftRawSession:
         return await self._mutate(handle, 'develop.merge', {'settings': {'wb': expected['wb']}, 'label': 'White Balance'},
                                   expected_revision, verify=verify, check=check)
 
-    async def apply_history_operation(self, handle, kind, metadata, expected_revision):
+    async def apply_history_operation(self, handle, kind, metadata, expected_revision, *, curve_points=None):
         from raw_controls import (CONTROLS, CONTROL_PATHS, control_location, DETAIL_RESET_DEFAULTS,
-                                  HISTORY_FLAG_CONTROLS, validate_history_operation)
+                                  HISTORY_FLAG_CONTROLS, validate_history_operation, validate_curve_input)
+        if kind == "curve":
+            if type(metadata) is not dict or set(metadata) != {"channel"}:
+                raise LightCraftError("raw_invalid_request")
+            points = validate_curve_input(metadata["channel"], curve_points)
+            channel = metadata["channel"]
+            photo = self._photo(handle, active=True)
+            expected = json.loads(photo.settings_json)
+            expected["curve"][channel] = sorted(({"x": point[0], "y": point[1]} for point in points), key=lambda point: point["x"])
+            def check(actual):
+                if actual != expected:
+                    raise LightCraftError("raw_operation_readback_mismatch")
+            return await self._mutate(handle, "develop.curve", {"channel": channel, "points": points},
+                                     expected_revision, check=check)
+        if curve_points is not None:
+            raise LightCraftError("raw_invalid_request")
         validate_history_operation(kind, metadata)
         if kind in ('wbAuto', 'wbPick'):
             # WB must pass the separate read-only estimate/candidate fence before any mutation.
