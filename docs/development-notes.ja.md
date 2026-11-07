@@ -2262,3 +2262,7 @@ LightCraft v0.18.1／v0.19.0のNative契約とGenzoRoom既存History・Recipeへ
 # RAWポイントカーブ P3-B（2026-11-07）
 
 旧Recipeで`curve`全体が欠落する場合に限り、LightCraft v0.18.1の完全なToneCurve既定構造をエンジン用設定へ補完する。Recipe／History snapshot／receiptの保存内容は変更しない。明示されたCurveは4チャンネルの点配列・有限座標・必要なToneCurve数値項目を検証し、不正または部分構造を拒否する。`_restore()`のNative reset／merge／readback照合を再利用し、旧Recipeと全チャンネルを持つ新Recipeの復元、Preview、History Undo／Redo／Jumpへの影響を限定Backendテストで確認した。P3-CのExport照合とCurve UI未接続は未対応。Managed Native binaryでの個別probeは未実施。
+
+# RAWポイントカーブ P3-C（2026-11-07）
+
+RAW Exportは保存Recipeを既存Runtimeで凍結し、Curve専用処理を介さず`develop.merge`へ渡す。Export前後の既存`get_develop`比較では、旧Recipe向けreadback期待値にP3-Bの`with_legacy_curve_defaults()`を再利用する。4チャンネル、複数チャンネル、空Curve、Curve欠落RecipeのExport用Native経路を既存fixtureで確認した。保存Recipe／receipt、Queue、Retry、Registrarのコード変更なし。readback完全比較も既存動作のままで、Managed Nativeや実RAW Exportは未検証。LightCraftの将来の通常正規化や追加設定で既存比較が失敗する可能性が残る。P4 UI未接続。

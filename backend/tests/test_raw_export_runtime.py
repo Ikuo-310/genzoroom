@@ -192,6 +192,86 @@ def test_raw_unknown_baseline_is_not_eligible(db):
     raw.put_raw_recipe(identity(),0,uuid4(),settings())
     with pytest.raises(edit_store.QueueRejected):enqueue_export_assets([A])
 
+
+@pytest.mark.parametrize('curve_mode', ['legacy', 'multi_channel'])
+def test_raw_curve_export_keeps_saved_recipe_and_receipt_unchanged(db, tmp_path, curve_mode):
+    from pathlib import Path
+    from raw_controls import with_legacy_curve_defaults, with_legacy_grading_defaults
+    from raw_export_artifact import export_raw_artifact
+    from tests.test_raw_export_artifact import jpeg
+
+    saved = settings()
+    saved['light']['exposure'] = .7
+    if curve_mode == 'legacy':
+        saved.pop('curve')
+    else:
+        saved['curve']['master'] = [{'x': 0., 'y': .1}, {'x': 1., 'y': .9}]
+        saved['curve']['red'] = [{'x': .25, 'y': .4}]
+        saved['curve']['green'] = [{'x': .5, 'y': .6}]
+        saved['curve']['blue'] = []
+    defaults = settings()
+    saved_result = raw.put_raw_recipe(
+        identity(), 0, uuid4(), saved,
+        import_defaults_fingerprint=raw._digest(raw._settings_json(defaults, 1)),
+    )
+    enqueue_export_assets([A])
+    expected = with_legacy_curve_defaults(with_legacy_grading_defaults(copy.deepcopy(saved)))
+    forwarded, commands = [], []
+
+    def persisted_rows():
+        with edit_store._connection() as connection:
+            return tuple(connection.execute(f'SELECT * FROM {table}').fetchall()
+                         for table in ('asset_raw_recipes', 'raw_recipe_saves'))
+
+    before_rows = persisted_rows()
+
+    class Owned:
+        async def start(self): pass
+        def status(self):
+            from types import SimpleNamespace
+            return SimpleNamespace(state='ready')
+        def artifact_info(self): return {'verified': True}
+        def _ready_client(self): return self
+        async def close(self): pass
+        async def call_tool_result(self, name, args, **kwargs):
+            if name == 'command_run':
+                commands.append((args['id'], copy.deepcopy(args['params'])))
+                if args['id'] == 'photo.inspect':
+                    return {'structuredContent': {'content_hash': identity()['sourceContentHash']}}
+                if args['id'] == 'develop.merge':
+                    forwarded.append(copy.deepcopy(args['params']['settings']))
+            elif name == 'import':
+                return {'structuredContent': {'imported': [1]}}
+            elif name == 'get_develop':
+                return {'structuredContent': copy.deepcopy(expected)}
+            elif name == 'export':
+                Path(args['path']).write_bytes(jpeg())
+                return {'structuredContent': {'width': 32, 'height': 24}}
+            return {'structuredContent': {}}
+
+    class Manager:
+        _gpu_backend = 'dx12'
+        def diagnostic_manager(self, backend):
+            assert backend == 'dx12'
+            return Owned()
+
+    async def artifact(request):
+        return await export_raw_artifact(request, manager=Manager(), temp_root=tmp_path)
+
+    async def run():
+        runtime = ExportRuntime(source=MixedSource(), family=Family(), registrar=Recorder(), raw_artifact=artifact)
+        run_id = await runtime.start([A])
+        await runtime.wait()
+        return get_export_run(run_id)
+
+    result = asyncio.run(run())
+    assert result.items[0].status == 'succeeded'
+    assert forwarded == [saved]
+    assert ('develop.merge', {'settings': saved}) in commands
+    assert saved_result['recipe']['settings'] == saved
+    assert persisted_rows() == before_rows
+
+
 @pytest.mark.parametrize('favorite',[True,False])
 def test_raw_uses_existing_immich_registrar_with_album_stack_cover(db,favorite):
     import httpx

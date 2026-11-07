@@ -102,6 +102,8 @@ def test_isolated_session_cleanup(tmp_path, mode):
     if mode == 'legacy_grading':
         from tests.test_lightcraft_raw import DEFAULT
         native_settings['grading'] = copy.deepcopy(DEFAULT['grading'])
+    from raw_controls import with_legacy_curve_defaults, with_legacy_grading_defaults
+    native_settings = with_legacy_curve_defaults(with_legacy_grading_defaults(native_settings))
     events = []
     class Owned:
         async def start(self):
@@ -164,6 +166,80 @@ def test_isolated_session_cleanup(tmp_path, mode):
     assert not list(tmp_path.iterdir())
     assert settings == original_settings
     assert request.source == raw
+
+
+@pytest.mark.parametrize('curve_case', ['legacy', 'master', 'red', 'green', 'blue', 'multiple', 'identity'])
+def test_saved_curve_recipe_uses_existing_raw_export_native_path(tmp_path, curve_case):
+    from raw_export_artifact import RawExportInput, export_raw_artifact
+    from raw_controls import with_legacy_curve_defaults, with_legacy_grading_defaults
+    from tests.test_lightcraft_raw import DEFAULT
+
+    settings = copy.deepcopy(DEFAULT)
+    settings['process'] = 1
+    if curve_case == 'legacy':
+        settings.pop('curve')
+    elif curve_case == 'identity':
+        settings['curve'] = with_legacy_curve_defaults({})['curve']
+    else:
+        channels = ('master', 'red', 'green', 'blue')
+        for channel in channels:
+            settings['curve'][channel] = []
+        edited = channels if curve_case == 'multiple' else (curve_case,)
+        for index, channel in enumerate(edited, 1):
+            settings['curve'][channel] = [{'x': 0.0, 'y': index / 10}, {'x': 1.0, 'y': 1.0}]
+
+    original_settings = copy.deepcopy(settings)
+    expected = with_legacy_curve_defaults(with_legacy_grading_defaults(copy.deepcopy(settings)))
+    native_commands, native_calls, events = [], [], []
+
+    class Owned:
+        async def start(self):
+            events.append('start')
+        def status(self):
+            return SimpleNamespace(state='ready')
+        def artifact_info(self):
+            return {'verified': True}
+        def _ready_client(self):
+            return self
+        async def close(self):
+            events.append('close')
+        async def call_tool_result(self, name, args, **kwargs):
+            if name == 'command_run':
+                native_commands.append((args['id'], copy.deepcopy(args['params'])))
+                if args['id'] == 'develop.merge':
+                    native_calls.append(copy.deepcopy(args['params']['settings']))
+            elif name == 'import':
+                return {'structuredContent': {'imported': [1]}}
+            elif name == 'get_develop':
+                native_calls.append('readback')
+                return {'structuredContent': copy.deepcopy(expected)}
+            elif name == 'export':
+                native_calls.append('export')
+                Path(args['path']).write_bytes(jpeg())
+                return {'structuredContent': {'width': 32, 'height': 24}}
+            return {'structuredContent': {}}
+
+    class Manager:
+        _gpu_backend = 'dx12'
+        def diagnostic_manager(self, backend):
+            assert backend == 'dx12'
+            return Owned()
+
+    request = RawExportInput(source(), 'curve.dng', (), settings, datetime.now(timezone.utc))
+    result = asyncio.run(export_raw_artifact(request, manager=Manager(), temp_root=tmp_path))
+    assert result.jpeg.startswith(b'\xff\xd8')
+    assert native_calls[0] == settings
+    assert native_commands.count(('develop.reset', {'ids': [1]})) == 1
+    assert native_commands.count(('develop.merge', {'settings': settings})) == 1
+    assert native_calls.count('readback') == 2 and native_calls.count('export') == 1
+    assert events == ['start', 'close']
+    assert settings == original_settings
+    if curve_case == 'legacy':
+        assert 'curve' not in native_calls[0]
+        assert expected['curve'] == with_legacy_curve_defaults({})['curve']
+    else:
+        for channel in ('master', 'red', 'green', 'blue'):
+            assert native_calls[0]['curve'][channel] == expected['curve'][channel]
 
 
 @pytest.mark.parametrize('filename', ['photo.ARW', 'photo.PEF', 'photo.NEF', 'photo.CR2', 'photo.CR3', 'photo.unknown'])

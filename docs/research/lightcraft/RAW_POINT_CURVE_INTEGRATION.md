@@ -67,6 +67,12 @@ Pointer Downで開始配列・チャンネル・document ownerを固定する。
 
 パラメトリックカーブは全Phaseで対象外。ヒストグラム背景と写真上ターゲット調整はP1〜P6の範囲に含めず、後段へ保留する。
 
+## P3-C Export接続補足
+
+既存Export Runtimeは保存Recipeを凍結して`RawExportInput.settings`へ渡す。`raw_export_artifact.py`はその設定を編集せずNativeの`develop.merge`へ送り、readback期待値を作る際に既存`with_legacy_curve_defaults()`を適用するため、`curve`がない旧Recipeも同じv0.18.1既定構造で照合される。4チャンネルを含むRecipeと空ポイント配列も同じ経路を通る。Recipeやreceiptの保存更新、専用Curve Export処理はない。
+
+Export前後の`get_develop`完全設定比較は既存の境界検証であり、P3-Cでは強化・追加していない。これはピン留めされたNativeのreadbackが入力Recipeを通常どおり反映する契約を確認する既存動作で、LightCraft内部処理や画素出力の一致保証ではない。将来のNative正規化・追加設定でこの比較が失敗する可能性は実Managed Native binaryで別途確認が必要。今回のExport検証は既存fixtureによるもので、Managed Native、実RAWのJPEG生成、Immich実登録は未検証。
+
 ## 証拠の限界
 
 本調査はLightCraft上流ソース比較とGenzoRoomローカルコード読解に基づく。今回、Native実binary probe、Preview/Export実行、テスト、実Desktop操作は行っていない。上記の未完成差分課題は解決済みを意味しない。
