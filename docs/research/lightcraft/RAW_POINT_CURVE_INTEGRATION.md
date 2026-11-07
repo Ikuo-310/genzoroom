@@ -75,7 +75,7 @@ Export前後の`get_develop`完全設定比較は既存の境界検証であり�
 
 ## 証拠の限界
 
-P0のNative契約調査はLightCraft上流ソース比較とGenzoRoomローカルコード読解に基づく。P5-B.1もコード読解とv0.18.1ソース確認による設計調査であり、Native実binary probe、Preview/Export実行、性能測定、実Desktop操作は行っていない。以前に記録した未完成差分課題は解決済みを意味しない。
+P0のNative契約調査とP5-B.1のライブPreview設計は、その時点では上流ソース比較とGenzoRoomコード読解に基づく。L0では以下の範囲でmanaged v0.18.1 binaryのInteraction/Preview probeを実施した。実DNG、実Desktop操作、GenzoRoom Backendを通した競合・性能測定は未実施。以前に記録した未完成差分課題は解決済みを意味しない。
 
 ## P5-B.1 ライブPreview経路調査・設計（2026-11-07）
 
@@ -145,3 +145,63 @@ Native command update数はsessionの既存mutation-attempt/regeneration thresho
 - `develop.beginInteraction`/`endInteraction`/`cancelInteraction`のtransport結果不明時、Native Interactionが開いたままかどうかを推測しない。receiptの再送またはsession reset/reopenで確定させる。
 - `_preview_readback`の一時状態扱い、Native/Preview共通lockのwait、Native attempt threshold、Preview Full/Draft source/StageCache時間の組合せは、L1/L4 probeで実測する。
 - P5-CのReset、右クリック削除はこの設計調査に含めず、今回実装もしていない。パラメトリックカーブ、ヒストグラム、写真上ターゲット調整も引き続き対象外。
+
+## P5-B.1 L0 Managed Native Interaction実動作Probe・Backend境界監査（2026-11-07）
+
+### 実Native Probe
+
+Repository内のmanaged binary `.tmp/lightcraft-0.18.1/target-lens-profile-info/release/lightcraft-cli.exe`を起動し、MCP `initialize`の応答version `0.18.1`を確認した。binary SHA-256は`1A2006FE083EEB15FF7DC7D054183CF5405C68CDCA66C7A7BDC154D745871A3C`。テスト入力は`native/lightcraft/settings_export_probe.py::synthetic_dng()`が生成する128×96の無圧縮Bayer DNGで、一回限りのtemporary directoryに置いた。ユーザー写真、Immich、Recipe DBにはアクセスしていない。Probeは既存MCP toolを通し、Native sourceからの推定ではなく実行結果を記録した。
+
+使用した引数と応答は以下。MCP `command_run`は全て`"ok"`を返し、最後のprobeではNativeエラーはなかった。
+
+| 段階 | 実際のtool引数 | 結果 |
+|---|---|---|
+| 初期readback | `get_develop {"id":1}` | 初期`curve`は`master`/`red`/`green`/`blue`全て空。parametric値は`shadows=0`, `darks=0`, `lights=0`, `highlights=0`、split値は`25/50/75`、`refine_saturation=100`。 |
+| Native History baseline | `command_run {"id":"history.clear","params":{}}`の後、`command_run {"id":"history.list","params":{"id":1}}` | `ok`。`history=["Cleared History"]`, `cursor=0`, `versions=[]`。 |
+| 開始 | `command_run {"id":"develop.beginInteraction","params":{"label":"GenzoRoom curve probe cancel"}}` | `ok` |
+| 1回目の一時変更 | `command_run {"id":"develop.curve","params":{"channel":"master","points":[[0,0],[0.45,0.62],[1,1]]}}` | `ok`。続く`get_develop`は`curve.master=[{x:0,y:0},{x:0.45,y:0.62},{x:1,y:1}]`を返した。 |
+| 2回目の一時変更 | `command_run {"id":"develop.curve","params":{"channel":"master","points":[[0,0],[0.45,0.70],[0.72,0.82],[1,1]]}}` | `ok`。続く`get_develop`は最終4点を返し、`red`/`green`/`blue`は空、parametric値・split値・`refine_saturation`は初期readback値のまま。 |
+| Interaction中の画像 | `render_preview {"id":1,"max_side":128,"quality":"draft","preview_contract":1}` | 128×96 PNGが生成された。baseline PNG SHA-256 `0ca6a981e2d6c89301fcdd0874036d2a233b27ae2078db4cf8164cdf82ce0276`に対し、変更中は`bc629e6eb81a200b53fc9d5cc2d0154ef6990165de0bd2c3f7d0b04d52bad906`となり、画像bytesも6469から2979に変化。直後の`get_develop`はカーブ設定を維持した。Preview readbackで設定は変更されなかった。 |
+| Cancel | `command_run {"id":"develop.cancelInteraction","params":{}}` | `ok`。完全`develop.get`は開始時snapshotと一致し、Preview PNG SHA-256もbaselineと一致。 |
+| End側Interaction | `command_run {"id":"develop.beginInteraction","params":{"label":"GenzoRoom curve probe end"}}` → 上記2つの`develop.curve` → `command_run {"id":"develop.endInteraction","params":{}}` | 全て`ok`。1回目の変更後のInteraction中`history.list`はbaselineのまま。終了後readbackは2回目の最終配列を保持し、Native `history.list`は`["Cleared History","GenzoRoom curve probe end"]`, cursor `1`となり、最終的に1件だけ追加。 |
+| Native Undo/Redo | `command_run`で`history.previous`、`history.next` | 両方`ok`。Undo後は開始時カーブ、Redo後は終了後カーブにreadbackが戻った。 |
+
+fresh importのNative Historyは空で、初回probeでは`history.previous`が「at the first History step」と拒否された。これはInteraction失敗ではなくUndo可能なbaselineがないprobe fixture状態による。最終probeでは`history.clear`を一度実行して`["Cleared History"]`, cursor `0`のbaselineを作ってから取消・終了・Undo/Redoを確認した。`history.clear`は一時fixture内だけに作用した。
+
+実測ではNative Interaction中に1回目のカーブ変更をreadbackしてもHistoryは増えず、続く複数変更後のEndで最終的に1 stepだけが追加された。Cancelは完全に戻り、`render_preview`は変更中のNative設定を使う。従って、v0.18.1ではP5-B.1の「一時Native設定＋既存Draft Preview」案が実動作することを確認した。GenzoRoom側のAPI／History DBとの結合、競合時の動作、実RAWでの追従性能はこのprobeでは検証していない。
+
+### Backend同期・検証の責任分類
+
+参照した実装は`backend/lightcraft_raw.py`の`_photo`、`_commit`、`get_settings`、`_restore`、`_mutate`、`request_preview`、`_ticket_current`、`_preview_readback`、`apply_history_operation`、`backend/windows_raw_api.py`の`_confirmed`／`_history`、`backend/raw_recipe_store.py::_save_history`。
+
+| 分類 | 箇所・既存目的 | 監査結果 |
+|---|---|---|
+| A — GenzoRoom保証として維持 | `_photo(active=True)`のhandle/generation/document owner検査、`_ticket_current`のepoch/sequence、Previewのlatest-wins、document切替時のinvalid化 | 古いAsset/Documentや古い画像が現在の写真として採用されるのを防ぐ所有権境界。Interaction中も維持し、Interaction idとsequenceを追加で照合する。 |
+| A — GenzoRoom保証として維持 | `_mutate`のexpected revision確認、`requested_revision`予約、操作の直列化、Native結果不明時のdesynchronized/recovery、`MAX_EDITS`等の上限 | 確定操作の競合、二重適用、無制限Native呼出しを制御する。確定操作には残す。一方、Moveごとに`_mutate`を呼ぶとrevision予約・Preview invalidation・edit count・mutation Historyを消費するので使わない。interaction update数にも上限を設け、終了/Cancel/recovery用の余力を残す。 |
+| A — GenzoRoom保証として維持 | `windows_raw_api._history`と`raw_recipe_store._save_history`のrevision CAS、完全snapshot、saveId/request fingerprint/receipt、単一transaction | Native readbackを保存することと保存の冪等性を担う。receiptはDB書込Retryの二重Historyを防ぐが、それ単独ではNative commandを一度だけ実行した保証にはならない。Finalize状態も既存pending save段階に保持する。 |
+| A/D — 用途を限定して維持 | `_restore`の`develop.reset`＋`develop.merge`後に完全readbackを要求する処理 | Recipe/Historyの選択済み完全snapshotを復元できたかを確かめるGenzoRoomの永続化保証なので、Preview都合で撤廃しない。比較対象は保存snapshot全体であり、固定フィールド一覧ではない。将来Nativeが正規化を変えた時の比較意味はAPI互換probeで評価する。 |
+| B — 通常Previewには必要、一時Interactionには不適 | `request_preview`と`_ticket_current`の`applied_revision == requested_revision == ticket.revision` | 確定mutation中のAfter画像を古いrevisionで返さない通常PreviewのFence。Interaction中のworking settingsは意図的にbaseline revisionと異なるため、その状態を不整合として拒否するのは誤り。durable revisionとinteraction sequenceを分離したticket経路が必要。 |
+| B/C — 一時状態の確定取り込みには不適 | `_preview_readback`はPreview後の`develop.get`が`photo.settings_json`と異なると`_commit`してrevisionを進める。`get_settings`も差異を読むと`_invalidate`＋`_commit`する。`windows_raw_api._confirmed`はsnapshotをAPI documentのrevision/fingerprintとして更新する。 | `_commit`自体はRecipe DBへの書込みではなく、RAW sessionのin-memory `settings_json`/revision更新。Recipeは別の`put_raw_recipe`または`_history`→store transactionで保存する。通常のHistory `readback`段階はrevision/fingerprint差をconflictとして返し保存しない。ただしPreview readbackがInteraction中のworking stateを`_commit`するとGenzoのdurable ownerと一時状態が混ざり、後続APIのrevision fenceを壊す。Interaction ticketのreadbackはworking snapshotとしてのみ返し、`_commit`/`_confirmed`/Recipe保存へ流さない。 |
+| C — 過剰な操作後検証 | `apply_history_operation`の`curve`／`curveReset`は、Native `develop.get`全体が事前snapshotへ操作差分だけを適用した`expected`と完全一致することを`check(actual)`で要求。 | v0.18.1の公開`develop.curve`契約は対象channelの点配列を設定する。実probeでは要求が`ok`となり、readbackとPreviewに適用された。全Native設定の不変性をGenzoが毎回再証明する必要はなく、他設定の将来正規化や新フィールドを理由に失敗し得る。今後の関連修正ではrequest/readback shapeと成功を検証し、返った完全Native snapshotを保存する。Native内部の副作用検証を追加しない。 |
+| D — 実故障条件を見て判断 | `_preview_readback`を通常Previewで行う追加`develop.get`と、差異時のrevision更新 | v0.18.1 probeでは`render_preview`前後のworking readbackは一致し、Previewは設定を変えなかった。したがって正常なrender結果の確定にこのreadbackは不要。現行実装がPreview helperの部分失敗後に学習済み設定defaultを同期する場合も想定しているため、一括削除の根拠はまだない。L1ではInteraction中だけ別扱いにし、通常経路を外す場合はhelperによるNative設定変更という具体的故障を再現・確認してから判断する。 |
+| D — 上限の数え方は未確定 | `_mutate`の`_edits`はNative mutation試行を数え、rollbackにも数を加える。Interaction中の各`develop.curve`をここへ入れるとドラッグが多数の確定mutationとして消費される。 | セッション上限は撤廃しない。Interactionのbegin/update/end/cancelをどの既存上限単位へ算入するか、許可更新数とgesture寿命、上限到達時に終端できる予備枠をManaged runtimeで測ってL1前に決める。 |
+
+**Native readbackが異なるだけでRecipeへ自動保存される設計ではない。** `_commit`と`_confirmed`が更新するのは現在のRAW session/API document snapshotとそのrevision/fingerprintである。Recipe/Historyの永続化は専用のsave/history経路を通る。通常履歴operationの未適用readback差はrevision conflictとなり、DBへ書かれない。ただし、Interaction中のworking readbackを既存`get_settings`または`_preview_readback`に通せばin-memoryの確定snapshotへ昇格するため、その経路を一時操作で共有しない必要がある。
+
+### L1の最小変更方針
+
+1. `LightCraftRawSession`に**単一のactive curve interaction owner**を保持する。ownerは既存`RawHandle`、generation/document token、開始`applied_revision`、channel、baseline Native settings、monotonic interaction sequence、状態（open/finalizing/canceling/saved）を持つ。別photo選択・mutation・Export開始は同じNative sessionで交錯させない。v0.18.1の`Session::begin_interaction`はすでにInteractionがあれば暗黙に先に終了するため、このowner fenceは必須。
+2. durable `photo.settings_json`、`applied_revision`、`requested_revision`、Frontend recipe fingerprintは開始値のまま保持する。Native `develop.get`/Preview結果はownerとsequenceに対応する一時working stateとして扱い、`_commit`や`_confirmed`へ通さない。Preview ticketは保存revisionとは別のinteraction id/sequenceを持つが、既存handle/document/generation/view ownerとlatest-wins/cancel判定はそのまま使う。
+3. Previewのreadbackは、Interaction中ならNative working settingsの応答shapeとPreview ownerだけを確認し、その値をdurable revisionやHistoryへ採用しない。通常Previewの`_preview_readback`完全比較・revision bumpは別途必要性が実証されるまでinteraction外で維持してよい。interaction modeでもRecipe保存やExportにworking snapshotを渡さない。
+4. Pointer MoveはNative `develop.curve`を全イベント分送らず、一つのin-flightと一つのlatest pending updateに限定する。Preview workerも既存の一running/一latest pendingを再利用し、Native lock/selection所有者を直列化する。古い画像は既存document/view generationにinteraction id/sequence一致を追加して破棄する。native render自体をcancelできると仮定しない。
+5. Pointer Upでは最新配列をdrainして`develop.endInteraction`し、Native readbackで最終完全snapshotを取得する。既存`windows_raw_api._history`のpending/saveIdと`raw_recipe_store._save_history`のtransactionを利用し、operation metadataを`curve`/channelとして一つだけappendする。Finalize分岐はすでに適用されたカーブに対して`apply_history_operation`の`develop.curve`を再実行しない。saveIdの同一Retryはstore receiptを返し、Native再操作なしで完了する。
+6. Cancel/Escapeは未送信latestを捨て、Native更新中要求をsettleした後`develop.cancelInteraction`を送り、readbackでbaselineへ戻ったことを確認する。一時Previewを無効化して開始時Previewへ戻すが、durable revision/Recipe/Historyは変更しない。Cancelのtransport結果が不明、readbackがbaselineと異なる、owner/lifecycleが切れた場合はそのNative sessionをsyncedと扱わず、既存のsession resetと保存済みRecipe/History復元へ送る。操作を推測で再適用しない。
+
+残す境界はAsset/Document owner、latest/stale Preview破棄、永続History/Recipe CASとreceipt、Exportの保存Recipe snapshot、Native結果不明時のRecovery、資源/更新回数上限。緩和候補はCurve操作時の全設定完全一致検証、および一時Preview readbackをdurable `_commit`へ結び付ける挙動に限る。既存の復元snapshot一致検証を一括撤廃したり、LightCraftアルゴリズムをGenzoRoomで再現したりしない。
+
+### 残るリスクと未検証事項
+
+- ProbeはManaged Native binaryと合成DNGで成功したが、実カメラDNG、実Desktopのtexture更新、GPU経路、長時間ドラッグ性能は未検証。
+- GenzoRoom Backendを通した一時状態・履歴receipt・Preview ticketの競合は未実装/未検証。L0はNative機能の実証であり、L1 completionではない。
+- Native sessionのTransport応答不明、同時document切替、Preview render中のcancel、Native edit上限到達時の具体的なrecoveryは今後のBackend限定試験が必要。
+- 今回は`backend/`、Frontend、Native patch、Recipe/History schemaを変更していない。P5-CとライブPreview本番実装にも着手していない。
