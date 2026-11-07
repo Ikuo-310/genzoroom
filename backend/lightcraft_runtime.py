@@ -555,7 +555,8 @@ class LightCraftManager:
     async def _raw_command(self, generation, command, params, *, timeout):
         if command not in {"library.import", "library.select", "photo.inspect", "photo.lensProfileInfo", "develop.get", "develop.set",
                            "develop.merge", "develop.reset", "develop.sectionEnabled", "develop.resetControl",
-                           "develop.resetSection", "develop.wb", "develop.curve", "curve.reset", "beforeAfter.setBefore", "app.memoryBudget", "library.memory",
+                           "develop.resetSection", "develop.wb", "develop.curve", "curve.reset", "develop.beginInteraction",
+                           "develop.endInteraction", "develop.cancelInteraction", "beforeAfter.setBefore", "app.memoryBudget", "library.memory",
                            "library.refreshLensProfiles", "lens.downloadDatabase", "lens.databaseStatus",
                            "crop.set", "crop.drag", "crop.aspect", "crop.rotateAspect", "crop.reset", "crop.straighten",
                            "photo.rotateLeft", "photo.rotateRight", "photo.flipHorizontal", "photo.flipVertical"}:

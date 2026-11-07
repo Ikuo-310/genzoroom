@@ -202,6 +202,36 @@ fresh importのNative Historyは空で、初回probeでは`history.previous`が�
 ### 残るリスクと未検証事項
 
 - ProbeはManaged Native binaryと合成DNGで成功したが、実カメラDNG、実Desktopのtexture更新、GPU経路、長時間ドラッグ性能は未検証。
-- GenzoRoom Backendを通した一時状態・履歴receipt・Preview ticketの競合は未実装/未検証。L0はNative機能の実証であり、L1 completionではない。
-- Native sessionのTransport応答不明、同時document切替、Preview render中のcancel、Native edit上限到達時の具体的なrecoveryは今後のBackend限定試験が必要。
-- 今回は`backend/`、Frontend、Native patch、Recipe/History schemaを変更していない。P5-CとライブPreview本番実装にも着手していない。
+- Native sessionのTransport応答不明、同時document切替、Preview render中のcancel、Native edit上限到達時の具体的なrecoveryはL1限定試験とreset経路で確認した。実Desktop・長時間操作は未検証。
+- L0では`backend/`、Frontend、Native patch、Recipe/History schemaを変更していない。以降のL1実装状況は次節に記録する。P5-Cには着手していない。
+
+## P5-B.1 / L1 Backend一時Curve Interaction（2026-11-07）
+
+### 実装範囲
+
+`backend/lightcraft_raw.py`にSessionごとの単一Curve Interaction ownerを追加し、`backend/lightcraft_runtime.py`のRAW command allowlistへ`develop.beginInteraction`／`develop.endInteraction`／`develop.cancelInteraction`を加えた。Native契約と現像処理、Frontend、Windows API endpoint、Recipe／History DB schemaは変更していない。L1の呼び出し境界は`LightCraftRawSession`内部であり、UI/APIへはまだ公開されていない。
+
+Beginではactive handle、document token、Native generation、確定revisionと保存済みbaselineを確認し、成功後にのみownerをopenにする。Begin中は写真切替、通常Preview、通常mutation、History復元、別Interactionを拒否する。`photo.settings_json`、`applied_revision`、`requested_revision`とDBはInteraction中に変更しない。
+
+UpdateはP1/P2の`validate_curve_input()`を再利用し、対象channelの全点配列をNative `develop.curve`へ送る。Native更新は1件だけin-flightとし、未送信pendingは最新1件へ置換する。成功したNative `develop.get`は一時`working_settings_json`として保持し、durable snapshotやrevisionへcommitしない。Native sessionの既存`MAX_EDITS=256`に対し、Interaction updateは最大128回、開始から最大120秒とし、beginとend/cancel用のcommand枠を残す。上限到達後もend/cancel可能なようにする。
+
+一時Previewは既存worker、Native lock、draft品質、latest-wins slotを再利用する。ticketにInteraction IDとsequenceを持たせ、baseline revision・handle・generationに加えて現在の最新/applied sequenceを照合する。古いPreviewは採用しない。Interaction Preview後のreadbackはCurve形式を確認してworking stateにだけ記録し、`_preview_readback`から`_commit`を呼ばない。通常Previewの既存revision fenceとreadback経路は変更していない。
+
+Cancelはpending更新を破棄し、実行中のNative更新／Previewをowner sequenceで無効化してsettleした後に`develop.cancelInteraction`を呼び、Native readbackが開始時snapshotへ戻ったことを確認する。durable snapshot、revision、History／Recipeは変わらない。Endはpendingを最終点で置換し、readback済みの同じ最終配列を重ねて送らずに`develop.endInteraction`を呼ぶ。最終Native snapshotとbaseline revisionを返し、ownerを`finalized`として保持する。これはHistory DB未接続のL1では通常操作を再開しない安全境界である。上位の永続History保存が成功した後に限り`confirm_curve_interaction()`で確定snapshotへ昇格する想定。保存失敗・End結果不明時はownerを解放せず、既存session reset/reimportで保存済みbaselineへ戻す。
+
+Mutation transport失敗、適用後readback失敗、またはNative結果不明のtimeoutではInteractionをfailed/unknownかつsession desynchronizedとして扱い、通常操作へ戻さない。明確なNative command rejectionは、Interactionが開いたままならretry/cancel可能な状態を保つ。reset／closeではpending要求とworkerをsettleしてownerを破棄する。
+
+P2 `curve`／`curveReset`操作にあった、Nativeの全設定がGenzoRoomの予測snapshotと完全一致することを要求する検証を除去した。入力のチャンネル・点配列検証、Native操作成否、readback形式、通常mutationのrevision／Recoveryは維持する。Nativeが返す完全readbackを通常の確定操作のsnapshotとして保存する既存方針に従う。Recipe／History復元の完全snapshot照合や一般RAW操作の検証はこの変更では緩和していない。
+
+### 検証結果と範囲
+
+Backend `tests/test_lightcraft_raw.py` は65件成功。新規InteractionケースでBegin失敗・二重Begin、owner/revision拒否、mutation／select fence、一時readbackの非commit、Preview ticketのID/sequence、最新pending置換、Endの最終点適用と二重適用防止、Cancel baseline復帰、Preview rejection後のEnd、Transport失敗後のreset、close時のowner cleanupを確認した。Curve ResetについてはNative readbackを信頼し、未公開設定の完全一致をGenzoRoomが予測しないことを既存fixtureで確認した。Runtime command-generation fenceを含む合計66件が成功。
+
+managed v0.18.1 binaryを使う統合probeも、合成128×96 Bayer DNGと一時ディレクトリで実施。GenzoRoom Backendを経由したBegin→master Update→draft Preview（1024×768 PNG）→End→次Interaction Cancelが成功した。baselineとworking curveのDraft Preview bytesが異なり、Update中の`photo.settings_json`と確定revisionはbaselineを維持した。End後はreadbackしたmaster点の`y=0.72`を確認し、CancelはそのEnd済みbaselineへ復帰した。Recipe／History DBを呼び出さず、ユーザー写真・Immichにもアクセスしていない。
+
+### 未接続・残る制約
+
+- `windows_raw_api.py`のendpoint、上位History DB saveId/receiptとの確定連携、Frontendドラッグからの接続はL1に含めず未実装。`confirm_curve_interaction()`はその上位保存後のsession昇格境界として用意しただけで、DBとの原子性は未検証。
+- End後は`finalized` ownerを維持して通常操作を拒否する。上位History保存とconfirm、またはsession reset/reimportを接続するまでUIから利用できない。
+- 実probeは合成DNGのみ。実カメラRAW、実Desktop応答性、Preview遅延時の連続cancel、長時間・上限到達時の操作感は未検証。
+- P5-C Reset／右クリック削除、Frontend、Native patch、Recipe／History schema変更は行っていない。

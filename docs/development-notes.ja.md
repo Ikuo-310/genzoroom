@@ -2286,3 +2286,9 @@ RAW調整パネルのカラーグレーディングとエフェクトの間に�
 # RAWポイントカーブ P5-B（2026-11-07）
 
 P4-Cの`onDragCommit`をP5-Aと共通の`curve` History操作へ接続した。変更ありのPointer Upのみ最終配列を1回送信し、MoveはローカルSVGだけ更新する。Cancel／Escape／変更なし、文書切替・チャンネル切替では確定しない。既存busy lock、Native readback、Preview更新、History Retry／Recovery経路を維持する。Resetと右クリック削除（P5-C）は未実装。
+
+# RAWポイントカーブ P5-B.1 / L1（2026-11-07）
+
+Backend内部に単一Curve Interaction owner、`develop.beginInteraction`／`develop.curve`／`develop.cancelInteraction`／`develop.endInteraction`の一時状態管理を追加した。Updateはin-flight 1件＋最新pending 1件に集約し、上限128回・120秒を設定。Draft Previewは既存workerとlatest-wins判定を使い、readbackをworking stateに保持して確定snapshot／revisionへcommitしない。Cancelはbaseline復帰をreadbackし、EndはNativeの最終snapshotを返して上位History保存までownerをfinalized状態で保持する。RuntimeのRAW command allowlistにも3つのInteraction commandを追加した。P2 Curve操作の予測snapshot完全一致検証は関連範囲だけ外し、入力・readback形式、owner、revision、Recoveryは維持。
+
+`tests/test_lightcraft_raw.py` 65件とRuntime command-generation fence 1件が成功。managed v0.18.1 binaryと合成DNGのBackend経由probeでもBegin／Update／Draft Preview／End／Cancelが成功し、Update中に確定snapshotとrevisionが変わらないことを確認した。Windows API・Frontend接続、History DB saveId/receiptとのEnd確定接続は未実装で、End後はHistory保存後のconfirmまたはsession resetまで通常操作を止める。実カメラRAWと実Desktop応答性は未検証。詳細は[RAWポイントカーブ統合調査](research/lightcraft/RAW_POINT_CURVE_INTEGRATION.md)を参照。

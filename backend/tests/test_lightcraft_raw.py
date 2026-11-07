@@ -114,6 +114,9 @@ class RawProcess(FakeProcess):
         self.preview_arguments = []
         self.preview_error_code = None
         self.curve_reset_mismatch = False
+        self.interaction = None
+        self.interaction_history = []
+        self.curve_updates = []
 
     def tool(self, message, value=None, error=False):
         result = {"isError": error, "content": [{"type": "text", "text": "PRIVATE C:/photo.raw API_KEY secret"}]}
@@ -221,6 +224,24 @@ class RawProcess(FakeProcess):
             if self.fail_get:
                 return self.tool(message, error=True)
             value = self.photos[params["id"]]["settings"]
+        elif command == "develop.beginInteraction":
+            if self.interaction is not None:
+                return self.tool(message, error=True)
+            self.interaction = copy.deepcopy(self.photos[self.active]["settings"])
+            value = {"ok": True}
+        elif command == "develop.endInteraction":
+            if self.interaction is None:
+                return self.tool(message, error=True)
+            if self.photos[self.active]["settings"] != self.interaction:
+                self.interaction_history.append(copy.deepcopy(self.photos[self.active]["settings"]))
+            self.interaction = None
+            value = {"ok": True}
+        elif command == "develop.cancelInteraction":
+            if self.interaction is None:
+                return self.tool(message, error=True)
+            self.photos[self.active]["settings"] = self.interaction
+            self.interaction = None
+            value = {"ok": True}
         elif command == "develop.reset":
             self.photos[self.active]["settings"] = copy.deepcopy(DEFAULT)
             value = {"ok": True}
@@ -269,6 +290,7 @@ class RawProcess(FakeProcess):
             settings["curve"][params["channel"]] = [
                 {"x": float(point[0]), "y": float(point[1])} for point in params["points"]
             ]
+            self.curve_updates.append(copy.deepcopy(params))
             value = {"ok": True}
         elif command == "curve.reset":
             curve = self.photos[self.active]["settings"]["curve"]
@@ -317,7 +339,7 @@ class RawProcess(FakeProcess):
         super().exit(code)
 
 
-async def create(tmp_path, *, timeouts=QUICK):
+async def create(tmp_path, *, timeouts=QUICK, adaptive=False):
     exe = tmp_path / "engine.exe"
     exe.write_bytes(b"fake")
     # RAW fixtures attest their exact synthetic executable, like a managed production process.
@@ -331,6 +353,7 @@ async def create(tmp_path, *, timeouts=QUICK):
 
     async def spawn(*args, **kwargs):
         child = RawProcess()
+        child.adaptive_supported = adaptive
         children.append(child)
         return child
 
@@ -403,7 +426,7 @@ def test_reset_twice_without_readback_keeps_restored_settings(tmp_path):
     asyncio.run(run())
 
 
-def test_curve_reset_readback_mismatch_is_not_confirmed(tmp_path):
+def test_curve_reset_trusts_native_readback_without_full_snapshot_prediction(tmp_path):
     async def run():
         raw, manager, children, files = await create(tmp_path)
         try:
@@ -412,10 +435,218 @@ def test_curve_reset_readback_mismatch_is_not_confirmed(tmp_path):
                 curve_points=[[0, 0], [1, 1]])
             child = children[0]
             child.curve_reset_mismatch = True
-            with pytest.raises(LightCraftError, match="raw_operation_readback_mismatch"):
-                await raw.apply_history_operation(handle, "curveReset", {"channel": "red"}, edited.revision)
-            assert raw._photos["pixel"].settings_json == _settings_json(edited.settings)
-            assert raw.status().state == "desynchronized"
+            reset = await raw.apply_history_operation(handle, "curveReset", {"channel": "red"}, edited.revision)
+            assert reset.settings["curve"]["red"] == []
+            assert reset.settings["curve"]["refine_saturation"] == 99.
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+def test_curve_interaction_update_preview_cancel_and_finalize(tmp_path, monkeypatch):
+    async def run():
+        raw, manager, children, files = await create(tmp_path, adaptive=True)
+        try:
+            handle, baseline = await raw.open_raw("pixel", files[0])
+            other, _ = await raw.open_raw("other", files[1])
+            await raw.select(handle)
+            child = children[0]
+            commits = []
+            original_commit = raw._commit
+            monkeypatch.setattr(raw, "_commit", lambda *args, **kwargs: (commits.append(True),
+                original_commit(*args, **kwargs))[1])
+
+            interaction_id = await raw.begin_curve_interaction(handle, "master", baseline.revision)
+            assert child.interaction is not None
+            assert raw._photos["pixel"].settings_json == _settings_json(baseline.settings)
+            assert raw._photos["pixel"].applied_revision == raw._photos["pixel"].requested_revision == baseline.revision
+            with pytest.raises(LightCraftError, match="raw_curve_interaction_pending"):
+                await raw.begin_curve_interaction(handle, "red", baseline.revision)
+            with pytest.raises(LightCraftError, match="raw_curve_interaction_pending"):
+                await raw.set_controls(handle, {"light.exposure": 1}, baseline.revision)
+            with pytest.raises(LightCraftError, match="raw_curve_interaction_pending"):
+                await raw.select(other)
+            with pytest.raises(LightCraftError, match="raw_curve_interaction_stale"):
+                await raw.update_curve_interaction(other, interaction_id, baseline.revision, [[0, 0], [1, 1]])
+            with pytest.raises(LightCraftError, match="raw_revision_conflict"):
+                await raw.update_curve_interaction(handle, interaction_id, baseline.revision + 1, [[0, 0], [1, 1]])
+            with pytest.raises(LightCraftError):
+                raw.request_preview(handle, baseline.revision)
+
+            points = [[0, 0], [.5, .8], [1, 1]]
+            update = await raw.update_curve_interaction(handle, interaction_id, baseline.revision, points)
+            assert update.applied and update.settings["curve"]["master"] == [
+                {"x": 0, "y": 0}, {"x": .5, "y": .8}, {"x": 1, "y": 1}]
+            frame = await update.preview_ticket
+            assert isinstance(frame, PreviewFrame)
+            assert frame.interaction_id == interaction_id and frame.interaction_sequence == update.sequence
+            assert frame.revision == baseline.revision
+            assert raw._photos["pixel"].settings_json == _settings_json(baseline.settings)
+            assert raw._photos["pixel"].applied_revision == baseline.revision
+            assert commits == []
+
+            result = await raw.end_curve_interaction(handle, interaction_id, baseline.revision, points)
+            assert result.settings["curve"]["master"] == update.settings["curve"]["master"]
+            assert [entry[0] for entry in child.commands].count("develop.curve") == 1
+            assert child.interaction is None and len(child.interaction_history) == 1
+            assert raw._photos["pixel"].settings_json == _settings_json(baseline.settings)
+            with pytest.raises(LightCraftError, match="raw_curve_interaction_pending"):
+                await raw.set_controls(handle, {"light.exposure": 1}, baseline.revision)
+            committed = raw.confirm_curve_interaction(handle, interaction_id, baseline.revision)
+            assert committed.settings == result.settings and committed.revision > baseline.revision
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+def test_curve_interaction_coalesces_pending_updates_and_cancel_restores_baseline(tmp_path):
+    async def run():
+        raw, manager, children, files = await create(tmp_path, adaptive=True)
+        try:
+            handle, baseline = await raw.open_raw("pixel", files[0])
+            child = children[0]
+            interaction_id = await raw.begin_curve_interaction(handle, "blue", baseline.revision)
+            started, release = asyncio.Event(), asyncio.Event()
+            original = manager._raw_command
+            first = True
+
+            async def delayed(generation, command, params, *, timeout=None):
+                nonlocal first
+                if command == "develop.curve" and first:
+                    first = False
+                    started.set()
+                    await release.wait()
+                return await original(generation, command, params, timeout=timeout)
+
+            manager._raw_command = delayed
+            p1, p2, p3 = ([[0, 0], [.3, .2], [1, 1]], [[0, 0], [.4, .4], [1, 1]], [[0, 0], [.7, .9], [1, 1]])
+            t1 = asyncio.create_task(raw.update_curve_interaction(handle, interaction_id, baseline.revision, p1))
+            await asyncio.wait_for(started.wait(), 1)
+            t2 = asyncio.create_task(raw.update_curve_interaction(handle, interaction_id, baseline.revision, p2))
+            t3 = asyncio.create_task(raw.update_curve_interaction(handle, interaction_id, baseline.revision, p3))
+            await asyncio.sleep(0)
+            release.set()
+            r1, r2, r3 = await asyncio.gather(t1, t2, t3)
+            assert r1 is SUPERSEDED and r2 is SUPERSEDED
+            assert r3.applied and r3.settings["curve"]["blue"][1]["y"] == .9
+            assert [entry["points"] for entry in child.curve_updates] == [p1, p3]
+            await r3.preview_ticket
+            final_points = [[0, 0], [.8, .7], [1, 1]]
+            await raw.end_curve_interaction(handle, interaction_id, baseline.revision, final_points)
+            assert [entry["points"] for entry in child.curve_updates] == [p1, p3, final_points]
+
+            # A second interaction exercises cancel and leaves the durable baseline untouched.
+            current = raw._photos["pixel"]
+            # The finalized owner deliberately fences operations until the history owner confirms it.
+            raw.confirm_curve_interaction(handle, interaction_id, baseline.revision)
+            next_revision = current.applied_revision
+            before = current.settings_json
+            second_id = await raw.begin_curve_interaction(handle, "green", next_revision)
+            await raw.update_curve_interaction(handle, second_id, next_revision, [[0, 0], [.5, .1], [1, 1]])
+            restored = await raw.cancel_curve_interaction(handle, second_id, next_revision)
+            assert restored.settings == json.loads(before)
+            assert current.settings_json == before and current.applied_revision == next_revision
+            assert child.interaction is None
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+def test_curve_interaction_discards_preview_from_superseded_sequence(tmp_path):
+    async def run():
+        raw, manager, children, files = await create(tmp_path, adaptive=True)
+        try:
+            handle, baseline = await raw.open_raw("pixel", files[0])
+            child = children[0]
+            interaction_id = await raw.begin_curve_interaction(handle, "master", baseline.revision)
+            child.gate = asyncio.Event()
+            first = await raw.update_curve_interaction(handle, interaction_id, baseline.revision,
+                                                       [[0, 0], [.4, .3], [1, 1]])
+            await asyncio.wait_for(child.render_started.wait(), 2)
+            second_task = asyncio.create_task(raw.update_curve_interaction(handle, interaction_id,
+                baseline.revision, [[0, 0], [.65, .85], [1, 1]]))
+            await asyncio.sleep(0)
+            child.gate.set()
+            second = await asyncio.wait_for(second_task, 3)
+            assert (await first.preview_ticket) is SUPERSEDED
+            final_frame = await second.preview_ticket
+            assert isinstance(final_frame, PreviewFrame)
+            assert final_frame.interaction_sequence == second.sequence
+            assert first.preview_ticket.interaction_sequence < final_frame.interaction_sequence
+            assert raw._photos["pixel"].applied_revision == baseline.revision
+            await raw.cancel_curve_interaction(handle, interaction_id, baseline.revision)
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+def test_curve_interaction_begin_failure_preview_failure_and_close_cleanup(tmp_path):
+    async def run():
+        raw, manager, children, files = await create(tmp_path, adaptive=True)
+        try:
+            handle, baseline = await raw.open_raw("pixel", files[0])
+            child = children[0]
+            child.fail_commands.add("develop.beginInteraction")
+            with pytest.raises(LightCraftError):
+                await raw.begin_curve_interaction(handle, "red", baseline.revision)
+            assert raw._curve_interaction.state == "cancelled"
+            child.fail_commands.clear()
+
+            rejected_id = await raw.begin_curve_interaction(handle, "red", baseline.revision)
+            child.fail_commands.add("develop.curve")
+            with pytest.raises(LightCraftError):
+                await raw.update_curve_interaction(handle, rejected_id, baseline.revision,
+                                                   [[0, 0], [.5, .55], [1, 1]])
+            assert raw._curve_interaction.state == "open"
+            child.fail_commands.clear()
+            await raw.cancel_curve_interaction(handle, rejected_id, baseline.revision)
+
+            interaction_id = await raw.begin_curve_interaction(handle, "red", baseline.revision)
+            child.preview_error_code = "preview_rejected"
+            points = [[0, 0], [.5, .6], [1, 1]]
+            update = await raw.update_curve_interaction(handle, interaction_id, baseline.revision, points)
+            with pytest.raises(LightCraftError):
+                await update.preview_ticket
+            child.preview_error_code = None
+            result = await raw.end_curve_interaction(handle, interaction_id, baseline.revision, points)
+            assert result.settings["curve"]["red"][1]["y"] == .6
+            assert raw._photos["pixel"].applied_revision == baseline.revision
+            raw.confirm_curve_interaction(handle, interaction_id, baseline.revision)
+
+            confirmed_revision = raw._photos["pixel"].applied_revision
+            pending_id = await raw.begin_curve_interaction(handle, "green", confirmed_revision)
+            await raw.close()
+            assert raw._curve_interaction is None
+            assert pending_id
+        finally:
+            if not raw._stop.is_set():
+                await raw.close()
+    asyncio.run(run())
+
+
+def test_curve_interaction_transport_failure_and_reset_release_owner(tmp_path):
+    async def run():
+        raw, manager, children, files = await create(tmp_path, adaptive=True)
+        try:
+            handle, baseline = await raw.open_raw("pixel", files[0])
+            interaction_id = await raw.begin_curve_interaction(handle, "green", baseline.revision)
+            original = manager._raw_command
+
+            async def broken(generation, command, params, *, timeout=None):
+                if command == "develop.curve":
+                    raise MCPTransportError("native_result_unknown")
+                return await original(generation, command, params, timeout=timeout)
+
+            manager._raw_command = broken
+            with pytest.raises(MCPTransportError):
+                await raw.update_curve_interaction(handle, interaction_id, baseline.revision,
+                                                   [[0, 0], [.5, .7], [1, 1]])
+            assert raw._curve_interaction.state == "failed"
+            assert raw._photos["pixel"].settings_json == _settings_json(baseline.settings)
+            manager._raw_command = original
+            refreshed = await raw.reset_session()
+            assert refreshed is not None and raw._curve_interaction is None
+            assert raw._photos["pixel"].settings_json == _settings_json(baseline.settings)
         finally:
             await raw.close()
     asyncio.run(run())

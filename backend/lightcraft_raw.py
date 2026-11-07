@@ -35,6 +35,9 @@ MAX_SETTINGS_BYTES = 256 * 1024
 MAX_RAW_FILES = 2
 MAX_EDITS = 256
 MAX_PREVIEW_SIDE = 2048
+# Leave one Native command slot for opening and one for closing/canceling an interaction.
+MAX_CURVE_INTERACTION_UPDATES = 128
+MAX_CURVE_INTERACTION_SECONDS = 120
 # Legacy bootstrap and document Before identity must not change with the advertised ceiling.
 DEFAULT_PREVIEW_SIDE = 1024
 
@@ -95,6 +98,8 @@ class PreviewFrame:
     _frame_json: str | None = field(default=None, repr=False)
     _metrics_json: str | None = field(default=None, repr=False)
     _crop_json: str | None = field(default=None, repr=False)
+    interaction_id: str | None = None
+    interaction_sequence: int | None = None
 
     @property
     def crop_display(self):
@@ -123,6 +128,61 @@ class RegionResult:
     @property
     def metadata(self):
         return json.loads(self._metadata)
+
+
+@dataclass(frozen=True)
+class CurveInteractionUpdate:
+    interaction_id: str
+    sequence: int
+    applied: bool
+    _settings_json: str | None = field(default=None, repr=False)
+    preview_ticket: object | None = field(default=None, repr=False)
+
+    @property
+    def settings(self):
+        return json.loads(self._settings_json) if self._settings_json is not None else None
+
+
+@dataclass(frozen=True)
+class CurveInteractionResult:
+    handle: RawHandle
+    interaction_id: str
+    baseline_revision: int
+    channel: str
+    _settings_json: str = field(repr=False)
+
+    @property
+    def settings(self):
+        return json.loads(self._settings_json)
+
+
+@dataclass
+class _CurveUpdateRequest:
+    sequence: int
+    points: list
+    future: asyncio.Future
+
+
+@dataclass
+class _CurveInteraction:
+    handle: RawHandle
+    interaction_id: str
+    baseline_revision: int
+    channel: str
+    baseline_settings_json: str
+    working_settings_json: str
+    started_at: float
+    update_limit: int
+    state: str = "opening"
+    latest_sequence: int = 0
+    applied_sequence: int = 0
+    working_points: list | None = None
+    update_attempts: int = 0
+    pending: _CurveUpdateRequest | None = None
+    update_task: asyncio.Task | None = None
+    final_points: list | None = None
+    final_result: CurveInteractionResult | None = None
+    committed_snapshot: DevelopSnapshot | None = None
 
 
 SUPERSEDED = Superseded()
@@ -172,6 +232,8 @@ class PreviewTicket:
         self.region_operation = None
         self.region_target = None
         self.region_document_token = None
+        self.interaction_id = None
+        self.interaction_sequence = None
         self.reason = "replaced"
         self._future = asyncio.get_running_loop().create_future()
         self._future.add_done_callback(lambda f: None if f.cancelled() else f.exception())
@@ -473,6 +535,8 @@ class LightCraftRawSession:
         self.manager = manager
         self._timeouts = timeouts or RawTimeouts()
         self._lock = asyncio.Lock()
+        self._curve_state_lock = asyncio.Lock()
+        self._curve_interaction = None
         self._control_reservations = 0
         self._control_idle = asyncio.Event()
         self._control_idle.set()
@@ -542,6 +606,10 @@ class LightCraftRawSession:
         if self._generation is not None and (status.generation != self._generation or status.state != "ready"):
             self._lost = True
             self._discard_pending("raw_session_lost")
+            interaction = self._curve_interaction
+            if interaction is not None and interaction.state not in ("cancelled", "confirmed"):
+                interaction.state = "failed"
+                self._fail_curve_pending(interaction, "raw_session_lost")
         return status
 
     def status(self):
@@ -584,6 +652,22 @@ class LightCraftRawSession:
         if photo.sync != "synced" and not allow_desync:
             raise LightCraftError("raw_desynchronized")
         return photo
+
+    def _ensure_curve_interaction_owner(self, interaction_id=None):
+        interaction = self._curve_interaction
+        if interaction is None:
+            return None
+        if interaction.state in ("cancelled", "confirmed"):
+            if interaction_id is None:
+                return None
+            if interaction_id != interaction.interaction_id:
+                raise LightCraftError("raw_curve_interaction_stale")
+            return interaction
+        if interaction_id != interaction.interaction_id:
+            raise LightCraftError("raw_curve_interaction_pending")
+        if interaction.state in ("failed", "unknown"):
+            raise LightCraftError("raw_session_desynchronized")
+        return interaction
 
     def _snapshot(self, photo):
         return DevelopSnapshot(photo.handle, photo.applied_revision, photo.settings_json,
@@ -669,8 +753,9 @@ class LightCraftRawSession:
             stop.cancel()
             await asyncio.gather(stop, return_exceptions=True)
 
-    async def _submit(self, action, timeout):
+    async def _submit(self, action, timeout, *, interaction_id=None):
         self._available(allow_desync=True)
+        self._ensure_curve_interaction_owner(interaction_id)
         if sum(not t.done() for t in self._operations) >= 2:
             raise LightCraftError("raw_busy")
 
@@ -682,6 +767,7 @@ class LightCraftRawSession:
                     await self._lock.acquire()
                 acquired = True
                 self._available(allow_desync=True)
+                self._ensure_curve_interaction_owner(interaction_id)
                 async with asyncio.timeout(self._remaining(deadline)):
                     return await action(deadline)
             except TimeoutError:
@@ -815,6 +901,7 @@ class LightCraftRawSession:
 
     async def open_raw(self, source_key, absolute_path):
         self._available()
+        self._ensure_curve_interaction_owner()
         if not isinstance(source_key, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", source_key):
             raise LightCraftError("raw_invalid_source_key")
 
@@ -869,6 +956,7 @@ class LightCraftRawSession:
             raise
 
     async def select(self, handle):
+        self._ensure_curve_interaction_owner()
         self._photo(handle)
         self._invalidate(selection=True)
         epoch = self._epoch
@@ -889,6 +977,7 @@ class LightCraftRawSession:
 
     def confirmed_settings(self, handle, expected_revision, *, allow_desync=False):
         """Observe the last confirmed snapshot without issuing an engine command."""
+        self._ensure_curve_interaction_owner()
         photo = self._photo(handle, active=True, allow_desync=allow_desync)
         if type(expected_revision) is not int or expected_revision != photo.applied_revision:
             raise LightCraftError("raw_revision_conflict")
@@ -918,6 +1007,375 @@ class LightCraftRawSession:
             return await self._command("lens.downloadDatabase", {}, deadline)
         return await self._submit(action, self._timeouts.command)
 
+    async def begin_curve_interaction(self, handle, channel, expected_revision):
+        from raw_controls import CURVE_CHANNELS, curve_readback
+        if type(channel) is not str or channel not in CURVE_CHANNELS:
+            raise LightCraftError("raw_invalid_request")
+        photo = self._photo(handle, active=True)
+        if type(expected_revision) is not int or expected_revision != photo.applied_revision or \
+                photo.requested_revision != photo.applied_revision:
+            raise LightCraftError("raw_revision_conflict")
+        if self._control_reservations or any(not task.done() for task in self._operations):
+            raise LightCraftError("raw_busy")
+        update_limit = min(MAX_CURVE_INTERACTION_UPDATES, MAX_EDITS - self._edits - 2)
+        if update_limit < 1:
+            raise LightCraftError("raw_session_edit_limit")
+
+        async with self._curve_state_lock:
+            previous = self._curve_interaction
+            if previous is not None and previous.state not in ("cancelled", "confirmed"):
+                raise LightCraftError("raw_curve_interaction_pending")
+            interaction = _CurveInteraction(handle, uuid.uuid4().hex, expected_revision, channel,
+                                            photo.settings_json, photo.settings_json,
+                                            asyncio.get_running_loop().time(), update_limit)
+            self._curve_interaction = interaction
+            self._invalidate()
+
+        async def action(deadline):
+            current = self._photo(handle, active=True)
+            if current.applied_revision != expected_revision or current.requested_revision != expected_revision:
+                raise LightCraftError("raw_revision_conflict")
+            native = await self._read_settings(current, deadline)
+            if native != interaction.baseline_settings_json:
+                current.sync = "desynchronized"
+                raise LightCraftError("raw_revision_conflict")
+            try:
+                curve_readback(json.loads(native))
+            except LightCraftError:
+                current.sync = "desynchronized"
+                raise
+            interaction.baseline_settings_json = native
+            self._edits += 1
+            await self._command("develop.beginInteraction", {"label": f"{channel.title()} Curve"}, deadline)
+            interaction.state = "open"
+            return interaction.interaction_id
+
+        try:
+            await self._submit(action, self._timeouts.command, interaction_id=interaction.interaction_id)
+            lightcraft_log("raw.curveInteraction.started", level="info", generation=self._generation,
+                           revision=interaction.baseline_revision, interactionId=interaction.interaction_id,
+                           channel=channel, updateLimit=interaction.update_limit)
+            return interaction.interaction_id
+        except MCPTransportError:
+            interaction.state = "unknown"
+            raise
+        except BaseException as error:
+            unknown = isinstance(error, LightCraftError) and error.code == "raw_operation_timeout"
+            if unknown:
+                interaction.state = "unknown"
+                self._desynchronized = True
+            elif self._lost or self._desynchronized or photo.sync != "synced":
+                interaction.state = "failed"
+            else:
+                interaction.state = "cancelled"
+            raise
+
+    async def update_curve_interaction(self, handle, interaction_id, expected_revision, points):
+        from raw_controls import validate_curve_input
+        interaction = self._ensure_curve_interaction_owner(interaction_id)
+        if interaction is None or interaction.handle != handle:
+            raise LightCraftError("raw_curve_interaction_stale")
+        points = json.loads(_object_json({"points": points}, MAX_PATCH_BYTES))["points"]
+        validate_curve_input(interaction.channel, points)
+        photo = self._photo(handle, active=True)
+        if interaction is None or interaction.handle != handle or interaction.state != "open":
+            raise LightCraftError("raw_curve_interaction_stale")
+        if type(expected_revision) is not int or expected_revision != interaction.baseline_revision or \
+                photo.applied_revision != interaction.baseline_revision or photo.requested_revision != photo.applied_revision:
+            raise LightCraftError("raw_revision_conflict")
+        if asyncio.get_running_loop().time() - interaction.started_at > MAX_CURVE_INTERACTION_SECONDS:
+            raise LightCraftError("raw_curve_interaction_expired")
+        if interaction.update_attempts >= interaction.update_limit:
+            raise LightCraftError("raw_session_edit_limit")
+
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        future.add_done_callback(lambda result: None if result.cancelled() else result.exception())
+        async with self._curve_state_lock:
+            if self._curve_interaction is not interaction or interaction.state != "open":
+                raise LightCraftError("raw_curve_interaction_stale")
+            interaction.latest_sequence += 1
+            request = _CurveUpdateRequest(interaction.latest_sequence, json.loads(
+                json.dumps(points, separators=(",", ":"), allow_nan=False)), future)
+            if interaction.pending is not None and not interaction.pending.future.done():
+                interaction.pending.future.set_result(SUPERSEDED)
+            interaction.pending = request
+            running = self._running
+            if running is not None and running.interaction_id == interaction_id:
+                running.abandoned, running.reason = True, "curve_updated"
+            if interaction.update_task is None or interaction.update_task.done():
+                interaction.update_task = asyncio.create_task(self._drain_curve_updates(interaction),
+                                                              name="lightcraft-curve-updates")
+        return await asyncio.shield(future)
+
+    async def _drain_curve_updates(self, interaction):
+        from raw_controls import curve_readback
+        while True:
+            async with self._curve_state_lock:
+                request = interaction.pending
+                interaction.pending = None
+                if request is None:
+                    interaction.update_task = None
+                    return
+                if self._curve_interaction is not interaction or interaction.state not in ("open", "finalizing"):
+                    if not request.future.done():
+                        request.future.set_result(SUPERSEDED)
+                    continue
+
+            async def action(deadline):
+                nonlocal sent
+                if self._curve_interaction is not interaction or interaction.state not in ("open", "finalizing") or \
+                        request.sequence != interaction.latest_sequence:
+                    return None
+                photo = self._photo(interaction.handle, active=True)
+                if photo.applied_revision != interaction.baseline_revision or \
+                        photo.requested_revision != interaction.baseline_revision:
+                    raise LightCraftError("raw_revision_conflict")
+                if interaction.update_attempts >= interaction.update_limit or self._edits + 1 >= MAX_EDITS:
+                    raise LightCraftError("raw_session_edit_limit")
+                interaction.update_attempts += 1
+                self._edits += 1
+                await self._command("develop.curve", {"channel": interaction.channel,
+                                                        "points": request.points}, deadline)
+                sent = True
+                encoded = await self._read_settings(photo, deadline,
+                    validate=lambda settings: curve_readback(settings))
+                return encoded
+
+            sent = False
+            try:
+                encoded = await self._submit(action, self._timeouts.command, interaction_id=interaction.interaction_id)
+            except BaseException as error:
+                unknown = isinstance(error, LightCraftError) and error.code == "raw_operation_timeout"
+                if sent or unknown or isinstance(error, MCPTransportError) or self._lost:
+                    interaction.state = "failed"
+                    self._desynchronized = True
+                    self._fail_curve_pending(interaction, "raw_session_lost")
+                if not request.future.done():
+                    request.future.set_exception(error)
+                if interaction.state in ("failed", "unknown"):
+                    return
+                continue
+
+            async with self._curve_state_lock:
+                current = self._curve_interaction is interaction and interaction.state in ("open", "finalizing")
+                latest = request.sequence == interaction.latest_sequence and interaction.pending is None
+                if encoded is not None and current:
+                    interaction.working_settings_json = encoded
+                    interaction.applied_sequence = request.sequence
+                    interaction.working_points = request.points
+                if not request.future.done():
+                    if encoded is None or not current or not latest:
+                        request.future.set_result(SUPERSEDED)
+                    elif interaction.state == "finalizing":
+                        request.future.set_result(CurveInteractionUpdate(interaction.interaction_id,
+                            request.sequence, True, encoded))
+                    elif interaction.state != "open":
+                        request.future.set_result(SUPERSEDED)
+                    else:
+                        ticket = self.request_curve_interaction_preview(interaction.handle,
+                            interaction.interaction_id, request.sequence)
+                        request.future.set_result(CurveInteractionUpdate(interaction.interaction_id,
+                            request.sequence, True, encoded, ticket))
+
+    def _fail_curve_pending(self, interaction, code):
+        pending = interaction.pending
+        interaction.pending = None
+        if pending is not None and not pending.future.done():
+            pending.future.set_exception(LightCraftError(code))
+
+    def request_curve_interaction_preview(self, handle, interaction_id, sequence, max_side=DEFAULT_PREVIEW_SIDE):
+        interaction = self._ensure_curve_interaction_owner(interaction_id)
+        if interaction is None or interaction.handle != handle:
+            raise LightCraftError("raw_curve_interaction_stale")
+        if interaction.state != "open" or sequence != interaction.latest_sequence or \
+                sequence != interaction.applied_sequence or interaction.pending is not None:
+            raise LightCraftError("raw_curve_interaction_stale")
+        return self.request_preview(handle, interaction.baseline_revision, max_side, kind="after", quality="draft",
+                                    interaction_id=interaction_id, interaction_sequence=sequence)
+
+    async def end_curve_interaction(self, handle, interaction_id, expected_revision, points):
+        from raw_controls import curve_readback, validate_curve_input
+        interaction = self._ensure_curve_interaction_owner(interaction_id)
+        if interaction is None or interaction.handle != handle:
+            raise LightCraftError("raw_curve_interaction_stale")
+        points = json.loads(_object_json({"points": points}, MAX_PATCH_BYTES))["points"]
+        validate_curve_input(interaction.channel, points)
+        if type(expected_revision) is not int or expected_revision != interaction.baseline_revision:
+            raise LightCraftError("raw_revision_conflict")
+        if interaction.state == "finalized":
+            if points != interaction.final_points:
+                raise LightCraftError("raw_curve_interaction_conflict")
+            return interaction.final_result
+        if interaction.state == "confirmed":
+            if points != interaction.final_points:
+                raise LightCraftError("raw_curve_interaction_conflict")
+            return interaction.final_result
+        if interaction.state == "ending":
+            raise LightCraftError("raw_busy")
+        if interaction.state == "open":
+            async with self._curve_state_lock:
+                interaction.state = "finalizing"
+                interaction.final_points = points
+                # Reuse the last verified Native update when Pointer Up did not change its payload.
+                already_applied = interaction.pending is None and interaction.latest_sequence == interaction.applied_sequence \
+                    and interaction.working_points == points
+                worker = interaction.update_task if already_applied else None
+                if not already_applied:
+                    loop = asyncio.get_running_loop()
+                    future = loop.create_future()
+                    future.add_done_callback(lambda result: None if result.cancelled() else result.exception())
+                    interaction.latest_sequence += 1
+                    request = _CurveUpdateRequest(interaction.latest_sequence,
+                        json.loads(json.dumps(points, separators=(",", ":"), allow_nan=False)), future)
+                    if interaction.pending is not None and not interaction.pending.future.done():
+                        interaction.pending.future.set_result(SUPERSEDED)
+                    interaction.pending = request
+                    running = self._running
+                    if running is not None and running.interaction_id == interaction_id:
+                        running.abandoned, running.reason = True, "curve_finalizing"
+                    if interaction.update_task is None or interaction.update_task.done():
+                        interaction.update_task = asyncio.create_task(self._drain_curve_updates(interaction),
+                                                                      name="lightcraft-curve-updates")
+            if already_applied:
+                if worker is not None and not worker.done():
+                    await asyncio.shield(worker)
+            else:
+                try:
+                    applied = await asyncio.shield(future)
+                    if applied is SUPERSEDED:
+                        raise LightCraftError("raw_curve_interaction_stale")
+                except BaseException:
+                    if interaction.state == "finalizing" and not self._lost:
+                        interaction.state = "open"
+                        interaction.final_points = None
+                    raise
+        elif interaction.state != "finalizing":
+            raise LightCraftError("raw_curve_interaction_stale")
+
+        interaction.state = "ending"
+        ended = False
+        async def action(deadline):
+            nonlocal ended
+            photo = self._photo(handle, active=True)
+            if photo.applied_revision != interaction.baseline_revision or \
+                    photo.requested_revision != interaction.baseline_revision:
+                raise LightCraftError("raw_revision_conflict")
+            self._edits += 1
+            await self._command("develop.endInteraction", {}, deadline)
+            ended = True
+            encoded = await self._read_settings(photo, deadline, validate=curve_readback)
+            return encoded
+
+        try:
+            encoded = await self._submit(action, self._timeouts.command, interaction_id=interaction_id)
+        except MCPTransportError:
+            interaction.state = "unknown"
+            self._desynchronized = True
+            raise
+        except LightCraftError as error:
+            # A definite command rejection leaves Native's Interaction open for retry or cancel.
+            unknown = error.code == "raw_operation_timeout"
+            if unknown:
+                interaction.state = "unknown"
+                self._desynchronized = True
+            elif not ended and not self._lost:
+                interaction.state = "finalizing"
+                raise
+            else:
+                interaction.state = "failed"
+                self._desynchronized = True
+            raise
+        result = CurveInteractionResult(handle, interaction_id, interaction.baseline_revision,
+                                        interaction.channel, encoded)
+        interaction.final_result = result
+        interaction.state = "finalized"
+        self._invalidate()
+        lightcraft_log("raw.curveInteraction.ended", level="info", generation=self._generation,
+                       revision=interaction.baseline_revision, interactionId=interaction_id,
+                       channel=interaction.channel, updates=interaction.update_attempts)
+        return result
+
+    async def cancel_curve_interaction(self, handle, interaction_id, expected_revision):
+        interaction = self._ensure_curve_interaction_owner(interaction_id)
+        if interaction is None or interaction.handle != handle:
+            raise LightCraftError("raw_curve_interaction_stale")
+        if type(expected_revision) is not int or expected_revision != interaction.baseline_revision:
+            raise LightCraftError("raw_revision_conflict")
+        if interaction.state == "cancelled":
+            return self._snapshot(self._photo(handle, active=True))
+        if interaction.state in ("finalized", "confirmed"):
+            raise LightCraftError("raw_curve_interaction_finalized")
+        if interaction.state not in ("open", "finalizing"):
+            raise LightCraftError("raw_curve_interaction_stale")
+        async with self._curve_state_lock:
+            interaction.state = "canceling"
+            if interaction.pending is not None and not interaction.pending.future.done():
+                interaction.pending.future.set_result(SUPERSEDED)
+            interaction.pending = None
+            running = self._running
+            if running is not None and running.interaction_id == interaction_id:
+                running.abandoned, running.reason = True, "curve_canceling"
+            worker = interaction.update_task
+        if worker is not None and not worker.done():
+            await asyncio.shield(worker)
+
+        cancelled = False
+        async def action(deadline):
+            nonlocal cancelled
+            photo = self._photo(handle, active=True)
+            self._edits += 1
+            await self._command("develop.cancelInteraction", {}, deadline)
+            cancelled = True
+            return await self._read_settings(photo, deadline)
+
+        try:
+            encoded = await self._submit(action, self._timeouts.command, interaction_id=interaction_id)
+        except MCPTransportError:
+            interaction.state = "unknown"
+            self._desynchronized = True
+            raise
+        except LightCraftError as error:
+            if cancelled or self._lost or error.code == "raw_operation_timeout":
+                interaction.state = "failed"
+                self._desynchronized = True
+            else:
+                interaction.state = "open"
+            raise
+        if encoded != interaction.baseline_settings_json:
+            interaction.state = "failed"
+            self._desynchronized = True
+            self._invalidate()
+            lightcraft_log("raw.curveInteraction.cancelMismatch", level="error", generation=self._generation,
+                           revision=interaction.baseline_revision, interactionId=interaction_id)
+            raise LightCraftError("raw_curve_interaction_cancel_mismatch")
+        interaction.state = "cancelled"
+        self._invalidate()
+        lightcraft_log("raw.curveInteraction.cancelled", level="info", generation=self._generation,
+                       revision=interaction.baseline_revision, interactionId=interaction_id,
+                       channel=interaction.channel, updates=interaction.update_attempts)
+        return self._snapshot(self._photo(handle, active=True))
+
+    def confirm_curve_interaction(self, handle, interaction_id, baseline_revision):
+        """Promote an ended Native snapshot only after the caller has durably saved its History step."""
+        interaction = self._curve_interaction
+        photo = self._photo(handle, active=True)
+        if interaction is None or interaction.interaction_id != interaction_id or interaction.handle != handle or \
+                interaction.baseline_revision != baseline_revision:
+            raise LightCraftError("raw_curve_interaction_stale")
+        if interaction.state == "confirmed":
+            if interaction.committed_snapshot is None:
+                raise LightCraftError("raw_curve_interaction_stale")
+            return interaction.committed_snapshot
+        if interaction.state != "finalized" or photo.applied_revision != baseline_revision or \
+                photo.requested_revision != baseline_revision or interaction.final_result is None:
+            raise LightCraftError("raw_revision_conflict")
+        snapshot = self._commit(photo, interaction.final_result._settings_json)
+        interaction.committed_snapshot = snapshot
+        interaction.state = "confirmed"
+        self._invalidate()
+        return snapshot
+
     async def _restore(self, photo, encoded, deadline, *, count_attempts=False):
         if count_attempts:
             self._edits += 1
@@ -932,6 +1390,7 @@ class LightCraftRawSession:
 
     async def _mutate(self, handle, command, params, expected_revision, restored=None, verify=None,
                       *, commands=None, check=None, prepare=None, readback_check=None):
+        self._ensure_curve_interaction_owner()
         photo = self._photo(handle, active=True)
         cost = len(commands) if commands is not None else 1
         if type(expected_revision) is not int or expected_revision != photo.applied_revision:
@@ -1136,29 +1595,16 @@ class LightCraftRawSession:
             channels = ("master", "red", "green", "blue") if channel == "point" else (channel,)
             if all(expected["curve"][target] == [] for target in channels):
                 return self.confirmed_settings(handle, expected_revision)
-            # Reset only point arrays so Native's parametric ToneCurve settings remain intact.
-            for target in channels:
-                expected["curve"][target] = []
-
-            def check(actual):
-                if actual != expected:
-                    raise LightCraftError("raw_operation_readback_mismatch")
-
-            return await self._mutate(handle, "curve.reset", {"channel": channel},
-                                      expected_revision, check=check)
+            # Native owns reset semantics; the command targets only point curves.
+            return await self._mutate(handle, "curve.reset", {"channel": channel}, expected_revision)
         if kind == "curve":
             if type(metadata) is not dict or set(metadata) != {"channel"}:
                 raise LightCraftError("raw_invalid_request")
             points = validate_curve_input(metadata["channel"], curve_points)
             channel = metadata["channel"]
             photo = self._photo(handle, active=True)
-            expected = json.loads(photo.settings_json)
-            expected["curve"][channel] = sorted(({"x": point[0], "y": point[1]} for point in points), key=lambda point: point["x"])
-            def check(actual):
-                if actual != expected:
-                    raise LightCraftError("raw_operation_readback_mismatch")
             return await self._mutate(handle, "develop.curve", {"channel": channel, "points": points},
-                                     expected_revision, check=check)
+                                     expected_revision)
         if curve_points is not None:
             raise LightCraftError("raw_invalid_request")
         validate_history_operation(kind, metadata)
@@ -1392,8 +1838,21 @@ class LightCraftRawSession:
         return hashlib.sha256(_object_json(value, MAX_SETTINGS_BYTES).encode()).hexdigest()
 
     def request_preview(self, handle, expected_revision, max_side=DEFAULT_PREVIEW_SIDE, *, kind="after",
-                        quality=None, serial=0, view_generation=0, geometry_id=None, mode="whole"):
+                        quality=None, serial=0, view_generation=0, geometry_id=None, mode="whole",
+                        interaction_id=None, interaction_sequence=None):
         photo = self._photo(handle, active=True)
+        interaction = self._ensure_curve_interaction_owner(interaction_id)
+        if interaction_id is None and self._curve_interaction is not None and \
+                self._curve_interaction.state not in ("cancelled", "confirmed"):
+            raise LightCraftError("raw_curve_interaction_pending")
+        if interaction_id is not None and (interaction is None or interaction.handle != handle or kind != "after"
+                or quality != "draft" or interaction.state != "open"
+                or type(interaction_sequence) is not int
+                or interaction_sequence != interaction.latest_sequence
+                or interaction_sequence != interaction.applied_sequence or interaction.pending is not None
+                or photo.applied_revision != interaction.baseline_revision
+                or photo.requested_revision != photo.applied_revision):
+            raise LightCraftError("raw_curve_interaction_stale")
         if mode not in ('whole', 'crop-edit') or mode == 'crop-edit' and (kind != 'after' or quality is None):
             raise LightCraftError('raw_invalid_preview_request')
         if quality not in (None, "draft", "full"):
@@ -1424,6 +1883,8 @@ class LightCraftRawSession:
             self._sequence += 1
             self._discard_pending()
             ticket = PreviewTicket(handle, self._epoch, expected_revision, self._sequence, max_side)
+            ticket.interaction_id = interaction_id
+            ticket.interaction_sequence = interaction_sequence
             self._pending = ticket
         ticket.mode = mode
         ticket.quality, ticket.adaptive = quality or "full", quality is not None
@@ -1448,6 +1909,7 @@ class LightCraftRawSession:
         """Use the existing owner/worker; the HTTP owner attests its public token explicitly."""
         from raw_region import validate_target
         validate_target(target, operation)
+        self._ensure_curve_interaction_owner()
         photo = self._photo(handle, active=True)
         # A future HTTP owner may attest its public document token; RawHandle still owns native lifetime.
         if target['identity'] != self.region_identity(handle, target['identity']['kind'], document_token=document_token) \
@@ -1473,6 +1935,13 @@ class LightCraftRawSession:
     def _ticket_current(self, ticket):
         try:
             photo = self._photo(ticket.handle, active=True)
+            if ticket.interaction_id is not None:
+                interaction = self._ensure_curve_interaction_owner(ticket.interaction_id)
+                return interaction is not None and interaction.handle == ticket.handle and \
+                    interaction.state == "open" and ticket.interaction_sequence == interaction.latest_sequence == \
+                    interaction.applied_sequence and interaction.pending is None and not ticket.abandoned and \
+                    ticket.epoch == self._epoch and ticket.sequence == self._sequence and \
+                    ticket.revision == photo.applied_revision == photo.requested_revision == interaction.baseline_revision
             if ticket.region_operation is not None:
                 return not ticket.abandoned and ticket.epoch == self._epoch and ticket.sequence == self._sequence \
                     and ticket.revision == photo.applied_revision == photo.requested_revision \
@@ -1656,7 +2125,9 @@ class LightCraftRawSession:
                                                  "validationMs": validation_ms,
                                                  "pngSha256": digest, "stageCache": metadata["stageCache"],
                                                  **({"execution": metadata["execution"]} if "execution" in metadata else {})})
-                                                 if self._diagnostics and metadata else None)
+                                                 if self._diagnostics and metadata else None,
+                                             interaction_id=ticket.interaction_id,
+                                             interaction_sequence=ticket.interaction_sequence)
                         if ticket.kind == "before":
                             self._before_cache = frame
                         ticket._finish(frame)
@@ -1709,13 +2180,14 @@ class LightCraftRawSession:
                         lightcraft_log('region.failed' if fatal else 'region.rejected', level='error' if fatal else 'warn', generation=self._generation,
                             operation=ticket.region_operation, revision=ticket.revision, errorCode=error.code)
                     if (isinstance(error, MCPTransportError) and error.code != "lightcraft_busy_timeout") or \
-                            (ticket.kind == "after" and error.code in ("lightcraft_invalid_preview", "lightcraft_preview_validation_timeout")):
+                            (ticket.kind == "after" and ticket.interaction_id is None and
+                             error.code in ("lightcraft_invalid_preview", "lightcraft_preview_validation_timeout")):
                         self.manager._abort_raw(ticket.handle.generation, error.code)
                         self._lost = True
                         self._discard_pending("raw_session_lost")
                     ticket._finish(error=error.code)
                 except Exception:
-                    if ticket.kind == "after":
+                    if ticket.kind == "after" and ticket.interaction_id is None:
                         self.manager._abort_raw(ticket.handle.generation, "lightcraft_preview_failed")
                         self._lost = True
                         self._discard_pending("raw_session_lost")
@@ -1731,8 +2203,25 @@ class LightCraftRawSession:
         try:
             settings = await self._read_settings(photo, deadline)
         except LightCraftError:
-            photo.sync = "desynchronized"
+            if ticket.interaction_id is None:
+                photo.sync = "desynchronized"
             raise
+        if ticket.interaction_id is not None:
+            # This readback describes temporary Native working state at the durable baseline revision.
+            from raw_controls import curve_readback
+            interaction = self._ensure_curve_interaction_owner(ticket.interaction_id)
+            if interaction is not None and interaction.state == "open" and \
+                    ticket.interaction_sequence == interaction.latest_sequence == interaction.applied_sequence:
+                try:
+                    curve_readback(json.loads(settings))
+                except LightCraftError:
+                    interaction.state = "failed"
+                    self._desynchronized = True
+                    raise
+                interaction.working_settings_json = settings
+            else:
+                ticket.abandoned, ticket.reason = True, "curve_sequence"
+            return
         if settings != photo.settings_json:
             self._commit(photo, settings)
             ticket.abandoned, ticket.reason = True, "revision"
@@ -1741,10 +2230,16 @@ class LightCraftRawSession:
         tasks = [t for t in self._operations if not t.done()]
         if self._worker is not None and not self._worker.done():
             tasks.append(self._worker)
+        interaction = self._curve_interaction
+        if interaction is not None:
+            self._fail_curve_pending(interaction, "raw_session_lost")
+            if interaction.update_task is not None and not interaction.update_task.done():
+                tasks.append(interaction.update_task)
         for task in tasks:
             task.cancel()
         for task in tasks:
             await _await_task_resilient(task)
+        self._curve_interaction = None
 
     async def reset_session(self, restore_active=True):
         if self._stop.is_set():
