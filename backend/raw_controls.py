@@ -47,6 +47,10 @@ HISTORY_FLAG_CONTROLS = frozenset(("optics.remove_ca", "optics.lens_profile"))
 # Vignette has a Native reset section, but its eye belongs to Effects.
 RESET_SECTIONS = (*SETTINGS_SECTIONS, "vignette")
 CURVE_CHANNELS = ("master", "red", "green", "blue")
+CURVE_SETTING_FIELDS = frozenset((*CURVE_CHANNELS, "highlights", "lights", "darks", "shadows",
+                                  "split_shadows", "split_mid", "split_highlights", "refine_saturation"))
+CURVE_NUMERIC_FIELDS = ("highlights", "lights", "darks", "shadows", "split_shadows", "split_mid",
+                        "split_highlights", "refine_saturation")
 MAX_CURVE_POINTS = 4096
 MAX_CURVE_BYTES = 64 * 1024
 VIGNETTE_STYLES = ("highlightPriority", "colorPriority", "paintOverlay")
@@ -113,6 +117,18 @@ def with_legacy_curve_defaults(settings):
             "split_shadows": 25.0, "split_mid": 50.0, "split_highlights": 75.0,
             **{channel: [] for channel in CURVE_CHANNELS}, "refine_saturation": 100.0}}
     return settings
+
+
+def validate_curve_settings(settings):
+    """Reject malformed explicit ToneCurve snapshots; only an absent section is legacy-defaulted."""
+    curve = settings.get("curve") if type(settings) is dict else None
+    if type(curve) is not dict or set(curve) != CURVE_SETTING_FIELDS:
+        raise LightCraftError("raw_invalid_settings")
+    if any(type(curve[field]) not in (int, float) or not math.isfinite(curve[field])
+           for field in CURVE_NUMERIC_FIELDS):
+        raise LightCraftError("raw_invalid_settings")
+    curve_readback(settings)
+    return curve
 
 
 def validate_curve_operation(kind, metadata):

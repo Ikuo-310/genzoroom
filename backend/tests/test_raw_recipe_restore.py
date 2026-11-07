@@ -3,6 +3,7 @@ import asyncio
 from contextlib import closing
 import copy
 import hashlib
+import json
 import os
 import sqlite3
 import subprocess
@@ -14,7 +15,7 @@ import pytest
 
 import edit_store
 from lightcraft_mcp import LightCraftError, MCPTransportError
-from lightcraft_raw import ENGINE_COMMIT
+from lightcraft_raw import ENGINE_COMMIT, _settings_json
 import raw_recipe_store as store
 from tests.test_lightcraft_mcp import until
 from tests.test_lightcraft_raw import DEFAULT, create
@@ -45,12 +46,89 @@ def changed_settings():
     return settings
 
 
-def seed(asset_id, **identity_changes):
+def test_missing_legacy_curve_is_defaulted_only_in_the_engine_settings_view():
+    settings = changed_settings()
+    settings.pop("curve")
+    stored = copy.deepcopy(settings)
+    normalized = json.loads(_settings_json(settings))
+    assert "curve" not in settings and settings == stored
+    assert normalized["curve"] == {
+        "highlights": 0., "lights": 0., "darks": 0., "shadows": 0.,
+        "split_shadows": 25., "split_mid": 50., "split_highlights": 75.,
+        "master": [], "red": [], "green": [], "blue": [], "refine_saturation": 100.,
+    }
+
+
+@pytest.mark.parametrize("curve", [None, [], "broken", {"master": [{"x": 0., "y": 0.}]},
+    {"highlights": 0., "lights": 0., "darks": 0., "shadows": 0., "split_shadows": 25.,
+     "split_mid": 50., "split_highlights": 75., "master": [{"x": -0.1, "y": 0.}],
+     "red": [], "green": [], "blue": [], "refine_saturation": 100.}])
+def test_explicit_invalid_curve_recipe_is_rejected_before_native(curve, tmp_path):
+    async def run():
+        raw, _, children, files = await create(tmp_path)
+        try:
+            handle, initial = await raw.open_raw(str(uuid4()), files[0])
+            settings = changed_settings()
+            settings["curve"] = curve
+            recipe = raw.recipe_identity(handle) | {"settings": settings}
+            commands = list(children[0].commands)
+            with pytest.raises(LightCraftError, match="^raw_recipe_invalid$"):
+                await raw.restore_persisted_settings(handle, recipe, initial.revision)
+            assert children[0].commands == commands
+            assert (await raw.get_settings(handle)).settings == initial.settings
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+def test_legacy_and_full_curve_recipes_restore_without_rewriting_persisted_rows(tmp_path, monkeypatch):
+    monkeypatch.setattr(edit_store, "DB_PATH", tmp_path / "recipes.db")
+    async def run():
+        raw, _, children, files = await create(tmp_path)
+        try:
+            handle, initial = await raw.open_raw(str(uuid4()), files[0])
+            identity = raw.recipe_identity(handle)
+            old_settings = changed_settings()
+            old_settings.pop("curve")
+            old_saved = store.put_raw_recipe(identity, 0, uuid4(), old_settings)
+            before = database_rows()
+            restored = await raw.restore_persisted_settings(handle, old_saved["recipe"], initial.revision)
+            expected_old = json.loads(_settings_json(old_settings))
+            assert restored.settings == expected_old
+            assert children[0].photos[1]["settings"] == expected_old
+            assert store.get_raw_recipe(identity)["recipe"]["settings"] == old_settings
+            assert database_rows() == before
+            frame = await raw.request_preview(handle, restored.revision)
+            assert frame.revision == restored.revision and frame.data.startswith(b"\x89PNG")
+
+            new_settings = changed_settings()
+            new_settings["curve"] = {
+                "master": [{"x": 0.0, "y": 0.1}, {"x": 1.0, "y": 0.9}],
+                "red": [{"x": 0.0, "y": 0.2}], "green": [{"x": 0.5, "y": 0.3}], "blue": [],
+                "highlights": 12.0, "lights": -4.0, "darks": 7.0, "shadows": -9.0,
+                "split_shadows": 22.0, "split_mid": 53.0, "split_highlights": 81.0,
+                "refine_saturation": 87.0,
+            }
+            new_saved = store.put_raw_recipe(identity, old_saved["revision"], uuid4(), new_settings)
+            before_new_restore = database_rows()
+            restored_new = await raw.restore_persisted_settings(handle, new_saved["recipe"], restored.revision)
+            assert restored_new.settings == new_settings
+            assert children[0].photos[1]["settings"] == new_settings
+            assert store.get_raw_recipe(identity)["recipe"]["settings"] == new_settings
+            assert database_rows() == before_new_restore
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+def seed(asset_id, *, include_curve=True, **identity_changes):
     identity = {"assetId": str(asset_id), "sourceContentHash": hashlib.sha256(Original().data).hexdigest(),
                 "engineName": "lightcraft", "engineVersion": ENGINE_VERSION, "engineCommit": ENGINE_COMMIT,
                 "settingsSchemaVersion": 1, **identity_changes}
     settings = changed_settings()
     settings["version"] = identity["settingsSchemaVersion"]
+    if not include_curve:
+        settings.pop("curve")
     return store.put_raw_recipe(identity, 0, uuid4(), settings)
 
 
@@ -507,6 +585,37 @@ def test_windows_incompatible_recipe_fails_open_and_keeps_db(local, tmp_path, mo
                 assert not any(name == "develop.merge" for name, _ in children[0].commands)
                 assert database_rows() == before
                 assert (await http.get("/api/health")).status_code == 200
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
+def test_windows_opens_legacy_recipe_without_curve_and_keeps_persisted_recipe(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            asset_id = uuid4()
+            saved = seed(asset_id, include_curve=False)
+            legacy_default_curve = json.loads(_settings_json({key: value for key, value in DEFAULT.items() if key != "curve"}))["curve"]
+            identity = {field: saved["recipe"][field] for field in store.IDENTITY_FIELDS}
+            persisted = store.get_raw_recipe(identity)
+            assert "curve" not in persisted["recipe"]["settings"]
+            before = database_rows()
+            async with client(local) as http:
+                await authenticate(http, local)
+                _, response = await open_asset(http, asset_id)
+                assert response.status_code == 200 and response.json()["recipeStatus"] == "restored"
+                doc = response.json()
+                settings = await http.post(f'/api/raw/documents/{doc["handle"]}/settings',
+                    json=document_identity(doc))
+                assert settings.status_code == 200
+                assert settings.json()["curve"] == {channel: []
+                    for channel in ("master", "red", "green", "blue")}
+                assert children[-1].photos[1]["settings"]["curve"] == legacy_default_curve
+                preview = await http.post(f'/api/raw/documents/{doc["handle"]}/preview', json=preview_body(doc))
+                assert preview.status_code == 200
+                assert database_rows() == before
+                assert "curve" not in store.get_raw_recipe(identity)["recipe"]["settings"]
         finally:
             await api.close()
     asyncio.run(run())

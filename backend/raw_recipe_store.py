@@ -113,6 +113,13 @@ def _settings_json(settings: dict, schema: int) -> str:
             raise InvalidRawRecipe()
         if any(type(wb.get(field)) not in (int, float) for field in ("temp", "tint")):
             raise InvalidRawRecipe()
+        if "curve" in settings:
+            from lightcraft_mcp import LightCraftError
+            from raw_controls import validate_curve_settings
+            try:
+                validate_curve_settings(settings)
+            except LightCraftError:
+                raise InvalidRawRecipe() from None
         # Preserve every field, including controls absent from the C2 UI; never project a Recipe v18.
         encoded = _json(settings)
         if len(encoded.encode("utf-8")) > MAX_SETTINGS_BYTES:

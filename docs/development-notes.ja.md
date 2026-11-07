@@ -2258,3 +2258,7 @@ F1はprovisionalCropで得た実効矩形と固定開始矩形との差をcanoni
 # RAWポイントカーブ P0調査（2026-11-07）
 
 LightCraft v0.18.1／v0.19.0のNative契約とGenzoRoom既存History・Recipeへの接続案を調査し、[RAWポイントカーブ統合調査](research/lightcraft/RAW_POINT_CURVE_INTEGRATION.md)へ記録した。契約比較ではポイントカーブにNative patchは不要。未完成実装に判明した課題も同文書に未解決事項として記録している。P0は調査結果の文書化のみで、P1〜P6は計画段階。パラメトリックカーブは対象外。
+
+# RAWポイントカーブ P3-B（2026-11-07）
+
+旧Recipeで`curve`全体が欠落する場合に限り、LightCraft v0.18.1の完全なToneCurve既定構造をエンジン用設定へ補完する。Recipe／History snapshot／receiptの保存内容は変更しない。明示されたCurveは4チャンネルの点配列・有限座標・必要なToneCurve数値項目を検証し、不正または部分構造を拒否する。`_restore()`のNative reset／merge／readback照合を再利用し、旧Recipeと全チャンネルを持つ新Recipeの復元、Preview、History Undo／Redo／Jumpへの影響を限定Backendテストで確認した。P3-CのExport照合とCurve UI未接続は未対応。Managed Native binaryでの個別probeは未実施。
