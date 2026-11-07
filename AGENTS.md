@@ -4,47 +4,29 @@
 
 These instructions apply repository-wide to all future GenzoRoom development tasks. Phase-specific implementation requirements belong in individual task instructions, not this file.
 
-## 開発の基本方針（最優先）
+## Core Development Principles (Highest Priority)
 
-GenzoRoomは現在開発中のソフトウェアであり、機能の完成度、操作性、実装の単純さを優先する。この節は、このファイル内の矛盾する指示より優先する。
+GenzoRoom is under active development. Prioritize feature completeness, usability, and implementation simplicity. This section takes precedence over any conflicting instructions in this file.
 
-### 破壊的変更
+### Prefer Working Functionality
 
-- 旧バージョンとの後方互換性は原則として保証しない。
-- 既存Recipe、History、内部DB、API形式を変更する場合、旧データの移行処理は原則不要とする。
-- 互換レイヤー、旧形式のフォールバック、非推奨APIの維持を要求しない。
-- 必要なら既存実装を置き換え、不要になったコードを削除する。
+- Breaking changes are acceptable. Backward compatibility and migration of existing Recipes, History, internal database data, or API formats are generally not required.
+- Replace existing implementations and remove obsolete code when needed.
+- Prioritize working functionality over complex mechanisms for hypothetical future problems. Keep phases to the necessary minimum, and allow temporary implementations.
 
-### 動作する機能を優先
+### Responsibilities
 
-- 最初に、ユーザーが期待する操作と結果を実現する。
-- 基本機能が未完成の段階で、将来の障害や拡張を想定した複雑な仕組みを先行実装しない。
-- Phase分割は必要最小限とし、機能が実際に使用できる状態を重視する。
-- 暫定実装を許容する。完成前にすべての例外条件を解決する必要はない。
+- Immich manages photo originals.
+- LightCraft owns RAW development algorithms and interpretation of Native settings.
+- GenzoRoom owns the UI, user interactions, persistence, History, and integration with other systems.
+- Do not duplicate verification or implementation of LightCraft's internal development processing or settings interpretation in GenzoRoom.
 
-### 責任範囲
+### Safeguards and Implementation Decisions
 
-- 写真原本の管理はImmichが担当する。
-- RAW現像アルゴリズムとNative設定の解釈はLightCraftが担当する。
-- GenzoRoomはUI、操作、保存、History、各システムとの連携を担当する。
-- 外部システムが保証する内部動作をGenzoRoomで重複検証・再実装しない。
-
-### 安全対策
-
-- 安全対策は、具体的に説明できる故障モードやデータ損失リスクに対して実装する。
-- 仮定上の将来問題だけを理由に、状態管理、検証、Recovery、抽象化を追加しない。
-- 複雑な実装を提案する場合は、それが何を防ぐために必要なのかを明示する。
-- 既存の安全機構も無条件に維持せず、必要性が失われた場合は簡素化する。
-- Immichの写真原本を意図せず変更・削除しない境界は維持する。
-
-### 実装・設計判断
-
-- 指示されていない互換性対応や防御機構を独自判断で追加しない。
-- 要求された機能に直接関係しない変更を広げない。
-- テストは変更範囲に応じて必要最小限とする。
-- 過剰設計の懸念がある場合は、まず単純な実装方法を検討する。
-- 将来の完成形を理由に、現在必要な操作性の実現を後回しにしない。
-- この方針は開発速度と実用性を優先するものであり、写真原本の保護や明確なデータ破損の防止は維持する。
+- Base safeguards on concrete failure modes and data-loss risks. Do not add state management, validation, recovery, or abstractions solely for hypothetical future problems.
+- Simplify or remove existing safeguards when they no longer serve a concrete purpose.
+- Preserve protection against unintended changes to or deletion of photo originals, and prevent clear data corruption.
+- ChatGPT and Codex implementation instructions must follow these principles. Do not add unrequested compatibility work or safeguards, expand changes beyond the requested functionality, or delay needed usability for a hypothetical future end state. Keep testing to the minimum required for the scope of the change.
 
 ## Code comments
 
@@ -74,7 +56,7 @@ GenzoRoom owns connecting UI actions to the Native API, communication/session/er
 
 Use LightCraft's published Native API contract rather than reimplementing or independently proving its internal algorithms. Validate basic input types, ranges and sizes, communication outcomes, and the integrity of data GenzoRoom persists. Do not generally require a complete Native settings snapshot to match a hard-coded inventory of fields. Preserve unknown Native fields when doing so does not prevent storage or restoration. Do not add per-operation comparisons of every field assumed to be unchanged, or GenzoRoom-side guarantees for Preview/Export rendering and interpolation accuracy, without identifying a concrete GenzoRoom-owned failure that the check prevents. Prefer checks that tolerate normal LightCraft updates and newly added settings.
 
-These principles do not remove existing checks, weaken authentication, command allowlists, path validation or resource limits, or relax Recipe/History integrity, revision, saveId, receipt and retry guarantees. They do not mean Native replies are accepted without checking transport shape and operation success. If an API change actually breaks compatibility, update the GenzoRoom adapter. Review any proposed additional verification for a specific failure boundary and avoid duplicating safety mechanisms without a demonstrated need.
+Existing checks may be simplified or removed when they no longer serve a concrete purpose. Preserve authentication, command authorization, protection of original photos, and data integrity at persistence boundaries. Native replies must still be checked for basic transport shape and operation success. If a Native API change breaks compatibility, update the GenzoRoom adapter. Base additional verification decisions on concrete failure boundaries and avoid duplicating mechanisms without a demonstrated need.
 
 ### Structured diagnostics / logging
 
@@ -100,7 +82,6 @@ These principles do not remove existing checks, weaken authentication, command a
 
 - The supported Backend Python baseline is 3.14 for development, tests, and production Docker. Check Backend compatibility against Python 3.14. The Windows development/test environment uses the repository `.venv` on Python 3.14; do not pin a patch version here.
 - Treat Recipe, History, Undo/Redo, persistent edit state, and frontend/backend validation as interconnected systems. When modifying any of them, check the impact on the others.
-- Preserve compatibility with supported saved-data versions unless a breaking change is explicitly authorized.
 - Do not change persistent-data versions or database schemas unnecessarily.
 - Maintain existing save-failure, retry, and conflict-handling guarantees.
 - For backend tests on Windows, use the repository virtual environment:
