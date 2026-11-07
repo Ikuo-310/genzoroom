@@ -24,6 +24,16 @@ These instructions apply repository-wide to all future GenzoRoom development tas
 - Preserve existing behavior unless the requested change explicitly modifies it.
 - Identify relevant dependencies before editing a change that affects multiple subsystems.
 
+### LightCraft Integration Principles
+
+LightCraft is the source of truth for RAW development. LightCraft owns RAW decoding, development and image generation; interpretation and normalization of development parameters; curve interpolation, colour processing, lens correction and other image algorithms; and the meaning of its Native API settings changes.
+
+GenzoRoom owns connecting UI actions to the Native API, communication/session/error handling, Recipe and History persistence and operation management (including Undo/Redo), and the Export Queue, generated-file lifecycle and Immich registration.
+
+Use LightCraft's published Native API contract rather than reimplementing or independently proving its internal algorithms. Validate basic input types, ranges and sizes, communication outcomes, and the integrity of data GenzoRoom persists. Do not generally require a complete Native settings snapshot to match a hard-coded inventory of fields. Preserve unknown Native fields when doing so does not prevent storage or restoration. Do not add per-operation comparisons of every field assumed to be unchanged, or GenzoRoom-side guarantees for Preview/Export rendering and interpolation accuracy, without identifying a concrete GenzoRoom-owned failure that the check prevents. Prefer checks that tolerate normal LightCraft updates and newly added settings.
+
+These principles do not remove existing checks, weaken authentication, command allowlists, path validation or resource limits, or relax Recipe/History integrity, revision, saveId, receipt and retry guarantees. They do not mean Native replies are accepted without checking transport shape and operation success. If an API change actually breaks compatibility, update the GenzoRoom adapter. Review any proposed additional verification for a specific failure boundary and avoid duplicating safety mechanisms without a demonstrated need.
+
 ### Structured diagnostics / logging
 
 - For features and fixes, consider diagnostic boundaries: network request/response/failure, asynchronous start/completion, generation changes, stale results, abort/cancellation, retry/attempt, save/load, validation mismatch, fallback, partial outcomes, batch/chunk processing, and important frontend/backend state transitions. Select useful boundaries; do not log every click.
@@ -88,7 +98,7 @@ These instructions apply repository-wide to all future GenzoRoom development tas
 
 ## Development workflow
 
-- When updating LightCraft, follow [the update guide](docs/research/lightcraft/UPDATE_GUIDE.md): verify the pinned upstream commit and every GenzoRoom patch, fail on partial/duplicate application, then build and test native Before/After capability and affected GenzoRoom behavior. Verify the actual binary's schema, response kind and SHA-256 receipt; version alone is insufficient. Retire a patch only after upstream equivalents pass the same compatibility checks.
+- When updating LightCraft, follow [the update guide](docs/research/lightcraft/UPDATE_GUIDE.md): verify the pinned upstream commit and every GenzoRoom patch, fail on partial/duplicate application, then build and test native Before/After capability and affected GenzoRoom behavior. Verify the actual binary's schema, response kind and SHA-256 receipt; version alone is insufficient. Check compatibility against the actual Native API contract and affected GenzoRoom flows; do not turn this into a requirement to match LightCraft's internal implementation or guarantee pixel-level output equivalence beyond its published contract. Retire a patch only after upstream equivalents pass the same compatibility checks.
 
 - Do not commit or push changes unless explicitly requested. The user performs Git operations, deployment, and NAS/Firefox verification.
 - Use Conventional Commits with an English type prefix and a Japanese change summary after the colon, for example `fix: RAWスライダーのフォーカスを維持`. Keep existing commits unchanged.

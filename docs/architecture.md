@@ -2,6 +2,10 @@
 
 RAW Whole Before switching validates Asset, generation, token, Before key and decoded-image ownership independently of After geometry. Its cache owner excludes After Geometry ID. Viewer uses the selected Before frame dimensions for fit/zoom. Region overlays retain shared-geometry checks, and Crop editing still disables comparison.
 
+## RAW Development: LightCraft Boundary
+
+LightCraft is the source of truth for RAW decoding, development algorithms and generated image content. GenzoRoom connects UI operations to its Native API and owns sessions, communication failures, Recipe/History persistence and navigation, Export Queue/file lifecycle, and Immich registration. The adapter checks request constraints, transport and operation outcomes, plus the integrity required by GenzoRoom's persisted snapshots; it preserves unknown Native settings when possible. GenzoRoom does not duplicate LightCraft algorithms or promise internal/pixel-level equivalence. Existing security and Recipe/History guarantees remain in force, and API compatibility fixes are made when a Native contract change affects actual GenzoRoom flows.
+
 
 ## RAW Export (P0–P4 complete, 2026-10-29)
 
