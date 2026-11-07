@@ -2281,4 +2281,8 @@ RAW調整パネルのカラーグレーディングとエフェクトの間に�
 
 # RAWポイントカーブ P5-A（2026-11-07）
 
-制御点の追加と選択中の内部点Delete削除を既存`curve` History操作へ接続し、対象チャンネルの全点をNative要求形式へ変換して1回送信する。操作中は既存lockで編集を抑止し、成功時はreadback設定でSVGを同期、失敗時は確定設定へ戻す。点選択・端点Deleteは送信せず、ドラッグ確定は引き続きローカルのみ。端点／内部点／空白のカーソルを`ns-resize`／`move`／`auto`にした。P5-BのドラッグHistory接続、P5-CのReset・右クリック削除は未実装。
+制御点の追加と選択中の内部点Delete削除を既存`curve` History操作へ接続し、対象チャンネルの全点をNative要求形式へ変換して1回送信する。操作中は既存lockで編集を抑止し、成功時はreadback設定でSVGを同期、失敗時は確定設定へ戻す。点選択・端点Deleteは送信しない。端点／内部点／空白のカーソルを`ns-resize`／`move`／`auto`にした。ドラッグ確定はP5-Bで接続。
+
+# RAWポイントカーブ P5-B（2026-11-07）
+
+P4-Cの`onDragCommit`をP5-Aと共通の`curve` History操作へ接続した。変更ありのPointer Upのみ最終配列を1回送信し、MoveはローカルSVGだけ更新する。Cancel／Escape／変更なし、文書切替・チャンネル切替では確定しない。既存busy lock、Native readback、Preview更新、History Retry／Recovery経路を維持する。Resetと右クリック削除（P5-C）は未実装。

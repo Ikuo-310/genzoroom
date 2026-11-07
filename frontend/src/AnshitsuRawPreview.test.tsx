@@ -577,15 +577,21 @@ it('places display-only Curves between Grading and Effects and keeps channel swi
   dispatchPointer(point, 'pointerdown', 31, pointX, pointY);
   dispatchPointer(graph, 'pointermove', 31, 180, 90);
   dispatchPointer(graph, 'pointerup', 31, 180, 90);
-  expect(rawApi.saveRawHistory).toHaveBeenCalledTimes(historyBeforeDrag);
+  await flush();
+  expect(rawApi.saveRawHistory).toHaveBeenCalledTimes(historyBeforeDrag + 1);
+  expect(commitHistory.mock.calls.at(-1)?.[0].operation).toMatchObject({ kind: 'curve', metadata: { channel: 'master' } });
   expect(rawApi.setRawControls).not.toHaveBeenCalled();
+  const movedPoint = curveCategory.querySelectorAll<SVGCircleElement>('[data-testid="raw-curve-point"]')[1];
+  act(() => movedPoint.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  graph.focus();
+  const historyBeforeDelete = vi.mocked(rawApi.saveRawHistory).mock.calls.length;
   act(() => graph.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true })));
   await flush();
   expect(curveCategory.querySelectorAll('[data-testid="raw-curve-point"]')).toHaveLength(1);
-  expect(vi.mocked(rawApi.saveRawHistory).mock.calls.length).toBe(historyBeforeDrag + 1);
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls.length).toBe(historyBeforeDelete + 1);
   historyKey('ArrowDown', { ctrlKey: false, shiftKey: true }, graph);
   expect(document.activeElement).toBe(host.querySelector<HTMLElement>('.raw-adjustment-category.is-effects .adjustment-category-title'));
-  expect(rawApi.saveRawHistory).toHaveBeenCalledTimes(historyWrites + 2);
+  expect(rawApi.saveRawHistory).toHaveBeenCalledTimes(historyWrites + 3);
   expect(rawApi.setRawControls).toHaveBeenCalledTimes(nativeWrites);
   expect(curveCategory.querySelector<SVGSVGElement>('[data-testid="raw-curve-graph"]')!.dataset.channel).toBe('master');
 });
@@ -654,11 +660,86 @@ it('locks out duplicate curve edits while an operation is pending and discards t
   act(() => graph.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 151, clientY: 128 })));
   expect(commitHistory).toHaveBeenCalledOnce();
   expect(host.querySelectorAll('[data-testid="raw-curve-point"]')).toHaveLength(3);
+  const middle = host.querySelectorAll<SVGCircleElement>('[data-testid="raw-curve-point"]')[1];
+  dispatchPointer(middle, 'pointerdown', 80, Number(middle.getAttribute('cx')), Number(middle.getAttribute('cy')));
+  dispatchPointer(graph, 'pointermove', 80, 170, 90);
+  dispatchPointer(graph, 'pointerup', 80, 170, 90);
+  expect(graph.classList.contains('is-dragging')).toBe(false);
+  expect(commitHistory).toHaveBeenCalledOnce();
 
   await act(async () => { rejectOperation(new Error('history transport failed')); await Promise.resolve(); });
   await flush();
   expect(host.querySelectorAll('[data-testid="raw-curve-point"]')).toHaveLength(2);
   expect(commitHistory).toHaveBeenCalledOnce();
+});
+
+it('sends one immutable curve History operation only after a changed drag reaches Pointer Up', async () => {
+  vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), curve: {
+    master: [], red: [{ x: 0, y: 0 }, { x: 0.5, y: 0.6 }, { x: 1, y: 1 }], green: [], blue: [],
+  } }));
+  commitHistory.mockImplementation(async request => {
+    if (request.action === 'operate' && request.operation?.kind === 'curve') {
+      const { channel } = request.operation.metadata;
+      const curve = { ...request.doc.curve, [channel]: request.operation.points.map(([x, y]) => ({ x, y })) };
+      return rawHistoryResult({ ...request, doc: { ...request.doc, curve } });
+    }
+    return rawHistoryResult(request);
+  });
+  await mount();
+  act(() => host.querySelector<HTMLButtonElement>('[data-channel="red"]')!.click());
+  const graph = host.querySelector<SVGSVGElement>('[data-testid="raw-curve-graph"]')!;
+  vi.spyOn(graph, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 256, 256));
+  const point = host.querySelectorAll<SVGCircleElement>('[data-testid="raw-curve-point"]')[1];
+  Object.defineProperty(point, 'setPointerCapture', { configurable: true, value: vi.fn() });
+  Object.defineProperty(point, 'releasePointerCapture', { configurable: true, value: vi.fn() });
+  const writesBefore = vi.mocked(rawApi.saveRawHistory).mock.calls.length;
+  const previewsBefore = vi.mocked(rawApi.rawPreview).mock.calls.length;
+  dispatchPointer(point, 'pointerdown', 71, 128, 104.8);
+  dispatchPointer(graph, 'pointermove', 71, 154, 94);
+  dispatchPointer(graph, 'pointermove', 71, 166, 82);
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls.length).toBe(writesBefore);
+  expect(vi.mocked(rawApi.rawPreview).mock.calls.length).toBe(previewsBefore);
+  expect(Number(host.querySelectorAll<SVGCircleElement>('[data-testid="raw-curve-point"]')[1].getAttribute('cx'))).toBe(166);
+
+  dispatchPointer(graph, 'pointerup', 71, 170, 70);
+  await flush();
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls.length).toBe(writesBefore + 1);
+  expect(commitHistory.mock.calls.filter(([request]) => request.action === 'operate')).toHaveLength(1);
+  expect(commitHistory.mock.calls.at(-1)?.[0].operation).toMatchObject({ kind: 'curve', metadata: { channel: 'red' } });
+  const operation = commitHistory.mock.calls.at(-1)?.[0].operation;
+  expect(operation?.kind).toBe('curve');
+  if (operation?.kind === 'curve') {
+    expect(operation.points[1][0]).toBeCloseTo((170 - 12) / 232);
+    expect(operation.points[1][1]).toBeCloseTo(1 - (70 - 12) / 232);
+  }
+  expect(Number(host.querySelectorAll<SVGCircleElement>('[data-testid="raw-curve-point"]')[1].getAttribute('cx'))).toBe(170);
+  dispatchPointer(graph, 'pointerup', 71, 170, 70);
+  await flush();
+  expect(commitHistory.mock.calls.filter(([request]) => request.action === 'operate')).toHaveLength(1);
+
+  const settledPoint = host.querySelectorAll<SVGCircleElement>('[data-testid="raw-curve-point"]')[1];
+  Object.defineProperty(settledPoint, 'setPointerCapture', { configurable: true, value: vi.fn() });
+  dispatchPointer(settledPoint, 'pointerdown', 72, 170, 70);
+  dispatchPointer(graph, 'pointerup', 72, 170, 70);
+  dispatchPointer(settledPoint, 'pointerdown', 73, 170, 70);
+  dispatchPointer(graph, 'pointermove', 73, 180, 60);
+  dispatchPointer(graph, 'pointercancel', 73, 180, 60);
+  dispatchPointer(settledPoint, 'pointerdown', 74, 170, 70);
+  dispatchPointer(graph, 'pointermove', 74, 180, 60);
+  act(() => graph.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+  await flush();
+  expect(commitHistory.mock.calls.filter(([request]) => request.action === 'operate')).toHaveLength(1);
+  expect(Number(host.querySelectorAll<SVGCircleElement>('[data-testid="raw-curve-point"]')[1].getAttribute('cx'))).toBe(170);
+
+  commitHistory.mockRejectedValueOnce(new Error('curve history transport failed'));
+  const retryPoint = host.querySelectorAll<SVGCircleElement>('[data-testid="raw-curve-point"]')[1];
+  Object.defineProperty(retryPoint, 'setPointerCapture', { configurable: true, value: vi.fn() });
+  dispatchPointer(retryPoint, 'pointerdown', 75, 170, 70);
+  dispatchPointer(graph, 'pointermove', 75, 182, 56);
+  dispatchPointer(graph, 'pointerup', 75, 182, 56);
+  await flush();
+  expect(commitHistory.mock.calls.filter(([request]) => request.action === 'operate')).toHaveLength(2);
+  expect(Number(host.querySelectorAll<SVGCircleElement>('[data-testid="raw-curve-point"]')[1].getAttribute('cx'))).toBe(170);
 });
 
 it('refreshes the curve and returns to RGB when switching RAW documents', async () => {
@@ -669,8 +750,6 @@ it('refreshes the curve and returns to RGB when switching RAW documents', async 
   await mount();
   const firstGraph = host.querySelector<SVGSVGElement>('[data-testid="raw-curve-graph"]')!;
   vi.spyOn(firstGraph, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 256, 256));
-  act(() => firstGraph.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 151.2, clientY: 128 })));
-  expect(host.querySelectorAll('[data-testid="raw-curve-point"]')).toHaveLength(2);
   act(() => host.querySelector<HTMLButtonElement>('[data-channel="red"]')!.click());
   const point = host.querySelectorAll<SVGCircleElement>('[data-testid="raw-curve-point"]')[0];
   const release = vi.fn();

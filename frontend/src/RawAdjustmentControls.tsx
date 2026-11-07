@@ -6,7 +6,7 @@ import { commitAdjustmentEdits, focusAdjustmentCategory, navigateAdjustments, pr
 import type { SliderAdjustmentId } from './adjustmentSliderIds';
 import { TINT_TRACK_GRADIENT, TEMPERATURE_TRACK_GRADIENT } from './WhiteBalanceAdjustmentControls';
 import { RawPointCurveControls } from './RawPointCurveControls';
-import { RAW_VIGNETTE_STYLES, type RawControlId, type RawHistoryControlId, type RawHistoryOperation, type RawOpticsFlagId, type RawSectionId, type RawVignetteStyle } from './rawApi';
+import { RAW_VIGNETTE_STYLES, type RawControlId, type RawCurvePoint, type RawHistoryControlId, type RawHistoryOperation, type RawOpticsFlagId, type RawSectionId, type RawVignetteStyle } from './rawApi';
 import type { useRawDocument } from './useRawDocument';
 
 type RawCategoryId = 'basic' | 'color' | 'grading' | 'curves' | 'effects' | 'detail';
@@ -49,6 +49,9 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
     if (panel.current) commitAdjustmentEdits(panel.current);
     raw.operate(operation);
   };
+  const operateCurve = (channel: 'master' | 'red' | 'green' | 'blue', points: RawCurvePoint[]) => operate({
+    kind: 'curve', metadata: { channel }, points: points.map(({ x, y }) => [x, y] as [number, number]),
+  });
   const locked = disabled || !!raw.locked || !!raw.editError || raw.status !== 'ready';
   const actionsLocked = locked || !!raw.historyLoading || !!raw.historyError || !raw.history;
   useEffect(() => { if (!actionsLocked && panel.current) restorePendingAdjustmentFocus(panel.current); }, [actionsLocked]);
@@ -98,8 +101,9 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
       </div>}
       {category === 'curves' && <RawPointCurveControls key={raw.assetId} curve={settings.curve}
         editDisabled={actionsLocked} syncKey={raw.operationError ?? raw.editError ?? raw.saveError}
-        onPointEdit={(channel, points) => operate({ kind: 'curve', metadata: { channel },
-          points: points.map(({ x, y }) => [x, y] as [number, number]) })} />}
+        onPointEdit={operateCurve} onDragCommit={({ channel, after, changed }) => {
+          if (changed) operateCurve(channel, after);
+        }} />}
       <div className={category === 'detail' ? 'raw-detail-controls' : undefined}>{(category === 'grading' ? [`grading.${gradingBand}.hue`, `grading.${gradingBand}.sat`, `grading.${gradingBand}.lum`, 'grading.blending', 'grading.balance'] as RawControlId[] : controls).map((control, index) => {
         const spec = settings.controls.find(spec => spec.id === control)!;
         const id = category === 'grading' ? control : ids[index];
