@@ -79,9 +79,12 @@ function smoothCurvePath(points: RawCurvePoint[]) {
   return path;
 }
 
-export function RawPointCurveControls({ curve, onDragCommit }: {
+export function RawPointCurveControls({ curve, onDragCommit, onPointEdit, editDisabled = false, syncKey }: {
   curve: Record<RawCurveChannel, RawCurvePoint[]>;
   onDragCommit?: (result: RawCurveDragResult) => void;
+  onPointEdit?: (channel: RawCurveChannel, points: RawCurvePoint[]) => void;
+  editDisabled?: boolean;
+  syncKey?: unknown;
 }) {
   const { t } = useTranslation();
   const [channel, setChannel] = useState<RawCurveChannel>('master');
@@ -94,7 +97,7 @@ export function RawPointCurveControls({ curve, onDragCommit }: {
     cancelDrag(false);
     setDraft(copyCurve(curve));
     setSelected({ master: null, red: null, green: null, blue: null });
-  }, [curve]);
+  }, [curve, syncKey]);
   useEffect(() => () => {
     const drag = dragRef.current;
     if (drag) releasePointerCapture(drag);
@@ -104,6 +107,8 @@ export function RawPointCurveControls({ curve, onDragCommit }: {
   const points = draft[channel];
   const visiblePoints = points.length ? points : identityPoints;
   const path = smoothCurvePath(points);
+  const dragPoint = dragRef.current?.workingPoints[dragRef.current.index];
+  const draggingEndpoint = dragPoint?.x === 0 || dragPoint?.x === 1;
 
   function releasePointerCapture(drag: CurveDrag) {
     try {
@@ -150,7 +155,7 @@ export function RawPointCurveControls({ curve, onDragCommit }: {
   }
 
   function handlePointerDown(event: ReactPointerEvent<SVGCircleElement>, index: number) {
-    if (event.button !== 0 || dragRef.current) return;
+    if (editDisabled || event.button !== 0 || dragRef.current) return;
     event.preventDefault();
     event.stopPropagation();
     const svg = event.currentTarget.ownerSVGElement;
@@ -198,6 +203,7 @@ export function RawPointCurveControls({ curve, onDragCommit }: {
   }
 
   function addOrSelectPoint(event: MouseEvent<SVGSVGElement>) {
+    if (editDisabled) return;
     const svg = event.currentTarget;
     const bounds = svg.getBoundingClientRect();
     if (bounds.width <= 0 || bounds.height <= 0) return;
@@ -225,6 +231,7 @@ export function RawPointCurveControls({ curve, onDragCommit }: {
     const nextIndex = nextPoints.findIndex(point => point.x === x && point.y === y);
     setDraft(previous => ({ ...previous, [channel]: nextPoints.map(point => ({ ...point })) }));
     setSelected(previous => ({ ...previous, [channel]: nextIndex }));
+    onPointEdit?.(channel, nextPoints.map(point => ({ ...point })));
   }
 
   function handleGraphKeyDown(event: KeyboardEvent<SVGSVGElement>) {
@@ -237,9 +244,11 @@ export function RawPointCurveControls({ curve, onDragCommit }: {
       event.preventDefault();
       if (dragRef.current) return;
       const index = selected[channel];
-      if (index === null || points[index]?.x === 0 || points[index]?.x === 1) return;
-      setDraft(previous => ({ ...previous, [channel]: previous[channel].filter((_, pointIndex) => pointIndex !== index) }));
+      if (editDisabled || index === null || points[index]?.x === 0 || points[index]?.x === 1) return;
+      const nextPoints = points.filter((_, pointIndex) => pointIndex !== index);
+      setDraft(previous => ({ ...previous, [channel]: nextPoints }));
       setSelected(previous => ({ ...previous, [channel]: null }));
+      onPointEdit?.(channel, nextPoints.map(point => ({ ...point })));
       return;
     }
     if (event.key === 'Escape') return;
@@ -263,7 +272,7 @@ export function RawPointCurveControls({ curve, onDragCommit }: {
         {channelLabels[item]}
       </button>)}
     </div>
-    <svg className={`raw-curve-graph is-${channel}${dragging ? ' is-dragging' : ''}`} viewBox={`0 0 ${graphSize} ${graphSize}`} role="img" tabIndex={0}
+    <svg className={`raw-curve-graph is-${channel}${dragging ? ` is-dragging is-dragging-${draggingEndpoint ? 'endpoint' : 'interior'}` : ''}`} viewBox={`0 0 ${graphSize} ${graphSize}`} role="img" tabIndex={0}
       aria-label={t('workspace.rawPreview.curveGraph')} data-testid="raw-curve-graph" data-channel={channel}
       onFocus={focusAdjustmentCategory} onKeyDown={handleGraphKeyDown} onClick={handleGraphClick}
       onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerCancel}>
@@ -276,7 +285,7 @@ export function RawPointCurveControls({ curve, onDragCommit }: {
       <line className="raw-curve-identity" x1={graphInset} y1={graphSize - graphInset}
         x2={graphSize - graphInset} y2={graphInset} />
       <path className="raw-curve-line" data-testid="raw-curve-line" d={path} />
-      {visiblePoints.map((point, index) => <circle className={`raw-curve-point${selected[channel] === index ? ' is-selected' : ''}`}
+      {visiblePoints.map((point, index) => <circle className={`raw-curve-point${point.x === 0 || point.x === 1 ? ' is-endpoint' : ' is-interior'}${selected[channel] === index ? ' is-selected' : ''}`}
         key={`${channel}:${index}`} data-testid="raw-curve-point" data-point-index={index}
         aria-selected={selected[channel] === index} cx={graphInset + point.x * graphExtent}
         cy={graphInset + (1 - point.y) * graphExtent} r={selected[channel] === index ? 5 : 3.5}

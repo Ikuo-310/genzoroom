@@ -96,7 +96,10 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
           </label>)}
         </div>
       </div>}
-      {category === 'curves' && <RawPointCurveControls key={raw.assetId} curve={settings.curve} />}
+      {category === 'curves' && <RawPointCurveControls key={raw.assetId} curve={settings.curve}
+        editDisabled={actionsLocked} syncKey={raw.operationError ?? raw.editError ?? raw.saveError}
+        onPointEdit={(channel, points) => operate({ kind: 'curve', metadata: { channel },
+          points: points.map(({ x, y }) => [x, y] as [number, number]) })} />}
       <div className={category === 'detail' ? 'raw-detail-controls' : undefined}>{(category === 'grading' ? [`grading.${gradingBand}.hue`, `grading.${gradingBand}.sat`, `grading.${gradingBand}.lum`, 'grading.blending', 'grading.balance'] as RawControlId[] : controls).map((control, index) => {
         const spec = settings.controls.find(spec => spec.id === control)!;
         const id = category === 'grading' ? control : ids[index];

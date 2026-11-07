@@ -61,6 +61,22 @@ it('updates the displayed channel when RAW settings change', () => {
   expect(d).toContain('244,12');
 });
 
+it('marks endpoint and interior cursor targets and preserves the active drag target', () => {
+  const curve = emptyCurve();
+  curve.master = [{ x: 0, y: 0 }, { x: 0.5, y: 0.6 }, { x: 1, y: 1 }];
+  act(() => root.render(<RawPointCurveControls curve={curve} />));
+  const graph = host.querySelector<SVGSVGElement>('[data-testid="raw-curve-graph"]')!;
+  const points = [...host.querySelectorAll<SVGCircleElement>('[data-testid="raw-curve-point"]')];
+  expect(graph.classList.contains('is-dragging')).toBe(false);
+  expect(points.map(point => point.classList.contains('is-endpoint'))).toEqual([true, false, true]);
+  expect(points[1].classList.contains('is-interior')).toBe(true);
+  Object.defineProperty(points[1], 'setPointerCapture', { configurable: true, value: vi.fn() });
+  sendPointer(points[1], 'pointerdown', 91, 128, 104);
+  expect(graph.classList.contains('is-dragging-interior')).toBe(true);
+  sendPointer(graph, 'pointercancel', 91, 128, 104);
+  expect(graph.classList.contains('is-dragging')).toBe(false);
+});
+
 it('adds sorted local points, selects nearby or duplicate-X points, and ignores clicks outside the plot', () => {
   act(() => root.render(<RawPointCurveControls curve={emptyCurve()} />));
   const graph = host.querySelector<SVGSVGElement>('[data-testid="raw-curve-graph"]')!;
@@ -106,6 +122,46 @@ it('selects points and deletes only selected interior points while protecting en
   act(() => graph.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true })));
   expect(points()).toHaveLength(2);
   expect(host.querySelector<SVGPathElement>('[data-testid="raw-curve-line"]')!.getAttribute('d')).toBe('M12,244 L244,12');
+});
+
+it('emits one complete channel edit for additions and interior deletion only', () => {
+  const curve = emptyCurve();
+  curve.red = [{ x: 0, y: 0 }, { x: 0.5, y: 0.6 }, { x: 1, y: 1 }];
+  const onPointEdit = vi.fn();
+  act(() => root.render(<RawPointCurveControls curve={curve} onPointEdit={onPointEdit} />));
+  const graph = host.querySelector<SVGSVGElement>('[data-testid="raw-curve-graph"]')!;
+  const points = () => [...host.querySelectorAll<SVGCircleElement>('[data-testid="raw-curve-point"]')];
+  act(() => host.querySelector<HTMLButtonElement>('[data-channel="red"]')!.click());
+
+  act(() => points()[0].dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  graph.focus();
+  act(() => graph.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true })));
+  expect(onPointEdit).not.toHaveBeenCalled();
+
+  act(() => points()[1].dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  expect(onPointEdit).not.toHaveBeenCalled();
+  act(() => graph.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true })));
+  expect(onPointEdit).toHaveBeenCalledTimes(1);
+  expect(onPointEdit).toHaveBeenLastCalledWith('red', [{ x: 0, y: 0 }, { x: 1, y: 1 }]);
+
+  act(() => root.render(<RawPointCurveControls curve={emptyCurve()} onPointEdit={onPointEdit} />));
+  const emptyGraph = host.querySelector<SVGSVGElement>('[data-testid="raw-curve-graph"]')!;
+  act(() => host.querySelector<HTMLButtonElement>('[data-channel="master"]')!.click());
+  clickPoint(emptyGraph, 0.4, 0.2);
+  expect(onPointEdit).toHaveBeenCalledTimes(2);
+  expect(onPointEdit.mock.lastCall?.[0]).toBe('master');
+  expect(onPointEdit.mock.lastCall?.[1]).toHaveLength(3);
+  expect(onPointEdit.mock.lastCall?.[1][1].x).toBeCloseTo(0.4);
+  expect(onPointEdit.mock.lastCall?.[1][1].y).toBeCloseTo(0.2);
+});
+
+it('prevents edit submission while the existing operation lock is active', () => {
+  const onPointEdit = vi.fn();
+  act(() => root.render(<RawPointCurveControls curve={emptyCurve()} editDisabled onPointEdit={onPointEdit} />));
+  const graph = host.querySelector<SVGSVGElement>('[data-testid="raw-curve-graph"]')!;
+  clickPoint(graph, 0.4, 0.2);
+  expect(host.querySelectorAll('[data-testid="raw-curve-point"]')).toHaveLength(2);
+  expect(onPointEdit).not.toHaveBeenCalled();
 });
 
 it('keeps separate channel drafts and replaces them when RAW settings refresh', () => {

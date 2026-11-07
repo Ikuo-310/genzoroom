@@ -525,7 +525,10 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .raw-curve-channel[aria-pressed="true"] { color: #fff; background: #303033; border-color: #68686c; }
 .raw-curve-channel:focus-visible { outline: 2px solid #f2f2f2; outline-offset: 1px; }
 .raw-curve-graph { display: block; width: min(100%, 320px); height: auto; aspect-ratio: 1; margin: 0 auto; cursor: auto; }
-.raw-curve-graph.is-dragging, .raw-curve-point { cursor: crosshair; }
+.raw-curve-point.is-endpoint { cursor: ns-resize; }
+.raw-curve-point.is-interior { cursor: move; }
+.raw-curve-graph.is-dragging-endpoint { cursor: ns-resize; }
+.raw-curve-graph.is-dragging-interior { cursor: move; }
 .raw-curve-graph:focus-visible { outline: 2px solid #f2f2f2; outline-offset: 2px; }
 .raw-curve-background { fill: #202022; }
 .raw-curve-grid line { stroke: #414145; stroke-width: 0.8; }

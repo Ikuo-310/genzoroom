@@ -2278,3 +2278,7 @@ RAW調整パネルのカラーグレーディングとエフェクトの間に�
 # RAWポイントカーブ P4-C（2026-11-07）
 
 折れ線をshape-preserving PCHIP由来のSVG Bezier pathへ置き換え、制御点ドラッグにPointer Captureを追加した。端点X固定、Y範囲、内部点の隣接間隔を維持し、Pointer Upで最終位置を取り込み、Cancel／Escape／チャンネル切替では開始配列へ戻す。RAW設定更新・文書切替で古いドラッグを破棄する。任意の完了コールバックにはチャンネル、開始／最終配列、変更有無を渡すが、P5のNative／History操作は未接続。Reset、Preview、Recipe保存、ヒストグラム、ターゲット調整も未実装。
+
+# RAWポイントカーブ P5-A（2026-11-07）
+
+制御点の追加と選択中の内部点Delete削除を既存`curve` History操作へ接続し、対象チャンネルの全点をNative要求形式へ変換して1回送信する。操作中は既存lockで編集を抑止し、成功時はreadback設定でSVGを同期、失敗時は確定設定へ戻す。点選択・端点Deleteは送信せず、ドラッグ確定は引き続きローカルのみ。端点／内部点／空白のカーソルを`ns-resize`／`move`／`auto`にした。P5-BのドラッグHistory接続、P5-CのReset・右クリック削除は未実装。
