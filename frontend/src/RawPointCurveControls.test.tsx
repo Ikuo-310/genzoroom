@@ -328,6 +328,31 @@ it('drags an interior point live, applies the Pointer Up position, and suppresse
   expect(curve.master[1]).toEqual({ x: 0.5, y: 0.5 });
 });
 
+it('keeps a targeted-readback point draggable when Begin triggers a parent render with cloned points', () => {
+  const curve = emptyCurve();
+  curve.master = [{ x: 0, y: 0 }, { x: 0.38, y: 0.62 }, { x: 1, y: 1 }];
+  const onDragCancel = vi.fn(), onDragChange = vi.fn(), onDragCommit = vi.fn();
+  const render: (input: ReturnType<typeof emptyCurve>) => void = input => root.render(<RawPointCurveControls curve={input}
+    onDragStart={() => render(Object.fromEntries(Object.entries(input).map(([channel, points]) =>
+      [channel, points.map(point => ({ ...point }))])) as ReturnType<typeof emptyCurve>)}
+    onDragCancel={onDragCancel} onDragChange={onDragChange} onDragCommit={onDragCommit} />);
+  act(() => render(curve));
+  const graph = host.querySelector<SVGSVGElement>('[data-testid="raw-curve-graph"]')!;
+  vi.spyOn(graph, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 200, 256, 256));
+  const point = host.querySelectorAll<SVGCircleElement>('[data-testid="raw-curve-point"]')[1];
+  Object.defineProperty(point, 'setPointerCapture', { configurable: true, value: vi.fn() });
+  Object.defineProperty(point, 'releasePointerCapture', { configurable: true, value: vi.fn() });
+
+  sendPointer(point, 'pointerdown', 32, 200, 200);
+  expect(onDragCancel).not.toHaveBeenCalled();
+  sendPointer(graph, 'pointermove', 32, 200, 230);
+  expect(onDragChange).toHaveBeenCalledOnce();
+  sendPointer(graph, 'pointerup', 32, 200, 230);
+
+  expect(onDragCommit).toHaveBeenCalledWith(expect.objectContaining({ changed: true, channel: 'master' }));
+  expect(onDragCancel).not.toHaveBeenCalled();
+});
+
 it('reports unchanged Pointer Up as a no-op and reports nothing for cancelled drags', () => {
   const curve = emptyCurve();
   curve.master = [{ x: 0, y: 0 }, { x: 0.5, y: 0.5 }, { x: 1, y: 1 }];

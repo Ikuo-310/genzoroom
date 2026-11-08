@@ -34,6 +34,10 @@ function samePoints(left: RawCurvePoint[], right: RawCurvePoint[]) {
   return left.length === right.length && left.every((point, index) => point.x === right[index].x && point.y === right[index].y);
 }
 
+function sameCurve(left: CurveDraft, right: CurveDraft) {
+  return RAW_CURVE_CHANNELS.every(channel => samePoints(left[channel], right[channel]));
+}
+
 function effectivePoints(points: RawCurvePoint[]) {
   return points.length ? points : identityPoints;
 }
@@ -106,9 +110,16 @@ export function RawPointCurveControls({ curve, channel: controlledChannel, onCha
   const [contextMenu, setContextMenu] = useState<CurveContextMenuState | null>(null);
   const dragRef = useRef<CurveDrag | null>(null);
   const suppressClickRef = useRef(false);
+  const syncedCurve = useRef(copyCurve(curve));
+  const syncedKey = useRef(syncKey);
   const dragCancelRef = useRef(onDragCancel);
   dragCancelRef.current = onDragCancel;
   useEffect(() => {
+    const changed = !sameCurve(syncedCurve.current, curve) || !Object.is(syncedKey.current, syncKey);
+    if (!changed) return;
+    // Parent renders can clone the same Native readback; only changed data should interrupt pointer capture.
+    syncedCurve.current = copyCurve(curve);
+    syncedKey.current = syncKey;
     cancelDrag(false);
     setContextMenu(null);
     setDraft(copyCurve(curve));
