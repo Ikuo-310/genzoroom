@@ -225,6 +225,21 @@ describe('RAW History transport', () => {
       documentToken: doc.documentToken, documentRevision: doc.revision, settingsFingerprint: request.doc.settingsFingerprint,
       expectedRecipeRevision: 4, saveId: request.saveId, ...operation });
   });
+  it.each([undefined, 'd'.repeat(32)])('sends curve points and only the supplied interaction identity (%s)', async curveInteractionId => {
+    const points: [number, number][] = [[0, 0], [.5, .6], [1, 1]];
+    const request: RawHistoryRequest = { doc: rawSettings(doc), action: 'operate', expectedRecipeRevision: 4,
+      saveId: '00000000-0000-4000-8000-000000000001', curveInteractionId,
+      operation: { kind: 'curve', metadata: { channel: 'master' }, points } };
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => new Response(JSON.stringify(rawHistoryResult(request)),
+      { headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetch);
+    await saveRawHistory(request);
+    expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toEqual({ workspaceId: doc.workspaceId,
+      generation: doc.generation, documentToken: doc.documentToken, documentRevision: doc.revision,
+      settingsFingerprint: request.doc.settingsFingerprint, expectedRecipeRevision: 4, saveId: request.saveId,
+      kind: 'curve', metadata: { channel: 'master' }, curvePoints: points,
+      ...(curveInteractionId ? { curveInteractionId } : {}) });
+  });
   it.each(['before', 'after'] as const)('sends the complete WB pick frame at the top level for %s', async kind => {
     const frame = { kind, geometryId: 'a'.repeat(64), maxSide: 1024, quality: 'full' as const, x: .23, y: .81 };
     const operation: RawHistoryOperation = { kind: 'wbPick', metadata: {}, frame };

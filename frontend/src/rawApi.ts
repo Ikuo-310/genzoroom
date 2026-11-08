@@ -472,6 +472,7 @@ export async function saveRawHistory(request: RawHistoryRequest): Promise<RawHis
       ...(action === 'commit' ? request.geometryCommit ? { kind: 'geometry', metadata: { operation: request.geometryCommit.operation, ...(request.geometryCommit.action ? { action: request.geometryCommit.action } : {}) },
         gestureId: request.geometryCommit.gestureId } : { kind: 'control', metadata: { control } } : {}),
       ...(action === 'operate' && operation ? { kind: operation.kind, metadata: operation.metadata,
+        ...(operation.kind === 'geometry' ? { geometry: operation.geometry } : {}),
         ...(operation.kind === 'curve' ? { curvePoints: operation.points, ...(curveInteractionId ? { curveInteractionId } : {}) } : {}),
         ...(operation.kind === 'wbPick' ? { frame: operation.frame } : {}) } : {}),
       ...(action === 'jump' ? { targetStepId } : {}) }), RAW_SETTINGS_RESPONSE_BYTES);
