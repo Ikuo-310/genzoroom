@@ -2300,3 +2300,7 @@ Windows RAW APIへCurve Interaction begin／update／cancelを接続し、一時
 # RAWポイントカーブ P5-C（2026-11-08）
 
 RAWカテゴリバーのResetを`curveReset / point`へ接続し、チャンネルボタン・グラフ空白の右クリックメニューから対象チャンネルReset、内部制御点の右クリックメニューから既存`curve`削除操作を実行する。メニューはEscape／外側Pointerで閉じ、操作ロック中は開かない。History表示を操作種別とチャンネルに分岐し、「カラーリセット」fallbackを解消した。Frontend関連301件、TypeScript／production build、`git diff --check`が成功。実Desktop操作は未確認。
+
+# RAWポイントカーブ ライブPreview応答性試験値（2026-11-08）
+
+ポイントカーブの一時Draft Previewだけ、要求`maxSide`を`min(現在の適応side, 512)`に制限し、Curve専用更新間隔を150msから50msへ短縮した。通常RAWスライダーの150ms集約、Viewport／DPR／Zoomの算出、Pointer Up後のFull Preview経路、in-flight 1件＋最新pending 1件の集約は維持する。512px／50msは応答性比較用の試験値であり固定仕様ではない。実Desktopで同じRAW・Viewport・Zoom条件を用い、追従速度、ドラッグ中の粗さ、Pointer Up後のFull復帰を確認する。

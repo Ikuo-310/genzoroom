@@ -20,6 +20,7 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 it('debounces all C2 controls, flushes the final input and uses readback rather than sent values', async () => {
+  expect(RAW_THROTTLE_MS).toBe(150);
   const c = controller();
   for (const id of api.RAW_CONTROL_IDS) c.change({ [id]: id === 'wb.temp' ? 5500 : 1 });
   await vi.advanceTimersByTimeAsync(RAW_THROTTLE_MS - 1); expect(api.setRawControls).not.toHaveBeenCalled();

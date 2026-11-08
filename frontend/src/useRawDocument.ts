@@ -472,7 +472,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       displayTargetKey = key;
       const geometryId = publishedFrame?.revision === doc.revision && publishedFrame.quality === quality
         ? publishedFrame.frame.geometryId : null;
-      curveTarget.current = { quality: 'draft', mode: 'whole', maxSide: side, viewGeneration, geometryId };
+      curveTarget.current = { quality: 'draft', mode: 'whole', maxSide: Math.min(side, 512), viewGeneration, geometryId };
       const owner = editor, view = viewGeneration;
       const acknowledged = () => valid() && editor === owner && !editor?.mutating && view === viewGeneration
         && editor?.confirmed.generation === doc.generation && editor.confirmed.documentToken === doc.documentToken

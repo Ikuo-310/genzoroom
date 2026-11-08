@@ -48,7 +48,9 @@ it('coalesces curve pointer moves into Draft Preview and confirms one History op
     { quality: 'draft', mode: 'whole', maxSide: 1024, viewGeneration: 0, geometryId: null });
   saver.updateCurveInteraction([{ x: 0, y: 0 }, { x: .4, y: .7 }, { x: 1, y: 1 }],
     { quality: 'draft', mode: 'whole', maxSide: 1024, viewGeneration: 0, geometryId: null });
-  await vi.advanceTimersByTimeAsync(150); await drain();
+  await vi.advanceTimersByTimeAsync(49); await drain();
+  expect(api.rawPreview).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1); await drain();
   expect(api.rawPreview).toHaveBeenCalledOnce();
   expect(vi.mocked(api.rawPreview).mock.calls[0][5]?.points).toEqual([[0, 0], [.4, .7], [1, 1]]);
   expect(curvePreview).toHaveBeenCalledOnce();
@@ -60,6 +62,32 @@ it('coalesces curve pointer moves into Draft Preview and confirms one History op
     kind: 'curve', metadata: { channel: 'master' }, points: [[0, 0], [.45, .75], [1, 1]] } });
   expect(vi.mocked(api.saveRawHistory).mock.calls.filter(([entry]) => entry.action === 'operate')).toHaveLength(1);
   expect(saver.locked).toBe(false);
+});
+
+it('keeps one curve Preview in flight and sends only the latest pending points after 50ms', async () => {
+  const { saver } = owner(); await saver.save();
+  expect(saver.beginCurveInteraction('red')).toBe(true); await drain();
+  const first = gate<Awaited<ReturnType<typeof api.rawPreview>>>();
+  vi.mocked(api.rawPreview).mockReturnValueOnce(first.promise);
+  const points = (x: number): api.RawCurvePoint[] => [{ x: 0, y: 0 }, { x, y: .5 }, { x: 1, y: 1 }];
+  const target = { quality: 'draft' as const, mode: 'whole' as const, maxSide: 512, viewGeneration: 0, geometryId: null };
+  saver.updateCurveInteraction(points(.2), target);
+  await vi.advanceTimersByTimeAsync(50); await drain();
+  expect(api.rawPreview).toHaveBeenCalledOnce();
+  saver.updateCurveInteraction(points(.3), target);
+  saver.updateCurveInteraction(points(.4), target);
+  saver.updateCurveInteraction(points(.6), target);
+  await vi.advanceTimersByTimeAsync(500); await drain();
+  expect(api.rawPreview).toHaveBeenCalledOnce();
+  first.resolve({ blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence: 1 });
+  await drain();
+  await vi.advanceTimersByTimeAsync(49); await drain();
+  expect(api.rawPreview).toHaveBeenCalledOnce();
+  await vi.advanceTimersByTimeAsync(1); await drain();
+  expect(api.rawPreview).toHaveBeenCalledTimes(2);
+  expect(vi.mocked(api.rawPreview).mock.calls[1][5]?.points).toEqual([[0, 0], [.6, .5], [1, 1]]);
+  await saver.cancelCurveInteraction();
+  expect(vi.mocked(api.saveRawHistory).mock.calls.filter(([request]) => request.action === 'operate')).toHaveLength(0);
 });
 
 it('queues Pointer Up behind a still-running Native begin without losing the final operation', async () => {

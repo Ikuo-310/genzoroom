@@ -12,7 +12,7 @@ import { ImageViewer } from './ImageViewer';
 import './i18n';
 
 vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(),
-  discardRawWorkspace:vi.fn(), beginRawGeometry:vi.fn(),updateRawGeometry:vi.fn(),recoverRawGeometry:vi.fn(), rawCapability: vi.fn(), createRawWorkspace: vi.fn(), openRawDocument: vi.fn(),
+  discardRawWorkspace:vi.fn(), beginRawGeometry:vi.fn(),updateRawGeometry:vi.fn(),recoverRawGeometry:vi.fn(), beginRawCurveInteraction:vi.fn(), cancelRawCurveInteraction:vi.fn(), rawCapability: vi.fn(), createRawWorkspace: vi.fn(), openRawDocument: vi.fn(),
   rawRegionOwner: vi.fn(), rawRegion: vi.fn(), cancelRawRegion: vi.fn(async () => {}),
   rawPreview: vi.fn(), cancelRawPreview: vi.fn(async () => {}), readRawDocument: vi.fn(), readRawSettings: vi.fn(), setRawControls: vi.fn(), releaseRawWorkspace: vi.fn(), rawWorkspaceEmpty: vi.fn(),
   readRawHistory: vi.fn(), saveRawHistory: vi.fn(), saveRawRecipe: vi.fn(), readRawRecipe: vi.fn() }));
@@ -40,6 +40,8 @@ beforeEach(() => {
   vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => ({
     workspaceId, assetId, handle: assetId, generation: 1, documentToken: assetId, revision: 1 }));
   vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence: 1 });
+  vi.mocked(api.beginRawCurveInteraction).mockResolvedValue('a'.repeat(32));
+  vi.mocked(api.cancelRawCurveInteraction).mockResolvedValue();
   vi.mocked(api.readRawDocument).mockImplementation(async doc => doc);
   vi.mocked(api.readRawSettings).mockImplementation(async doc => rawSettings(doc));
   vi.mocked(api.setRawControls).mockImplementation(async (doc, patch) => ({ ...rawSettings(doc), revision: doc.revision + 1,
@@ -634,6 +636,41 @@ describe('RAW native Before cache', () => {
     expect(current?.frame?.nativeWidth).toBe(6000); expect(current?.width).toBe(16);
     await act(async () => current!.prepareSave());
     expect(current?.saveError).toBeUndefined();
+  });
+  it('caps only curve-interaction Draft requests at 512px and restores Full after Pointer Up', async () => {
+    await render('a'); await flush();
+    act(() => current!.viewChanged({ width: 1600, height: 1200, dpr: 2, scale: 1,
+      nativeWidth: 6000, nativeHeight: 4000, geometryId: 'a'.repeat(64), fit: true }));
+    await new Promise(resolve => setTimeout(resolve, 200)); await flush();
+    expect(vi.mocked(api.rawPreview).mock.calls.at(-1)?.[4]?.maxSide).toBe(2048);
+    const before = vi.mocked(api.rawPreview).mock.calls.length;
+    act(() => current!.beginCurveInteraction('master'));
+    await flush();
+    act(() => current!.updateCurveInteraction([{ x: 0, y: 0 }, { x: .5, y: .7 }, { x: 1, y: 1 }]));
+    await new Promise(resolve => setTimeout(resolve, 70)); await flush();
+    const curveCall = vi.mocked(api.rawPreview).mock.calls.slice(before).find(call => call[5]);
+    expect(curveCall?.[4]).toMatchObject({ quality: 'draft', maxSide: 512 });
+    act(() => current!.finishCurveInteraction('master', [{ x: 0, y: 0 }, { x: .5, y: .7 }, { x: 1, y: 1 }], true));
+    await flush();
+    expect(vi.mocked(api.rawPreview).mock.calls.at(-1)?.[4]).toMatchObject({ quality: 'full', maxSide: 2048 });
+  });
+
+  it('keeps a smaller adaptive side for curve Draft when the viewport needs less than 512px', async () => {
+    await render('a'); await flush();
+    act(() => current!.viewChanged({ width: 300, height: 225, dpr: 1, scale: 1,
+      nativeWidth: 6000, nativeHeight: 4000, geometryId: 'a'.repeat(64), fit: true }));
+    await new Promise(resolve => setTimeout(resolve, 200)); await flush();
+    expect(vi.mocked(api.rawPreview).mock.calls.at(-1)?.[4]?.maxSide).toBe(320);
+    const before = vi.mocked(api.rawPreview).mock.calls.length;
+    act(() => current!.beginCurveInteraction('red'));
+    await flush();
+    act(() => current!.updateCurveInteraction([{ x: 0, y: 0 }, { x: .5, y: .7 }, { x: 1, y: 1 }]));
+    await new Promise(resolve => setTimeout(resolve, 70)); await flush();
+    const curveCall = vi.mocked(api.rawPreview).mock.calls.slice(before).find(call => call[5]);
+    expect(curveCall?.[4]).toMatchObject({ quality: 'draft', maxSide: 320 });
+    act(() => current!.cancelCurveInteraction()); await flush();
+    expect(api.cancelRawCurveInteraction).toHaveBeenCalledOnce();
+    expect(vi.mocked(api.rawPreview).mock.calls.at(-1)?.[4]?.quality).toBe('full');
   });
   it.each(['light.exposure', 'detail.sharpenAmount', 'detail.sharpenMasking', 'detail.nrLuminance', 'detail.nrDetail',
     'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'] as const)('requests Draft on acknowledged %s interaction and Full on end without another mutation', async control => {

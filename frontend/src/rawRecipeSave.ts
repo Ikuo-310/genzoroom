@@ -5,9 +5,10 @@ import { RawApiError, RawSaveError, beginRawGeometry, updateRawGeometry, beginRa
   type RawCurvePoint, type RawDisplayTarget, type RawFrame, readRawRecipe, saveRawRecipe, saveRawHistory, readRawHistory,
   type RawSettings, type RawRecipeRequest, type RawHistoryRequest, type RawHistoryControlId, type RawHistoryResult,
   type RawHistoryStep, type RawHistoryOperation } from './rawApi';
-import { RAW_THROTTLE_MS, type RawControls } from './rawControls';
+import type { RawControls } from './rawControls';
 
 export const RAW_AUTOSAVE_MS = 5000;
+const RAW_CURVE_PREVIEW_THROTTLE_MS = 50;
 
 /** Current-document save owner. Unknown outcomes retain one immutable request ahead of newer edits. */
 export class RawRecipeSave {
@@ -88,7 +89,7 @@ export class RawRecipeSave {
     gesture.sequence++;
     if (!gesture.timer && !gesture.inFlight) gesture.timer = setTimeout(() => {
       gesture.timer = undefined; void this.pumpCurvePreview(gesture, target);
-    }, RAW_THROTTLE_MS);
+    }, RAW_CURVE_PREVIEW_THROTTLE_MS);
     return gesture.sequence;
   }
   private async pumpCurvePreview(gesture: NonNullable<typeof this.curveGesture>, target: RawDisplayTarget) {
@@ -112,7 +113,7 @@ export class RawRecipeSave {
     } finally {
       gesture.inFlight = undefined;
       if (this.active && this.curveGesture === gesture && !gesture.ending && gesture.latest)
-        gesture.timer = setTimeout(() => { gesture.timer = undefined; void this.pumpCurvePreview(gesture, gesture.target ?? target); }, RAW_THROTTLE_MS);
+        gesture.timer = setTimeout(() => { gesture.timer = undefined; void this.pumpCurvePreview(gesture, gesture.target ?? target); }, RAW_CURVE_PREVIEW_THROTTLE_MS);
     }
   }
   finishCurveInteraction(channel: RawCurveChannel, points: RawCurvePoint[], changed: boolean) {
