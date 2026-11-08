@@ -806,12 +806,12 @@ class RawPreviewApi:
         identity = {"workspaceId", "generation", "documentToken", "documentRevision"}
         action = request.url.path.rsplit("/", 1)[1]
         if action == "begin":
-            if set(body) != identity | {"channel"}:
+            if set(body) not in (identity | {"channel"}, identity | {"channel", "mode"}) or body.get("mode", "points") not in ("points", "targeted"):
                 raise LightCraftError("raw_invalid_request")
             async with self._lock:
                 self._history_unsettled()
                 interaction_id = await self.raw.begin_curve_interaction(
-                    self._raw_handle, body["channel"], doc["revision"])
+                    self._raw_handle, body["channel"], doc["revision"], body.get("mode", "points"))
             return JSONResponse({**{key: doc[key] for key in ("workspaceId", "handle", "assetId", "generation", "documentToken")},
                                  "revision": doc["revision"],
                                  "interactionId": interaction_id}, headers={"Cache-Control": "no-store"})
@@ -820,16 +820,22 @@ class RawPreviewApi:
                 raise LightCraftError("raw_invalid_request")
             await self.raw.cancel_curve_interaction(self._raw_handle, body["interactionId"], doc["revision"])
             return Response(status_code=204, headers={"Cache-Control": "no-store"})
-        required = identity | {"interactionId", "points", "serial", "maxSide", "viewGeneration", "geometryId"}
+        targeted = "steps" in body
+        required = identity | ({"interactionId", "target", "steps", "serial", "maxSide", "viewGeneration", "geometryId"} if targeted else {"interactionId", "points", "serial", "maxSide", "viewGeneration", "geometryId"})
         if set(body) != required or type(body.get("interactionId")) is not str or \
                 type(body.get("serial")) is not int or not 0 <= body["serial"] <= 2**31 - 1 or \
                 type(body.get("maxSide")) is not int or not 16 <= body["maxSide"] <= MAX_PREVIEW_SIDE or \
                 type(body.get("viewGeneration")) is not int or body["viewGeneration"] < 0 or \
                 not (body["geometryId"] is None or type(body["geometryId"]) is str and re.fullmatch(r"[a-f0-9]{64}", body["geometryId"])):
             raise LightCraftError("raw_invalid_request")
-        update = await self.raw.update_curve_interaction(self._raw_handle, body["interactionId"],
-            doc["revision"], body["points"], max_side=body["maxSide"],
-            view_generation=body["viewGeneration"], geometry_id=body["geometryId"])
+        if targeted:
+            update = await self.raw.update_targeted_curve_interaction(self._raw_handle, body["interactionId"],
+                doc["revision"], body["target"], body["steps"], max_side=body["maxSide"],
+                view_generation=body["viewGeneration"], geometry_id=body["geometryId"])
+        else:
+            update = await self.raw.update_curve_interaction(self._raw_handle, body["interactionId"],
+                doc["revision"], body["points"], max_side=body["maxSide"],
+                view_generation=body["viewGeneration"], geometry_id=body["geometryId"])
         if update is SUPERSEDED or not update.applied or update.preview_ticket is None:
             return Response(status_code=204, headers={"X-Raw-Superseded-Reason": "replaced", "Cache-Control": "no-store"})
         frame = await update.preview_ticket
@@ -845,6 +851,8 @@ class RawPreviewApi:
             if isinstance(response, _ImageResponse):
                 response.headers["X-Raw-Interaction-Id"] = frame.interaction_id
                 response.headers["X-Raw-Interaction-Sequence"] = str(frame.interaction_sequence)
+                if targeted:
+                    response.headers["X-Raw-Curve-Points"] = json.dumps(update.settings["curve"][self.raw._curve_interaction.channel], separators=(",", ":"))
             return self._hold_image_response(response, lease)
 
     def _preview_response(self, frame, doc, body, kind, handle):

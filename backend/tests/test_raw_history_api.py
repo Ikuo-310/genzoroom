@@ -147,17 +147,18 @@ def test_curve_interaction_preview_cancel_and_single_history_confirmation(local,
                 baseline_curve = copy.deepcopy(doc["curve"]["master"])
                 identity_body = identity(doc) | {"documentRevision": doc["revision"]}
                 begin_url = f'/api/raw/documents/{doc["handle"]}/curve-interaction/begin'
-                started = await http.post(begin_url, json=identity_body | {"channel": "master"})
+                started = await http.post(begin_url, json=identity_body | {"channel": "master", "mode": "targeted"})
                 assert started.status_code == 200
                 interaction_id = started.json()["interactionId"]
-                points = [[0, 0], [.5, .7], [1, 1]]
+                target = {"x": .5, "y": .5}
                 update = await http.post(f'/api/raw/documents/{doc["handle"]}/curve-interaction/update', json=identity_body | {
-                    "interactionId": interaction_id, "points": points, "serial": 1, "maxSide": 1024,
+                    "interactionId": interaction_id, "target": target, "steps": [2, -1], "serial": 1, "maxSide": 1024,
                     "viewGeneration": 0, "geometryId": None})
                 assert update.status_code == 200
                 assert update.headers["x-raw-quality"] == "draft"
                 assert update.headers["x-raw-interaction-id"] == interaction_id
                 assert update.headers["x-raw-interaction-sequence"] == "1"
+                assert json.loads(update.headers["x-raw-curve-points"])[1]["x"] == .5
                 assert update.content.startswith(b"\x89PNG\r\n\x1a\n")
                 cancelled = await http.post(f'/api/raw/documents/{doc["handle"]}/curve-interaction/cancel',
                     json=identity_body | {"interactionId": interaction_id})
@@ -165,23 +166,28 @@ def test_curve_interaction_preview_cancel_and_single_history_confirmation(local,
                 assert len(store.get_raw_history(api._history_identity)["history"]["steps"]) == 0
                 assert (await api.raw.get_settings(api._raw_handle)).settings["curve"]["master"] == baseline_curve
 
-                started = await http.post(begin_url, json=identity_body | {"channel": "master"})
+                started = await http.post(begin_url, json=identity_body | {"channel": "master", "mode": "targeted"})
                 interaction_id = started.json()["interactionId"]
                 update = await http.post(f'/api/raw/documents/{doc["handle"]}/curve-interaction/update', json=identity_body | {
-                    "interactionId": interaction_id, "points": points, "serial": 2, "maxSide": 1024,
+                    "interactionId": interaction_id, "target": target, "steps": [2, -1], "serial": 2, "maxSide": 1024,
                     "viewGeneration": 0, "geometryId": None})
                 assert update.status_code == 200
-                before_curve_commands = sum(name == "develop.curve" for name, _ in children[0].commands)
+                assert update.headers["x-raw-interaction-sequence"] == "1"
+                curve_points = json.loads(update.headers["x-raw-curve-points"])
+                history_points = [[p["x"], p["y"]] for p in curve_points]
+                before_targeted_commands = sum(name == "develop.targeted" for name, _ in children[0].commands)
+                assert len(store.get_raw_history(api._history_identity)["history"]["steps"]) == 0
+                assert doc["curve"]["master"] == baseline_curve
                 request = body(doc) | {"kind": "curve", "metadata": {"channel": "master"},
-                    "curvePoints": points, "curveInteractionId": interaction_id}
+                    "curvePoints": history_points, "curveInteractionId": interaction_id}
                 doc = await operation(http, doc, "operate", request)
-                assert doc["curve"]["master"] == [{"x": 0, "y": 0}, {"x": .5, "y": .7}, {"x": 1, "y": 1}]
+                assert doc["curve"]["master"] == curve_points
                 assert doc["history"]["length"] == doc["history"]["cursor"] == 1
-                assert sum(name == "develop.curve" for name, _ in children[0].commands) == before_curve_commands
+                assert sum(name == "develop.targeted" for name, _ in children[0].commands) == before_targeted_commands
                 doc = await operation(http, doc, "undo")
                 assert doc["curve"]["master"] == baseline_curve and doc["history"]["cursor"] == 0
                 doc = await operation(http, doc, "redo")
-                assert doc["curve"]["master"] == [{"x": 0, "y": 0}, {"x": .5, "y": .7}, {"x": 1, "y": 1}]
+                assert doc["curve"]["master"] == curve_points
         finally:
             await api.close()
     asyncio.run(run())

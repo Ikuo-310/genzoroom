@@ -292,6 +292,25 @@ class RawProcess(FakeProcess):
             ]
             self.curve_updates.append(copy.deepcopy(params))
             value = {"ok": True}
+        elif command == "develop.targeted":
+            from bisect import bisect_left
+            from math import isfinite
+            settings = self.photos[self.active]["settings"]
+            channel = params["channel"]
+            points = settings["curve"][channel]
+            x, delta = params["x"], params["delta"] / 255
+            if not points:
+                points = [{"x": 0., "y": 0.}, {"x": 1., "y": 1.}]
+                settings["curve"][channel] = points
+            i = next((i for i, p in enumerate(points) if abs(p["x"] - x) < .03), None)
+            if i is None:
+                i = bisect_left([p["x"] for p in points], x)
+                left, right = points[max(0, i-1)], points[min(len(points)-1, i)]
+                y = left["y"] + (right["y"] - left["y"]) * (x-left["x"]) / max(1e-12, right["x"]-left["x"])
+                points.insert(i, {"x": x, "y": max(0., min(1., y+delta))})
+            else:
+                points[i]["y"] = max(0., min(1., points[i]["y"] + delta))
+            value = {"ok": True}
         elif command == "curve.reset":
             curve = self.photos[self.active]["settings"]["curve"]
             channels = ("master", "red", "green", "blue") if params["channel"] == "point" else (params["channel"],)
@@ -494,6 +513,31 @@ def test_curve_interaction_update_preview_cancel_and_finalize(tmp_path, monkeypa
                 await raw.set_controls(handle, {"light.exposure": 1}, baseline.revision)
             committed = raw.confirm_curve_interaction(handle, interaction_id, baseline.revision)
             assert committed.settings == result.settings and committed.revision > baseline.revision
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+def test_targeted_curve_steps_preserve_order_and_finalize_without_reapplying(tmp_path):
+    async def run():
+        raw, manager, children, files = await create(tmp_path, adaptive=True)
+        try:
+            handle, baseline = await raw.open_raw("pixel", files[0])
+            child = children[0]
+            interaction_id = await raw.begin_curve_interaction(handle, "master", baseline.revision, "targeted")
+            update = await raw.update_targeted_curve_interaction(handle, interaction_id, baseline.revision,
+                {"x": 0., "y": .5}, [2, -4, 1])
+            frame = await update.preview_ticket
+            assert frame.interaction_sequence == update.sequence
+            points = update.settings["curve"]["master"]
+            assert points == [{"x": 0., "y": 1/255}, {"x": 1., "y": 1.}]
+            assert [p[1]["delta"] for p in child.commands if p[0] == "develop.targeted"] == [2, -4, 1]
+            assert raw._photos["pixel"].settings_json == _settings_json(baseline.settings)
+            result = await raw.end_curve_interaction(handle, interaction_id, baseline.revision, [])
+            assert result.settings["curve"]["master"] == update.settings["curve"]["master"]
+            assert len([x for x in child.interaction_history]) == 1
+            committed = raw.confirm_curve_interaction(handle, interaction_id, baseline.revision)
+            assert committed.settings == result.settings
         finally:
             await raw.close()
     asyncio.run(run())

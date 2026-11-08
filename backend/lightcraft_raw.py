@@ -172,6 +172,7 @@ class _CurveInteraction:
     interaction_id: str
     baseline_revision: int
     channel: str
+    mode: str
     baseline_settings_json: str
     working_settings_json: str
     started_at: float
@@ -1010,9 +1011,9 @@ class LightCraftRawSession:
             return await self._command("lens.downloadDatabase", {}, deadline)
         return await self._submit(action, self._timeouts.command)
 
-    async def begin_curve_interaction(self, handle, channel, expected_revision):
+    async def begin_curve_interaction(self, handle, channel, expected_revision, mode="points"):
         from raw_controls import CURVE_CHANNELS, curve_readback
-        if type(channel) is not str or channel not in CURVE_CHANNELS:
+        if type(channel) is not str or channel not in CURVE_CHANNELS or mode not in ("points", "targeted"):
             raise LightCraftError("raw_invalid_request")
         photo = self._photo(handle, active=True)
         if type(expected_revision) is not int or expected_revision != photo.applied_revision or \
@@ -1028,7 +1029,7 @@ class LightCraftRawSession:
             previous = self._curve_interaction
             if previous is not None and previous.state not in ("cancelled", "confirmed"):
                 raise LightCraftError("raw_curve_interaction_pending")
-            interaction = _CurveInteraction(handle, uuid.uuid4().hex, expected_revision, channel,
+            interaction = _CurveInteraction(handle, uuid.uuid4().hex, expected_revision, channel, mode,
                                             photo.settings_json, photo.settings_json,
                                             asyncio.get_running_loop().time(), update_limit)
             self._curve_interaction = interaction
@@ -1049,7 +1050,7 @@ class LightCraftRawSession:
                 raise
             interaction.baseline_settings_json = native
             self._edits += 1
-            await self._command("develop.beginInteraction", {"label": f"{channel.title()} Curve"}, deadline)
+            await self._command("develop.beginInteraction", {"label": f"{channel.title()} Curve" if mode == "points" else f"{channel.title()} Targeted Curve"}, deadline)
             interaction.state = "open"
             return interaction.interaction_id
 
@@ -1078,6 +1079,8 @@ class LightCraftRawSession:
         from raw_controls import validate_curve_input
         interaction = self._ensure_curve_interaction_owner(interaction_id)
         if interaction is None or interaction.handle != handle:
+            raise LightCraftError("raw_curve_interaction_stale")
+        if interaction.mode != "points":
             raise LightCraftError("raw_curve_interaction_stale")
         points = json.loads(_object_json({"points": points}, MAX_PATCH_BYTES))["points"]
         validate_curve_input(interaction.channel, points)
@@ -1112,6 +1115,54 @@ class LightCraftRawSession:
                 interaction.update_task = asyncio.create_task(self._drain_curve_updates(interaction),
                                                               name="lightcraft-curve-updates")
         return await asyncio.shield(future)
+
+    async def update_targeted_curve_interaction(self, handle, interaction_id, expected_revision, target, steps, *,
+                                                max_side=DEFAULT_PREVIEW_SIDE, view_generation=0, geometry_id=None):
+        """Apply ordered relative steps; every call is serialized and never coalesced."""
+        from raw_controls import curve_readback
+        interaction = self._ensure_curve_interaction_owner(interaction_id)
+        if interaction is None or interaction.handle != handle or interaction.mode != "targeted" or interaction.state != "open":
+            raise LightCraftError("raw_curve_interaction_stale")
+        if type(target) is not dict or set(target) != {"x", "y"} or any(type(target[k]) not in (int, float) or not math.isfinite(target[k]) or not 0 <= target[k] <= 1 for k in target):
+            raise LightCraftError("raw_invalid_request")
+        if type(steps) is not list or not steps or len(steps) > 128 or any(type(step) is not int or step == 0 or abs(step) > 255 for step in steps):
+            raise LightCraftError("raw_invalid_request")
+        if type(expected_revision) is not int or expected_revision != interaction.baseline_revision:
+            raise LightCraftError("raw_revision_conflict")
+        # A per-interaction lock preserves pointer order across concurrent HTTP requests.
+        lock = getattr(interaction, "target_lock", None)
+        if lock is None:
+            lock = interaction.target_lock = asyncio.Lock()
+        async with lock:
+            if interaction.update_attempts + len(steps) > interaction.update_limit or self._edits + len(steps) + 1 >= MAX_EDITS:
+                raise LightCraftError("raw_session_edit_limit")
+            seq = interaction.latest_sequence + 1
+            sent = False
+            async def action(deadline):
+                nonlocal sent
+                photo = self._photo(handle, active=True)
+                if photo.applied_revision != interaction.baseline_revision or photo.requested_revision != interaction.baseline_revision:
+                    raise LightCraftError("raw_revision_conflict")
+                for delta in steps:
+                    self._edits += 1
+                    interaction.update_attempts += 1
+                    await self._command("develop.targeted", {"target":"curve", "channel":interaction.channel,
+                        "x":float(target["x"]), "y":float(target["y"]), "delta":delta}, deadline)
+                    sent = True
+                return await self._read_settings(photo, deadline, validate=lambda settings: curve_readback(settings))
+            try:
+                encoded = await self._submit(action, self._timeouts.command, interaction_id=interaction_id)
+            except BaseException as error:
+                unknown = isinstance(error, LightCraftError) and error.code == "raw_operation_timeout"
+                if sent or unknown or isinstance(error, MCPTransportError) or self._lost:
+                    interaction.state = "failed"; self._desynchronized = True
+                raise
+            interaction.latest_sequence = interaction.applied_sequence = seq
+            interaction.working_settings_json = encoded
+            points = curve_readback(json.loads(encoded))[interaction.channel]
+            interaction.working_points = [[p["x"], p["y"]] for p in points]
+            ticket = self.request_curve_interaction_preview(handle, interaction_id, seq, max_side, view_generation, geometry_id)
+            return CurveInteractionUpdate(interaction_id, seq, True, encoded, ticket)
 
     async def _drain_curve_updates(self, interaction):
         from raw_controls import curve_readback
@@ -1207,8 +1258,11 @@ class LightCraftRawSession:
         interaction = self._ensure_curve_interaction_owner(interaction_id)
         if interaction is None or interaction.handle != handle:
             raise LightCraftError("raw_curve_interaction_stale")
-        points = json.loads(_object_json({"points": points}, MAX_PATCH_BYTES))["points"]
-        validate_curve_input(interaction.channel, points)
+        if interaction.mode == "points":
+            points = json.loads(_object_json({"points": points}, MAX_PATCH_BYTES))["points"]
+            validate_curve_input(interaction.channel, points)
+        else:
+            points = None
         if type(expected_revision) is not int or expected_revision != interaction.baseline_revision:
             raise LightCraftError("raw_revision_conflict")
         if interaction.state == "finalized":
@@ -1221,7 +1275,7 @@ class LightCraftRawSession:
             return interaction.final_result
         if interaction.state == "ending":
             raise LightCraftError("raw_busy")
-        if interaction.state == "open":
+        if interaction.state == "open" and interaction.mode == "points":
             async with self._curve_state_lock:
                 interaction.state = "finalizing"
                 interaction.final_points = points
@@ -1258,6 +1312,9 @@ class LightCraftRawSession:
                         interaction.state = "open"
                         interaction.final_points = None
                     raise
+        elif interaction.state == "open" and interaction.mode == "targeted":
+            interaction.state = "finalizing"
+            interaction.final_points = None
         elif interaction.state != "finalizing":
             raise LightCraftError("raw_curve_interaction_stale")
 
