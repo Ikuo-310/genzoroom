@@ -51,14 +51,18 @@ h1 { margin: 0; font-size: clamp(2.5rem, 8vw, 4rem); letter-spacing: -0.04em; li
 .error .dot { background: #ffae9d; }
 .not-configured .dot { background: #aeb9b3; }
 .detail { color: #bacac1; font-size: 0.95rem; }
-button { font: inherit; color: #17221f; background: #d1e2bf; border: 0; border-radius: 6px; padding: 8px 16px; cursor: pointer; }
-button:hover:not(:disabled) { background: #e3f0d6; }
+button { font: inherit; border: 0; border-radius: 6px; padding: 8px 16px; cursor: pointer; }
+.developer-page button { color: #17221f; background: #d1e2bf; }
+.developer-page button:hover:not(:disabled) { background: #e3f0d6; }
 button:focus-visible { outline: 3px solid #e6eee9; outline-offset: 4px; }
 button:disabled { opacity: 0.6; cursor: wait; }
-/* Low specificity lets local controls retain their own states without changing the workspace or Developer base. */
+/* Neutral defaults yield to component rules, especially their selected and hover states. */
 :where(.home-page, .settings-dialog) button { color: var(--text-primary); background: var(--bg-elevated); }
-:where(.home-page, .settings-dialog) button:hover:not(:disabled) { background: var(--selection); }
+:where(.home-page button:hover:not(:disabled), .settings-dialog button:hover:not(:disabled)) { background: var(--selection); }
 :where(.home-page, .settings-dialog) button:focus-visible { outline-color: var(--accent); }
+/* Workspace fallback reuses the existing darkroom button colors without outranking local states. */
+:where(.workspace-page button) { color: #d8d8da; background: #242426; }
+:where(.workspace-page button:hover:not(:disabled)) { background: #303033; }
 .home-content { width: 100%; min-width: 0; min-height: 0; margin-top: 0; }
 .home-tabs-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; min-width: 0; padding: 0 16px; background: var(--bg-panel); border-bottom: 1px solid var(--border-subtle); }
 .home-toolbar { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding: 8px 16px; background: var(--bg-panel); border-bottom: 1px solid var(--border-subtle); }
