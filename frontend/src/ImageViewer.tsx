@@ -79,7 +79,6 @@ type ImageViewerProps = {
 
 const EMPTY_IMAGE_SIZE: Point = { x: 0, y: 0 };
 const NAVIGATOR_LONG_EDGE = 180;
-const PICK_CURSOR = `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="m14 5 5 5M16 3l5 5-3 3-1-1-10 10-4 1 1-4L14 7l-1-1z" fill="white" stroke="black" stroke-width="1.5"/></svg>')}") 3 21, crosshair`;
 type ViewerLoupePoint = { anchor: Point; imagePoint: Point; fixed: boolean };
 type TargetLoupePoint = ViewerLoupePoint & { nativePoint: Point };
 
@@ -748,7 +747,6 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
       className={`viewer-viewport${zoomed ? ' pannable' : ''}`}
       onPointerEnter={event=>{if(event.pointerType!=='touch'&&!dragRef.current&&!cropBusy){pointerInsideViewer.current=true;if(!targetDragRef.current)refreshTargetLoupe({x:event.clientX,y:event.clientY});}}}
       onPointerLeave={event=>{if(event.pointerType!=='touch'&&!dragRef.current&&!cropBusy){pointerInsideViewer.current=false;if(!targetDragRef.current)publishTargetLoupe();}}}
-      style={rawPickActive ? { cursor: pickReady ? PICK_CURSOR : 'not-allowed' } : undefined}
       onKeyDown={(event) => {
         // Only actual photo focus participates; hovering a slider does not.
         if (keyboardBlocked || document.activeElement !== event.currentTarget || event.target !== event.currentTarget || isNativeEditingTarget(event.target)) return;
@@ -783,7 +781,9 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
       onPointerCancel={stopPan}
     >
       {rawCrop?.active && <RawCropSurface binding={rawCrop} viewport={viewportSize} scale={scale} pan={pan} busy={setCropBusy} handTool={spaceHand && scale>fitScale || viewerPanActive} panning={viewerPanActive} />}
-      <div ref={imagePositionRef} className="viewer-image-position" style={{ display: rawCrop?.active ? 'none' : undefined, cursor: targetDragging ? 'ns-resize' : rawTargetedActive && !showBeforeAdjustments && !spaceHand ? 'crosshair' : undefined, transform: `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px))` }}
+      <div ref={imagePositionRef} className="viewer-image-position" style={{ display: rawCrop?.active ? 'none' : undefined,
+        cursor: rawPickActive ? pickReady ? 'none' : 'not-allowed' : targetDragging ? 'ns-resize' : rawTargetedActive && !showBeforeAdjustments && !spaceHand ? 'crosshair' : undefined,
+        transform: `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px))` }}
         onPointerDown={(event) => {
           if (event.button === 0) viewportRef.current?.focus({ preventScroll: true });
         }}>

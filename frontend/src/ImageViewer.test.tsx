@@ -347,6 +347,8 @@ describe('Viewer edit settings context menu', () => {
     const base = host.querySelector<HTMLImageElement>('.raw-whole-base')!;
     Object.defineProperty(base, 'naturalWidth', { value: 1472 }); Object.defineProperty(base, 'naturalHeight', { value: 1104 });
     act(() => base.dispatchEvent(new Event('load')));
+    expect(position.style.cursor).toBe('none');
+    expect(viewport.style.cursor).toBe('');
     const pointer = (type: string, x: number, y: number) => act(() => viewport.dispatchEvent(new MouseEvent(type,
       { bubbles: true, button: 0, clientX: x, clientY: y })));
     pointer('pointermove', 500, 350);
@@ -381,6 +383,7 @@ describe('Viewer edit settings context menu', () => {
       .toEqual(['blob:retained-before', 'blob:before-region']);
     render(true, true, 'raw', 'error');
     expect(host.querySelector('[data-testid="viewer-point-loupe"]')).toBeNull();
+    expect(position.style.cursor).toBe('not-allowed');
     render(true); pointer('pointermove', 500, 350);
     pointer('pointerdown', 500, 350); pointer('pointerup', 500, 350);
     expect(picked).toHaveBeenLastCalledWith(expect.objectContaining({ url: 'blob:retained-before',
@@ -393,6 +396,7 @@ describe('Viewer edit settings context menu', () => {
     render(false, true, 'raw-next');
     expect(host.querySelector('[data-testid="viewer-point-loupe"]')).toBeNull();
     render(false, false); expect(host.querySelector('[data-testid="viewer-point-loupe"]')).toBeNull();
+    expect(position.style.cursor).toBe('');
     picked.mockClear(); pointer('pointerdown', 500, 350); pointer('pointerup', 500, 350);
     expect(picked).not.toHaveBeenCalled();
   });
