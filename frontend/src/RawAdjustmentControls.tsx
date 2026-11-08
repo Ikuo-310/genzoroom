@@ -73,8 +73,9 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
         enabled: !settings.sections[sections[category]] } }); }}
       onReset={category === 'effects' || category === 'curves' ? undefined : () => operate({ kind: 'sectionReset', metadata: { section: sections[category] } })}
       showActions={category !== 'curves'} headerActions={category === 'curves' ? <button type="button"
-        className="adjustment-category-reset" disabled aria-label={t('workspace.resetCategory')}
-        title={t('workspace.resetCategory')}>{t('workspace.reset')}</button> : undefined}>
+        className="adjustment-category-reset" disabled={actionsLocked} aria-label={t('workspace.resetCategory')}
+        title={t('workspace.resetCategory')} onClick={() => operate({ kind: 'curveReset', metadata: { channel: 'point' } })}
+        onFocus={focusAdjustmentCategory} onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>{t('workspace.reset')}</button> : undefined}>
       {category === 'color' && <p className="edit-source-note">{settings.wb.available
         ? `${settings.wb.mode} · Kelvin` : t('workspace.rawPreview.wbUnavailable')}</p>}
       {category === 'effects' && <RawSubcategoryHeader name={t('workspace.rawPreview.basicEffects')}
@@ -101,6 +102,7 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
       </div>}
       {category === 'curves' && <RawPointCurveControls key={raw.assetId} curve={settings.curve}
         editDisabled={actionsLocked} syncKey={raw.operationError ?? raw.editError ?? raw.saveError}
+        onReset={channel => operate({ kind: 'curveReset', metadata: { channel } })}
         onPointEdit={operateCurve} onDragStart={channel => raw.beginCurveInteraction(channel)}
         onDragChange={(_channel, points) => raw.updateCurveInteraction(points)}
         onDragCancel={() => raw.cancelCurveInteraction()}

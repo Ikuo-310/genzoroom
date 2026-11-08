@@ -78,6 +78,12 @@ const flagResetLabels: Record<RawOpticsFlagId, string> = {
 
 function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t']) {
   if (step.kind === 'geometry') return t(`workspace.rawPreview.cropHistory.${step.metadata.action ?? step.metadata.operation}`);
+  if (step.kind === 'curve') return t(`workspace.rawPreview.curveHistory.${step.metadata.channel}`);
+  if (step.kind === 'curveReset') {
+    const resetLabel = step.metadata.channel === 'point' ? 'resetPoint'
+      : `reset${String(step.metadata.channel).charAt(0).toUpperCase()}${String(step.metadata.channel).slice(1)}`;
+    return t(`workspace.rawPreview.curveHistory.${resetLabel}`);
+  }
   if (step.kind === 'vignetteStyle')
     return `${t('workspace.rawPreview.vignetteMode')}: ${t(`workspace.rawPreview.vignetteStyles.${step.metadata.style}`)}`;
   if (step.kind === 'opticsFlag' || step.kind === 'opticsFlagReset') {

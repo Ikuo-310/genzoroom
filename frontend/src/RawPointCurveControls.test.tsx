@@ -164,6 +164,63 @@ it('prevents edit submission while the existing operation lock is active', () =>
   expect(onPointEdit).not.toHaveBeenCalled();
 });
 
+it('opens channel and graph reset actions at the pointer location without adding points', () => {
+  const onReset = vi.fn();
+  act(() => root.render(<RawPointCurveControls curve={emptyCurve()} onReset={onReset} />));
+  const open = (target: Element, x = 24, y = 32) => act(() => target.dispatchEvent(new MouseEvent('contextmenu', {
+    bubbles: true, cancelable: true, button: 2, clientX: x, clientY: y,
+  })));
+  const menuItem = () => document.querySelector<HTMLButtonElement>('.raw-curve-context-menu [role="menuitem"]')!;
+  open(host.querySelector<HTMLButtonElement>('[data-channel="red"]')!);
+  expect(menuItem().textContent).toBe('Reset Red Curve');
+  act(() => menuItem().click());
+  expect(onReset).toHaveBeenLastCalledWith('red');
+
+  act(() => host.querySelector<HTMLButtonElement>('[data-channel="blue"]')!.click());
+  const graph = host.querySelector<SVGSVGElement>('[data-testid="raw-curve-graph"]')!;
+  open(graph);
+  expect(menuItem().textContent).toBe('Reset Blue Curve');
+  act(() => menuItem().click());
+  expect(onReset).toHaveBeenLastCalledWith('blue');
+  expect(host.querySelectorAll('[data-testid="raw-curve-point"]')).toHaveLength(2);
+});
+
+it('right-click deletes only interior points and suppresses endpoint or locked menus', () => {
+  const curve = emptyCurve();
+  curve.master = [{ x: 0, y: 0 }, { x: 0.5, y: 0.6 }, { x: 1, y: 1 }];
+  const onPointEdit = vi.fn();
+  act(() => root.render(<RawPointCurveControls curve={curve} onPointEdit={onPointEdit} />));
+  const points = () => [...host.querySelectorAll<SVGCircleElement>('[data-testid="raw-curve-point"]')];
+  const open = (point: Element) => act(() => point.dispatchEvent(new MouseEvent('contextmenu', {
+    bubbles: true, cancelable: true, button: 2, clientX: 50, clientY: 60,
+  })));
+  open(points()[0]);
+  expect(document.querySelector('.raw-curve-context-menu')).toBeNull();
+  expect(points()).toHaveLength(3);
+  open(points()[1]);
+  expect(document.querySelector<HTMLButtonElement>('.raw-curve-context-menu [role="menuitem"]')?.textContent).toBe('Delete this point');
+  act(() => document.querySelector<HTMLButtonElement>('.raw-curve-context-menu [role="menuitem"]')!.click());
+  expect(points()).toHaveLength(2);
+  expect(onPointEdit).toHaveBeenCalledOnce();
+  expect(onPointEdit).toHaveBeenCalledWith('master', [{ x: 0, y: 0 }, { x: 1, y: 1 }]);
+
+  act(() => root.render(<RawPointCurveControls curve={curve} editDisabled onReset={vi.fn()} />));
+  open(host.querySelectorAll<SVGCircleElement>('[data-testid="raw-curve-point"]')[1]);
+  expect(document.querySelector('.raw-curve-context-menu')).toBeNull();
+});
+
+it('closes the curve context menu on Escape and outside pointer input', () => {
+  act(() => root.render(<RawPointCurveControls curve={emptyCurve()} onReset={vi.fn()} />));
+  const graph = host.querySelector<SVGSVGElement>('[data-testid="raw-curve-graph"]')!;
+  act(() => graph.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 })));
+  expect(document.querySelector('.raw-curve-context-menu')).not.toBeNull();
+  act(() => document.querySelector('.raw-curve-context-menu')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+  expect(document.querySelector('.raw-curve-context-menu')).toBeNull();
+  act(() => graph.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 })));
+  act(() => document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+  expect(document.querySelector('.raw-curve-context-menu')).toBeNull();
+});
+
 it('keeps separate channel drafts and replaces them when RAW settings refresh', () => {
   act(() => root.render(<RawPointCurveControls curve={emptyCurve()} />));
   const graph = host.querySelector<SVGSVGElement>('[data-testid="raw-curve-graph"]')!;

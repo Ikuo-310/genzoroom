@@ -2296,3 +2296,7 @@ Backend内部に単一Curve Interaction owner、`develop.beginInteraction`／`de
 # RAWポイントカーブ P5-B.1 / L2（2026-11-08）
 
 Windows RAW APIへCurve Interaction begin／update／cancelを接続し、一時UpdateのDraft Previewを既存Preview応答として返す。Frontendはドラッグ中SVGを即時更新し、150ms間隔・一つのin-flight＋最新一件でNative Previewを追従させる。Pointer Upでは最終配列でNative Interactionを終了し、Curveを再適用せず、最終readbackを既存saveId／receipt付きHistory操作として一件保存した後に確定snapshotへ昇格する。Cancel／Escapeは開始表示へ戻し、通常Previewを再要求する。Frontend関連382件、Backend関連3件、TypeScript／production build、`git diff --check`が成功。実Desktopと実カメラRAWでの応答性・表示復帰は受入確認待ち。P5-CのReset等は未実装。詳細は[RAWポイントカーブ統合調査](research/lightcraft/RAW_POINT_CURVE_INTEGRATION.md)を参照。
+
+# RAWポイントカーブ P5-C（2026-11-08）
+
+RAWカテゴリバーのResetを`curveReset / point`へ接続し、チャンネルボタン・グラフ空白の右クリックメニューから対象チャンネルReset、内部制御点の右クリックメニューから既存`curve`削除操作を実行する。メニューはEscape／外側Pointerで閉じ、操作ロック中は開かない。History表示を操作種別とチャンネルに分岐し、「カラーリセット」fallbackを解消した。Frontend関連301件、TypeScript／production build、`git diff --check`が成功。実Desktop操作は未確認。

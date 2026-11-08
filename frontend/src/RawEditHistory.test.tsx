@@ -152,6 +152,23 @@ it.each(['ja', 'en'])('labels RAW grading controls and category Reset in %s', as
   expect(markup).not.toContain('workspace.');
 });
 
+it.each(['ja', 'en'])('labels every point curve operation by kind and channel in %s', async language => {
+  await i18n.changeLanguage(language);
+  const channels = ['master', 'red', 'green', 'blue'] as const;
+  const steps: RawHistoryStep[] = [
+    ...channels.map(channel => ({ stepId: `edit-${channel}`, kind: 'curve' as const, metadata: { channel }, changes: [], createdAt: '' })),
+    ...([...channels, 'point'] as const).map(channel => ({ stepId: `reset-${channel}`, kind: 'curveReset' as const, metadata: { channel }, changes: [], createdAt: '' })),
+  ];
+  const markup = renderToStaticMarkup(<RawEditHistory raw={rawHistory(steps, steps.length) as never} disabled={false} onReset={() => {}} />);
+  const expected = language === 'ja'
+    ? ['ポイントカーブ', 'レッドカーブ', 'グリーンカーブ', 'ブルーカーブ', 'RGBカーブをリセット', 'レッドカーブをリセット',
+      'グリーンカーブをリセット', 'ブルーカーブをリセット', 'ポイントカーブをリセット']
+    : ['Point Curve', 'Red Curve', 'Green Curve', 'Blue Curve', 'Reset RGB Curve', 'Reset Red Curve',
+      'Reset Green Curve', 'Reset Blue Curve', 'Reset Point Curve'];
+  for (const label of expected) expect(markup).toContain(label);
+  expect(markup).not.toContain(language === 'ja' ? 'カラー リセット' : 'Color Reset');
+});
+
 it.each(['ja','en'])('labels geometry History independently of scalar Reset in %s',async(language)=>{
   await i18n.changeLanguage(language);
   const steps:RawHistoryStep[]=[{stepId:'crop',kind:'geometry',metadata:{operation:'drag'},changes:[],createdAt:'2026-11-04T00:00:00Z'}];

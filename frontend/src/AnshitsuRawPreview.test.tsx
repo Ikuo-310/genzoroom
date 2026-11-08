@@ -34,7 +34,8 @@ vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawA
   setRawControls: vi.fn(async (doc, patch) => ({ ...rawSettings(doc), revision: doc.revision + 1,
     settingsFingerprint: String(doc.revision + 1).padStart(64, '0'),
     values: { ...rawSettings(doc).values, ...patch } })), releaseRawWorkspace: vi.fn(async () => {}),
-  readRawHistory: vi.fn(), saveRawHistory: vi.fn(), saveRawRecipe: vi.fn(), readRawRecipe: vi.fn() }));
+  readRawHistory: vi.fn(), saveRawHistory: vi.fn(), saveRawRecipe: vi.fn(), readRawRecipe: vi.fn(),
+  beginRawCurveInteraction: vi.fn(async () => 'a'.repeat(32)), cancelRawCurveInteraction: vi.fn(async () => {}) }));
 const commitHistory = vi.fn(async (request: rawApi.RawHistoryRequest): Promise<rawApi.RawHistoryResult> => rawHistoryResult(request));
 let root: Root, host: HTMLDivElement;
 async function flush() { await act(async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); }); }
@@ -191,7 +192,7 @@ it('binds engine control specs to shared sliders and commits RAW values without 
   const actions = [...host.querySelectorAll<HTMLButtonElement>('.adjustment-power, .adjustment-reset, .adjustment-category-actions button, .develop-panel .workspace-section-action')];
   expect(actions).toHaveLength(48);
   expect(host.querySelectorAll('.adjustment-power')).toHaveLength(0);
-  expect(actions.filter(button => button.disabled)).toHaveLength(7);
+  expect(actions.filter(button => button.disabled)).toHaveLength(6);
   const number = sliders[4].closest('.adjustment-control')!.querySelector<HTMLInputElement>('input[type="number"]')!;
   act(() => {
     number.focus();
@@ -555,7 +556,7 @@ it('places display-only Curves between Grading and Effects and keeps channel swi
   const curveCategory = categories[3];
   expect(curveCategory.querySelector('[data-category-switch]')).toBeNull();
   const curveReset = curveCategory.querySelector<HTMLButtonElement>('.adjustment-category-header .adjustment-category-reset')!;
-  expect(curveReset.disabled).toBe(true);
+  expect(curveReset.disabled).toBe(false);
   expect(curveCategory.querySelector<SVGPathElement>('[data-testid="raw-curve-line"]')!.getAttribute('d')).toContain('70,70');
   const historyWrites = vi.mocked(rawApi.saveRawHistory).mock.calls.length;
   const nativeWrites = vi.mocked(rawApi.setRawControls).mock.calls.length;
@@ -642,6 +643,80 @@ it('persists point additions and interior deletions through the existing curve H
   expect(commitHistory.mock.calls.filter(([request]) => request.action === 'operate').at(-1)?.[0].operation)
     .toEqual({ kind: 'curve', metadata: { channel: 'blue' }, points: [[0, 0], [1, 1]] });
   expect(host.querySelectorAll('[data-testid="raw-curve-point"]')).toHaveLength(2);
+});
+
+it('routes channel, graph, and category curve resets plus point context deletion through one History operation each', async () => {
+  const initialCurve = {
+    master: [{ x: 0, y: 0 }, { x: 0.5, y: 0.6 }, { x: 1, y: 1 }],
+    red: [{ x: 0, y: 0 }, { x: 0.4, y: 0.7 }, { x: 1, y: 1 }],
+    green: [{ x: 0, y: 0 }, { x: 0.6, y: 0.3 }, { x: 1, y: 1 }],
+    blue: [{ x: 0, y: 0 }, { x: 0.3, y: 0.8 }, { x: 1, y: 1 }],
+  };
+  vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), curve: structuredClone(initialCurve) }));
+  commitHistory.mockImplementation(async request => {
+    const operation = request.operation;
+    if (request.action === 'operate' && operation?.kind === 'curve') {
+      const channel = operation.metadata.channel;
+      const curve = { ...request.doc.curve, [channel]: operation.points.map(([x, y]) => ({ x, y })) };
+      return rawHistoryResult({ ...request, doc: { ...request.doc, curve } });
+    }
+    if (request.action === 'operate' && operation?.kind === 'curveReset') {
+      const channel = operation.metadata.channel;
+      const curve = channel === 'point' ? { master: [], red: [], green: [], blue: [] }
+        : { ...request.doc.curve, [channel]: [] };
+      return rawHistoryResult({ ...request, doc: { ...request.doc, curve } });
+    }
+    return rawHistoryResult(request);
+  });
+  await mount();
+  const categories = [...host.querySelectorAll<HTMLElement>('.raw-adjustment-category')];
+  const category = categories.find(item => item.classList.contains('is-curves'))!;
+  const operationCount = () => commitHistory.mock.calls.filter(([request]) => request.action === 'operate').length;
+  const context = (target: Element) => act(() => target.dispatchEvent(new MouseEvent('contextmenu', {
+    bubbles: true, cancelable: true, button: 2, clientX: 80, clientY: 90,
+  })));
+  const selectMenuItem = async () => {
+    const item = document.querySelector<HTMLButtonElement>('.raw-curve-context-menu [role="menuitem"]')!;
+    expect(item).toBeDefined(); act(() => item.click()); await flush();
+  };
+  const curve = () => host.querySelector<SVGSVGElement>('[data-testid="raw-curve-graph"]')!;
+
+  const beforeRedReset = operationCount();
+  context(category.querySelector<HTMLButtonElement>('[data-channel="red"]')!);
+  await selectMenuItem();
+  expect(operationCount()).toBe(beforeRedReset + 1);
+  expect(commitHistory.mock.calls.filter(([request]) => request.action === 'operate').at(-1)?.[0].operation)
+    .toEqual({ kind: 'curveReset', metadata: { channel: 'red' } });
+  expect(category.querySelector('[data-channel="red"]')).not.toBeNull();
+  expect(category.querySelectorAll('[data-testid="raw-curve-point"]')).toHaveLength(3);
+
+  act(() => category.querySelector<HTMLButtonElement>('[data-channel="green"]')!.click());
+  const beforeGraphReset = operationCount();
+  context(curve()); await selectMenuItem();
+  expect(operationCount()).toBe(beforeGraphReset + 1);
+  expect(commitHistory.mock.calls.filter(([request]) => request.action === 'operate').at(-1)?.[0].operation)
+    .toEqual({ kind: 'curveReset', metadata: { channel: 'green' } });
+
+  act(() => category.querySelector<HTMLButtonElement>('[data-channel="master"]')!.click());
+  const middle = category.querySelectorAll<SVGCircleElement>('[data-testid="raw-curve-point"]')[1];
+  const beforeDelete = operationCount();
+  context(middle); await selectMenuItem();
+  expect(operationCount()).toBe(beforeDelete + 1);
+  expect(commitHistory.mock.calls.filter(([request]) => request.action === 'operate').at(-1)?.[0].operation)
+    .toEqual({ kind: 'curve', metadata: { channel: 'master' }, points: [{ x: 0, y: 0 }, { x: 1, y: 1 }].map(point => [point.x, point.y]) });
+
+  const reset = category.querySelector<HTMLButtonElement>('.adjustment-category-reset')!;
+  expect(reset.disabled).toBe(false);
+  const beforeAllReset = operationCount();
+  act(() => reset.click()); await flush();
+  expect(operationCount()).toBe(beforeAllReset + 1);
+  expect(commitHistory.mock.calls.filter(([request]) => request.action === 'operate').at(-1)?.[0].operation)
+    .toEqual({ kind: 'curveReset', metadata: { channel: 'point' } });
+  for (const channel of ['master', 'red', 'green', 'blue']) {
+    act(() => category.querySelector<HTMLButtonElement>(`[data-channel="${channel}"]`)!.click());
+    expect(category.querySelectorAll('[data-testid="raw-curve-point"]')).toHaveLength(2);
+  }
+  expect(reset.disabled).toBe(false);
 });
 
 it('locks out duplicate curve edits while an operation is pending and discards the local draft on failure', async () => {

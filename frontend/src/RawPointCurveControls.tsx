@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { KeyboardEvent, MouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { focusAdjustmentCategory, navigateAdjustments } from './adjustmentFocus';
-import { RAW_CURVE_CHANNELS, type RawCurveChannel, type RawCurvePoint } from './rawApi';
+import { RAW_CURVE_CHANNELS, type RawCurveChannel, type RawCurvePoint, type RawCurveResetChannel } from './rawApi';
 
 const channelLabels: Record<RawCurveChannel, string> = {
   master: 'RGB', red: 'R', green: 'G', blue: 'B',
@@ -17,6 +18,8 @@ const identityPoints: RawCurvePoint[] = [{ x: 0, y: 0 }, { x: 1, y: 1 }];
 type CurveDraft = Record<RawCurveChannel, RawCurvePoint[]>;
 type ChannelSelection = Record<RawCurveChannel, number | null>;
 type CurveDrag = { pointerId: number; channel: RawCurveChannel; index: number; startPoints: RawCurvePoint[]; workingPoints: RawCurvePoint[]; captureTarget: SVGCircleElement };
+type CurveContextMenuState = { x: number; y: number; trigger: HTMLElement | SVGElement;
+  action: { kind: 'reset'; channel: RawCurveResetChannel } | { kind: 'delete'; channel: RawCurveChannel; index: number } };
 export type RawCurveDragResult = { channel: RawCurveChannel; before: RawCurvePoint[]; after: RawCurvePoint[]; changed: boolean };
 
 function copyCurve(curve: CurveDraft): CurveDraft {
@@ -79,13 +82,14 @@ function smoothCurvePath(points: RawCurvePoint[]) {
   return path;
 }
 
-export function RawPointCurveControls({ curve, onDragStart, onDragChange, onDragCancel, onDragCommit, onPointEdit, editDisabled = false, syncKey }: {
+export function RawPointCurveControls({ curve, onDragStart, onDragChange, onDragCancel, onDragCommit, onPointEdit, onReset, editDisabled = false, syncKey }: {
   curve: Record<RawCurveChannel, RawCurvePoint[]>;
   onDragStart?: (channel: RawCurveChannel, before: RawCurvePoint[]) => void;
   onDragChange?: (channel: RawCurveChannel, points: RawCurvePoint[]) => void;
   onDragCancel?: (channel: RawCurveChannel, before: RawCurvePoint[]) => void;
   onDragCommit?: (result: RawCurveDragResult) => void;
   onPointEdit?: (channel: RawCurveChannel, points: RawCurvePoint[]) => void;
+  onReset?: (channel: RawCurveResetChannel) => void;
   editDisabled?: boolean;
   syncKey?: unknown;
 }) {
@@ -94,10 +98,12 @@ export function RawPointCurveControls({ curve, onDragStart, onDragChange, onDrag
   const [draft, setDraft] = useState<CurveDraft>(() => copyCurve(curve));
   const [selected, setSelected] = useState<ChannelSelection>({ master: null, red: null, green: null, blue: null });
   const [dragging, setDragging] = useState(false);
+  const [contextMenu, setContextMenu] = useState<CurveContextMenuState | null>(null);
   const dragRef = useRef<CurveDrag | null>(null);
   const suppressClickRef = useRef(false);
   useEffect(() => {
     cancelDrag(false);
+    setContextMenu(null);
     setDraft(copyCurve(curve));
     setSelected({ master: null, red: null, green: null, blue: null });
   }, [curve, syncKey]);
@@ -106,6 +112,7 @@ export function RawPointCurveControls({ curve, onDragStart, onDragChange, onDrag
     if (drag) releasePointerCapture(drag);
     dragRef.current = null;
   }, []);
+  useEffect(() => { if (editDisabled) setContextMenu(null); }, [editDisabled]);
 
   const points = draft[channel];
   const visiblePoints = points.length ? points : identityPoints;
@@ -208,6 +215,33 @@ export function RawPointCurveControls({ curve, onDragStart, onDragChange, onDrag
     setSelected(previous => ({ ...previous, [channel]: index }));
   }
 
+  function openResetMenu(event: MouseEvent<HTMLElement | SVGElement>, targetChannel: RawCurveResetChannel) {
+    if (editDisabled || !onReset) return;
+    event.preventDefault(); event.stopPropagation();
+    // Keep the hit channel fixed while the menu is open, even if the graph selection changes.
+    setContextMenu({ x: event.clientX, y: event.clientY, trigger: event.currentTarget,
+      action: { kind: 'reset', channel: targetChannel } });
+  }
+
+  function deletePoint(targetChannel: RawCurveChannel, index: number) {
+    const targetPoints = draft[targetChannel];
+    if (editDisabled || index < 0 || index >= targetPoints.length
+      || targetPoints[index].x === 0 || targetPoints[index].x === 1) return;
+    const nextPoints = targetPoints.filter((_, pointIndex) => pointIndex !== index);
+    setDraft(previous => ({ ...previous, [targetChannel]: nextPoints }));
+    setSelected(previous => ({ ...previous, [targetChannel]: null }));
+    onPointEdit?.(targetChannel, nextPoints.map(point => ({ ...point })));
+  }
+
+  function openPointMenu(event: MouseEvent<SVGCircleElement>, index: number) {
+    event.preventDefault(); event.stopPropagation();
+    const point = visiblePoints[index];
+    if (editDisabled || !point || point.x === 0 || point.x === 1) return;
+    // The context target is immutable so deletion cannot drift to another point or channel.
+    setContextMenu({ x: event.clientX, y: event.clientY, trigger: event.currentTarget,
+      action: { kind: 'delete', channel, index } });
+  }
+
   function addOrSelectPoint(event: MouseEvent<SVGSVGElement>) {
     if (editDisabled) return;
     const svg = event.currentTarget;
@@ -250,11 +284,7 @@ export function RawPointCurveControls({ curve, onDragStart, onDragChange, onDrag
       event.preventDefault();
       if (dragRef.current) return;
       const index = selected[channel];
-      if (editDisabled || index === null || points[index]?.x === 0 || points[index]?.x === 1) return;
-      const nextPoints = points.filter((_, pointIndex) => pointIndex !== index);
-      setDraft(previous => ({ ...previous, [channel]: nextPoints }));
-      setSelected(previous => ({ ...previous, [channel]: null }));
-      onPointEdit?.(channel, nextPoints.map(point => ({ ...point })));
+      if (index !== null) deletePoint(channel, index);
       return;
     }
     if (event.key === 'Escape') return;
@@ -269,18 +299,29 @@ export function RawPointCurveControls({ curve, onDragStart, onDragChange, onDrag
     addOrSelectPoint(event);
   }
 
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+  function invokeContextMenu() {
+    const target = contextMenu;
+    if (!target || editDisabled) return;
+    setContextMenu(null);
+    if (target.action.kind === 'reset') onReset?.(target.action.channel);
+    else deletePoint(target.action.channel, target.action.index);
+  }
+
   return <div className="raw-point-curve-controls">
     <div className="raw-curve-channels" role="group" aria-label={t('workspace.rawPreview.curveChannels')}
       onFocus={focusAdjustmentCategory} onKeyDown={event => navigateAdjustments(event.nativeEvent, event.target as HTMLElement)}>
       {RAW_CURVE_CHANNELS.map(item => <button key={item} type="button" className="raw-curve-channel"
         data-channel={item} aria-label={t(`workspace.rawPreview.curveChannelNames.${item}`)}
-        aria-pressed={channel === item} onClick={() => { if (item !== channel) cancelDrag(); setChannel(item); }}>
+        aria-pressed={channel === item} onClick={() => { setContextMenu(null); if (item !== channel) cancelDrag(); setChannel(item); }}
+        onContextMenu={event => openResetMenu(event, item)}>
         {channelLabels[item]}
       </button>)}
     </div>
     <svg className={`raw-curve-graph is-${channel}${dragging ? ` is-dragging is-dragging-${draggingEndpoint ? 'endpoint' : 'interior'}` : ''}`} viewBox={`0 0 ${graphSize} ${graphSize}`} role="img" tabIndex={0}
       aria-label={t('workspace.rawPreview.curveGraph')} data-testid="raw-curve-graph" data-channel={channel}
       onFocus={focusAdjustmentCategory} onKeyDown={handleGraphKeyDown} onClick={handleGraphClick}
+      onContextMenu={event => openResetMenu(event, channel)}
       onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerCancel}>
       <rect className="raw-curve-background" x={graphInset} y={graphInset} width={graphExtent} height={graphExtent} />
       {[0.25, 0.5, 0.75].map(fraction => <g key={fraction} className="raw-curve-grid">
@@ -295,6 +336,7 @@ export function RawPointCurveControls({ curve, onDragStart, onDragChange, onDrag
         key={`${channel}:${index}`} data-testid="raw-curve-point" data-point-index={index}
         aria-selected={selected[channel] === index} cx={graphInset + point.x * graphExtent}
         cy={graphInset + (1 - point.y) * graphExtent} r={selected[channel] === index ? 5 : 3.5}
+        onContextMenu={event => openPointMenu(event, index)}
         onPointerDown={event => handlePointerDown(event, index)} onClick={event => {
           event.stopPropagation();
           const followsPointer = suppressClickRef.current;
@@ -304,5 +346,51 @@ export function RawPointCurveControls({ curve, onDragStart, onDragChange, onDrag
           event.currentTarget.ownerSVGElement?.focus();
         }} />)}
     </svg>
+    {contextMenu && <CurveContextMenu target={contextMenu} onClose={closeContextMenu} onInvoke={invokeContextMenu}
+      label={t('workspace.rawPreview.curveContextMenu.title')} itemLabel={contextMenu.action.kind === 'delete'
+        ? t('workspace.rawPreview.curveContextMenu.deletePoint')
+        : t(`workspace.rawPreview.curveContextMenu.reset.${contextMenu.action.channel}`)} />}
   </div>;
+}
+
+function CurveContextMenu({ target, label, itemLabel, onClose, onInvoke }: {
+  target: CurveContextMenuState; label: string; itemLabel: string; onClose: () => void; onInvoke: () => void;
+}) {
+  const menu = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ left: target.x, top: target.y });
+  useLayoutEffect(() => {
+    const element = menu.current;
+    if (!element) return;
+    const fit = () => {
+      const bounds = element.getBoundingClientRect();
+      setPosition({ left: Math.max(8, Math.min(target.x, window.innerWidth - bounds.width - 8)),
+        top: Math.max(8, Math.min(target.y, window.innerHeight - bounds.height - 8)) });
+    };
+    fit();
+    element.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true });
+    const outside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !element.contains(event.target)) onClose();
+    };
+    const escape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
+      // Handle Escape in capture phase so the graph/category shortcuts never receive it.
+      event.preventDefault(); event.stopPropagation(); onClose();
+      if (target.trigger.isConnected) target.trigger.focus({ preventScroll: true });
+    };
+    document.addEventListener('pointerdown', outside, true);
+    document.addEventListener('keydown', escape, true);
+    window.addEventListener('resize', fit);
+    return () => {
+      document.removeEventListener('pointerdown', outside, true);
+      document.removeEventListener('keydown', escape, true);
+      window.removeEventListener('resize', fit);
+    };
+  }, [onClose, target]);
+  return createPortal(<div ref={menu} role="menu" aria-label={label}
+    className="workspace-menu-surface workspace-menu-list raw-curve-context-menu" style={position}
+    onKeyDownCapture={event => event.stopPropagation()}>
+    <button type="button" className="workspace-menu-item" role="menuitem" onClick={() => {
+      onClose(); if (target.trigger.isConnected) target.trigger.focus({ preventScroll: true }); onInvoke();
+    }}>{itemLabel}</button>
+  </div>, document.body);
 }

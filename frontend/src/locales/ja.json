@@ -400,6 +400,11 @@
       "curveChannels": "カーブチャンネル",
       "curveChannelNames": { "master": "RGB全体", "red": "赤", "green": "緑", "blue": "青" },
       "curveGraph": "ポイントカーブグラフ",
+      "curveHistory": { "master": "ポイントカーブ", "red": "レッドカーブ", "green": "グリーンカーブ", "blue": "ブルーカーブ",
+        "resetPoint": "ポイントカーブをリセット", "resetMaster": "RGBカーブをリセット", "resetRed": "レッドカーブをリセット",
+        "resetGreen": "グリーンカーブをリセット", "resetBlue": "ブルーカーブをリセット" },
+      "curveContextMenu": { "title": "カーブ操作", "deletePoint": "このポイントを削除", "reset": {
+        "master": "RGBカーブをリセット", "red": "レッドカーブをリセット", "green": "グリーンカーブをリセット", "blue": "ブルーカーブをリセット" } },
       "basicEffects": "基本エフェクト",
       "vignette": "周辺光量補正",
       "mode": "モード",

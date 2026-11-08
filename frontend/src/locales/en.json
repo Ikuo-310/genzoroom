@@ -409,6 +409,11 @@
       "curveChannels": "Curve channels",
       "curveChannelNames": { "master": "RGB master", "red": "Red", "green": "Green", "blue": "Blue" },
       "curveGraph": "Point curve graph",
+      "curveHistory": { "master": "Point Curve", "red": "Red Curve", "green": "Green Curve", "blue": "Blue Curve",
+        "resetPoint": "Reset Point Curve", "resetMaster": "Reset RGB Curve", "resetRed": "Reset Red Curve",
+        "resetGreen": "Reset Green Curve", "resetBlue": "Reset Blue Curve" },
+      "curveContextMenu": { "title": "Curve actions", "deletePoint": "Delete this point", "reset": {
+        "master": "Reset RGB Curve", "red": "Reset Red Curve", "green": "Reset Green Curve", "blue": "Reset Blue Curve" } },
       "basicEffects": "Basic Effects",
       "vignette": "Vignette",
       "mode": "Mode",
