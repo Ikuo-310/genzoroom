@@ -12,7 +12,7 @@ import { ImageViewer } from './ImageViewer';
 import './i18n';
 
 vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(),
-  discardRawWorkspace:vi.fn(), beginRawGeometry:vi.fn(),updateRawGeometry:vi.fn(),recoverRawGeometry:vi.fn(), beginRawCurveInteraction:vi.fn(), cancelRawCurveInteraction:vi.fn(), rawCapability: vi.fn(), createRawWorkspace: vi.fn(), openRawDocument: vi.fn(),
+  discardRawWorkspace:vi.fn(), beginRawGeometry:vi.fn(),updateRawGeometry:vi.fn(),recoverRawGeometry:vi.fn(), beginRawCurveInteraction: vi.fn(), cancelRawCurveInteraction: vi.fn(), updateRawTargetedCurve: vi.fn(), rawCapability: vi.fn(), createRawWorkspace: vi.fn(), openRawDocument: vi.fn(),
   rawRegionOwner: vi.fn(), rawRegion: vi.fn(), cancelRawRegion: vi.fn(async () => {}),
   rawPreview: vi.fn(), cancelRawPreview: vi.fn(async () => {}), readRawDocument: vi.fn(), readRawSettings: vi.fn(), setRawControls: vi.fn(), releaseRawWorkspace: vi.fn(), rawWorkspaceEmpty: vi.fn(),
   readRawHistory: vi.fn(), saveRawHistory: vi.fn(), saveRawRecipe: vi.fn(), readRawRecipe: vi.fn() }));
@@ -656,19 +656,21 @@ describe('RAW native Before cache', () => {
   });
 
   it('fails RAW departure while a rejected curve update is still awaiting Native cancel', async () => {
+    vi.mocked(api.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), sourceWidth: 16, sourceHeight: 12 }));
+    vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence: 1,
+      frame: { geometryId: 'a'.repeat(64), nativeWidth: 16, nativeHeight: 12, aspect: 4/3,
+        fullWidth: 16, fullHeight: 12, window: null } });
+    vi.mocked(api.updateRawTargetedCurve).mockRejectedValueOnce(new api.RawApiError('raw_session_edit_limit'));
     await render('a'); await flush();
-    const preview = vi.mocked(api.rawPreview).getMockImplementation()!;
-    vi.mocked(api.rawPreview).mockImplementation(async (...args) => {
-      if (args[5]) throw new api.RawApiError('raw_session_edit_limit');
-      return preview(...args);
-    });
     let finishCancel!: () => void;
     vi.mocked(api.cancelRawCurveInteraction).mockReturnValueOnce(new Promise<void>(resolve => { finishCancel = resolve; }));
     const initialHistoryWrites = vi.mocked(api.saveRawHistory).mock.calls.length;
 
-    act(() => current!.beginCurveInteraction('master')); await flush();
-    act(() => current!.updateCurveInteraction([{ x: 0, y: 0 }, { x: .5, y: .7 }, { x: 1, y: 1 }]));
+    act(() => current!.toggleTargetedCurve()); await flush();
+    act(() => { expect(current!.beginTargetedCurve({ x: .5, y: .5 })).toBe(true); });
+    act(() => current!.updateTargetedCurve([1]));
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 70)); await flush(); });
+    expect(api.updateRawTargetedCurve).toHaveBeenCalledOnce();
     expect(api.cancelRawCurveInteraction).toHaveBeenCalledOnce();
 
     await expect(current!.prepareSave()).rejects.toMatchObject({ code: 'raw_save_unconfirmed' });
