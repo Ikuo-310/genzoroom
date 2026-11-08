@@ -39,6 +39,7 @@ Internal changes are omitted unless they affect users.
 
 ### Fixed
 
+- Fixed RAW Crop operations failing validation, including aspect-ratio locking and presets, rotation, and flipping.
 - Fixed WB picking that could block subsequent RAW edits and removed the duplicate OS cursor shown with the magnifier crosshair.
 - Improved stability when editing and dragging points created by the target picker, and removed the edit-count failure during repeated RAW curve gestures.
 - Prevented departure saves from looping on an unconfirmed curve interaction; the edit remains available in the darkroom for resolution.

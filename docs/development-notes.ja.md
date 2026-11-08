@@ -2340,3 +2340,17 @@ Commit `7e4c29f`で2件を修正した。Draft Previewは最新入力との完�
 `f6090e2`でFrontend送信Bodyへ既存`frame`を追加し、Before／After双方の全フィールドを保つ回帰テストを追加した。WB Autoや他のHistory操作には`frame`を追加していない。関連Frontendテスト7ファイル601件、TypeScriptチェック、本番build、`git diff --check`が成功した。ユーザーの実Desktop確認でWB採色後の編集継続が正常動作することが確認された。
 
 続いて、WB使用時に旧スポイト形カーソルとルーペ十字が重なる問題を`63b47e8`で修正した。カーソルを画像領域に限定し、採色可能時は非表示、採色不可時は`not-allowed`を維持する。関連Frontendテスト3ファイル337件、TypeScriptチェック、本番build、`git diff --check`が成功した。このカーソル修正後の実Desktop再確認は、本記録作成時点では未確認である。
+
+## RAW Geometry History送信契約の修正（2026-11-08）
+
+Windows DesktopでRAW Cropのアスペクト比固定／解除、プリセット切替、Swap、左右90°回転、水平／垂直フリップが`raw_invalid_request`で失敗した。Crop矩形を事前に縮小しても失敗することを確認した。
+
+原因はFrontendの`saveRawHistory()`がGeometry `operate`の必須フィールド`geometry`をHTTP Bodyへ含めていなかったことだった。操作オブジェクト自体は正しく生成されていたが、送信Bodyの直列化でGeometryが欠落し、Backendの`_history_body()`による検証で拒否されていた。添付ログには`raw_invalid_request`が記録されているが、Codex側から当該ファイルを参照できなかったため、ログ本文を根拠にした調査は行っていない。原因はFrontend送信処理とBackendの必須フィールド検証、および生成Bodyの照合で確認した。
+
+Commit `94efd2e`で`rawApi.ts`からトップレベル`geometry`を送信するよう修正した。`rawGeometryApi.test.ts`では各Geometry操作、専用Gesture経路、確定後のHistoryと編集継続を検証し、`rawApi.test.ts`ではCurveの`curvePoints`と任意の`curveInteractionId`を追加検証した。Backend入力検証、LightCraft Native API、History／Recipeの保存形式は変更していない。
+
+Frontend 366件、Backend 104件が成功した。Frontend生成HTTP Body 28件を実際のBackend `_history_body()`へ渡して受理されることも確認し、欠落Geometry・operation不一致・不正actionが引き続き拒否されることを確認した。TypeScriptチェック、本番Build、`git diff --check`も成功した。BuildではReact Routerの`use client` directiveとchunkサイズに関する警告が出た。
+
+ユーザーのWindows Desktop確認で、RAW Crop操作が正常に動作することを確認済み。自動テストの結果と実機確認を区別し、個々の操作やUndo／Redo／Jumpの実機確認範囲をこれ以上広げて記録しない。
+
+同日に確認したWB `frame`欠落と今回のGeometry `geometry`欠落は、どちらもFrontendのHistory HTTP BodyとBackend契約の不一致だった。今後History操作を追加・変更するときは、操作オブジェクトの生成だけで完了とせず、実際のHTTP BodyとBackend入力検証の整合性を確認する。
