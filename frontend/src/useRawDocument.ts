@@ -1049,6 +1049,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     saver.pause();
     notifyRef.current();
     await saver.waitHistory(retry);
+    // An open curve gesture is not a savable snapshot; fail instead of looping on its dirty owner.
+    if (saver.curveInteracting) throw new RawApiError('raw_save_unconfirmed');
     if (retry && (editor.error || saver.error === 'raw_revision_conflict')) {
       editor.retry(true);
       // Retry first resynchronizes on this queue; settle must not inspect its old error.

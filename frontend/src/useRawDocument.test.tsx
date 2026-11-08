@@ -655,6 +655,31 @@ describe('RAW native Before cache', () => {
     expect(vi.mocked(api.saveRawHistory).mock.calls.some(([request]) => request.action === 'operate')).toBe(false);
   });
 
+  it('fails RAW departure while a rejected curve update is still awaiting Native cancel', async () => {
+    await render('a'); await flush();
+    const preview = vi.mocked(api.rawPreview).getMockImplementation()!;
+    vi.mocked(api.rawPreview).mockImplementation(async (...args) => {
+      if (args[5]) throw new api.RawApiError('raw_session_edit_limit');
+      return preview(...args);
+    });
+    let finishCancel!: () => void;
+    vi.mocked(api.cancelRawCurveInteraction).mockReturnValueOnce(new Promise<void>(resolve => { finishCancel = resolve; }));
+    const initialHistoryWrites = vi.mocked(api.saveRawHistory).mock.calls.length;
+
+    act(() => current!.beginCurveInteraction('master')); await flush();
+    act(() => current!.updateCurveInteraction([{ x: 0, y: 0 }, { x: .5, y: .7 }, { x: 1, y: 1 }]));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 70)); await flush(); });
+    expect(api.cancelRawCurveInteraction).toHaveBeenCalledOnce();
+
+    await expect(current!.prepareSave()).rejects.toMatchObject({ code: 'raw_save_unconfirmed' });
+    expect(vi.mocked(api.saveRawHistory).mock.calls).toHaveLength(initialHistoryWrites);
+    expect(api.discardRawWorkspace).not.toHaveBeenCalled();
+
+    await act(async () => { finishCancel(); await flush(); });
+    act(() => current!.resumeEditing());
+    expect(current!.locked).toBe(false);
+  });
+
   it('caps only curve-interaction Draft requests at 512px and restores Full after Pointer Up', async () => {
     await render('a'); await flush();
     act(() => current!.viewChanged({ width: 1600, height: 1200, dpr: 2, scale: 1,
