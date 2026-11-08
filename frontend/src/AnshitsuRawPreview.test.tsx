@@ -817,7 +817,7 @@ it('sends one immutable curve History operation only after a changed drag reache
   expect(Number(host.querySelectorAll<SVGCircleElement>('[data-testid="raw-curve-point"]')[1].getAttribute('cx'))).toBe(170);
 });
 
-it('refreshes the curve and returns to RGB when switching RAW documents', async () => {
+it('finishes a curve drag before switching RAW documents and refreshes RGB from the new document', async () => {
   vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), curve: {
     master: doc.assetId === base.id ? [{ x: 0.25, y: 0.75 }] : [{ x: 0.75, y: 0.25 }],
     red: [], green: [], blue: [],
@@ -834,16 +834,60 @@ it('refreshes the curve and returns to RGB when switching RAW documents', async 
   const historyWrites = vi.mocked(rawApi.saveRawHistory).mock.calls.length;
   dispatchPointer(point, 'pointerdown', 32, pointX, pointY);
   dispatchPointer(firstGraph, 'pointermove', 32, 170, 90);
+  await flush();
+  expect(rawApi.beginRawCurveInteraction).toHaveBeenCalledOnce();
+  expect(vi.mocked(rawApi.beginRawCurveInteraction).mock.calls[0][2]).toBe('points');
   expect(rawApi.saveRawHistory).toHaveBeenCalledTimes(historyWrites);
+  dispatchPointer(firstGraph, 'pointerup', 32, 170, 90);
+  await flush();
+  expect(release).toHaveBeenCalledWith(32);
+  expect(commitHistory.mock.calls.filter(([request]) => request.action === 'operate')).toHaveLength(1);
   act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[2].click());
   await flush();
   const graph = host.querySelector<SVGSVGElement>('[data-testid="raw-curve-graph"]')!;
-  expect(release).toHaveBeenCalledWith(32);
   expect(rawApi.openRawDocument).toHaveBeenLastCalledWith('workspace', rawB.id);
   expect(graph.dataset.channel).toBe('master');
   expect(host.querySelectorAll('[data-testid="raw-curve-point"]')).toHaveLength(1);
   expect(host.querySelector<SVGPathElement>('[data-testid="raw-curve-line"]')!.getAttribute('d')).toContain('186,186');
   expect(rawApi.setRawControls).not.toHaveBeenCalled();
+});
+
+it('rejects RAW document switching while a curve interaction is unconfirmed, then resumes it when staying', async () => {
+  await mount();
+  const firstGraph = host.querySelector<SVGSVGElement>('[data-testid="raw-curve-graph"]')!;
+  vi.spyOn(firstGraph, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 256, 256));
+  act(() => host.querySelector<HTMLButtonElement>('[data-channel="red"]')!.click());
+  const point = host.querySelectorAll<SVGCircleElement>('[data-testid="raw-curve-point"]')[0];
+  const capture = vi.fn(), release = vi.fn();
+  Object.defineProperty(point, 'setPointerCapture', { configurable: true, value: capture });
+  Object.defineProperty(point, 'releasePointerCapture', { configurable: true, value: release });
+  dispatchPointer(point, 'pointerdown', 33, Number(point.getAttribute('cx')), Number(point.getAttribute('cy')));
+  dispatchPointer(firstGraph, 'pointermove', 33, 170, 90);
+  await flush();
+  expect(rawApi.beginRawCurveInteraction).toHaveBeenCalledOnce();
+  expect(capture).toHaveBeenCalledWith(33);
+  const historyWrites = vi.mocked(rawApi.saveRawHistory).mock.calls.length;
+
+  act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[2].click());
+  await flush();
+  expect(host.querySelector('[role="alertdialog"]')).not.toBeNull();
+  expect(host.querySelector('[role="alertdialog"]')?.textContent).toContain('The RAW recipe could not be saved');
+  expect(rawApi.openRawDocument).toHaveBeenLastCalledWith('workspace', base.id);
+  expect(rawApi.openRawDocument).not.toHaveBeenCalledWith('workspace', rawB.id);
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls).toHaveLength(historyWrites);
+  expect(rawApi.cancelRawCurveInteraction).not.toHaveBeenCalled();
+  expect(release).not.toHaveBeenCalled();
+
+  act(() => [...host.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')]
+    .find(button => button.textContent === 'Stay on this photo')!.click());
+  await flush();
+  dispatchPointer(firstGraph, 'pointerup', 33, 170, 90);
+  await flush();
+  expect(release).toHaveBeenCalledWith(33);
+  expect(commitHistory.mock.calls.filter(([request]) => request.action === 'operate')).toHaveLength(1);
+  expect(rawApi.cancelRawCurveInteraction).not.toHaveBeenCalled();
+  expect(host.querySelector('[role="alertdialog"]')).toBeNull();
+  expect(rawApi.openRawDocument).not.toHaveBeenCalledWith('workspace', rawB.id);
 });
 
 it.each(['ja', 'en'])('separates NR subheadings, accessible Detail names and zero-amount dependents in %s', async language => {
