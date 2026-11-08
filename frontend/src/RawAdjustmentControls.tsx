@@ -6,6 +6,7 @@ import { commitAdjustmentEdits, focusAdjustmentCategory, navigateAdjustments, pr
 import type { SliderAdjustmentId } from './adjustmentSliderIds';
 import { TINT_TRACK_GRADIENT, TEMPERATURE_TRACK_GRADIENT } from './WhiteBalanceAdjustmentControls';
 import { RawPointCurveControls } from './RawPointCurveControls';
+import { RawEyedropperIcon } from './RawEyedropperIcon';
 import { RAW_VIGNETTE_STYLES, type RawControlId, type RawCurvePoint, type RawHistoryControlId, type RawHistoryOperation, type RawOpticsFlagId, type RawSectionId, type RawVignetteStyle } from './rawApi';
 import type { useRawDocument } from './useRawDocument';
 
@@ -228,9 +229,7 @@ function RawCategory({ category, enabled, disabled, resetDisabled, autoWhiteBala
           aria-label={t('workspace.rawPreview.wbPick')} title={t('workspace.rawPreview.wbPick')}
           onClick={picker.run} onFocus={focusAdjustmentCategory}
           onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-            <path d="m14 5 5 5M16 3l5 5-3 3-1-1-10 10-4 1 1-4L14 7l-1-1z" />
-          </svg>
+          <RawEyedropperIcon />
         </button>}
         <button type="button" className={`adjustment-category-icon${enabled ? '' : ' is-off'}`} data-category-switch disabled={disabled}
           aria-pressed={enabled} onClick={onToggle} aria-label={t(`workspace.${enabled ? 'disable' : 'enable'}${titleKey}`)}

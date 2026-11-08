@@ -4,6 +4,7 @@ import type { KeyboardEvent, MouseEvent, PointerEvent as ReactPointerEvent } fro
 import { useTranslation } from 'react-i18next';
 import { focusAdjustmentCategory, navigateAdjustments } from './adjustmentFocus';
 import { RAW_CURVE_CHANNELS, type RawCurveChannel, type RawCurvePoint, type RawCurveResetChannel } from './rawApi';
+import { RawEyedropperIcon } from './RawEyedropperIcon';
 
 const channelLabels: Record<RawCurveChannel, string> = {
   master: 'RGB', red: 'R', green: 'G', blue: 'B',
@@ -342,9 +343,7 @@ export function RawPointCurveControls({ curve, channel: controlledChannel, onCha
       {onToggleTargeted && <button type="button" className={`raw-curve-channel raw-curve-target${targetedActive ? ' is-selected' : ''}`}
         aria-label={t('workspace.rawPreview.targetedCurve')} aria-pressed={targetedActive} disabled={editDisabled}
         onClick={onToggleTargeted} onFocus={focusAdjustmentCategory}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-          <path d="M5 19 19 5M7 5h12v12"/><circle cx="5" cy="19" r="2"/>
-        </svg>
+        <RawEyedropperIcon />
       </button>}
     </div>
     <svg className={`raw-curve-graph is-${channel}${dragging ? ` is-dragging is-dragging-${draggingEndpoint ? 'endpoint' : 'interior'}` : ''}`} viewBox={`0 0 ${graphSize} ${graphSize}`} role="img" tabIndex={0}

@@ -69,6 +69,11 @@ it('keeps targeted mode active across controlled channel changes and leaves the 
   render('master');
   const toggleButton = host.querySelector<HTMLButtonElement>('.raw-curve-target')!;
   expect(toggleButton.getAttribute('aria-pressed')).toBe('true');
+  expect(toggleButton.querySelector('svg')?.getAttribute('width')).toBe('16');
+  expect(toggleButton.querySelector('svg')?.getAttribute('height')).toBe('16');
+  expect(toggleButton.querySelector('svg')?.getAttribute('viewBox')).toBe('0 0 24 24');
+  expect(toggleButton.querySelector('svg')?.getAttribute('stroke-width')).toBe('1.8');
+  expect(toggleButton.querySelector('path')?.getAttribute('d')).toBe('m14 5 5 5M16 3l5 5-3 3-1-1-10 10-4 1 1-4L14 7l-1-1z');
   act(() => host.querySelector<HTMLButtonElement>('[data-channel="red"]')!.click());
   expect(channelChange).toHaveBeenCalledWith('red');
   expect(toggle).not.toHaveBeenCalled();

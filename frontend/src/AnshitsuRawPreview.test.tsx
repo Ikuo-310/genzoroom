@@ -1731,6 +1731,9 @@ it('toggles Picker, cancels with Escape/other edits/Asset change, and submits on
   const picker = () => host.querySelector<HTMLButtonElement>('.raw-wb-pick')!;
   expect(picker().disabled).toBe(false);
   expect(picker().previousElementSibling?.textContent).toBe('AW');
+  expect(picker().querySelector('svg')?.getAttribute('width')).toBe('16');
+  expect(picker().querySelector('svg')?.getAttribute('stroke-width')).toBe('1.8');
+  expect(picker().querySelector('path')?.getAttribute('d')).toBe('m14 5 5 5M16 3l5 5-3 3-1-1-10 10-4 1 1-4L14 7l-1-1z');
   const aw = picker().previousElementSibling as HTMLButtonElement;
   act(() => aw.focus()); historyKey('ArrowRight', { ctrlKey: false, shiftKey: true }, aw);
   expect(document.activeElement).toBe(picker());
