@@ -225,6 +225,29 @@ describe('RAW History transport', () => {
       documentToken: doc.documentToken, documentRevision: doc.revision, settingsFingerprint: request.doc.settingsFingerprint,
       expectedRecipeRevision: 4, saveId: request.saveId, ...operation });
   });
+  it.each(['before', 'after'] as const)('sends the complete WB pick frame at the top level for %s', async kind => {
+    const frame = { kind, geometryId: 'a'.repeat(64), maxSide: 1024, quality: 'full' as const, x: .23, y: .81 };
+    const operation: RawHistoryOperation = { kind: 'wbPick', metadata: {}, frame };
+    const request: RawHistoryRequest = { doc: rawSettings(doc), action: 'operate', operation,
+      expectedRecipeRevision: 4, saveId: '00000000-0000-4000-8000-000000000001' };
+    const fetch = vi.fn(async () => new Response(JSON.stringify(rawHistoryResult(request)), { headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetch);
+    await saveRawHistory(request);
+    const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toMatchObject({ kind: 'wbPick', metadata: {}, frame });
+    expect(JSON.parse(init.body as string).frame).toEqual(frame);
+  });
+  it('does not add a frame to WB Auto History requests', async () => {
+    const operation: RawHistoryOperation = { kind: 'wbAuto', metadata: {} };
+    const request: RawHistoryRequest = { doc: rawSettings(doc), action: 'operate', operation,
+      expectedRecipeRevision: 4, saveId: '00000000-0000-4000-8000-000000000001' };
+    const fetch = vi.fn(async () => new Response(JSON.stringify(rawHistoryResult(request)), { headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetch);
+    await saveRawHistory(request);
+    const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toMatchObject({ kind: 'wbAuto', metadata: {} });
+    expect(JSON.parse(init.body as string)).not.toHaveProperty('frame');
+  });
   const historyRequest = (action: 'initialize' | 'commit'): RawHistoryRequest => ({ doc: rawSettings(doc),
     action, control: action === 'commit' ? 'light.exposure' : undefined,
     expectedRecipeRevision: 4, saveId: '00000000-0000-4000-8000-000000000001' });
