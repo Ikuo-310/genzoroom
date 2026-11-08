@@ -322,6 +322,8 @@ describe('Viewer edit settings context menu', () => {
 
   it.each([1, 1.25, 2])('samples the displayed retained Whole, rejects drag/outside/stale identity at DPR %s', dpr => {
     Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: dpr });
+    let resize = () => {};
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resize = callback; } observe() {} disconnect() {} });
     const picked = vi.fn(), cancel = vi.fn();
     const metadata = regionResponse(), geometry = { nativeWidth: 4000, nativeHeight: 3000, geometryId: metadata.geometryId };
     const whole = { url: 'blob:retained-after', doc: { workspaceId: 'w', handle: 'h', ...metadata.identity, revision: 2 },
@@ -329,11 +331,16 @@ describe('Viewer edit settings context menu', () => {
     const display: RawRegionDisplay = { after: { url: 'blob:region', metadata, planGeneration: 1,
       ...regionLayerPlacement(metadata, geometry) }, wholeAfter: whole, wholeBefore: { ...whole, url: 'blob:retained-before' },
       before: { url: 'blob:before-region', metadata, planGeneration: 1, ...regionLayerPlacement(metadata, geometry) } };
-    const render = (before = false, active = true) => act(() => root.render(<ImageViewer src="blob:new-whole" documentKey="raw"
+    const render = (before = false, active = true, documentKey = 'raw', previewStatus?: 'loading' | 'error') => act(() => root.render(<ImageViewer src="blob:new-whole" documentKey={documentKey}
       rawFrame={geometry} rawRegionDisplay={display} previewPixels rawPickActive={active} onRawPick={picked} onRawPickCancel={cancel}
-      beforeSrc="blob:before-whole" persistentBeforeAdjustments={before} alt="raw" leftOpen rightOpen onToggleLeft={() => {}} onToggleRight={() => {}} />));
+      beforeSrc="blob:before-whole" persistentBeforeAdjustments={before} previewStatus={previewStatus}
+      alt="raw" leftOpen rightOpen onToggleLeft={() => {}} onToggleRight={() => {}} />));
     render();
     const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+    Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 800 });
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 600 });
+    vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 800, height: 600 } as DOMRect);
+    act(() => resize());
     Object.defineProperty(viewport, 'setPointerCapture', { value: vi.fn() });
     const position = host.querySelector<HTMLElement>('.viewer-image-position')!;
     vi.spyOn(position, 'getBoundingClientRect').mockReturnValue({ left: -300, top: -250, width: 1600, height: 1200 } as DOMRect);
@@ -342,18 +349,39 @@ describe('Viewer edit settings context menu', () => {
     act(() => base.dispatchEvent(new Event('load')));
     const pointer = (type: string, x: number, y: number) => act(() => viewport.dispatchEvent(new MouseEvent(type,
       { bubbles: true, button: 0, clientX: x, clientY: y })));
+    pointer('pointermove', 500, 350);
+    const loupe = host.querySelector<HTMLElement>('[data-testid="viewer-point-loupe"]')!;
+    expect(loupe).not.toBeNull();
+    expect(loupe.style.width).toBe('120px');
+    expect(loupe.style.pointerEvents).toBe('none');
+    expect(loupe.dataset.pointX).toBe('0.5');
+    expect(host.querySelector('.viewer-point-crosshair')).not.toBeNull();
+    expect([...host.querySelectorAll<HTMLImageElement>('.viewer-point-loupe-image img')].map(image => image.getAttribute('src')))
+      .toEqual(['blob:retained-after', 'blob:region']);
     // The rectangle is the Whole CSS transform even when a pointer-transparent Region is on top.
-    pointer('pointerdown', 500, 350); pointer('pointerup', 500, 350);
+    pointer('pointerdown', 500, 350); pointer('pointermove', 502, 350);
+    expect(loupe.dataset.pointX).toBe(String(800 / 1600 + 2 / 1600));
+    pointer('pointerup', 502, 350);
     expect(picked).toHaveBeenLastCalledWith(expect.objectContaining({ url: 'blob:retained-after',
-      frame: { kind: 'after', geometryId: metadata.geometryId, maxSide: 1472, quality: 'full' } }), { x: .5, y: .5 });
+      frame: { kind: 'after', geometryId: metadata.geometryId, maxSide: 1472, quality: 'full' } }), { x: 802 / 1600, y: .5 });
     picked.mockClear();
     pointer('pointerdown', -301, 350); pointer('pointerup', -301, 350); expect(picked).not.toHaveBeenCalled();
     pointer('pointerdown', 500, 350); pointer('pointermove', 520, 350); pointer('pointerup', 520, 350);
     expect(picked).not.toHaveBeenCalled();
     pointer('pointerdown', 500, 350); pointer('pointercancel', 500, 350); pointer('pointerup', 500, 350);
     expect(picked).not.toHaveBeenCalled();
-    pointer('pointerdown', 500, 350); render(true); pointer('pointerup', 500, 350);
+    pointer('pointerdown', 500, 350); render(true);
+    pointer('pointerup', 500, 350);
     expect(picked).not.toHaveBeenCalled();
+    pointer('pointermove', 500, 350);
+    const beforeLoupe = host.querySelector<HTMLElement>('[data-testid="viewer-point-loupe"]')!;
+    expect(beforeLoupe).not.toBeNull();
+    expect(beforeLoupe.dataset.pointX).toBe('0.5');
+    expect([...host.querySelectorAll<HTMLImageElement>('.viewer-point-loupe-image img')].map(image => image.getAttribute('src')))
+      .toEqual(['blob:retained-before', 'blob:before-region']);
+    render(true, true, 'raw', 'error');
+    expect(host.querySelector('[data-testid="viewer-point-loupe"]')).toBeNull();
+    render(true); pointer('pointermove', 500, 350);
     pointer('pointerdown', 500, 350); pointer('pointerup', 500, 350);
     expect(picked).toHaveBeenLastCalledWith(expect.objectContaining({ url: 'blob:retained-before',
       frame: expect.objectContaining({ kind: 'before' }) }), { x: .5, y: .5 });
@@ -362,7 +390,10 @@ describe('Viewer edit settings context menu', () => {
     display.after.metadata = { ...metadata, geometryId: 'f'.repeat(64) };
     render(); picked.mockClear(); pointer('pointerdown', 500, 350); pointer('pointerup', 500, 350);
     expect(picked).not.toHaveBeenCalled();
-    render(false, false); picked.mockClear(); pointer('pointerdown', 500, 350); pointer('pointerup', 500, 350);
+    render(false, true, 'raw-next');
+    expect(host.querySelector('[data-testid="viewer-point-loupe"]')).toBeNull();
+    render(false, false); expect(host.querySelector('[data-testid="viewer-point-loupe"]')).toBeNull();
+    picked.mockClear(); pointer('pointerdown', 500, 350); pointer('pointerup', 500, 350);
     expect(picked).not.toHaveBeenCalled();
   });
   it.each([1, 1.25, 1.5, 2])('shares Native scale, pan and comparison placement at DPR %s', dpr => {
