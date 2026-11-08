@@ -2330,3 +2330,13 @@ RAWカテゴリバーのResetを`curveReset / point`へ接続し、チャンネ�
 Commit `7e4c29f`で2件を修正した。Draft Previewは最新入力との完全一致ではなく表示済みsequence順で採用し、画像decodeが逆順に完了しても古い画像が新しい表示を上書きしないようにした。進行中ドラッグのアンマウント時は既存`onDragCancel`経路を一度実行し、通常アンマウントや完了済み操作ではCancelしない。関連Frontend 3ファイルの241件、TypeScript、production build、`git diff --check`が成功した。既存のchunk size警告とReact Router directive警告あり。
 
 実Desktopでは、ユーザー確認によりポイントカーブの基本操作、Reset、右クリック操作、History表示が動作した。512px／50ms変更後はドラッグ中の写真追従が改善し、Draft中の画質低下は許容範囲、Pointer Up後にFull品質へ戻ることを画像表示で確認した。若干の引っ掛かりは残るため、現時点で追加最適化は保留。なお、`7e4c29f`の監査Finding修正後に同じ実Desktop追従性を再確認した結果ではない。
+
+## WBスポイト共通ルーペと採色修正（2026-11-08）
+
+`2c482ef`で、ターゲットカーブ用の共通`ViewerPointLoupe`をWBスポイトにも接続した。WB側は表示中のBefore／After Whole画像と有効なRegion Overlayを拡大表示し、従来どおりPointer Up位置で採色する。カーブ側のPointer Down固定・上下ドラッグとは操作状態を共有せず、描画コンポーネントのみ共用する。Frontend関連テスト215件が成功した。
+
+その後、Windows DesktopでWB採色直後に後続の現像操作ができなくなる問題を確認した。今回の原因確認には正しいログ`genzoroom-all-logs-20261108T071441Z.json`を使用し、Backendの`raw.operation.failed`とFrontendの`recipe.saveFailed`／`history.failed`で`raw_invalid_request`を確認した。`genzoroom-all-logs-20261108T050942Z(1).json`は別操作のログであり、この不具合の根拠には使用していない。Frontendの`saveRawHistory()`が`wbPick`の`RawPickFrame`をトップレベル`frame`として送らず、Backend `_history_body()`が必須として`validate_pick_frame()`で検証する契約に不一致があった。
+
+`f6090e2`でFrontend送信Bodyへ既存`frame`を追加し、Before／After双方の全フィールドを保つ回帰テストを追加した。WB Autoや他のHistory操作には`frame`を追加していない。関連Frontendテスト7ファイル601件、TypeScriptチェック、本番build、`git diff --check`が成功した。ユーザーの実Desktop確認でWB採色後の編集継続が正常動作することが確認された。
+
+続いて、WB使用時に旧スポイト形カーソルとルーペ十字が重なる問題を`63b47e8`で修正した。カーソルを画像領域に限定し、採色可能時は非表示、採色不可時は`not-allowed`を維持する。関連Frontendテスト3ファイル337件、TypeScriptチェック、本番build、`git diff --check`が成功した。このカーソル修正後の実Desktop再確認は、本記録作成時点では未確認である。

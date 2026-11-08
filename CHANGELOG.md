@@ -26,6 +26,7 @@ Internal changes are omitted unless they affect users.
 
 - Added RAW point-curve editing for the master, red, green, and blue channels, with graph point editing, reset, and History, Recipe, and RAW Export integration.
 - Added image-targeted curve adjustment with a circular magnifier for precise sampling.
+- Added a shared magnifier to the RAW WB eyedropper for inspecting sampling points in both Before and After views.
 
 - Windows desktop now provides Lensfun database status and explicit download/update controls using LightCraft's pinned, integrity-checked database. Configured `LIGHTCRAFT_LENSFUN_DIR` locations are respected, and newly available profiles are checked when a RAW photo is reopened.
 - Added RAW Lens Corrections controls inside Detail, including profile status, manual and profile adjustments, defringe, and lateral chromatic aberration. All settings use the existing RAW History, Reset, Preview, and Recipe paths; JPEG development is unchanged.
@@ -38,6 +39,7 @@ Internal changes are omitted unless they affect users.
 
 ### Fixed
 
+- Fixed WB picking that could block subsequent RAW edits and removed the duplicate OS cursor shown with the magnifier crosshair.
 - Improved stability when editing and dragging points created by the target picker, and removed the edit-count failure during repeated RAW curve gestures.
 - Prevented departure saves from looping on an unconfirmed curve interaction; the edit remains available in the darkroom for resolution.
 
