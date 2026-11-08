@@ -5,6 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { useTranslation } from 'react-i18next';
 import { wholeImagePoint, calculateFitScale, clampViewerPan, clampZoom, panForCenteredZoom, zoomAroundPoint, type Point } from './viewerMath';
 import { AdjustedImage } from './AdjustedImage';
+import { ViewerPointLoupe } from './ViewerPointLoupe';
 import { activeAdjustmentId } from './adjustmentFocus';
 import { editClipboardShortcut, editSelectionShortcut, isNativeEditingTarget, matchesShortcut, matchesShortcutKey } from './editShortcuts';
 import { EditSettingsMenu } from './EditSettingsMenu';
@@ -78,6 +79,7 @@ type ImageViewerProps = {
 const EMPTY_IMAGE_SIZE: Point = { x: 0, y: 0 };
 const NAVIGATOR_LONG_EDGE = 180;
 const PICK_CURSOR = `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="m14 5 5 5M16 3l5 5-3 3-1-1-10 10-4 1 1-4L14 7l-1-1z" fill="white" stroke="black" stroke-width="1.5"/></svg>')}") 3 21, crosshair`;
+type TargetLoupePoint = { anchor: Point; imagePoint: Point; nativePoint: Point; fixed: boolean };
 
 export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, beforeFrame, rawRegionDisplay, rawRegionOutline = false, rawPickActive = false, rawTargetedActive = false, rawTargetCrop, rawTargetOrientation = 'Normal', rawTargetSourceSize, onRawTargetBegin, onRawTargetMove, onRawTargetFinish, onRawTargetCancel, rawPickTargets, onRawPick, onRawPickCancel, onRawViewChange, rawDiagnosticView, previewStatus, statusNote, previewPixels = false, beforeAvailable = true, beforeSrc, beforeStatus, onBeforeRetry, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, onInteractionStart, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
   const { t } = useTranslation();
@@ -106,6 +108,9 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
   const targetCancelRef = useRef(onRawTargetCancel);
   targetCancelRef.current = onRawTargetCancel;
   const [targetDragging,setTargetDragging] = useState(false);
+  const [targetLoupe,setTargetLoupe] = useState<TargetLoupePoint | undefined>(undefined);
+  const targetLoupeRef = useRef<TargetLoupePoint | undefined>(undefined);
+  const targetPointerRef = useRef<Point | undefined>(undefined);
   const cropSizeRef = useRef<{ identity: string; size: Point } | null>(null);
   if (rawCrop?.surface) cropSizeRef.current = { identity: imageIdentity, size: {x:rawCrop.surface.frame.nativeWidth,y:rawCrop.surface.frame.nativeHeight} };
   const cropSize = rawCrop?.active && cropSizeRef.current?.identity === imageIdentity ? cropSizeRef.current.size : undefined;
@@ -209,21 +214,53 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
   const displayedUrl = regionBase?.url ?? (showBeforeAdjustments && beforeSrc ? beforeSrc : src);
   const pickReady = rawPickActive && !keyboardBlocked && !previewStatus && imageState === 'ready'
     && !!displayedPickTarget && displayedPickTarget.url === displayedUrl;
+  const publishTargetLoupe = (point?: TargetLoupePoint) => {
+    targetLoupeRef.current = point;
+    setTargetLoupe(point);
+  };
+  const targetLoupeAt = (client: Point, fixed = false): TargetLoupePoint | undefined => {
+    if (!rawTargetedActive || rawPickActive || !previewPixels || !displayedUrl || showBeforeAdjustments || rawCrop?.active
+      || spaceHand || keyboardBlocked || previewStatus || imageState !== 'ready' || !rawTargetSourceSize) return;
+    const viewport = viewportRef.current, image = imagePositionRef.current;
+    if (!viewport || !image) return;
+    const viewportBounds = viewport.getBoundingClientRect(), imageBounds = image.getBoundingClientRect();
+    const imagePoint = wholeImagePoint(client, imageBounds);
+    if (!imagePoint) return;
+    const swap = ['Transpose','Rotate90','Transverse','Rotate270'].includes(rawTargetOrientation);
+    const oriented = { x: swap ? rawTargetSourceSize.y : rawTargetSourceSize.x,
+      y: swap ? rawTargetSourceSize.x : rawTargetSourceSize.y };
+    const nativePoint = rawTargetPoint(imagePoint, rawTargetCrop, oriented);
+    if (!nativePoint) return;
+    return { anchor: { x: client.x - viewportBounds.left, y: client.y - viewportBounds.top },
+      imagePoint, nativePoint, fixed };
+  };
+  const refreshTargetLoupe = (client: Point, fixed = false) => {
+    targetPointerRef.current = client;
+    publishTargetLoupe(targetLoupeAt(client, fixed));
+  };
   const pickPointer = useRef<{ id: number; origin: Point; target: RawPickTarget; bounds: DOMRect; moved: boolean } | null>(null);
   useEffect(() => {
     pickPointer.current = null;
     if (keyboardBlocked) onRawPickCancel?.();
   }, [rawPickActive, imageIdentity, keyboardBlocked]);
   useEffect(() => {
-    if (!rawTargetedActive || showBeforeAdjustments || rawCrop?.active || keyboardBlocked) {
+    if (!rawTargetedActive || rawPickActive || showBeforeAdjustments || rawCrop?.active || keyboardBlocked || imageState !== 'ready') {
       if (targetDragRef.current) { targetDragRef.current = null; setTargetDragging(false); onRawTargetCancel?.(); }
+      targetPointerRef.current = undefined;
+      publishTargetLoupe();
     }
-  }, [rawTargetedActive, showBeforeAdjustments, rawCrop?.active, keyboardBlocked, imageIdentity]);
+  }, [rawTargetedActive, rawPickActive, showBeforeAdjustments, rawCrop?.active, keyboardBlocked, imageIdentity, imageState]);
+  useEffect(() => {
+    if (targetDragRef.current || targetLoupeRef.current?.fixed) return;
+    if (targetPointerRef.current) refreshTargetLoupe(targetPointerRef.current);
+  }, [scale, pan.x, pan.y, imageIdentity, displayedUrl, imageState]);
   useEffect(() => {
     if (!targetDragging) return;
     const escape = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !event.isComposing && !event.defaultPrevented) {
         event.preventDefault(); targetDragRef.current = null; setTargetDragging(false); onRawTargetCancel?.();
+        const pointer = targetPointerRef.current;
+        if (pointer) refreshTargetLoupe(pointer);
       }
     };
     window.addEventListener('keydown', escape);
@@ -231,6 +268,7 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
   }, [targetDragging, onRawTargetCancel]);
   useEffect(() => () => {
     if (targetDragRef.current) { targetDragRef.current = null; targetCancelRef.current?.(); }
+    targetLoupeRef.current = undefined;
   }, []);
   useEffect(() => {
     if (!rawPickActive) return;
@@ -466,21 +504,21 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
       return;
     }
     if (rawTargetedActive && !spaceHand && !showBeforeAdjustments && event.button === 0 && !targetDragRef.current
+      && !(event.target instanceof Element && event.target.closest('.viewer-navigator'))
       && !keyboardBlocked && !previewStatus && imageState === 'ready' && rawTargetSourceSize && imagePositionRef.current) {
-      const bounds = imagePositionRef.current.getBoundingClientRect();
-      const outputPoint = wholeImagePoint({x:event.clientX,y:event.clientY},bounds);
-      const swap = ['Transpose','Rotate90','Transverse','Rotate270'].includes(rawTargetOrientation);
-      const oriented = {x:swap ? rawTargetSourceSize.y : rawTargetSourceSize.x,y:swap ? rawTargetSourceSize.x : rawTargetSourceSize.y};
-      const nativePoint = outputPoint && rawTargetPoint(outputPoint,rawTargetCrop,oriented);
-      if (!nativePoint || !onRawTargetBegin?.(nativePoint)) return;
+      const location = targetLoupeAt({ x: event.clientX, y: event.clientY }, true);
+      if (!location || !onRawTargetBegin?.(location.nativePoint)) return;
       event.preventDefault(); event.stopPropagation();
       event.currentTarget.setPointerCapture(event.pointerId);
-      targetDragRef.current = {pointerId:event.pointerId,lastY:event.clientY,acc:0,target:nativePoint};
+      targetPointerRef.current = { x: event.clientX, y: event.clientY };
+      targetDragRef.current = {pointerId:event.pointerId,lastY:event.clientY,acc:0,target:location.nativePoint};
+      publishTargetLoupe(location);
       setTargetDragging(true);
       return;
     }
     if (event.button === 0) panMovedRef.current = false;
     if (scale <= fitScale || event.button !== 0 || rawCrop?.active && !spaceHand) return;
+    publishTargetLoupe();
     onInteractionStart?.();
     event.currentTarget.setPointerCapture(event.pointerId);
     dragRef.current = { pointerId: event.pointerId, origin: { x: event.clientX, y: event.clientY }, pan };
@@ -490,7 +528,9 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
 
   function movePan(event: ReactPointerEvent<HTMLDivElement>) {
     const targetDrag = targetDragRef.current;
-    if (targetDrag && targetDrag.pointerId === event.pointerId) {
+    if (targetDrag) {
+      if (targetDrag.pointerId !== event.pointerId) return;
+      targetPointerRef.current = { x: event.clientX, y: event.clientY };
       targetDrag.acc -= (event.clientY - targetDrag.lastY) * .5;
       targetDrag.lastY = event.clientY;
       const step = Math.trunc(targetDrag.acc);
@@ -502,6 +542,9 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
       if (Math.hypot(event.clientX - pick.origin.x, event.clientY - pick.origin.y) >= 4) pick.moved = true;
       return;
     }
+    if (!dragRef.current && event.pointerType !== 'touch' && !(event.target instanceof Element && event.target.closest('.viewer-navigator')))
+      refreshTargetLoupe({ x: event.clientX, y: event.clientY });
+    else publishTargetLoupe();
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     const delta = { x: event.clientX - drag.origin.x, y: event.clientY - drag.origin.y };
@@ -515,6 +558,7 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
       targetDragRef.current = null;
       setTargetDragging(false);
       if (event.type === 'pointerup') onRawTargetFinish?.(); else onRawTargetCancel?.();
+      refreshTargetLoupe({ x: event.clientX, y: event.clientY });
       return;
     }
     const pick = pickPointer.current;
@@ -679,8 +723,8 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
       tabIndex={0}
       aria-label={alt}
       className={`viewer-viewport${zoomed ? ' pannable' : ''}`}
-      onPointerEnter={event=>{if(event.pointerType!=='touch'&&!dragRef.current&&!cropBusy)pointerInsideViewer.current=true;}}
-      onPointerLeave={event=>{if(event.pointerType!=='touch'&&!dragRef.current&&!cropBusy)pointerInsideViewer.current=false;}}
+      onPointerEnter={event=>{if(event.pointerType!=='touch'&&!dragRef.current&&!cropBusy){pointerInsideViewer.current=true;if(!targetDragRef.current)refreshTargetLoupe({x:event.clientX,y:event.clientY});}}}
+      onPointerLeave={event=>{if(event.pointerType!=='touch'&&!dragRef.current&&!cropBusy){pointerInsideViewer.current=false;if(!targetDragRef.current)publishTargetLoupe();}}}
       style={rawPickActive ? { cursor: pickReady ? PICK_CURSOR : 'not-allowed' } : undefined}
       onKeyDown={(event) => {
         // Only actual photo focus participates; hovering a slider does not.
@@ -716,7 +760,7 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
       onPointerCancel={stopPan}
     >
       {rawCrop?.active && <RawCropSurface binding={rawCrop} viewport={viewportSize} scale={scale} pan={pan} busy={setCropBusy} handTool={spaceHand && scale>fitScale || viewerPanActive} panning={viewerPanActive} />}
-      <div ref={imagePositionRef} className="viewer-image-position" style={{ display: rawCrop?.active ? 'none' : undefined, cursor: targetDragging ? 'ns-resize' : rawTargetedActive && !showBeforeAdjustments ? 'crosshair' : undefined, transform: `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px))` }}
+      <div ref={imagePositionRef} className="viewer-image-position" style={{ display: rawCrop?.active ? 'none' : undefined, cursor: targetDragging ? 'ns-resize' : rawTargetedActive && !showBeforeAdjustments && !spaceHand ? 'crosshair' : undefined, transform: `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px))` }}
         onPointerDown={(event) => {
           if (event.button === 0) viewportRef.current?.focus({ preventScroll: true });
         }}>
@@ -754,8 +798,14 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
           onError={() => setLoadedImage({ identity: imageIdentity, status: 'error', size: EMPTY_IMAGE_SIZE })}
         /> : null}
       </div>
+      {rawTargetedActive && !rawPickActive && !showBeforeAdjustments && !rawCrop?.active && imageState === 'ready'
+        && !previewStatus && targetLoupe && <ViewerPointLoupe key={imageIdentity} viewport={viewportSize} anchor={targetLoupe.anchor}
+        imagePoint={targetLoupe.imagePoint} imageSize={imageSize} scale={scale} source={regionBase?.url ?? src} region={regionLayer}
+        fixed={targetLoupe.fixed} />}
       {showNavigator && <div className="viewer-navigator" data-testid="zoom-navigator" data-position={navigatorPosition}
         role="img" aria-label={t('workspace.zoomNavigator')} style={{ width: navigatorWidth, height: navigatorHeight }}
+        onPointerEnter={() => { if (!targetDragRef.current) publishTargetLoupe(); }}
+        onPointerLeave={event => { if (!targetDragRef.current && event.pointerType !== 'touch') refreshTargetLoupe({ x: event.clientX, y: event.clientY }); }}
         onClick={clickNavigator} onPointerDown={startNavigatorPointer} onPointerMove={moveNavigatorPointer}
         onPointerUp={stopNavigatorPointer} onPointerCancel={stopNavigatorPointer}
         onWheel={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}>

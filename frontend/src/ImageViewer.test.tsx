@@ -124,6 +124,18 @@ function NativePreviewHarness({ src, documentKey, previewStatus, autoLoad }: {
     alt="photo" leftOpen rightOpen onToggleLeft={vi.fn()} onToggleRight={vi.fn()} />;
 }
 
+function RawTargetHarness({ src = 'blob:target', documentKey = 'raw-target', active = true,
+  begin = vi.fn(() => true), move = vi.fn(), finish = vi.fn(), cancel = vi.fn() }: {
+  src?: string; documentKey?: string; active?: boolean; begin?: (point: { x: number; y: number }) => boolean;
+  move?: (steps: number[]) => void; finish?: () => void; cancel?: () => void;
+}) {
+  return <ImageViewer src={src} documentKey={documentKey} previewPixels rawFrame={{ nativeWidth: 4000, nativeHeight: 3000, geometryId: 'a'.repeat(64) }}
+    rawTargetedActive={active} rawTargetCrop={{ geometry: { rect: { x0: 0, y0: 0, x1: 1, y1: 1 }, angle: 0 }, aspect: null, flip_h: false, flip_v: false }}
+    rawTargetOrientation="Normal" rawTargetSourceSize={{ x: 4000, y: 3000 }} onRawTargetBegin={begin}
+    onRawTargetMove={move} onRawTargetFinish={finish} onRawTargetCancel={cancel}
+    alt="raw" leftOpen rightOpen onToggleLeft={() => {}} onToggleRight={() => {}} />;
+}
+
 function PanelToggleHarness() {
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
@@ -190,13 +202,14 @@ afterEach(() => {
 describe('Viewer edit settings context menu', () => {
   it('captures a RAW target point and emits ordered vertical steps independent of zoom or DPR', () => {
     const begin = vi.fn(() => true), move = vi.fn(), finish = vi.fn(), cancel = vi.fn();
-    act(() => root.render(<ImageViewer src="blob:target" documentKey="raw-target" previewPixels
-      rawFrame={{ nativeWidth: 4000, nativeHeight: 3000, geometryId: 'a'.repeat(64) }} rawTargetedActive
-      rawTargetCrop={{ geometry: { rect: { x0: 0, y0: 0, x1: 1, y1: 1 }, angle: 0 }, aspect: null, flip_h: false, flip_v: false }}
-      rawTargetOrientation="Normal" rawTargetSourceSize={{ x: 4000, y: 3000 }} onRawTargetBegin={begin}
-      onRawTargetMove={move} onRawTargetFinish={finish} onRawTargetCancel={cancel}
-      alt="raw" leftOpen rightOpen onToggleLeft={() => {}} onToggleRight={() => {}} />));
+    let resize = () => {};
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resize = callback; } observe() {} disconnect() {} });
+    act(() => root.render(<RawTargetHarness begin={begin} move={move} finish={finish} cancel={cancel} />));
     const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+    Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 400 });
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 300 });
+    vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 400, height: 300 } as DOMRect);
+    act(() => resize());
     Object.defineProperty(viewport, 'setPointerCapture', { value: vi.fn() });
     const position = host.querySelector<HTMLElement>('.viewer-image-position')!;
     vi.spyOn(position, 'getBoundingClientRect').mockReturnValue({ left: 100, top: 100, width: 200, height: 100 } as DOMRect);
@@ -208,17 +221,66 @@ describe('Viewer edit settings context menu', () => {
       const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: 150, clientY: y });
       Object.defineProperty(event, 'pointerId', { value: 77 }); act(() => viewport.dispatchEvent(event));
     };
+    pointer('pointermove', 125);
+    const loupe = host.querySelector<HTMLElement>('[data-testid="viewer-point-loupe"]')!;
+    expect(loupe).not.toBeNull();
+    expect(loupe.dataset.pointX).toBe('0.25');
+    expect(loupe.style.width).toBe('120px');
+    expect(loupe.style.left).toBe('90px');
+    expect(loupe.style.top).toBe('141px');
+    expect(host.querySelector('.viewer-point-crosshair')).not.toBeNull();
     pointer('pointerdown', 125);
+    expect(loupe.dataset.fixed).toBe('true');
     expect(begin).toHaveBeenCalledWith({ x: .25, y: .25 });
     expect(viewport.setPointerCapture).toHaveBeenCalledWith(77);
     expect(position.style.cursor).toBe('ns-resize');
     pointer('pointermove', 123);
     pointer('pointermove', 125);
+    expect(loupe.style.left).toBe('90px');
+    expect(loupe.style.top).toBe('141px');
+    expect(loupe.dataset.pointX).toBe('0.25');
     expect(move.mock.calls).toEqual([[[1]], [[-1]]]);
     pointer('pointerup', 125);
+    expect(loupe.dataset.fixed).toBe('false');
     expect(finish).toHaveBeenCalledOnce();
     expect(cancel).not.toHaveBeenCalled();
     expect(position.style.cursor).toBe('crosshair');
+    pointer('pointermove', 125);
+    expect(host.querySelector('[data-testid="viewer-point-loupe"]')).not.toBeNull();
+    pointer('pointermove', 90);
+    expect(host.querySelector('[data-testid="viewer-point-loupe"]')).toBeNull();
+    pointer('pointerdown', 125); pointer('pointercancel', 125);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(host.querySelector<HTMLElement>('[data-testid="viewer-point-loupe"]')?.dataset.fixed).toBe('false');
+    pointer('pointerdown', 125);
+    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+    expect(cancel).toHaveBeenCalledTimes(2);
+    expect(host.querySelector<HTMLElement>('[data-testid="viewer-point-loupe"]')?.dataset.fixed).toBe('false');
+  });
+
+  it('hides the loupe when the picker turns off or the RAW document changes', () => {
+    let resize = () => {};
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resize = callback; } observe() {} disconnect() {} });
+    act(() => root.render(<RawTargetHarness />));
+    const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+    Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 400 });
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 300 });
+    vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 400, height: 300 } as DOMRect);
+    act(() => resize());
+    const image = host.querySelector<HTMLImageElement>('.raw-whole-base')!;
+    Object.defineProperty(image, 'naturalWidth', { configurable: true, value: 4000 });
+    Object.defineProperty(image, 'naturalHeight', { configurable: true, value: 3000 });
+    act(() => image.dispatchEvent(new Event('load')));
+    const position = host.querySelector<HTMLElement>('.viewer-image-position')!;
+    vi.spyOn(position, 'getBoundingClientRect').mockReturnValue({ left: 100, top: 100, width: 200, height: 100 } as DOMRect);
+    const move = new MouseEvent('pointermove', { bubbles: true, clientX: 150, clientY: 125 });
+    act(() => viewport.dispatchEvent(move));
+    expect(host.querySelector('[data-testid="viewer-point-loupe"]')).not.toBeNull();
+
+    act(() => root.render(<RawTargetHarness active={false} />));
+    expect(host.querySelector('[data-testid="viewer-point-loupe"]')).toBeNull();
+    act(() => root.render(<RawTargetHarness documentKey="raw-next" src="blob:next" />));
+    expect(host.querySelector('[data-testid="viewer-point-loupe"]')).toBeNull();
   });
 
   it.each([1, 1.25, 2])('samples the displayed retained Whole, rejects drag/outside/stale identity at DPR %s', dpr => {
