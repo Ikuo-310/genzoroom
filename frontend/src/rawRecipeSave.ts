@@ -36,7 +36,7 @@ export class RawRecipeSave {
     curveInteractionId?: string };
   private curveGesture?: { channel: RawCurveChannel; doc: RawSettings; started: Promise<string>; id?: string; latest?: RawCurvePoint[];
     sequence: number; displayedSequence: number; timer?: ReturnType<typeof setTimeout>; inFlight?: Promise<void>; ending: boolean; controller: AbortController;
-    target?: RawDisplayTarget; targeted?: { point: {x:number;y:number}; pending: number[]; points?: RawCurvePoint[];
+    target?: RawDisplayTarget; cancelPromise?: Promise<void>; targeted?: { point: {x:number;y:number}; pending: number[]; points?: RawCurvePoint[];
       pump?: Promise<void>; preview?: Promise<void>; timer?: ReturnType<typeof setTimeout> } };
   private cropGesture?: { id: string; type: 'drag' | 'straighten'; action?: RawGeometryAction; sequence: number; latest?: RawGeometryOperation; ending: boolean;
     started: Promise<void>; end?: Promise<void>; error?: unknown; cancelled?: boolean; updateDoc?: RawSettings; rejected?: boolean; commit?: RawHistoryRequest };
@@ -116,7 +116,11 @@ export class RawRecipeSave {
       targeted.timer = undefined;
       const pump = this.pumpTargetedCurve(gesture);
       targeted.pump = pump;
-      void pump.then(() => {}, cause => this.failCurveUpdate(gesture, cause))
+      void pump.then(() => {}, cause => {
+        // Fetch reports an intentional interaction abort as AbortError; cancellation owns that outcome.
+        if (gesture.cancelPromise && cause instanceof Error && cause.name === 'AbortError') return;
+        return this.failCurveUpdate(gesture, cause);
+      })
         .finally(() => {
           if (targeted.pump === pump) targeted.pump = undefined;
           if (this.curveGesture === gesture && targeted.pending.length && !gesture.ending) this.scheduleTargetedPump(gesture);
@@ -219,9 +223,15 @@ export class RawRecipeSave {
     this.historyOperation = operation;
     void operation.catch(cause => this.cropFailure(cause));
   }
-  async cancelCurveInteraction() {
+  cancelCurveInteraction() {
     const gesture = this.curveGesture;
-    if (!gesture) return;
+    if (!gesture) return Promise.resolve();
+    if (gesture.cancelPromise) return gesture.cancelPromise;
+    const cancellation = this.cancelCurveGesture(gesture);
+    gesture.cancelPromise = cancellation;
+    return cancellation;
+  }
+  private async cancelCurveGesture(gesture: NonNullable<typeof this.curveGesture>) {
     clearTimeout(gesture.timer);
     gesture.timer = undefined; gesture.latest = undefined; gesture.ending = true;
     if (gesture.targeted) clearTimeout(gesture.targeted.timer);

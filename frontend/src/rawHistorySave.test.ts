@@ -6,7 +6,8 @@ import { rawSettings } from './test/rawSettings';
 import { rawHistoryResult, rawHistoryData } from './test/rawHistory';
 
 vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(),
-  beginRawGeometry: vi.fn(), updateRawGeometry: vi.fn(), beginRawCurveInteraction: vi.fn(), cancelRawCurveInteraction: vi.fn(), rawPreview: vi.fn(),
+  beginRawGeometry: vi.fn(), updateRawGeometry: vi.fn(), beginRawCurveInteraction: vi.fn(), cancelRawCurveInteraction: vi.fn(),
+  updateRawTargetedCurve: vi.fn(), rawPreview: vi.fn(),
   recoverRawGeometry: vi.fn(), readRawHistory: vi.fn(), saveRawHistory: vi.fn(), saveRawRecipe: vi.fn(), setRawControls: vi.fn(), readRawSettings: vi.fn() }));
 let queue: Promise<void>;
 const schedule = (action: () => Promise<void>) => { queue = queue.then(action); };
@@ -16,10 +17,11 @@ const initial = () => rawSettings({ workspaceId: 'workspace', handle: 'doc', ass
 function owner(settings = initial()) {
   let saver: RawRecipeSave;
   const curvePreview = vi.fn();
+  const curveRecovery = vi.fn(async () => {});
   const controls = new RawControls(settings, { schedule, changed: () => saver?.observe(controls.confirmed, !controls.unsettled),
     preview: async () => {} });
-  saver = new RawRecipeSave(settings, { schedule, changed: () => {}, controls, curvePreview });
-  return { saver, controls, curvePreview };
+  saver = new RawRecipeSave(settings, { schedule, changed: () => {}, controls, curvePreview, curveRecovery });
+  return { saver, controls, curvePreview, curveRecovery };
 }
 async function drain() { for (let i = 0; i < 40; i++) await Promise.resolve(); }
 function gate<T>() { let resolve!: (value: T) => void; return { promise: new Promise<T>(yes => { resolve = yes; }), get resolve() { return resolve; } }; }
@@ -28,6 +30,7 @@ beforeEach(() => {
   vi.useFakeTimers(); vi.clearAllMocks(); queue = Promise.resolve();
   vi.mocked(api.beginRawCurveInteraction).mockResolvedValue('a'.repeat(32));
   vi.mocked(api.cancelRawCurveInteraction).mockResolvedValue();
+  vi.mocked(api.updateRawTargetedCurve).mockResolvedValue({ sequence: 1, points: [{ x: 0, y: 0 }, { x: .5, y: .6 }, { x: 1, y: 1 }] });
   vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence: 1 });
   vi.mocked(api.saveRawHistory).mockImplementation(async request => rawHistoryResult(request));
   vi.mocked(api.setRawControls).mockImplementation(async (doc, patch) => {
@@ -37,6 +40,67 @@ beforeEach(() => {
   });
 });
 afterEach(() => vi.useRealTimers());
+
+it('shares one targeted Cancel when Escape aborts an in-flight update before Native Cancel replies', async () => {
+  const { saver, curveRecovery } = owner(); await saver.save();
+  expect(saver.beginTargetedCurveInteraction('master', { x: .4, y: .6 })).toBe(true); await drain();
+  vi.mocked(api.updateRawTargetedCurve).mockImplementationOnce((_doc, _sequence, signal) => new Promise((_resolve, reject) => {
+    signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+  }));
+  const cancelReply = gate<void>(); vi.mocked(api.cancelRawCurveInteraction).mockReturnValueOnce(cancelReply.promise);
+  const writesBefore = vi.mocked(api.saveRawHistory).mock.calls.length;
+  saver.updateTargetedCurveInteraction([1], { quality: 'draft', mode: 'whole', maxSide: 512, viewGeneration: 0, geometryId: null });
+  await vi.advanceTimersByTimeAsync(50); await drain();
+  const firstCancel = saver.cancelCurveInteraction(); await drain();
+  const secondCancel = saver.cancelCurveInteraction();
+  expect(secondCancel).toBe(firstCancel);
+  expect(api.updateRawTargetedCurve).toHaveBeenCalledOnce();
+  expect(api.cancelRawCurveInteraction).toHaveBeenCalledOnce();
+  expect(curveRecovery).not.toHaveBeenCalled();
+  expect(vi.mocked(api.saveRawHistory).mock.calls).toHaveLength(writesBefore);
+  cancelReply.resolve(); await Promise.all([firstCancel, secondCancel]);
+  expect(saver.curveInteracting).toBe(false); expect(saver.locked).toBe(false);
+  expect(curveRecovery).not.toHaveBeenCalled();
+  expect(vi.mocked(api.saveRawHistory).mock.calls).toHaveLength(writesBefore);
+});
+
+it('cancels a genuine targeted Native update failure without committing History', async () => {
+  const { saver, curveRecovery } = owner(); await saver.save();
+  expect(saver.beginTargetedCurveInteraction('red', { x: .5, y: .4 })).toBe(true); await drain();
+  vi.mocked(api.updateRawTargetedCurve).mockRejectedValueOnce(new api.RawApiError('raw_session_edit_limit'));
+  saver.updateTargetedCurveInteraction([-1], { quality: 'draft', mode: 'whole', maxSide: 512, viewGeneration: 0, geometryId: null });
+  await vi.advanceTimersByTimeAsync(50); await drain();
+  expect(api.updateRawTargetedCurve).toHaveBeenCalledOnce();
+  expect(api.cancelRawCurveInteraction).toHaveBeenCalledOnce();
+  expect(curveRecovery).not.toHaveBeenCalled();
+  expect(vi.mocked(api.saveRawHistory).mock.calls.filter(([request]) => request.action === 'operate')).toHaveLength(0);
+  expect(saver.curveInteracting).toBe(false); expect(saver.locked).toBe(false);
+});
+
+it('recovers once when Native Cancel fails after a targeted update failure', async () => {
+  const { saver, curveRecovery } = owner(); await saver.save();
+  expect(saver.beginTargetedCurveInteraction('blue', { x: .2, y: .8 })).toBe(true); await drain();
+  vi.mocked(api.updateRawTargetedCurve).mockRejectedValueOnce(new api.RawApiError('raw_session_edit_limit'));
+  vi.mocked(api.cancelRawCurveInteraction).mockRejectedValueOnce(new api.RawApiError('raw_session_desynchronized'));
+  saver.updateTargetedCurveInteraction([1], { quality: 'draft', mode: 'whole', maxSide: 512, viewGeneration: 0, geometryId: null });
+  await vi.advanceTimersByTimeAsync(50); await drain();
+  expect(api.cancelRawCurveInteraction).toHaveBeenCalledOnce();
+  expect(curveRecovery).toHaveBeenCalledOnce();
+  expect(saver.curveInteracting).toBe(false);
+  expect(vi.mocked(api.saveRawHistory).mock.calls.filter(([request]) => request.action === 'operate')).toHaveLength(0);
+});
+
+it('confirms a successful targeted Pointer Up as one History operation without Cancel', async () => {
+  const { saver } = owner(); await saver.save();
+  expect(saver.beginTargetedCurveInteraction('green', { x: .3, y: .7 })).toBe(true); await drain();
+  saver.updateTargetedCurveInteraction([1, 1], { quality: 'draft', mode: 'whole', maxSide: 512, viewGeneration: 0, geometryId: null });
+  await vi.advanceTimersByTimeAsync(50); await drain();
+  await saver.finishTargetedCurveInteraction('green'); await drain(); await queue;
+  expect(api.updateRawTargetedCurve).toHaveBeenCalledOnce();
+  expect(api.cancelRawCurveInteraction).not.toHaveBeenCalled();
+  expect(vi.mocked(api.saveRawHistory).mock.calls.filter(([request]) => request.action === 'operate')).toHaveLength(1);
+  expect(saver.curveInteracting).toBe(false); expect(saver.locked).toBe(false);
+});
 
 it('coalesces curve pointer moves into Draft Preview and confirms one History operation on Pointer Up', async () => {
   const { saver, curvePreview } = owner(); await saver.save();
