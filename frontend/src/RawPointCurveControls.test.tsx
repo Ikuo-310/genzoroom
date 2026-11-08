@@ -407,3 +407,29 @@ it('cancels an active drag when switching channels', () => {
   expect(Number(host.querySelectorAll<SVGCircleElement>('[data-testid="raw-curve-point"]')[1].getAttribute('cx'))).toBe(128);
   expect(Number(host.querySelectorAll<SVGCircleElement>('[data-testid="raw-curve-point"]')[1].getAttribute('cy'))).toBe(128);
 });
+
+it('cancels an active drag once on unmount using the latest cancel callback', () => {
+  const curve = emptyCurve();
+  curve.master = [{ x: 0, y: 0 }, { x: 0.5, y: 0.5 }, { x: 1, y: 1 }];
+  const oldCancel = vi.fn(), latestCancel = vi.fn();
+  act(() => root.render(<RawPointCurveControls curve={curve} onDragCancel={oldCancel} />));
+  const graph = host.querySelector<SVGSVGElement>('[data-testid="raw-curve-graph"]')!;
+  vi.spyOn(graph, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 200, 256, 256));
+  const point = host.querySelectorAll<SVGCircleElement>('[data-testid="raw-curve-point"]')[1];
+  Object.defineProperty(point, 'setPointerCapture', { configurable: true, value: vi.fn() });
+  Object.defineProperty(point, 'releasePointerCapture', { configurable: true, value: vi.fn() });
+  sendPointer(point, 'pointerdown', 77, 228, 328);
+  sendPointer(graph, 'pointermove', 77, 250, 300);
+  act(() => root.render(<RawPointCurveControls curve={curve} onDragCancel={latestCancel} />));
+  act(() => root.render(null));
+  expect(oldCancel).not.toHaveBeenCalled();
+  expect(latestCancel).toHaveBeenCalledOnce();
+  expect(latestCancel).toHaveBeenCalledWith('master', curve.master);
+});
+
+it('does not cancel on ordinary unmount without an active drag', () => {
+  const onDragCancel = vi.fn();
+  act(() => root.render(<RawPointCurveControls curve={emptyCurve()} onDragCancel={onDragCancel} />));
+  act(() => root.render(null));
+  expect(onDragCancel).not.toHaveBeenCalled();
+});

@@ -101,6 +101,8 @@ export function RawPointCurveControls({ curve, onDragStart, onDragChange, onDrag
   const [contextMenu, setContextMenu] = useState<CurveContextMenuState | null>(null);
   const dragRef = useRef<CurveDrag | null>(null);
   const suppressClickRef = useRef(false);
+  const dragCancelRef = useRef(onDragCancel);
+  dragCancelRef.current = onDragCancel;
   useEffect(() => {
     cancelDrag(false);
     setContextMenu(null);
@@ -109,8 +111,11 @@ export function RawPointCurveControls({ curve, onDragStart, onDragChange, onDrag
   }, [curve, syncKey]);
   useEffect(() => () => {
     const drag = dragRef.current;
-    if (drag) releasePointerCapture(drag);
-    dragRef.current = null;
+    if (drag) {
+      dragRef.current = null;
+      releasePointerCapture(drag);
+      dragCancelRef.current?.(drag.channel, drag.startPoints.map(point => ({ ...point })));
+    }
   }, []);
   useEffect(() => { if (editDisabled) setContextMenu(null); }, [editDisabled]);
 

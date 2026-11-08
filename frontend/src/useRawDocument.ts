@@ -60,10 +60,10 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   const [urls] = useState(() => new RawPreviewUrls());
   const wholeSurfaces = useRef<{ after?: RawWholeSurface; before?: RawWholeSurface }>({});
   const curveTarget = useRef<RawDisplayTarget>({ quality: 'draft', mode: 'whole', maxSide: 1024, viewGeneration: 0, geometryId: null });
-  const curvePresentation = useRef<{ active: boolean; sequence: number; url?: string; baseline?: {
+  const curvePresentation = useRef<{ active: boolean; sequence: number; displayedSequence: number; url?: string; baseline?: {
     url?: string; width?: number; height?: number; frame?: RawGeometry; quality?: 'draft' | 'full';
     imageRevision?: number; surface?: RawWholeSurface;
-  } }>({ active: false, sequence: 0 });
+  } }>({ active: false, sequence: 0, displayedSequence: -1 });
   const comparing = useRef(beforeRequested); comparing.current = beforeRequested;
   const overlayRef = useRef<RawRegionOverlay | null>(null);
   const [, regionChanged] = useState(0);
@@ -566,12 +566,13 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         },
         curvePreview: (frame, doc, sequence, target) => {
           const owner = curvePresentation.current;
-          if (!owner.active || sequence !== owner.sequence || !current()) return;
+          if (!owner.active || sequence <= owner.displayedSequence || !current()) return;
           void decodeFrame(frame, controller.signal, urls).then(candidate => {
-            if (!owner.active || sequence !== owner.sequence || !current()
+            if (!owner.active || sequence < owner.displayedSequence || !current()
               || doc.generation !== editor?.confirmed.generation || doc.documentToken !== editor?.confirmed.documentToken) {
               urls.release(candidate); return;
             }
+            owner.displayedSequence = sequence;
             if (owner.url) urls.release(owner.url);
             owner.url = candidate;
             if (frame.frame) {
@@ -584,7 +585,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
               imageRevision: doc.revision, displayError: undefined } : previous);
             overlay.refresh();
           }).catch(cause => {
-            if (owner.active && sequence === owner.sequence) {
+            if (owner.active && sequence >= owner.displayedSequence) {
               const code = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
               setState(previous => previous && ({ ...previous, displayError: code }));
             }
@@ -1114,7 +1115,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       if (!editor || !saver || frozen.current || saver.locked) return;
       const started = saver.beginCurveInteraction(channel);
       if (!started) return;
-      curvePresentation.current = { active: true, sequence: 0, baseline: {
+      curvePresentation.current = { active: true, sequence: 0, displayedSequence: -1, baseline: {
         url: visible?.url, width: visible?.width, height: visible?.height, frame: visible?.frame,
         quality: visible?.quality, imageRevision: visible?.imageRevision,
         surface: wholeSurfaces.current.after ? { ...wholeSurfaces.current.after } : undefined,
@@ -1129,9 +1130,10 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     },
     finishCurveInteraction: (channel: import('./rawApi').RawCurveChannel, points: import('./rawApi').RawCurvePoint[], changed: boolean) => {
       if (!callbackEditor() || frozen.current) return;
+      curvePresentation.current.active = false;
       saverRef.current?.finishCurveInteraction(channel, points, changed);
     },
-    cancelCurveInteraction: () => { void saverRef.current?.cancelCurveInteraction(); },
+    cancelCurveInteraction: () => { curvePresentation.current.active = false; void saverRef.current?.cancelCurveInteraction(); },
     operate: (operation: RawHistoryOperation) => {
       cancelPick();
       if (callbackEditor() && !frozen.current) void saverRef.current?.operate(operation).catch(cause =>

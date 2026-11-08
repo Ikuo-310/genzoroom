@@ -672,6 +672,44 @@ describe('RAW native Before cache', () => {
     expect(api.cancelRawCurveInteraction).toHaveBeenCalledOnce();
     expect(vi.mocked(api.rawPreview).mock.calls.at(-1)?.[4]?.quality).toBe('full');
   });
+  it('publishes a completed curve Draft while newer pointer input is pending', async () => {
+    await render('a'); await flush();
+    const first = deferred<api.RawFrame>();
+    const before = vi.mocked(api.rawPreview).mock.calls.length;
+    vi.mocked(api.rawPreview).mockReturnValueOnce(first.promise);
+    act(() => current!.beginCurveInteraction('master'));
+    await flush();
+    act(() => current!.updateCurveInteraction([{ x: 0, y: 0 }, { x: .4, y: .6 }, { x: 1, y: 1 }]));
+    await new Promise(resolve => setTimeout(resolve, 60)); await flush();
+    expect(api.rawPreview).toHaveBeenCalledTimes(before + 1);
+    act(() => current!.updateCurveInteraction([{ x: 0, y: 0 }, { x: .6, y: .8 }, { x: 1, y: 1 }]));
+    const previousUrl = current?.url;
+    await act(async () => { first.resolve({ blob: new Blob(['draft-a']), width: 16, height: 12, epoch: 1, sequence: 1,
+      quality: 'draft' }); await flush(); });
+    expect(current?.url).not.toBe(previousUrl);
+    act(() => current!.cancelCurveInteraction()); await flush();
+  });
+  it('keeps a newer curve Draft when an older decoded image finishes later', async () => {
+    await render('a'); await flush();
+    const first = deferred<api.RawFrame>(), decodeA = deferred<void>(), decodeB = deferred<void>();
+    vi.mocked(api.rawPreview).mockReturnValueOnce(first.promise);
+    let decodeCount = 0;
+    decode = () => ++decodeCount === 1 ? decodeA.promise : decodeB.promise;
+    act(() => current!.beginCurveInteraction('green')); await flush();
+    act(() => current!.updateCurveInteraction([{ x: 0, y: 0 }, { x: .4, y: .6 }, { x: 1, y: 1 }]));
+    await new Promise(resolve => setTimeout(resolve, 60)); await flush();
+    act(() => current!.updateCurveInteraction([{ x: 0, y: 0 }, { x: .6, y: .8 }, { x: 1, y: 1 }]));
+    await act(async () => { first.resolve({ blob: new Blob(['draft-a']), width: 16, height: 12, epoch: 1, sequence: 1, quality: 'draft' }); await flush(); });
+    await new Promise(resolve => setTimeout(resolve, 60)); await flush();
+    expect(api.rawPreview).toHaveBeenCalledTimes(3);
+    const beforeNewDecode = current?.url;
+    await act(async () => { decodeB.resolve(); await flush(); });
+    const newerUrl = current?.url;
+    expect(newerUrl).not.toBe(beforeNewDecode);
+    await act(async () => { decodeA.resolve(); await flush(); });
+    expect(current?.url).toBe(newerUrl);
+    act(() => current!.cancelCurveInteraction()); await flush();
+  });
   it.each(['light.exposure', 'detail.sharpenAmount', 'detail.sharpenMasking', 'detail.nrLuminance', 'detail.nrDetail',
     'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'] as const)('requests Draft on acknowledged %s interaction and Full on end without another mutation', async control => {
     await render('a'); await flush();

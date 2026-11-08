@@ -34,7 +34,7 @@ export class RawRecipeSave {
   private moveIntent?: { action: 'undo' | 'redo' | 'jump' | 'operate'; targetStepId?: string | null; operation?: RawHistoryOperation;
     curveInteractionId?: string };
   private curveGesture?: { channel: RawCurveChannel; doc: RawSettings; started: Promise<string>; id?: string; latest?: RawCurvePoint[];
-    sequence: number; timer?: ReturnType<typeof setTimeout>; inFlight?: Promise<void>; ending: boolean; controller: AbortController;
+    sequence: number; displayedSequence: number; timer?: ReturnType<typeof setTimeout>; inFlight?: Promise<void>; ending: boolean; controller: AbortController;
     target?: RawDisplayTarget };
   private cropGesture?: { id: string; type: 'drag' | 'straighten'; action?: RawGeometryAction; sequence: number; latest?: RawGeometryOperation; ending: boolean;
     started: Promise<void>; end?: Promise<void>; error?: unknown; cancelled?: boolean; updateDoc?: RawSettings; rejected?: boolean; commit?: RawHistoryRequest };
@@ -59,7 +59,7 @@ export class RawRecipeSave {
     if (this.confirmed.mutationAttempts >= Math.min(this.confirmed.regenerationThreshold, this.confirmed.mutationLimit - 1)) return false;
     const preceding = this.save();
     const gesture = { channel, doc: structuredClone(this.options.controls!.confirmed), started: Promise.resolve(''),
-      sequence: 0, ending: false, controller: new AbortController() } as NonNullable<typeof this.curveGesture>;
+      sequence: 0, displayedSequence: -1, ending: false, controller: new AbortController() } as NonNullable<typeof this.curveGesture>;
     this.curveGesture = gesture;
     gesture.started = preceding.then(async () => {
       if (!this.active || this.curveGesture !== gesture) throw new RawApiError('raw_document_closed');
@@ -101,8 +101,10 @@ export class RawRecipeSave {
       if (!this.active || this.curveGesture !== gesture || gesture.ending || sequence !== gesture.sequence) return;
       const frame = await rawPreview(gesture.doc, sequence, gesture.controller.signal, 'after', target,
         { id, points: points.map(point => [point.x, point.y]) });
-      if (this.active && this.curveGesture === gesture && !gesture.ending && sequence === gesture.sequence)
+      if (this.active && this.curveGesture === gesture && !gesture.ending && sequence > gesture.displayedSequence) {
+        gesture.displayedSequence = sequence;
         this.options.curvePreview?.(frame, gesture.doc, sequence, target);
+      }
     })();
     gesture.inFlight = work;
     try { await work; }

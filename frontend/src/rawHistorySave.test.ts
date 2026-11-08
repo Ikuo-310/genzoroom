@@ -65,7 +65,7 @@ it('coalesces curve pointer moves into Draft Preview and confirms one History op
 });
 
 it('keeps one curve Preview in flight and sends only the latest pending points after 50ms', async () => {
-  const { saver } = owner(); await saver.save();
+  const { saver, curvePreview } = owner(); await saver.save();
   expect(saver.beginCurveInteraction('red')).toBe(true); await drain();
   const first = gate<Awaited<ReturnType<typeof api.rawPreview>>>();
   vi.mocked(api.rawPreview).mockReturnValueOnce(first.promise);
@@ -81,6 +81,7 @@ it('keeps one curve Preview in flight and sends only the latest pending points a
   expect(api.rawPreview).toHaveBeenCalledOnce();
   first.resolve({ blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence: 1 });
   await drain();
+  expect(curvePreview).toHaveBeenCalledWith(expect.anything(), expect.anything(), 1, target);
   await vi.advanceTimersByTimeAsync(49); await drain();
   expect(api.rawPreview).toHaveBeenCalledOnce();
   await vi.advanceTimersByTimeAsync(1); await drain();
