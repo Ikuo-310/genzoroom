@@ -2304,3 +2304,11 @@ RAWカテゴリバーのResetを`curveReset / point`へ接続し、チャンネ�
 # RAWポイントカーブ ライブPreview応答性試験値（2026-11-08）
 
 ポイントカーブの一時Draft Previewだけ、要求`maxSide`を`min(現在の適応side, 512)`に制限し、Curve専用更新間隔を150msから50msへ短縮した。通常RAWスライダーの150ms集約、Viewport／DPR／Zoomの算出、Pointer Up後のFull Preview経路、in-flight 1件＋最新pending 1件の集約は維持する。512px／50msは応答性比較用の試験値であり固定仕様ではない。実Desktopで同じRAW・Viewport・Zoom条件を用い、追従速度、ドラッグ中の粗さ、Pointer Up後のFull復帰を確認する。
+
+## RAWポイントカーブ完成監査と限定修正（2026-11-08）
+
+完成監査はポイントカーブ実装に限定し、High 0件、Medium 2件を確認した。Findingは、(1)連続ドラッグ中に完成したDraft Previewが最新Pointer Moveとの不一致で破棄される問題、(2)ドラッグ中にカーブ部品がアンマウントされた際にCancelされない問題。監査時のBackend限定22件は成功した。修正前に実施済みのFrontend等の検証は、上記P5-B.1／L2およびP5-Cの各Phase記録を参照。
+
+Commit `7e4c29f`で2件を修正した。Draft Previewは最新入力との完全一致ではなく表示済みsequence順で採用し、画像decodeが逆順に完了しても古い画像が新しい表示を上書きしないようにした。進行中ドラッグのアンマウント時は既存`onDragCancel`経路を一度実行し、通常アンマウントや完了済み操作ではCancelしない。関連Frontend 3ファイルの241件、TypeScript、production build、`git diff --check`が成功した。既存のchunk size警告とReact Router directive警告あり。
+
+実Desktopでは、ユーザー確認によりポイントカーブの基本操作、Reset、右クリック操作、History表示が動作した。512px／50ms変更後はドラッグ中の写真追従が改善し、Draft中の画質低下は許容範囲、Pointer Up後にFull品質へ戻ることを画像表示で確認した。若干の引っ掛かりは残るため、現時点で追加最適化は保留。なお、`7e4c29f`の監査Finding修正後に同じ実Desktop追従性を再確認した結果ではない。
