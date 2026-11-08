@@ -256,3 +256,52 @@ Pointer Upは未送信Moveを捨て、最後の点配列をHistory要求に含�
 ### 残る確認事項
 
 実Desktop上でドラッグ追従の体感、低速Native時の連続操作、Cancel後の表示復帰、History一件とUndo／Redo後のFull Previewを確認する。P5-C Reset／右クリック削除、ヒストグラム、ターゲット調整、プリセットには着手していない。
+
+## RAWポイントカーブのライブPreview解像度・遅延調査（2026-11-08）
+
+### 現行要求の流れと品質
+
+- `RawPointCurveControls`のPointer MoveはSVGをローカル更新し、`RawAdjustmentControls`から`useRawDocument.updateCurveInteraction()`へ点列を渡す。`RawRecipeSave.updateCurveInteraction()`は150ms（`RAW_THROTTLE_MS`）で集約し、要求中は一件だけ処理、未送信点列は最新一件へ置換する。処理完了後にも最新点列があれば150ms後に次を送る。
+- `useRawDocument.displayPreview()`が保持する`curveTarget`は`quality: 'draft'`、`mode: 'whole'`、現在の`side`、`viewGeneration`、`geometryId`を使う。開始時にこのtargetを固定し、ドラッグ中は再計算しない。したがって通常のRAWスライダーDraftと同じWhole用`side`を使うが、Viewport変更をドラッグ中に追随しない。
+- `frontend/src/rawWholePreview.ts::rawWholeSide()`がsideを決める。Fit時はViewport幅・高さとNative寸法、非Fit時はZoom scale、さらにDPRを掛けて需要値を求め、Native画像の長辺と`RAW_WHOLE_MAX_SIDE=2048`の小さい方を上限とし、64px単位へ丸める。実例としてテストは1600px Viewportで1600、DPR 2では2048、700px Native画像では700、非Fit・scale 0.5・DPR 2では2048を返す。初期sideは1024で、まだ有効なViewport要求がない場合はこれが残る。curve専用の低解像度capはない。
+- これは`maxSide`という長辺の上限であり、実出力寸法そのものではない。`RawRecipeSave`から`rawApi.rawPreview()`、Windows API `/curve-interaction/update`、`LightCraftRawSession.update_curve_interaction()`へ同じ`maxSide`が渡り、Backendは範囲16..2048を検証してNative `render_preview`へ`max_side`と`quality: 'draft'`を送る。実際のPNG幅・高さはNative応答から取得され、上限以下となる。
+- Nativeから返るPreview qualityはDraftで、Pointer Up後は`curveSettled`でDraft表示を解除し、通常の`refreshPreview()`／`displayPreview()`が現在のViewportからsideを再評価してFullを要求する。Full要求完了後に通常表示へ収束する。
+
+### 実測と計測できる範囲
+
+今回、実Desktop実行ログを取得していないため、このDesktop上でNativeへ渡った実`max_side`、応答PNG寸法、処理時間は未実測である。コード上の要求値は上記の通り。ユーザー報告の遅延だけから2048要求が実際の主因とは断定しない。過去のL1合成DNG probeでは128×96入力から1024×768 PNGを得た記録があるが、これは現Desktopのcurve targetや実カメラRAWの寸法・性能を示すものではない。
+
+既存debug計測では次を区別できる。
+
+- Pointer Moveから要求発行までの150ms待ち、並びにin-flight処理中に最新要求が待つ時間：曲線Interaction専用の経過時間ログがなく未計測。シーケンス番号だけでは待ち時間を計算できない。
+- Backend `preview.measured`の`nativeMs`：`render_preview` Native呼び出し開始から応答後の`_preview_readback`を含むBackend処理まで。曲線Native `develop.curve`の個別適用／readback時間と、プレビュー現像のみの時間は分離しない。
+- PNG検証時間：`validationMs`として別記録。Native応答の幅・高さ、要求`maxSide`、payload bytesも同イベントに記録。
+- Frontend `preview.received`：HTTP応答ヘッダーまでの`responseWaitMs`、body読込の`bodyReadMs`、要求side・実幅高さを記録する。`responseWaitMs`はBackend集約・Native更新・現像をまとめて含み、各段階を分離しない。
+- Frontend `preview.decoded`：ブラウザーPNG decodeの`decodeMs`と寸法を記録。curve PreviewのReact state採用／画面描画完了時間は個別計測されない。
+- 古い要求の置換・破棄はsequence比較とlatest-pending slotで行われるが、破棄数や最新要求が待った時間のcurve専用計測はない。`preview.completed`はBackend完了寸法を記録する。
+
+以上のdebug logから処理段階の概況は取得可能だが、実際のログを採取していないため遅延の主要因は未確定。特に、クライアント間隔150msとNative更新・Preview処理時間のどちらが支配的かは実Desktopの同一セッションで各eventを突合する必要がある。
+
+### LightCraft v0.18.1公式Desktopとの比較
+
+managed manifestが固定するupstream commit `57024f072c234e0c6c850e0940a261790f976575`のsource checkoutで`crates/ui-egui/src/panels/edit/curve.rs`、`panels/detail.rs`、`region.rs`を確認した。GenzoRoom patchのtarget一覧にこれらのUIファイルは含まれない。公式Tone Curve UIはdrag開始時に`develop.beginInteraction`、点の追加・各drag frameで`develop.curve`、終了時に`develop.endInteraction`を呼び、同じsession interaction内でUndo単位をまとめる。detail rendererはinteraction中の画像をDraftとして描画する。
+
+公式`DragScale`はGPUがViewを描くとき通常1.0 scaleを試し、過去に遅いと判定した写真・controlでは縮小する。CPU経路では`CPU_DRAFT_SCALE=0.6`。描画時間と直前frameの表示時間からFull-size draftが遅い場合に、その写真・controlの次回dragを縮小する仕組みを持つ。detail rendererのドラッグ画像はcanvas表示寸法・zoom/window計画に応じた寸法で、interaction中はsource preview levelまで引き上げない。終了後は通常の表示寸法／Preview levelへ戻す。これは表示パイプラインへ直接つながったDesktop rendererの制御であり、Native `render_preview`のquality値だけを使うGenzoRoomとは制御点が異なる。GenzoRoomの`quality: 'draft'`は軽量品質モードを指定するが、要求sideを小さくする指定ではないため、Draftでも`maxSide`が最大2048になり得る。
+
+### 遅延候補と改善案
+
+現時点で根拠を持って挙げられる遅延要因は、少なくとも要求側150ms間隔、Curve Native更新とそのreadback、続くPreview現像・PNG生成、応答body転送、PNG decodeに分かれる。Backendは最新pendingへ集約するが、実行中Native要求を毎回中断する仕組みではないため、新しい最新要求は現在処理とその後の間隔待ちの影響を受ける。どの段階が主因かは実Desktop計測前には決められない。
+
+| 案 | 変更箇所 | 期待効果 | デメリット |
+|---|---|---|---|
+| A：curve drag中だけ`maxSide`をcap | `useRawDocument.ts`の`curveTarget`作成箇所（例：1024px上限） | PNGサイズと現像量を確実に抑え、Native/転送/decodeをまとめて短縮できる可能性がある | 表示が粗くなる。viewportが小さい場合は効果がない。実寸が既に小さいなら無効 |
+| B：150ms間隔短縮 | `RawRecipeSave.ts`のcurve Preview間隔（現在は共通`RAW_THROTTLE_MS`） | 遅延主因が意図的な待ち時間なら追従を早める | Native処理が間に合わなければ最新pending置換が増えるだけで、Preview回数・応答性が改善しない可能性 |
+| C：A＋B | 上記2箇所 | 低解像度で処理時間を下げたうえで更新間隔も短くでき、改善余地は最大 | 負荷を増やしつつ品質も下げる。どちらが効いたか判別しにくいため、最初から同時変更する根拠がない |
+
+高解像度要求が実ログで確認された場合の最小変更は、操作中だけcurve targetの`maxSide`を固定cap（まず1024px程度）で`min(currentSide, cap)`し、Pointer Up後は現行Full経路へ戻す案A。品質・応答性を実Desktopで比較してから、待ち時間が残る場合にのみcurve間隔を短縮する。新Schedulerや動的品質判定は不要。
+
+### 次回の実Desktop比較項目
+
+同一RAW・同一Viewport／DPR／Zoomで、ドラッグ中に`preview.received`の`requestedMaxSide`と寸法、Backend `preview.measured`の`nativeMs`・`validationMs`、Frontend `bodyReadMs`・`decodeMs`を突合する。curve sequenceごとのHTTP開始待ちが現行診断では取れないため、そこで見えない間隔／最新pending待ちを必要とする場合に限って、軽量なcurve start/request timestampを追加する。実カメラRAWでA案を比較し、Pointer Up後にFullへ戻る時間、画面上の粗さ、入力追従を確認する。合成DNG probeやソース上の推定を実Desktop・実RAW性能として扱わない。
+
+今回、製品コード、Native patch、テスト、Preview schedulerは変更していない。研究文書のみの追記である。
