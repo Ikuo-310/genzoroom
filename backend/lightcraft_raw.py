@@ -35,9 +35,6 @@ MAX_SETTINGS_BYTES = 256 * 1024
 MAX_RAW_FILES = 2
 MAX_EDITS = 256
 MAX_PREVIEW_SIDE = 2048
-# Leave one Native command slot for opening and one for closing/canceling an interaction.
-MAX_CURVE_INTERACTION_UPDATES = 128
-MAX_CURVE_INTERACTION_SECONDS = 120
 # Legacy bootstrap and document Before identity must not change with the advertised ceiling.
 DEFAULT_PREVIEW_SIDE = 1024
 
@@ -175,8 +172,6 @@ class _CurveInteraction:
     mode: str
     baseline_settings_json: str
     working_settings_json: str
-    started_at: float
-    update_limit: int
     state: str = "opening"
     latest_sequence: int = 0
     applied_sequence: int = 0
@@ -1022,8 +1017,7 @@ class LightCraftRawSession:
             raise LightCraftError("raw_revision_conflict")
         if self._control_reservations or any(not task.done() for task in self._operations):
             raise LightCraftError("raw_busy")
-        update_limit = min(MAX_CURVE_INTERACTION_UPDATES, MAX_EDITS - self._edits - 2)
-        if update_limit < 1:
+        if self._edits >= MAX_EDITS:
             raise LightCraftError("raw_session_edit_limit")
 
         async with self._curve_state_lock:
@@ -1031,8 +1025,7 @@ class LightCraftRawSession:
             if previous is not None and previous.state not in ("cancelled", "confirmed"):
                 raise LightCraftError("raw_curve_interaction_pending")
             interaction = _CurveInteraction(handle, uuid.uuid4().hex, expected_revision, channel, mode,
-                                            photo.settings_json, photo.settings_json,
-                                            asyncio.get_running_loop().time(), update_limit)
+                                            photo.settings_json, photo.settings_json)
             self._curve_interaction = interaction
             self._invalidate()
 
@@ -1050,7 +1043,6 @@ class LightCraftRawSession:
                 current.sync = "desynchronized"
                 raise
             interaction.baseline_settings_json = native
-            self._edits += 1
             await self._command("develop.beginInteraction", {"label": f"{channel.title()} Curve" if mode == "points" else f"{channel.title()} Targeted Curve"}, deadline)
             interaction.state = "open"
             return interaction.interaction_id
@@ -1059,7 +1051,7 @@ class LightCraftRawSession:
             await self._submit(action, self._timeouts.command, interaction_id=interaction.interaction_id)
             lightcraft_log("raw.curveInteraction.started", level="info", generation=self._generation,
                            revision=interaction.baseline_revision, interactionId=interaction.interaction_id,
-                           channel=channel, updateLimit=interaction.update_limit)
+                           channel=channel)
             return interaction.interaction_id
         except MCPTransportError:
             interaction.state = "unknown"
@@ -1091,10 +1083,6 @@ class LightCraftRawSession:
         if type(expected_revision) is not int or expected_revision != interaction.baseline_revision or \
                 photo.applied_revision != interaction.baseline_revision or photo.requested_revision != photo.applied_revision:
             raise LightCraftError("raw_revision_conflict")
-        if asyncio.get_running_loop().time() - interaction.started_at > MAX_CURVE_INTERACTION_SECONDS:
-            raise LightCraftError("raw_curve_interaction_expired")
-        if interaction.update_attempts >= interaction.update_limit:
-            raise LightCraftError("raw_session_edit_limit")
 
         loop = asyncio.get_running_loop()
         future = loop.create_future()
@@ -1135,8 +1123,6 @@ class LightCraftRawSession:
         if lock is None:
             lock = interaction.target_lock = asyncio.Lock()
         async with lock:
-            if interaction.update_attempts + len(steps) > interaction.update_limit or self._edits + len(steps) + 1 >= MAX_EDITS:
-                raise LightCraftError("raw_session_edit_limit")
             seq = interaction.latest_sequence + 1
             sent = False
             async def action(deadline):
@@ -1145,7 +1131,6 @@ class LightCraftRawSession:
                 if photo.applied_revision != interaction.baseline_revision or photo.requested_revision != interaction.baseline_revision:
                     raise LightCraftError("raw_revision_conflict")
                 for delta in steps:
-                    self._edits += 1
                     interaction.update_attempts += 1
                     await self._command("develop.targeted", {"target":"curve", "channel":interaction.channel,
                         "x":float(target["x"]), "y":float(target["y"]), "delta":delta}, deadline)
@@ -1155,7 +1140,7 @@ class LightCraftRawSession:
                 encoded = await self._submit(action, self._timeouts.command, interaction_id=interaction_id)
             except BaseException as error:
                 unknown = isinstance(error, LightCraftError) and error.code == "raw_operation_timeout"
-                if sent or unknown or isinstance(error, MCPTransportError) or self._lost:
+                if (sent and not isinstance(error, MCPToolError)) or unknown or isinstance(error, MCPTransportError) or self._lost:
                     interaction.state = "failed"; self._desynchronized = True
                 raise
             interaction.latest_sequence = interaction.applied_sequence = seq
@@ -1192,10 +1177,7 @@ class LightCraftRawSession:
                 if photo.applied_revision != interaction.baseline_revision or \
                         photo.requested_revision != interaction.baseline_revision:
                     raise LightCraftError("raw_revision_conflict")
-                if interaction.update_attempts >= interaction.update_limit or self._edits + 1 >= MAX_EDITS:
-                    raise LightCraftError("raw_session_edit_limit")
                 interaction.update_attempts += 1
-                self._edits += 1
                 await self._command("develop.curve", {"channel": interaction.channel,
                                                         "points": request.points}, deadline)
                 sent = True
@@ -1331,7 +1313,6 @@ class LightCraftRawSession:
             if photo.applied_revision != interaction.baseline_revision or \
                     photo.requested_revision != interaction.baseline_revision:
                 raise LightCraftError("raw_revision_conflict")
-            self._edits += 1
             await self._command("develop.endInteraction", {}, deadline)
             ended = True
             encoded = await self._read_settings(photo, deadline, validate=curve_readback)
@@ -1356,6 +1337,9 @@ class LightCraftRawSession:
                 interaction.state = "failed"
                 self._desynchronized = True
             raise
+        # Native silent updates create no History; count only a successfully ended, changed interaction.
+        if encoded != interaction.baseline_settings_json:
+            self._edits += 1
         result = CurveInteractionResult(handle, interaction_id, interaction.baseline_revision,
                                         interaction.channel, encoded)
         interaction.final_result = result
@@ -1394,7 +1378,6 @@ class LightCraftRawSession:
         async def action(deadline):
             nonlocal cancelled
             photo = self._photo(handle, active=True)
-            self._edits += 1
             await self._command("develop.cancelInteraction", {}, deadline)
             cancelled = True
             return await self._read_settings(photo, deadline)

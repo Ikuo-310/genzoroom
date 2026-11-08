@@ -175,14 +175,19 @@ def test_curve_interaction_preview_cancel_and_single_history_confirmation(local,
 
                 started = await http.post(begin_url, json=identity_body | {"channel": "master", "mode": "targeted"})
                 interaction_id = started.json()["interactionId"]
+                for serial in range(3, 6):
+                    repeated = await http.post(f'/api/raw/documents/{doc["handle"]}/curve-interaction/update', json=identity_body | {
+                        "interactionId": interaction_id, "target": target, "steps": [1, -1] * 64, "serial": serial,
+                        "maxSide": 512, "viewGeneration": 0, "geometryId": None})
+                    assert repeated.status_code == 200
                 update = await http.post(f'/api/raw/documents/{doc["handle"]}/curve-interaction/update', json=identity_body | {
                     "interactionId": interaction_id, "target": target, "steps": [2, -1], "serial": 2, "maxSide": 1024,
                     "viewGeneration": 0, "geometryId": None})
                 assert update.status_code == 200
-                assert update.json()["interactionSequence"] == 1
+                assert update.json()["interactionSequence"] == 4
                 curve_points = update.json()["curvePoints"]
                 preview = await http.post(f'/api/raw/documents/{doc["handle"]}/curve-interaction/preview', json=identity_body | {
-                    "interactionId": interaction_id, "interactionSequence": 1, "serial": 2, "maxSide": 1024,
+                    "interactionId": interaction_id, "interactionSequence": 4, "serial": 2, "maxSide": 1024,
                     "viewGeneration": 0, "geometryId": None})
                 assert preview.status_code == 200
                 history_points = [[p["x"], p["y"]] for p in curve_points]

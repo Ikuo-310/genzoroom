@@ -518,6 +518,41 @@ def test_curve_interaction_update_preview_cancel_and_finalize(tmp_path, monkeypa
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("mode", ["points", "targeted"])
+def test_curve_interaction_counts_only_changed_end_at_last_session_slot(tmp_path, mode):
+    async def run():
+        raw, manager, children, files = await create(tmp_path, adaptive=True)
+        try:
+            handle, baseline = await raw.open_raw("pixel", files[0])
+            raw._edits = 255
+            interaction_id = await raw.begin_curve_interaction(handle, "master", baseline.revision, mode)
+            assert raw._edits == 255
+            await raw.cancel_curve_interaction(handle, interaction_id, baseline.revision)
+            assert raw._edits == 255
+            interaction_id = await raw.begin_curve_interaction(handle, "master", baseline.revision, mode)
+            baseline_points = [[p["x"], p["y"]] for p in baseline.settings["curve"]["master"]]
+            await raw.end_curve_interaction(handle, interaction_id, baseline.revision, baseline_points)
+            raw.confirm_curve_interaction(handle, interaction_id, baseline.revision)
+            assert raw._edits == 255
+            baseline = await raw.get_settings(handle)
+            interaction_id = await raw.begin_curve_interaction(handle, "master", baseline.revision, mode)
+            points = [[0, 0], [.5, .7], [1, 1]]
+            for _ in range(140):
+                update = (await raw.update_curve_interaction(handle, interaction_id, baseline.revision, points)
+                    if mode == "points" else await raw.update_targeted_curve_interaction(handle, interaction_id,
+                        baseline.revision, {"x": .5, "y": .5}, [1, -1]))
+                await update.preview_ticket
+            assert raw._edits == 255
+            await raw.end_curve_interaction(handle, interaction_id, baseline.revision, points)
+            assert raw._edits == 256
+            await raw.end_curve_interaction(handle, interaction_id, baseline.revision, points)
+            assert raw._edits == 256
+            raw.confirm_curve_interaction(handle, interaction_id, baseline.revision)
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
 def test_targeted_curve_steps_preserve_order_and_finalize_without_reapplying(tmp_path):
     async def run():
         raw, manager, children, files = await create(tmp_path, adaptive=True)

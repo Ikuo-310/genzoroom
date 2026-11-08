@@ -569,6 +569,24 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       editor = installed;
       saver = new RawRecipeSave(settings, { schedule: enqueue, changed: notify, controls: installed,
         curveSettled: settleCurvePresentation,
+        curveRecovery: async () => {
+          await owned(async () => {
+            if (!current() || !workspace) return;
+            frozen.current = true;
+            invalidateDisplay();
+            const oldSaver = saver, oldEditor = editor;
+            settleCurvePresentation(true);
+            await discardRawWorkspace({ workspaceId: workspace });
+            workspace = undefined;
+            oldSaver?.dispose(); oldEditor?.dispose();
+            workspace = await createRawWorkspace();
+            const reopened = await openRawDocument(workspace, assetId);
+            const settings = await readRawSettings(reopened);
+            if (!current()) return;
+            frozen.current = false;
+            install(settings);
+          });
+        },
         curveReadback: (channel, points, sequence) => {
           if (current() && curvePresentation.current.active)
             setTargetedCurvePoints({ channel, points: points.map(point => ({...point})), sequence });

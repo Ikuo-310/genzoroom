@@ -637,6 +637,24 @@ describe('RAW native Before cache', () => {
     await act(async () => current!.prepareSave());
     expect(current?.saveError).toBeUndefined();
   });
+  it.each([false, true])('cleans up rejected curve updates and reopens durable state when cancel is unknown: %s', async unknown => {
+    await render('a'); await flush();
+    vi.mocked(api.discardRawWorkspace).mockResolvedValue();
+    if (unknown) vi.mocked(api.cancelRawCurveInteraction).mockRejectedValueOnce(new api.RawApiError('raw_session_desynchronized'));
+    const preview = vi.mocked(api.rawPreview).getMockImplementation()!;
+    vi.mocked(api.rawPreview).mockImplementation(async (...args) => {
+      if (args[5]) throw new api.RawApiError(unknown ? 'raw_connection_failed' : 'raw_invalid_request');
+      return preview(...args);
+    });
+    act(() => current!.beginCurveInteraction('master')); await flush();
+    act(() => current!.updateCurveInteraction([{ x: 0, y: 0 }, { x: .5, y: .7 }, { x: 1, y: 1 }]));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 70)); }); await flush();
+    expect(api.cancelRawCurveInteraction).toHaveBeenCalledOnce();
+    expect(api.discardRawWorkspace).toHaveBeenCalledTimes(unknown ? 1 : 0);
+    expect(current!.locked).toBe(false);
+    expect(vi.mocked(api.saveRawHistory).mock.calls.some(([request]) => request.action === 'operate')).toBe(false);
+  });
+
   it('caps only curve-interaction Draft requests at 512px and restores Full after Pointer Up', async () => {
     await render('a'); await flush();
     act(() => current!.viewChanged({ width: 1600, height: 1200, dpr: 2, scale: 1,

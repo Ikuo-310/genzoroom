@@ -54,6 +54,7 @@ export class RawRecipeSave {
     curvePreviewError?: (cause: unknown) => void;
     curveReadback?: (channel: RawCurveChannel, points: RawCurvePoint[], sequence: number) => void;
     curveSettled?: (cancelled: boolean) => void;
+    curveRecovery?: () => Promise<void>;
   }) {
     this.revision = confirmed.recipeRevision;
     this.savedFingerprint = confirmed.recipeFingerprint ?? confirmed.settingsFingerprint;
@@ -115,7 +116,7 @@ export class RawRecipeSave {
       targeted.timer = undefined;
       const pump = this.pumpTargetedCurve(gesture);
       targeted.pump = pump;
-      void pump.then(() => {}, cause => { if (this.active && this.curveGesture === gesture) this.options.curvePreviewError?.(cause); })
+      void pump.then(() => {}, cause => this.failCurveUpdate(gesture, cause))
         .finally(() => {
           if (targeted.pump === pump) targeted.pump = undefined;
           if (this.curveGesture === gesture && targeted.pending.length && !gesture.ending) this.scheduleTargetedPump(gesture);
@@ -123,6 +124,13 @@ export class RawRecipeSave {
     };
     // Batch every relative delta; only the cadence changes, never the ordered Native steps.
     if (immediate) start(); else targeted.timer = setTimeout(start, RAW_CURVE_PREVIEW_THROTTLE_MS);
+  }
+  private async failCurveUpdate(gesture: NonNullable<typeof this.curveGesture>, cause: unknown) {
+    if (!this.active || this.curveGesture !== gesture) return;
+    gesture.ending = true;
+    gesture.targeted?.pending.splice(0);
+    this.options.curvePreviewError?.(cause);
+    await this.cancelCurveInteraction();
   }
   private async pumpTargetedCurve(gesture: NonNullable<typeof this.curveGesture>) {
     const targeted = gesture.targeted!;
@@ -161,6 +169,7 @@ export class RawRecipeSave {
       await gesture.targeted.pump;
     }
     await gesture.targeted.preview;
+    if (this.curveGesture !== gesture || gesture.controller.signal.aborted) return;
     const after = gesture.targeted.points ?? [];
     const before = gesture.doc.curve[channel];
     this.finishCurveInteraction(channel, after, JSON.stringify(before) !== JSON.stringify(after));
@@ -182,8 +191,9 @@ export class RawRecipeSave {
     gesture.inFlight = work;
     try { await work; }
     catch (cause) {
-      if (this.active && this.curveGesture === gesture && !gesture.ending) {
-        this.options.curvePreviewError?.(cause);
+      if (cause instanceof RawSuperseded) return;
+      if (this.active && this.curveGesture === gesture && !gesture.controller.signal.aborted) {
+        await this.failCurveUpdate(gesture, cause);
       }
     } finally {
       gesture.inFlight = undefined;
@@ -227,6 +237,12 @@ export class RawRecipeSave {
       this.operationError = undefined;
     } catch (cause) {
       this.operationError = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
+      // A lost update/cancel reply cannot be replayed safely; reopen durable Recipe truth.
+      if (this.options.curveRecovery) {
+        this.curveGesture = undefined;
+        try { await this.options.curveRecovery(); }
+        catch (recoveryError) { this.cropFailure(recoveryError); }
+      }
     } finally { if (this.active) this.options.changed(); }
   }
   get dirty() { return !!this.cropGesture || !!this.curveGesture || !!this.retryRequest || !!this.gesture || !!this.handoff || !!this.moveIntent
@@ -646,6 +662,7 @@ export class RawRecipeSave {
     this.active = false; clearTimeout(this.timer);
     const gesture = this.curveGesture;
     if (gesture) {
+      if (gesture.targeted) clearTimeout(gesture.targeted.timer);
       clearTimeout(gesture.timer); gesture.controller.abort(); gesture.ending = true;
       void gesture.started.then(id => cancelRawCurveInteraction(gesture.doc, id)).catch(() => {});
       this.options.curveSettled?.(true);
