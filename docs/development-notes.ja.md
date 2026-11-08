@@ -2292,3 +2292,7 @@ P4-Cの`onDragCommit`をP5-Aと共通の`curve` History操作へ接続した。�
 Backend内部に単一Curve Interaction owner、`develop.beginInteraction`／`develop.curve`／`develop.cancelInteraction`／`develop.endInteraction`の一時状態管理を追加した。Updateはin-flight 1件＋最新pending 1件に集約し、上限128回・120秒を設定。Draft Previewは既存workerとlatest-wins判定を使い、readbackをworking stateに保持して確定snapshot／revisionへcommitしない。Cancelはbaseline復帰をreadbackし、EndはNativeの最終snapshotを返して上位History保存までownerをfinalized状態で保持する。RuntimeのRAW command allowlistにも3つのInteraction commandを追加した。P2 Curve操作の予測snapshot完全一致検証は関連範囲だけ外し、入力・readback形式、owner、revision、Recoveryは維持。
 
 `tests/test_lightcraft_raw.py` 65件とRuntime command-generation fence 1件が成功。managed v0.18.1 binaryと合成DNGのBackend経由probeでもBegin／Update／Draft Preview／End／Cancelが成功し、Update中に確定snapshotとrevisionが変わらないことを確認した。Windows API・Frontend接続、History DB saveId/receiptとのEnd確定接続は未実装で、End後はHistory保存後のconfirmまたはsession resetまで通常操作を止める。実カメラRAWと実Desktop応答性は未検証。詳細は[RAWポイントカーブ統合調査](research/lightcraft/RAW_POINT_CURVE_INTEGRATION.md)を参照。
+
+# RAWポイントカーブ P5-B.1 / L2（2026-11-08）
+
+Windows RAW APIへCurve Interaction begin／update／cancelを接続し、一時UpdateのDraft Previewを既存Preview応答として返す。Frontendはドラッグ中SVGを即時更新し、150ms間隔・一つのin-flight＋最新一件でNative Previewを追従させる。Pointer Upでは最終配列でNative Interactionを終了し、Curveを再適用せず、最終readbackを既存saveId／receipt付きHistory操作として一件保存した後に確定snapshotへ昇格する。Cancel／Escapeは開始表示へ戻し、通常Previewを再要求する。Frontend関連382件、Backend関連3件、TypeScript／production build、`git diff --check`が成功。実Desktopと実カメラRAWでの応答性・表示復帰は受入確認待ち。P5-CのReset等は未実装。詳細は[RAWポイントカーブ統合調査](research/lightcraft/RAW_POINT_CURVE_INTEGRATION.md)を参照。

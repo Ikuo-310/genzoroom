@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { LIGHTCRAFT_ENGINE } from './lightcraftEngine';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createRawWorkspace,abortRawWorkspaceRequests,discardRawWorkspace, rawCapability, rawPreview, readRawSettings, setRawControls, saveRawRecipe, saveRawHistory, readRawHistory, readRawRecipe, rawWorkspaceEmpty,
+import { createRawWorkspace,abortRawWorkspaceRequests,discardRawWorkspace, rawCapability, rawPreview, beginRawCurveInteraction, cancelRawCurveInteraction, readRawSettings, setRawControls, saveRawRecipe, saveRawHistory, readRawHistory, readRawRecipe, rawWorkspaceEmpty,
   RAW_CONTROL_IDS, RawSaveError, type RawDocument, type RawHistoryRequest, type RawHistoryOperation, validRawCurve, validRawCurveInput } from './rawApi';
 import { downloadRawLensDatabase, readRawLensDatabaseStatus } from './rawApi';
 import { rawSettings } from './test/rawSettings';
@@ -97,6 +97,27 @@ it('keeps logical geometry separate from bitmap dimensions and sends display ide
   expect(frame.frame?.nativeWidth).toBe(6000); expect(frame.width).toBe(16); expect(frame.quality).toBe('draft');
   const init = (fetch.mock.calls[0] as unknown as [string, RequestInit])[1];
   expect(JSON.parse(init.body as string)).toMatchObject(adaptiveTarget);
+});
+it('routes temporary curve updates through the existing adaptive Draft Preview contract', async () => {
+  const settings = rawSettings(doc), interactionId = 'd'.repeat(32);
+  const fetch = vi.fn<typeof globalThis.fetch>()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ workspaceId: doc.workspaceId, handle: doc.handle, assetId: doc.assetId,
+      generation: doc.generation, documentToken: doc.documentToken, revision: doc.revision, interactionId }),
+      { headers: { 'Content-Type': 'application/json' } }))
+    .mockResolvedValueOnce(response({ ...adaptiveHeaders(), 'X-Raw-Serial': '1', 'X-Raw-Interaction-Id': interactionId,
+      'X-Raw-Interaction-Sequence': '1' }))
+    .mockResolvedValueOnce(new Response(null, { status: 204 }));
+  vi.stubGlobal('fetch', fetch);
+  expect(await beginRawCurveInteraction(settings, 'green')).toBe(interactionId);
+  const points: [number, number][] = [[0, 0], [.5, .8], [1, 1]];
+  const frame = await rawPreview(settings, 1, new AbortController().signal, 'after', adaptiveTarget, { id: interactionId, points });
+  expect(frame.interactionId).toBe(interactionId); expect(frame.interactionSequence).toBe(1);
+  const [path, init] = fetch.mock.calls[1] as unknown as [string, RequestInit];
+  expect(path).toBe(`/api/raw/documents/${doc.handle}/curve-interaction/update`);
+  expect(JSON.parse(init.body as string)).toMatchObject({ documentRevision: doc.revision, interactionId, points,
+    serial: 1, maxSide: adaptiveTarget.maxSide, viewGeneration: adaptiveTarget.viewGeneration });
+  await cancelRawCurveInteraction(settings, interactionId);
+  expect(fetch.mock.calls[2]?.[0]).toBe(`/api/raw/documents/${doc.handle}/curve-interaction/cancel`);
 });
 it.each<Record<string, string>>([
   { 'X-Raw-Quality': 'full' }, { 'X-Raw-View-Generation': '3' }, { 'X-Raw-Mode': 'region' },

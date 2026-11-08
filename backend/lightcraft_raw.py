@@ -161,6 +161,9 @@ class _CurveUpdateRequest:
     sequence: int
     points: list
     future: asyncio.Future
+    max_side: int = DEFAULT_PREVIEW_SIDE
+    view_generation: int = 0
+    geometry_id: str | None = None
 
 
 @dataclass
@@ -1070,7 +1073,8 @@ class LightCraftRawSession:
                 interaction.state = "cancelled"
             raise
 
-    async def update_curve_interaction(self, handle, interaction_id, expected_revision, points):
+    async def update_curve_interaction(self, handle, interaction_id, expected_revision, points, *,
+                                       max_side=DEFAULT_PREVIEW_SIDE, view_generation=0, geometry_id=None):
         from raw_controls import validate_curve_input
         interaction = self._ensure_curve_interaction_owner(interaction_id)
         if interaction is None or interaction.handle != handle:
@@ -1096,7 +1100,8 @@ class LightCraftRawSession:
                 raise LightCraftError("raw_curve_interaction_stale")
             interaction.latest_sequence += 1
             request = _CurveUpdateRequest(interaction.latest_sequence, json.loads(
-                json.dumps(points, separators=(",", ":"), allow_nan=False)), future)
+                json.dumps(points, separators=(",", ":"), allow_nan=False)), future,
+                max_side, view_generation, geometry_id)
             if interaction.pending is not None and not interaction.pending.future.done():
                 interaction.pending.future.set_result(SUPERSEDED)
             interaction.pending = request
@@ -1174,7 +1179,8 @@ class LightCraftRawSession:
                         request.future.set_result(SUPERSEDED)
                     else:
                         ticket = self.request_curve_interaction_preview(interaction.handle,
-                            interaction.interaction_id, request.sequence)
+                            interaction.interaction_id, request.sequence, request.max_side,
+                            request.view_generation, request.geometry_id)
                         request.future.set_result(CurveInteractionUpdate(interaction.interaction_id,
                             request.sequence, True, encoded, ticket))
 
@@ -1184,7 +1190,8 @@ class LightCraftRawSession:
         if pending is not None and not pending.future.done():
             pending.future.set_exception(LightCraftError(code))
 
-    def request_curve_interaction_preview(self, handle, interaction_id, sequence, max_side=DEFAULT_PREVIEW_SIDE):
+    def request_curve_interaction_preview(self, handle, interaction_id, sequence, max_side=DEFAULT_PREVIEW_SIDE,
+                                          view_generation=0, geometry_id=None):
         interaction = self._ensure_curve_interaction_owner(interaction_id)
         if interaction is None or interaction.handle != handle:
             raise LightCraftError("raw_curve_interaction_stale")
@@ -1192,6 +1199,7 @@ class LightCraftRawSession:
                 sequence != interaction.applied_sequence or interaction.pending is not None:
             raise LightCraftError("raw_curve_interaction_stale")
         return self.request_preview(handle, interaction.baseline_revision, max_side, kind="after", quality="draft",
+                                    view_generation=view_generation, geometry_id=geometry_id,
                                     interaction_id=interaction_id, interaction_sequence=sequence)
 
     async def end_curve_interaction(self, handle, interaction_id, expected_revision, points):

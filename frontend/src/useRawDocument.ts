@@ -1,7 +1,7 @@
 import { provisionalCrop, reusableCropBitmap, sameCropOwner, type CropSnapshot, type CropPresentation } from './rawCropDisplay';
 import { useEffect, useRef, useState } from 'react';
 import { createRawWorkspace, openRawDocument, rawCapability, rawPreview, cancelRawPreview, RawSuperseded, readRawDocument, readRawSettings,
-  abortRawWorkspaceRequests, discardRawWorkspace, releaseRawWorkspace, resetRawEdits as resetRawEditsApi, rawWorkspaceEmpty, RawApiError, type RawDocument, type RawSettings, type RawValues, type RawHistoryControlId,
+  abortRawWorkspaceRequests, discardRawWorkspace, releaseRawWorkspace, resetRawEdits as resetRawEditsApi, rawWorkspaceEmpty, RawApiError, type RawDocument, type RawSettings, type RawValues, type RawHistoryControlId, type RawDisplayTarget,
   type RawPickTarget, type RawPickFrame, type RawHistoryResult, type RawHistoryStep, type RawHistoryOperation, type RawFrame, type RawGeometry, type RawCropDisplay, type RawGeometryOperation } from './rawApi';
 import { frontendLogger } from './frontendLogging';
 import { RawControls } from './rawControls';
@@ -59,6 +59,11 @@ async function decodeFrame(frame: RawFrame, signal: AbortSignal, urls: RawPrevie
 export function useRawDocument(assetId: string | null, beforeRequested = false) {
   const [urls] = useState(() => new RawPreviewUrls());
   const wholeSurfaces = useRef<{ after?: RawWholeSurface; before?: RawWholeSurface }>({});
+  const curveTarget = useRef<RawDisplayTarget>({ quality: 'draft', mode: 'whole', maxSide: 1024, viewGeneration: 0, geometryId: null });
+  const curvePresentation = useRef<{ active: boolean; sequence: number; url?: string; baseline?: {
+    url?: string; width?: number; height?: number; frame?: RawGeometry; quality?: 'draft' | 'full';
+    imageRevision?: number; surface?: RawWholeSurface;
+  } }>({ active: false, sequence: 0 });
   const comparing = useRef(beforeRequested); comparing.current = beforeRequested;
   const overlayRef = useRef<RawRegionOverlay | null>(null);
   const [, regionChanged] = useState(0);
@@ -309,6 +314,22 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       if (wholeSurfaces.current.after?.url === url) wholeSurfaces.current.after = undefined;
       if (url) urls.release(url); url = undefined;
     };
+    const settleCurvePresentation = (cancelled: boolean) => {
+      const owner = curvePresentation.current;
+      owner.active = false;
+      if (cancelled) {
+        if (owner.url) urls.release(owner.url);
+        owner.url = undefined;
+        wholeSurfaces.current.after = owner.baseline?.surface;
+        publishedFrame = owner.baseline?.surface ? { revision: owner.baseline.surface.doc.revision,
+          quality: owner.baseline.surface.quality, frame: owner.baseline.surface.frame } : undefined;
+        overlay.refresh();
+        const baseline = owner.baseline;
+        setState(previous => previous && previous.assetId === assetId ? { ...previous, url: baseline?.url,
+          width: baseline?.width, height: baseline?.height, frame: baseline?.frame, quality: baseline?.quality,
+          imageRevision: baseline?.imageRevision, displayError: undefined } : previous);
+      }
+    };
     const fail = (error: unknown) => {
       if (!current()) return;
       region.invalidate(); regionOwner = undefined;
@@ -348,6 +369,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         await readRawDocument(doc, controller.signal);
         if (!valid()) return;
         revoke();
+        if (curvePresentation.current.url) urls.release(curvePresentation.current.url);
+        curvePresentation.current.url = undefined;
         setCropPresentation(null);
         displayedRevision = doc.revision;
         url = candidate;
@@ -433,7 +456,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     };
     resyncPreviewRef.current = () => resyncPreview();
     const displayPreview = (doc: RawDocument, valid = current) => {
-      if (!current() || !valid()) return;
+      if (!current() || !valid() || curvePresentation.current.active) return;
       // Rect/angle do not change crop-edit pixels. Keep the paired bitmap and give
       // input/readback priority; request one official Full at the settled boundary.
       if(cropMode && saver?.cropping)return;
@@ -449,6 +472,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       displayTargetKey = key;
       const geometryId = publishedFrame?.revision === doc.revision && publishedFrame.quality === quality
         ? publishedFrame.frame.geometryId : null;
+      curveTarget.current = { quality: 'draft', mode: 'whole', maxSide: side, viewGeneration, geometryId };
       const owner = editor, view = viewGeneration;
       const acknowledged = () => valid() && editor === owner && !editor?.mutating && view === viewGeneration
         && editor?.confirmed.generation === doc.generation && editor.confirmed.documentToken === doc.documentToken
@@ -534,7 +558,38 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         invalidate: invalidateDisplay,
       });
       editor = installed;
-      saver = new RawRecipeSave(settings, { schedule: enqueue, changed: notify, controls: installed });
+      saver = new RawRecipeSave(settings, { schedule: enqueue, changed: notify, controls: installed,
+        curveSettled: settleCurvePresentation,
+        curvePreviewError: cause => {
+          const code = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
+          if (current() && curvePresentation.current.active) setState(previous => previous && ({ ...previous, displayError: code }));
+        },
+        curvePreview: (frame, doc, sequence, target) => {
+          const owner = curvePresentation.current;
+          if (!owner.active || sequence !== owner.sequence || !current()) return;
+          void decodeFrame(frame, controller.signal, urls).then(candidate => {
+            if (!owner.active || sequence !== owner.sequence || !current()
+              || doc.generation !== editor?.confirmed.generation || doc.documentToken !== editor?.confirmed.documentToken) {
+              urls.release(candidate); return;
+            }
+            if (owner.url) urls.release(owner.url);
+            owner.url = candidate;
+            if (frame.frame) {
+              publishedFrame = { revision: doc.revision, quality: frame.quality ?? 'draft', frame: frame.frame };
+              wholeSurfaces.current.after = { url: candidate, doc: { ...doc }, frame: frame.frame,
+                quality: frame.quality ?? 'draft', maxSide: target.maxSide };
+            }
+            setState(previous => previous && previous.assetId === assetId ? { ...previous, url: candidate,
+              width: frame.width, height: frame.height, frame: frame.frame, quality: frame.quality ?? 'draft',
+              imageRevision: doc.revision, displayError: undefined } : previous);
+            overlay.refresh();
+          }).catch(cause => {
+            if (owner.active && sequence === owner.sequence) {
+              const code = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
+              setState(previous => previous && ({ ...previous, displayError: code }));
+            }
+          });
+        } });
       saverRef.current = saver;
       editorRef.current = editor;
       notifyRef.current = notify;
@@ -1054,6 +1109,29 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     beforeStatus: beforeMatches ? before?.status : undefined,
     retryBefore: () => requestBeforeRef.current(true),
     undo: () => moveHistory('undo'), redo: () => moveHistory('redo'),
+    beginCurveInteraction: (channel: import('./rawApi').RawCurveChannel) => {
+      const editor = callbackEditor(), saver = saverRef.current;
+      if (!editor || !saver || frozen.current || saver.locked) return;
+      const started = saver.beginCurveInteraction(channel);
+      if (!started) return;
+      curvePresentation.current = { active: true, sequence: 0, baseline: {
+        url: visible?.url, width: visible?.width, height: visible?.height, frame: visible?.frame,
+        quality: visible?.quality, imageRevision: visible?.imageRevision,
+        surface: wholeSurfaces.current.after ? { ...wholeSurfaces.current.after } : undefined,
+      } };
+    },
+    updateCurveInteraction: (points: import('./rawApi').RawCurvePoint[]) => {
+      const editor = callbackEditor(), saver = saverRef.current;
+      if (!editor || !saver || frozen.current || !curvePresentation.current.active) return;
+      const doc = editor.confirmed;
+      const sequence = saver.updateCurveInteraction(points, curveTarget.current);
+      if (sequence !== undefined) curvePresentation.current.sequence = sequence;
+    },
+    finishCurveInteraction: (channel: import('./rawApi').RawCurveChannel, points: import('./rawApi').RawCurvePoint[], changed: boolean) => {
+      if (!callbackEditor() || frozen.current) return;
+      saverRef.current?.finishCurveInteraction(channel, points, changed);
+    },
+    cancelCurveInteraction: () => { void saverRef.current?.cancelCurveInteraction(); },
     operate: (operation: RawHistoryOperation) => {
       cancelPick();
       if (callbackEditor() && !frozen.current) void saverRef.current?.operate(operation).catch(cause =>

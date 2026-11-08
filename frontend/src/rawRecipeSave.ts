@@ -1,8 +1,11 @@
 import { createEditStateSaveId } from './editStateApi';
 import { frontendLogger } from './frontendLogging';
-import { RawApiError, RawSaveError, beginRawGeometry, updateRawGeometry, readRawSettings, recoverRawGeometry, type RawGeometryAction, type RawGeometryOperation, readRawRecipe, saveRawRecipe, saveRawHistory, readRawHistory,
-  type RawSettings, type RawRecipeRequest, type RawHistoryRequest, type RawHistoryControlId, type RawHistoryResult, type RawHistoryStep, type RawHistoryOperation } from './rawApi';
-import type { RawControls } from './rawControls';
+import { RawApiError, RawSaveError, beginRawGeometry, updateRawGeometry, beginRawCurveInteraction, cancelRawCurveInteraction,
+  rawPreview, readRawSettings, recoverRawGeometry, type RawGeometryAction, type RawGeometryOperation, type RawCurveChannel,
+  type RawCurvePoint, type RawDisplayTarget, type RawFrame, readRawRecipe, saveRawRecipe, saveRawHistory, readRawHistory,
+  type RawSettings, type RawRecipeRequest, type RawHistoryRequest, type RawHistoryControlId, type RawHistoryResult,
+  type RawHistoryStep, type RawHistoryOperation } from './rawApi';
+import { RAW_THROTTLE_MS, type RawControls } from './rawControls';
 
 export const RAW_AUTOSAVE_MS = 5000;
 
@@ -27,7 +30,11 @@ export class RawRecipeSave {
   operationError?: string;
   moving = false;
   private historyOperation?: Promise<void>;
-  private moveIntent?: { action: 'undo' | 'redo' | 'jump' | 'operate'; targetStepId?: string | null; operation?: RawHistoryOperation };
+  private moveIntent?: { action: 'undo' | 'redo' | 'jump' | 'operate'; targetStepId?: string | null; operation?: RawHistoryOperation;
+    curveInteractionId?: string };
+  private curveGesture?: { channel: RawCurveChannel; doc: RawSettings; started: Promise<string>; id?: string; latest?: RawCurvePoint[];
+    sequence: number; timer?: ReturnType<typeof setTimeout>; inFlight?: Promise<void>; ending: boolean; controller: AbortController;
+    target?: RawDisplayTarget };
   private cropGesture?: { id: string; type: 'drag' | 'straighten'; action?: RawGeometryAction; sequence: number; latest?: RawGeometryOperation; ending: boolean;
     started: Promise<void>; end?: Promise<void>; error?: unknown; cancelled?: boolean; updateDoc?: RawSettings; rejected?: boolean; commit?: RawHistoryRequest };
   get cropOperation() { return this.cropGesture?.type; }
@@ -39,13 +46,115 @@ export class RawRecipeSave {
   constructor(public confirmed: RawSettings, private options: {
     schedule: (action: () => Promise<void>) => void; changed: () => void;
     controls?: RawControls;
+    curvePreview?: (frame: RawFrame, doc: RawSettings, sequence: number, target: RawDisplayTarget) => void;
+    curvePreviewError?: (cause: unknown) => void;
+    curveSettled?: (cancelled: boolean) => void;
   }) {
     this.revision = confirmed.recipeRevision;
     this.savedFingerprint = confirmed.recipeFingerprint ?? confirmed.settingsFingerprint;
   }
-  get dirty() { return !!this.cropGesture || !!this.retryRequest || !!this.gesture || !!this.handoff || !!this.moveIntent
+  beginCurveInteraction(channel: RawCurveChannel) {
+    if (!this.active || this.locked || this.paused || this.historyLoading || this.historyError || !this.history) return false;
+    if (this.confirmed.mutationAttempts >= Math.min(this.confirmed.regenerationThreshold, this.confirmed.mutationLimit - 1)) return false;
+    const preceding = this.save();
+    const gesture = { channel, doc: structuredClone(this.options.controls!.confirmed), started: Promise.resolve(''),
+      sequence: 0, ending: false, controller: new AbortController() } as NonNullable<typeof this.curveGesture>;
+    this.curveGesture = gesture;
+    gesture.started = preceding.then(async () => {
+      if (!this.active || this.curveGesture !== gesture) throw new RawApiError('raw_document_closed');
+      gesture.doc = structuredClone(this.options.controls!.confirmed);
+      gesture.id = await beginRawCurveInteraction(gesture.doc, channel);
+      this.options.controls!.beginPreview();
+      return gesture.id;
+    }).catch(cause => {
+      if (this.curveGesture === gesture) {
+        this.curveGesture = undefined;
+        this.options.controls?.endPreview();
+        this.options.curveSettled?.(true);
+        this.options.controls?.refreshPreview();
+      }
+      this.operationError = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
+      throw cause;
+    })
+      .finally(() => this.options.changed());
+    this.options.changed();
+    return true;
+  }
+  updateCurveInteraction(points: RawCurvePoint[], target: RawDisplayTarget) {
+    const gesture = this.curveGesture;
+    if (!gesture || gesture.ending || !this.active) return;
+    gesture.latest = points.map(point => ({ ...point }));
+    gesture.target = target;
+    gesture.sequence++;
+    if (!gesture.timer && !gesture.inFlight) gesture.timer = setTimeout(() => {
+      gesture.timer = undefined; void this.pumpCurvePreview(gesture, target);
+    }, RAW_THROTTLE_MS);
+    return gesture.sequence;
+  }
+  private async pumpCurvePreview(gesture: NonNullable<typeof this.curveGesture>, target: RawDisplayTarget) {
+    if (gesture.inFlight || gesture.ending || !gesture.latest || !this.active) return;
+    const sequence = gesture.sequence, points = gesture.latest;
+    gesture.latest = undefined;
+    const work = (async () => {
+      const id = await gesture.started;
+      if (!this.active || this.curveGesture !== gesture || gesture.ending || sequence !== gesture.sequence) return;
+      const frame = await rawPreview(gesture.doc, sequence, gesture.controller.signal, 'after', target,
+        { id, points: points.map(point => [point.x, point.y]) });
+      if (this.active && this.curveGesture === gesture && !gesture.ending && sequence === gesture.sequence)
+        this.options.curvePreview?.(frame, gesture.doc, sequence, target);
+    })();
+    gesture.inFlight = work;
+    try { await work; }
+    catch (cause) {
+      if (this.active && this.curveGesture === gesture && !gesture.ending) {
+        this.options.curvePreviewError?.(cause);
+      }
+    } finally {
+      gesture.inFlight = undefined;
+      if (this.active && this.curveGesture === gesture && !gesture.ending && gesture.latest)
+        gesture.timer = setTimeout(() => { gesture.timer = undefined; void this.pumpCurvePreview(gesture, gesture.target ?? target); }, RAW_THROTTLE_MS);
+    }
+  }
+  finishCurveInteraction(channel: RawCurveChannel, points: RawCurvePoint[], changed: boolean) {
+    const gesture = this.curveGesture;
+    if (!gesture || gesture.channel !== channel) return;
+    clearTimeout(gesture.timer);
+    gesture.timer = undefined; gesture.latest = undefined;
+    if (!changed) { void this.cancelCurveInteraction(); return; }
+    gesture.ending = true;
+    this.moving = true;
+    const operation = gesture.started.then(() => {
+      this.moveIntent = { action: 'operate', operation: { kind: 'curve', metadata: { channel },
+        points: points.map(point => [point.x, point.y]) } };
+      return this.save();
+    }).finally(() => {
+      this.moving = false; this.historyOperation = undefined; if (this.active) this.options.changed();
+    });
+    this.historyOperation = operation;
+    void operation.catch(cause => this.cropFailure(cause));
+  }
+  async cancelCurveInteraction() {
+    const gesture = this.curveGesture;
+    if (!gesture) return;
+    clearTimeout(gesture.timer);
+    gesture.timer = undefined; gesture.latest = undefined; gesture.ending = true;
+    gesture.controller.abort();
+    try {
+      const id = await gesture.started;
+      if (this.curveGesture !== gesture) return;
+      await cancelRawCurveInteraction(gesture.doc, id);
+      this.curveGesture = undefined;
+      this.options.controls?.endPreview();
+      this.options.curveSettled?.(true);
+      this.options.controls?.refreshPreview();
+      this.operationError = undefined;
+    } catch (cause) {
+      this.operationError = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
+    } finally { if (this.active) this.options.changed(); }
+  }
+  get dirty() { return !!this.cropGesture || !!this.curveGesture || !!this.retryRequest || !!this.gesture || !!this.handoff || !!this.moveIntent
     || !!this.options.controls && !this.initialized || this.confirmed.settingsFingerprint !== this.savedFingerprint; }
-  get locked() { return !!this.cropGesture || !!this.options.controls && (!this.initialized || !!this.operation || !!this.error || this.moving); }
+  get locked() { return !!this.cropGesture || !!this.curveGesture || !!this.options.controls && (!this.initialized || !!this.operation || !!this.error || this.moving); }
   get gesturing() { return !!this.gesture && !this.operation && !this.paused && !this.moving; }
   get canUndo() { return !!this.history && (this.history.cursor > 0 || !!this.gesture || !!this.cropGesture); }
   get canRedo() { return !!this.history && this.history.cursor < this.history.length; }
@@ -117,8 +226,11 @@ export class RawRecipeSave {
       : targetStepId !== this.history?.selectedStepId);
     this.moveIntent = undefined;
     if (!available) return;
+    const curveInteractionId = operation?.kind === 'curve' && this.curveGesture?.ending
+      ? await this.curveGesture.started : undefined;
     this.retryRequest = { doc: structuredClone(this.confirmed), expectedRecipeRevision: this.revision,
-      saveId: createEditStateSaveId(), action, ...(action === 'jump' ? { targetStepId } : {}), ...(operation ? { operation } : {}) };
+      saveId: createEditStateSaveId(), action, ...(action === 'jump' ? { targetStepId } : {}), ...(operation ? { operation } : {}),
+      ...(curveInteractionId ? { curveInteractionId } : {}) };
     try { await this.sendHistory(); }
     catch (cause) {
       if ((operation?.kind === 'wbAuto' || operation?.kind === 'wbPick') && cause instanceof RawSaveError && cause.outcome === 'rejected'
@@ -406,6 +518,13 @@ export class RawRecipeSave {
       this.gesture = undefined;
       this.confirmed = controls.confirmed = result;
       this.history = result.history;
+      if (request.curveInteractionId && this.curveGesture) {
+        clearTimeout(this.curveGesture.timer);
+        this.curveGesture.controller.abort();
+        this.curveGesture = undefined;
+        controls.endPreview();
+        this.options.curveSettled?.(false);
+      }
       // Commits can prune or replace step IDs, while cursor moves preserve the complete list.
       if (!moving || request.action === 'operate' || this.historyError) await this.loadHistory();
       if (moving) controls.refreshPreview();
@@ -446,5 +565,13 @@ export class RawRecipeSave {
       throw cause;
     }
   }
-  dispose() { this.active = false; clearTimeout(this.timer); }
+  dispose() {
+    this.active = false; clearTimeout(this.timer);
+    const gesture = this.curveGesture;
+    if (gesture) {
+      clearTimeout(gesture.timer); gesture.controller.abort(); gesture.ending = true;
+      void gesture.started.then(id => cancelRawCurveInteraction(gesture.doc, id)).catch(() => {});
+      this.options.curveSettled?.(true);
+    }
+  }
 }

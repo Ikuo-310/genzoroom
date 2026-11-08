@@ -15,7 +15,7 @@ export type RawGeometry = { geometryId: string; nativeWidth: number; nativeHeigh
 export type RawDisplayTarget = { quality: 'draft' | 'full'; mode: 'whole' | 'crop-edit'; maxSide: number; viewGeneration: number; geometryId: string | null };
 export type RawCropDisplay = { canonicalGeometry: { crop: RawCrop; orientation: string }; bitmapSpace: 'oriented-warped-unstraightened-flipped'; settingsFingerprint: string };
 export type RawFrame = { blob: Blob; width: number; height: number; epoch: number; sequence: number; kind?: 'before' | 'after'; key?: string;
-  quality?: 'draft' | 'full'; frame?: RawGeometry; cropDisplay?: RawCropDisplay };
+  quality?: 'draft' | 'full'; frame?: RawGeometry; cropDisplay?: RawCropDisplay; interactionId?: string; interactionSequence?: number };
 export class RawSuperseded extends Error {
   constructor(public readonly reason: 'revision' | 'replaced' | 'cancelled') { super(reason); }
 }
@@ -113,6 +113,7 @@ export type RawHistoryOperation = { kind: 'controlReset'; metadata: { control: R
   | { kind: 'allReset' | 'wbAuto'; metadata: Record<string, never> };
 export type RawHistoryRequest = RawRecipeRequest & { action: 'initialize' | 'commit' | 'undo' | 'redo' | 'jump' | 'operate';
   control?: RawHistoryControlId; targetStepId?: string | null; operation?: RawHistoryOperation;
+  curveInteractionId?: string;
   geometryCommit?: { gestureId: string; operation: 'set' | 'drag' | 'straighten'; action?: RawGeometryAction } };
 export type RawHistoryStep = { stepId: string; kind: 'control' | 'controlReset' | 'opticsFlag' | 'opticsFlagReset' | 'sectionToggle' | 'sectionReset' | 'vignetteStyle' | 'allReset' | 'wbAuto' | 'wbPick' | 'geometry' | 'curve' | 'curveReset';
   metadata: { control?: RawHistoryControlId | RawOpticsFlagId; section?: RawResetSectionId; enabled?: boolean; style?: RawVignetteStyle; operation?: RawGeometryOperationId; action?: RawGeometryAction; channel?: RawCurveResetChannel }; createdAt: string;
@@ -459,7 +460,7 @@ export async function saveRawRecipe(request: RawRecipeRequest): Promise<RawRecip
 }
 /** A retry keeps the exact document/body; current metadata is independent of the original ack. */
 export async function saveRawHistory(request: RawHistoryRequest): Promise<RawHistoryResult> {
-  const { doc, action, expectedRecipeRevision, saveId, control, targetStepId, operation } = request;
+  const { doc, action, expectedRecipeRevision, saveId, control, targetStepId, operation, curveInteractionId } = request;
   if (action === 'operate' && operation?.kind === 'curve' && !validRawCurveInput(operation.metadata.channel, operation.points))
     throw new RawSaveError('raw_invalid_request', 'rejected', 422);
   let accepted = false;
@@ -469,7 +470,7 @@ export async function saveRawHistory(request: RawHistoryRequest): Promise<RawHis
       ...(action === 'commit' ? request.geometryCommit ? { kind: 'geometry', metadata: { operation: request.geometryCommit.operation, ...(request.geometryCommit.action ? { action: request.geometryCommit.action } : {}) },
         gestureId: request.geometryCommit.gestureId } : { kind: 'control', metadata: { control } } : {}),
       ...(action === 'operate' && operation ? { kind: operation.kind, metadata: operation.metadata,
-        ...(operation.kind === 'curve' ? { curvePoints: operation.points } : {}) } : {}),
+        ...(operation.kind === 'curve' ? { curvePoints: operation.points, ...(curveInteractionId ? { curveInteractionId } : {}) } : {}) } : {}),
       ...(action === 'jump' ? { targetStepId } : {}) }), RAW_SETTINGS_RESPONSE_BYTES);
     accepted = true;
     settings(value, doc);
@@ -563,12 +564,28 @@ export async function recoverRawGeometry(doc: RawSettings) {
 export async function cancelRawPreview(doc: RawDocument, kind: 'before' | 'after', serial: number) {
   await request(`/documents/${doc.handle}/preview/cancel`, post({ ...identityBody(doc), kind, serial }));
 }
-export async function rawPreview(doc: RawDocument, serial: number, signal: AbortSignal, kind: 'before' | 'after' = 'after', target?: RawDisplayTarget): Promise<RawFrame> {
+export async function beginRawCurveInteraction(doc: RawSettings, channel: RawCurveChannel): Promise<string> {
+  const value = await json(`/documents/${doc.handle}/curve-interaction/begin`, post({ ...identityBody(doc),
+    documentRevision: doc.revision, channel }));
+  document(value, doc.workspaceId, doc.assetId);
+  if (value.handle !== doc.handle || value.generation !== doc.generation || value.documentToken !== doc.documentToken
+    || typeof value.interactionId !== 'string' || !/^[a-f0-9]{32}$/.test(value.interactionId)) throw new RawApiError('raw_invalid_response');
+  return value.interactionId;
+}
+export async function cancelRawCurveInteraction(doc: RawSettings, interactionId: string) {
+  await request(`/documents/${doc.handle}/curve-interaction/cancel`, post({ ...identityBody(doc),
+    documentRevision: doc.revision, interactionId }));
+}
+export async function rawPreview(doc: RawDocument, serial: number, signal: AbortSignal, kind: 'before' | 'after' = 'after', target?: RawDisplayTarget,
+  interaction?: { id: string; points: RawCurveCommandPoint[] }): Promise<RawFrame> {
   if (target && (!Number.isInteger(target.maxSide) || target.maxSide < 16 || target.maxSide > RAW_PREVIEW_MAX_SIDE))
     throw new RawApiError('raw_invalid_preview_request');
   const started = performance.now();
-  const response = await request(`/documents/${doc.handle}/preview`, { ...post({ workspaceId: doc.workspaceId,
-    generation: doc.generation, documentToken: doc.documentToken, revision: doc.revision, serial, ...target, ...(kind === 'before' ? { kind } : {}) }),
+  const response = await request(`/documents/${doc.handle}/${interaction ? 'curve-interaction/update' : 'preview'}`, { ...post({ workspaceId: doc.workspaceId,
+    generation: doc.generation, documentToken: doc.documentToken,
+    ...(interaction ? { documentRevision: doc.revision, interactionId: interaction.id, points: interaction.points,
+      serial, maxSide: target?.maxSide ?? RAW_PREVIEW_MAX_SIDE, viewGeneration: target?.viewGeneration ?? 0,
+      geometryId: target?.geometryId ?? null } : { revision: doc.revision, serial, ...target, ...(kind === 'before' ? { kind } : {}) }) }),
     signal: AbortSignal.any([signal, AbortSignal.timeout(90_000)]) });
   try {
     const responseStarted = performance.now();
@@ -627,6 +644,13 @@ export async function rawPreview(doc: RawDocument, serial: number, signal: Abort
         throw new RawApiError('raw_stale_handle');
     };
     check();
+    let interactionSequence: number | undefined;
+    if (interaction) {
+      const id = response.headers.get('x-raw-interaction-id'), sequenceText = response.headers.get('x-raw-interaction-sequence');
+      if (id !== interaction.id || !sequenceText || !/^\d+$/.test(sequenceText) || !integer(Number(sequenceText)) || Number(sequenceText) < 1)
+        throw new RawApiError('raw_invalid_response');
+      interactionSequence = Number(sequenceText);
+    }
     const width = numeric('width'), height = numeric('height'), epoch = numeric('epoch'), sequence = numeric('sequence');
     if (frame && (frame.fullWidth !== width || frame.fullHeight !== height)) throw new RawApiError('raw_invalid_response');
     if (!width || !height || Math.max(width, height) > (target?.maxSide ?? RAW_PREVIEW_MAX_SIDE) || width * height > RAW_PREVIEW_MAX_SIDE ** 2) throw new RawApiError('raw_invalid_response');
@@ -638,7 +662,8 @@ export async function rawPreview(doc: RawDocument, serial: number, signal: Abort
     check();
     if (![137, 80, 78, 71, 13, 10, 26, 10].every((byte, index) => bytes[index] === byte)) throw new RawApiError('raw_invalid_response');
     return { blob: new Blob([bytes], { type: 'image/png' }), width, height, epoch, sequence,
-      kind, quality, frame, cropDisplay, ...(kind === 'before' ? { key: doc.beforeKey! } : {}) };
+      kind, quality, frame, cropDisplay, ...(interaction ? { interactionId: interaction.id, interactionSequence } : {}),
+      ...(kind === 'before' ? { key: doc.beforeKey! } : {}) };
   } finally { await response.body?.cancel().catch(() => {}); }
 }
 

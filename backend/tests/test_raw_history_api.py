@@ -135,6 +135,58 @@ def test_confirmed_gesture_undo_redo_jump_noop_and_replay(local, tmp_path, monke
     asyncio.run(run())
 
 
+def test_curve_interaction_preview_cancel_and_single_history_confirmation(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        children[0].adaptive_supported = True
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                _, doc = await open_document(http)
+                doc = await operation(http, doc, "initialize")
+                baseline_curve = copy.deepcopy(doc["curve"]["master"])
+                identity_body = identity(doc) | {"documentRevision": doc["revision"]}
+                begin_url = f'/api/raw/documents/{doc["handle"]}/curve-interaction/begin'
+                started = await http.post(begin_url, json=identity_body | {"channel": "master"})
+                assert started.status_code == 200
+                interaction_id = started.json()["interactionId"]
+                points = [[0, 0], [.5, .7], [1, 1]]
+                update = await http.post(f'/api/raw/documents/{doc["handle"]}/curve-interaction/update', json=identity_body | {
+                    "interactionId": interaction_id, "points": points, "serial": 1, "maxSide": 1024,
+                    "viewGeneration": 0, "geometryId": None})
+                assert update.status_code == 200
+                assert update.headers["x-raw-quality"] == "draft"
+                assert update.headers["x-raw-interaction-id"] == interaction_id
+                assert update.headers["x-raw-interaction-sequence"] == "1"
+                assert update.content.startswith(b"\x89PNG\r\n\x1a\n")
+                cancelled = await http.post(f'/api/raw/documents/{doc["handle"]}/curve-interaction/cancel',
+                    json=identity_body | {"interactionId": interaction_id})
+                assert cancelled.status_code == 204
+                assert len(store.get_raw_history(api._history_identity)["history"]["steps"]) == 0
+                assert (await api.raw.get_settings(api._raw_handle)).settings["curve"]["master"] == baseline_curve
+
+                started = await http.post(begin_url, json=identity_body | {"channel": "master"})
+                interaction_id = started.json()["interactionId"]
+                update = await http.post(f'/api/raw/documents/{doc["handle"]}/curve-interaction/update', json=identity_body | {
+                    "interactionId": interaction_id, "points": points, "serial": 2, "maxSide": 1024,
+                    "viewGeneration": 0, "geometryId": None})
+                assert update.status_code == 200
+                before_curve_commands = sum(name == "develop.curve" for name, _ in children[0].commands)
+                request = body(doc) | {"kind": "curve", "metadata": {"channel": "master"},
+                    "curvePoints": points, "curveInteractionId": interaction_id}
+                doc = await operation(http, doc, "operate", request)
+                assert doc["curve"]["master"] == [{"x": 0, "y": 0}, {"x": .5, "y": .7}, {"x": 1, "y": 1}]
+                assert doc["history"]["length"] == doc["history"]["cursor"] == 1
+                assert sum(name == "develop.curve" for name, _ in children[0].commands) == before_curve_commands
+                doc = await operation(http, doc, "undo")
+                assert doc["curve"]["master"] == baseline_curve and doc["history"]["cursor"] == 0
+                doc = await operation(http, doc, "redo")
+                assert doc["curve"]["master"] == [{"x": 0, "y": 0}, {"x": .5, "y": .7}, {"x": 1, "y": 1}]
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("field,value,code", [
     ("generation", 999, "raw_stale_handle"), ("documentToken", "wrong", "raw_stale_handle"),
     ("documentRevision", 999, "raw_revision_conflict"), ("settingsFingerprint", "0" * 64, "raw_revision_conflict"),

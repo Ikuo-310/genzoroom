@@ -79,8 +79,11 @@ function smoothCurvePath(points: RawCurvePoint[]) {
   return path;
 }
 
-export function RawPointCurveControls({ curve, onDragCommit, onPointEdit, editDisabled = false, syncKey }: {
+export function RawPointCurveControls({ curve, onDragStart, onDragChange, onDragCancel, onDragCommit, onPointEdit, editDisabled = false, syncKey }: {
   curve: Record<RawCurveChannel, RawCurvePoint[]>;
+  onDragStart?: (channel: RawCurveChannel, before: RawCurvePoint[]) => void;
+  onDragChange?: (channel: RawCurveChannel, points: RawCurvePoint[]) => void;
+  onDragCancel?: (channel: RawCurveChannel, before: RawCurvePoint[]) => void;
   onDragCommit?: (result: RawCurveDragResult) => void;
   onPointEdit?: (channel: RawCurveChannel, points: RawCurvePoint[]) => void;
   editDisabled?: boolean;
@@ -126,6 +129,7 @@ export function RawPointCurveControls({ curve, onDragCommit, onPointEdit, editDi
     setDraft(previous => ({ ...previous, [drag.channel]: drag.startPoints.map(point => ({ ...point })) }));
     setSelected(previous => ({ ...previous, [drag.channel]: drag.index }));
     setDragging(false);
+    onDragCancel?.(drag.channel, drag.startPoints.map(point => ({ ...point })));
     suppressClickRef.current = suppressClick;
     if (suppressClick) window.setTimeout(() => { suppressClickRef.current = false; }, 0);
   }
@@ -168,6 +172,7 @@ export function RawPointCurveControls({ curve, onDragCommit, onPointEdit, editDi
     suppressClickRef.current = true;
     setSelected(previous => ({ ...previous, [channel]: index }));
     setDragging(true);
+    onDragStart?.(channel, startPoints.map(point => ({ ...point })));
     if (typeof event.currentTarget.setPointerCapture === 'function') event.currentTarget.setPointerCapture(event.pointerId);
   }
 
@@ -176,6 +181,7 @@ export function RawPointCurveControls({ curve, onDragCommit, onPointEdit, editDi
     if (!drag || drag.pointerId !== event.pointerId) return;
     const nextPoints = pointsAtPointer(drag, event.currentTarget, event.clientX, event.clientY);
     setDraft(previous => ({ ...previous, [drag.channel]: nextPoints }));
+    onDragChange?.(drag.channel, nextPoints.map(point => ({ ...point })));
   }
 
   function handlePointerUp(event: ReactPointerEvent<SVGSVGElement>) {

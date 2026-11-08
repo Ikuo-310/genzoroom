@@ -235,3 +235,24 @@ managed v0.18.1 binaryを使う統合probeも、合成128×96 Bayer DNGと一時
 - End後は`finalized` ownerを維持して通常操作を拒否する。上位History保存とconfirm、またはsession reset/reimportを接続するまでUIから利用できない。
 - 実probeは合成DNGのみ。実カメラRAW、実Desktop応答性、Preview遅延時の連続cancel、長時間・上限到達時の操作感は未検証。
 - P5-C Reset／右クリック削除、Frontend、Native patch、Recipe／History schema変更は行っていない。
+
+## P5-B.1 / L2 Windows API・FrontendライブPreview接続（2026-11-08）
+
+### 実装
+
+`backend/windows_raw_api.py`に既存RAW Document owner/revision契約を使うCurve Interaction begin／update／cancel endpointを追加した。UpdateはL1のlatest-pending集約とPreview ticketを使い、draft画像を既存Previewレスポンス形式で返す。Historyのcurve operate要求では`curveInteractionId`がある場合に限り、すでにNativeへ反映したCurveを再実行せず`end_curve_interaction()`の最終readbackを既存`_history`／saveId／receipt経路で一つのsnapshotとして保存する。DB保存後に`confirm_curve_interaction()`でsession snapshotへ昇格する。receipt replayも同じinteractionのconfirmを完了する。
+
+Frontendでは`RawPointCurveControls`の既存drag start／move／cancel／commit callbackを`useRawDocument`・`RawRecipeSave`へ接続した。Pointer MoveはローカルSVGを同期更新しつつ、150msの既存RAW更新間隔を使ってNative更新とDraft Previewを要求する。Frontendは同時に一つのPreview要求と最新一件だけを保持し、sequence／document ownerが現行の画像だけを表示する。表示は既存Preview URLの管理、viewport side／view generation、geometry identity、region overlay refreshを再利用する。
+
+Pointer Upは未送信Moveを捨て、最後の点配列をHistory要求に含める。Nativeのendで返ったreadbackを完全snapshot Historyに一度だけ保存し、成功後にDraft状態を解除して通常のFull Previewへ収束する。Cancel／EscapeはInteractionをcancelし、開始時の表示面・画像情報へ戻して通常Previewを再要求する。ドラッグ中のPreview失敗は表示エラーとして扱い、履歴確定済み状態にはしない。文書dispose時は通信signalを中断し、開始済みInteractionのcancelを試みる。
+
+### 限定検証
+
+- Frontend関連テスト4ファイル（`rawHistorySave`、`RawPointCurveControls`、`rawApi`、`useRawDocument`）：382件成功。最新点配列への集約、Draft要求、Pointer Up一回のHistory要求、interaction IDの付与を含む。
+- Backend関連テスト：History APIのInteraction確定統合とL1 update／cancel／finalize集約テストの3件成功。Native readback後の保存、cancel、Undo／Redo経路を確認した。
+- TypeScript／Vite production build成功。既存のchunk size警告とReact Routerの`use client` directive警告あり。
+- `git diff --check`成功。Managed Native binary／実カメラRAWによる追加probeと実Desktop手動操作は今回未実施。
+
+### 残る確認事項
+
+実Desktop上でドラッグ追従の体感、低速Native時の連続操作、Cancel後の表示復帰、History一件とUndo／Redo後のFull Previewを確認する。P5-C Reset／右クリック削除、ヒストグラム、ターゲット調整、プリセットには着手していない。
