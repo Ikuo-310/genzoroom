@@ -3,21 +3,25 @@
 調査日: 2026-11-07  
 対象: GenzoRoom `feature/lightcraft-integration`、Managed LightCraft v0.18.1、上流タグv0.18.1/v0.19.0
 
-## 現行実装状況（2026-11-08、`7e4c29f`）
+## 現行実装状況（2026-11-08、`9ef27af`）
 
-P0〜P5-CとライブPreview接続・応答性改善まで実装済み。以下は現在の仕様であり、Phaseごとの記録や初期調査時の未解決事項より優先する。ポイントカーブはNativeの`master`／`red`／`green`／`blue`の4チャンネルを対象とし、共通SVG UIで曲線と制御点を表示し、点の追加・移動・削除、全チャンネル／単一チャンネルReset、右クリックメニューを提供する。曲線補間と画像現像はLightCraftが行う。
+RAWポイントカーブP0〜P5、ターゲット調整P1〜P3、および監査で確認した不具合修正は完了している。以下を現行仕様とし、後続のPhase記録にある当時の「未実装」「計画」「未確認」は記録時点の状態を示す。
 
-ドラッグ中はNative Interactionで一時Curveを更新し、Draft Previewを表示する。Curve Preview要求の最大辺は`min(適応side, 512px)`、Curve専用の待機間隔は50msで、通常RAWスライダーの150ms設定は変更していない。Native更新はin-flight 1件と最新pending 1件に集約する。Draftは最新Pointer Moveとの完全一致ではなく、表示済みsequence順で採用し、画像decode完了順が前後しても古い画像で新しい表示を上書きしない。Pointer Up／Cancel後は一時Draftを採用せず、Pointer Up後は既存の適応解像度によるFull Previewへ戻る。写真のFit表示サイズ計算は変更していない。512px／50msは実Desktopで操作感を比較して採用した現在の試験値であり、固定仕様ではない。
+ポイントカーブは`master`／`red`／`green`／`blue`の4チャンネルを共通SVGグラフで編集する。ポイント追加・移動・削除、右クリック削除、チャンネル／全体Resetに対応する。補間とRAW現像はLightCraft Nativeが担当する。編集はNative Curve Interaction内でDraft Previewへ反映し、専用スケジューラは50ms間隔・最大512px（`min(適応side, 512)`）を使う。通常RAWスライダーの150ms更新間隔とは別である。Native更新は順序を保って直列化し、Previewはsequence順に表示する。変更のあるPointer Upは既存History経路で1操作として確定し、Cancelは開始状態へ戻す。Undo／Redo／Jump、Recipe保存・復元、RAW Exportは既存カーブデータと経路を使う。
 
-Pointer Upは既に適用された最終Native設定を二重適用せず、readbackを既存History snapshotへ1操作として確定する。Cancel／Escapeは開始状態へ復帰する。HistoryのUndo／Redo／Jump、完全Recipeの保存・復元、保存Recipeを使うRAW Exportも既存経路へ接続済み。2026-11-08の限定監査で見つかった「連続ドラッグ中に完成Draftが破棄され続ける」「ドラッグ中の部品アンマウントでCancelされない」の2件は`7e4c29f`で修正した。修正後の実Desktop追従性は未確認。
+ターゲット調整はLightCraftの`develop.targeted`を用いる。PV上で位置を指定して上下ドラッグし、4チャンネルを選択できる。Native readbackが該当カーブのグラフへ反映され、相対stepの順序を保つ。Pointer Down時にチャンネルとサンプリング座標を固定し、Pointer Upで既存History経路へ確定する。Escapeはスポイトモードを解除し、ドラッグ中なら未確定InteractionをCancelする。WBスポイト、Crop編集、Before表示など既存Viewerの排他条件を維持する。
 
-写真上のターゲット調整は未実装。LightCraftの`develop.targeted`を利用する、画像上の位置を指定した上下ドラッグ調整を将来候補として残す。ヒストグラム背景、カーブプリセット、パラメトリックカーブも今回の実装範囲外で、未実装である。
+共通`ViewerPointLoupe`は直径120 CSS px、Viewer上の表示倍率4倍の円形Overlayで、中央十字を表示する。Hover中はPointerに追従し、ドラッグ中は表示位置と拡大中心を固定する。現在のWhole画像と有効なRegion Overlayの描画情報を再利用し、Viewport端では表示位置だけを補正する。追加Native Preview要求は行わない。将来のポイント選択UIへ再利用できるが、WBスポイトには接続していない。
 
-旧版調査・設計・Phase実装記録は、各時点の判断と検証結果を残す履歴である。後段で「未実装」「未確認」とする記述は、その節の時点を指し、上記の現行状態を否定しない。
+Curve InteractionのBegin／各Update／Cancelは通常Sessionの編集回数へ加算せず、変更を伴う正常Endを1編集として数える。Interactionごとの旧128更新・120秒制限は撤廃した。通常Sessionの再生成閾値200回と編集上限256回は維持する。これらはGenzoRoomのSession運用制限であり、LightCraft Native自体の編集回数上限を示さない。
+
+未確定Curve Interactionは離脱保存の反復対象にせず、`prepareSave()`は`raw_save_unconfirmed`で離脱を拒否する。意図的Cancelで生じるAbortは新たなUpdate失敗と扱わず、同一InteractionのCancel Promiseを共有してNative Cancelの二重送信を防ぐ。本来のNative／通信失敗では既存Recoveryを使う。グラフ同期は配列参照ではなく値の変化で判断する。
+
+2026-11-08の総合監査はHigh 0、Medium 1、Low 1で、Mediumは`2c31dc2`の二重Cancel修正、Lowは`9ef27af`のDocument切替テスト契約修正で解消した。ユーザーによるWindows Desktop確認ではポイントカーブの基本操作、Reset、右クリック操作、History表示と512px／50ms時のPreview追従・Full復帰が確認されている。ターゲット調整と円形ルーペの実Desktop確認もユーザーから報告された。一方、終了時異常状態からのClose修正後の再現確認、監査修正後の全組み合わせ、今回のテスト実行は実Desktopで未確認である。古いPhaseごとの検証記録は履歴として保持する。
 
 ## 結論と調査範囲
 
-LightCraft v0.18.1には4チャンネルのポイントカーブ、設定readback、Reset、画像上ターゲット調整が既にある。v0.18.1とv0.19.0のポイントカーブ契約は同一であり、P1〜P6の統合に新しいNative patchや独自現像処理は不要と判断する。これはソース契約の比較結果であり、v0.19.0への更新推奨ではない。GenzoRoomの途中実装には後述する未解決事項がある。
+LightCraft v0.18.1には4チャンネルのポイントカーブ、設定readback、Reset、画像上ターゲット調整が既にある。v0.18.1とv0.19.0のポイントカーブ契約は同一であり、P1〜P6の統合に新しいNative patchや独自現像処理は不要と判断する。これはソース契約の比較結果であり、v0.19.0への更新推奨ではない。調査時点のGenzoRoom実装には、後続Phaseで解決した課題が残っていた。
 
 上流参照commitはv0.18.1 `57024f072c234e0c6c850e0940a261790f976575`、v0.19.0 `16636c45a63bff3065a6fd31aecc22a6fc15ca53`。主な参照元は`crates/develop/src/settings.rs`、`crates/engine/src/cmd/develop.rs`、`crates/engine/src/cmd/curves.rs`、`crates/engine/src/cmd/color.rs`、`crates/pipeline/src/finish.rs`、`crates/color/src/spline.rs`。
 
@@ -225,7 +229,7 @@ fresh importのNative Historyは空で、初回probeでは`history.previous`が�
 
 Beginではactive handle、document token、Native generation、確定revisionと保存済みbaselineを確認し、成功後にのみownerをopenにする。Begin中は写真切替、通常Preview、通常mutation、History復元、別Interactionを拒否する。`photo.settings_json`、`applied_revision`、`requested_revision`とDBはInteraction中に変更しない。
 
-UpdateはP1/P2の`validate_curve_input()`を再利用し、対象channelの全点配列をNative `develop.curve`へ送る。Native更新は1件だけin-flightとし、未送信pendingは最新1件へ置換する。成功したNative `develop.get`は一時`working_settings_json`として保持し、durable snapshotやrevisionへcommitしない。Native sessionの既存`MAX_EDITS=256`に対し、Interaction updateは最大128回、開始から最大120秒とし、beginとend/cancel用のcommand枠を残す。上限到達後もend/cancel可能なようにする。
+UpdateはP1/P2の`validate_curve_input()`を再利用し、対象channelの全点配列をNative `develop.curve`へ送る。Native更新は1件だけin-flightとし、未送信pendingは最新1件へ置換する。成功したNative `develop.get`は一時`working_settings_json`として保持し、durable snapshotやrevisionへcommitしない。当時のGenzoRoom Session側では`MAX_EDITS=256`の予算に対し、Interaction updateを最大128回、開始から最大120秒に制限してbeginとend/cancel用の枠を残していた。この制限はLightCraft Nativeの上限ではなく、後続修正で撤廃済み。上限到達後もend/cancel可能なようにする。
 
 一時Previewは既存worker、Native lock、draft品質、latest-wins slotを再利用する。ticketにInteraction IDとsequenceを持たせ、baseline revision・handle・generationに加えて現在の最新/applied sequenceを照合する。古いPreviewは採用しない。Interaction Preview後のreadbackはCurve形式を確認してworking stateにだけ記録し、`_preview_readback`から`_commit`を呼ばない。通常Previewの既存revision fenceとreadback経路は変更していない。
 

@@ -1,5 +1,23 @@
 # GenzoRoom 開発ノート
 
+## RAWポイントカーブ／ターゲット調整 完了記録（2026-11-08）
+
+RAWポイントカーブP0〜P5、ターゲット調整P1〜P3、および関連する不具合修正・総合監査を完了した。最終実装Commitは`9ef27af5aea141706fe02b6b29caf09250d97de9`。Native v0.18.1を維持し、曲線補間と現像はLightCraftへ委ねる。
+
+- ポイントカーブはmaster／red／green／blueの4チャンネルをSVGで編集する。点の追加・移動・右クリック削除、チャンネルReset、Native readback、Draft Preview、History／Undo／Redo／Jump、Recipe、RAW Exportへ接続した。Curve専用Previewは50ms／最大512px、通常RAWスライダーの150ms schedulerとは別である。
+- ターゲット調整はNative `develop.targeted`を使い、PV上の地点を固定して上下ドラッグする。Ordered relative step、Native readbackによるグラフ同期、既存History確定を利用する。P1〜P3でNative接続、Pointer操作、円形ルーペまで実装した。
+- `ViewerPointLoupe`は120 CSS px、Viewer表示の4倍で、Hover追従・ドラッグ中固定、Whole／Region合成、Viewport内配置を行う。WBスポイトには未接続。
+- Escapeでターゲットモードを解除し、ドラッグ中は未確定InteractionをCancelする。WB／カーブのスポイトアイコンを統一し、緑色のbutton hoverをDeveloper画面へ限定した。
+- 初期PoCのCurve Interaction 128更新／120秒制限を撤廃し、Begin／Update／Cancelを編集回数へ加算せず、変更を伴うEndを1編集とした。通常Sessionの200／256回制限は維持する。
+- 未確定Interactionは`prepareSave()`の反復保存に入れず、`raw_save_unconfirmed`で離脱を拒否する。意図的Abortを更新失敗扱いしないCancel Promise共有と、既存Recovery経路を整えた。
+- スポイトreadback後のグラフ同期を値ベースにし、生成点をグラフで通常点と同様にドラッグ可能にした。総合監査のHigh 0、Medium 1は`2c31dc2`で二重Cancelを修正、Low 1は`9ef27af`でDocument切替テストの操作契約を修正し、Findingを解消した。
+
+実Desktopではユーザー報告として、ポイントカーブ基本操作・Reset・右クリック・History、512px／50ms時のPreview追従とFull復帰、ターゲット調整とルーペが確認されている。Desktop Close異常経路はFrontend失敗注入テストで有限時間の保存失敗を確認したが、修正後のWindows Desktop実再現確認は未実施。監査修正後の全条件や各端末の組合せも網羅的な実機確認済みとは扱わない。
+
+最終Document切替テスト修正では、正常切替（Pointer Up、Native Begin／History完了、Capture解放後）、未確定中の切替拒否、拒否後に暗室へ留まりPointer Upで解決する経路を個別に確認した。修正対象2ケースが成功し、関連Frontend 3ファイル265件、TypeScript、本番Build、`git diff --check`が成功した。別段階のテスト数は合算していない。Buildには既存のchunk sizeおよびReact Router directive警告がある。
+
+詳細なNative契約・Phaseごとの調査と検証履歴は[RAWポイントカーブ統合調査](research/lightcraft/RAW_POINT_CURVE_INTEGRATION.md)を参照する。本記録で機能開発を一区切りとする。
+
 ## RAW Before切替のGeometry制約修正（2026-11-05）
 
 レンズ補正OFF時に正常取得したBeforeがAfterとのGeometry不一致でエラーになる問題を修正。Before所有者からAfter Geometryを除き、表示可否は所有権・URL・デコード寸法で判定する。ViewerへBefore frameを渡し独立した寸法でfit／zoomする。Region照合とCrop編集中の制限は保持。関連Frontend限定4ファイル238件、TypeScript／production build成功。実Desktopで補正OFF時のBefore切替が成功し、Before側にも補正が反映されることを確認した。後者はLightCraft公式版でも同じ挙動。異なる縦横比でのfit／Zoom／PanとRegionの全組み合わせは未確認。Backend／Native変更なし。

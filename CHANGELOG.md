@@ -8,6 +8,8 @@ Internal changes are omitted unless they affect users.
 
 ### Changed
 
+- Escape now exits RAW curve targeting and cancels an active drag. The RAW curve and WB pickers use the same eyedropper icon, and button hover colors are clearer across the darkroom.
+
 - Updated the Windows RAW engine to LightCraft v0.18.1, preserving RAW Crop, Preview, Export, and saved Recipe compatibility. Lens corrections now avoid blank image edges independently of Constrain Crop; perspective corrections continue to follow that setting.
 - Windows LightCraft RAW development now includes three-band Color Grading for Shadows, Midtones, and Highlights, with Hue, Saturation, and Luminance sliders plus shared Blending and Balance controls. Hue uses a rainbow slider. Grading follows existing RAW saving, History, Undo/Redo, Reset, Export, and rendered-thumbnail paths, with improved compatibility for older RAW Recipes. JPEG Color Grading remains unchanged.
 - Windows RAW photos now show the existing Edited badge in Home and the Filmstrip when their saved or current DevelopSettings differ from that photo's import defaults. Stack aggregation and the Edited filter include RAW edit status.
@@ -22,6 +24,9 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
+- Added RAW point-curve editing for the master, red, green, and blue channels, with graph point editing, reset, and History, Recipe, and RAW Export integration.
+- Added image-targeted curve adjustment with a circular magnifier for precise sampling.
+
 - Windows desktop now provides Lensfun database status and explicit download/update controls using LightCraft's pinned, integrity-checked database. Configured `LIGHTCRAFT_LENSFUN_DIR` locations are respected, and newly available profiles are checked when a RAW photo is reopened.
 - Added RAW Lens Corrections controls inside Detail, including profile status, manual and profile adjustments, defringe, and lateral chromatic aberration. All settings use the existing RAW History, Reset, Preview, and Recipe paths; JPEG development is unchanged.
 - Added non-destructive RAW Crop and Straighten editing in the Windows darkroom, with interactive crop-frame dragging and resizing, aspect-ratio presets and locking, 90° rotation, horizontal/vertical flipping, and composition overlays.
@@ -32,6 +37,9 @@ Internal changes are omitted unless they affect users.
 - Windows desktop now includes File, View, and Help menus with Preferences (`Ctrl+P`), Exit (`Ctrl+Q`), Full Screen, Developer Diagnostics, and About GenzoRoom. Menu labels follow the app's Japanese or English language setting.
 
 ### Fixed
+
+- Improved stability when editing and dragging points created by the target picker, and removed the edit-count failure during repeated RAW curve gestures.
+- Prevented departure saves from looping on an unconfirmed curve interaction; the edit remains available in the darkroom for resolution.
 
 - RAW Before/After switching now permits independently framed images after lens correction changes, retaining Region geometry checks.
 
