@@ -1,7 +1,8 @@
 import { createEditStateSaveId } from './editStateApi';
 import { frontendLogger } from './frontendLogging';
-import { RawApiError, RawSaveError, beginRawGeometry, updateRawGeometry, beginRawCurveInteraction, cancelRawCurveInteraction,
+import { RawApiError, RawSaveError, RawSuperseded, beginRawGeometry, updateRawGeometry, beginRawCurveInteraction, cancelRawCurveInteraction,
   rawPreview, readRawSettings, recoverRawGeometry, type RawGeometryAction, type RawGeometryOperation, type RawCurveChannel,
+  updateRawTargetedCurve,
   type RawCurvePoint, type RawDisplayTarget, type RawFrame, readRawRecipe, saveRawRecipe, saveRawHistory, readRawHistory,
   type RawSettings, type RawRecipeRequest, type RawHistoryRequest, type RawHistoryControlId, type RawHistoryResult,
   type RawHistoryStep, type RawHistoryOperation } from './rawApi';
@@ -35,11 +36,13 @@ export class RawRecipeSave {
     curveInteractionId?: string };
   private curveGesture?: { channel: RawCurveChannel; doc: RawSettings; started: Promise<string>; id?: string; latest?: RawCurvePoint[];
     sequence: number; displayedSequence: number; timer?: ReturnType<typeof setTimeout>; inFlight?: Promise<void>; ending: boolean; controller: AbortController;
-    target?: RawDisplayTarget };
+    target?: RawDisplayTarget; targeted?: { point: {x:number;y:number}; pending: number[]; points?: RawCurvePoint[];
+      pump?: Promise<void>; preview?: Promise<void>; timer?: ReturnType<typeof setTimeout> } };
   private cropGesture?: { id: string; type: 'drag' | 'straighten'; action?: RawGeometryAction; sequence: number; latest?: RawGeometryOperation; ending: boolean;
     started: Promise<void>; end?: Promise<void>; error?: unknown; cancelled?: boolean; updateDoc?: RawSettings; rejected?: boolean; commit?: RawHistoryRequest };
   get cropOperation() { return this.cropGesture?.type; }
   get cropping() { return !!this.cropGesture; }
+  get curveInteracting() { return !!this.curveGesture; }
   private gesture?: { control: RawHistoryControlId; fingerprint: string };
   // One adjacent control's unsent intent is held until the preceding gesture is acknowledged.
   // It uses the same owner queue; no native mutation or second save queue starts here.
@@ -49,12 +52,13 @@ export class RawRecipeSave {
     controls?: RawControls;
     curvePreview?: (frame: RawFrame, doc: RawSettings, sequence: number, target: RawDisplayTarget) => void;
     curvePreviewError?: (cause: unknown) => void;
+    curveReadback?: (channel: RawCurveChannel, points: RawCurvePoint[], sequence: number) => void;
     curveSettled?: (cancelled: boolean) => void;
   }) {
     this.revision = confirmed.recipeRevision;
     this.savedFingerprint = confirmed.recipeFingerprint ?? confirmed.settingsFingerprint;
   }
-  beginCurveInteraction(channel: RawCurveChannel) {
+  beginCurveInteraction(channel: RawCurveChannel, mode: 'points' | 'targeted' = 'points') {
     if (!this.active || this.locked || this.paused || this.historyLoading || this.historyError || !this.history) return false;
     if (this.confirmed.mutationAttempts >= Math.min(this.confirmed.regenerationThreshold, this.confirmed.mutationLimit - 1)) return false;
     const preceding = this.save();
@@ -64,7 +68,7 @@ export class RawRecipeSave {
     gesture.started = preceding.then(async () => {
       if (!this.active || this.curveGesture !== gesture) throw new RawApiError('raw_document_closed');
       gesture.doc = structuredClone(this.options.controls!.confirmed);
-      gesture.id = await beginRawCurveInteraction(gesture.doc, channel);
+      gesture.id = await beginRawCurveInteraction(gesture.doc, channel, mode);
       this.options.controls!.beginPreview();
       return gesture.id;
     }).catch(cause => {
@@ -81,6 +85,11 @@ export class RawRecipeSave {
     this.options.changed();
     return true;
   }
+  beginTargetedCurveInteraction(channel: RawCurveChannel, point: {x:number;y:number}) {
+    if (!this.beginCurveInteraction(channel, 'targeted')) return false;
+    this.curveGesture!.targeted = { point: { ...point }, pending: [] };
+    return true;
+  }
   updateCurveInteraction(points: RawCurvePoint[], target: RawDisplayTarget) {
     const gesture = this.curveGesture;
     if (!gesture || gesture.ending || !this.active) return;
@@ -91,6 +100,70 @@ export class RawRecipeSave {
       gesture.timer = undefined; void this.pumpCurvePreview(gesture, target);
     }, RAW_CURVE_PREVIEW_THROTTLE_MS);
     return gesture.sequence;
+  }
+  updateTargetedCurveInteraction(steps: number[], target: RawDisplayTarget) {
+    const gesture = this.curveGesture;
+    if (!gesture?.targeted || gesture.ending || !this.active || !steps.length) return;
+    gesture.target = target;
+    gesture.targeted.pending.push(...steps);
+    this.scheduleTargetedPump(gesture);
+  }
+  private scheduleTargetedPump(gesture: NonNullable<typeof this.curveGesture>, immediate = false) {
+    const targeted = gesture.targeted!;
+    if (targeted.timer || targeted.pump || !targeted.pending.length) return;
+    const start = () => {
+      targeted.timer = undefined;
+      const pump = this.pumpTargetedCurve(gesture);
+      targeted.pump = pump;
+      void pump.then(() => {}, cause => { if (this.active && this.curveGesture === gesture) this.options.curvePreviewError?.(cause); })
+        .finally(() => {
+          if (targeted.pump === pump) targeted.pump = undefined;
+          if (this.curveGesture === gesture && targeted.pending.length && !gesture.ending) this.scheduleTargetedPump(gesture);
+        });
+    };
+    // Batch every relative delta; only the cadence changes, never the ordered Native steps.
+    if (immediate) start(); else targeted.timer = setTimeout(start, RAW_CURVE_PREVIEW_THROTTLE_MS);
+  }
+  private async pumpTargetedCurve(gesture: NonNullable<typeof this.curveGesture>) {
+    const targeted = gesture.targeted!;
+    while (targeted.pending.length && this.active && this.curveGesture === gesture) {
+      const steps = targeted.pending.splice(0, 128);
+      const id = await gesture.started;
+      const readback = await updateRawTargetedCurve(gesture.doc, ++gesture.sequence, gesture.controller.signal,
+        gesture.target!, { id, target: targeted.point, steps });
+      if (!this.active || this.curveGesture !== gesture || readback.sequence < gesture.displayedSequence) continue;
+      targeted.points = readback.points.map(point => ({ ...point }));
+      this.options.curveReadback?.(gesture.channel, targeted.points, readback.sequence);
+      const preview = rawPreview(gesture.doc, ++gesture.sequence, gesture.controller.signal, 'after', gesture.target,
+        undefined, { id, sequence: readback.sequence }).then(frame => {
+        if (this.active && this.curveGesture === gesture && frame.interactionSequence! > gesture.displayedSequence) {
+          gesture.displayedSequence = frame.interactionSequence!;
+          this.options.curvePreview?.(frame, gesture.doc, gesture.displayedSequence, gesture.target!);
+        }
+      }).catch(cause => {
+        if (cause instanceof RawSuperseded) return;
+        if (this.active && this.curveGesture === gesture && !gesture.ending) this.options.curvePreviewError?.(cause);
+      });
+      targeted.preview = preview;
+    }
+  }
+  async finishTargetedCurveInteraction(channel: RawCurveChannel) {
+    const gesture = this.curveGesture;
+    if (!gesture?.targeted || gesture.channel !== channel) return;
+    gesture.ending = true;
+    clearTimeout(gesture.timer);
+    clearTimeout(gesture.targeted.timer);
+    gesture.targeted.timer = undefined;
+    await gesture.started;
+    await gesture.targeted.pump;
+    if (gesture.targeted.pending.length) {
+      this.scheduleTargetedPump(gesture, true);
+      await gesture.targeted.pump;
+    }
+    await gesture.targeted.preview;
+    const after = gesture.targeted.points ?? [];
+    const before = gesture.doc.curve[channel];
+    this.finishCurveInteraction(channel, after, JSON.stringify(before) !== JSON.stringify(after));
   }
   private async pumpCurvePreview(gesture: NonNullable<typeof this.curveGesture>, target: RawDisplayTarget) {
     if (gesture.inFlight || gesture.ending || !gesture.latest || !this.active) return;
@@ -141,6 +214,7 @@ export class RawRecipeSave {
     if (!gesture) return;
     clearTimeout(gesture.timer);
     gesture.timer = undefined; gesture.latest = undefined; gesture.ending = true;
+    if (gesture.targeted) clearTimeout(gesture.targeted.timer);
     gesture.controller.abort();
     try {
       const id = await gesture.started;

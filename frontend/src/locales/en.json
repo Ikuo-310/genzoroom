@@ -407,6 +407,7 @@
       "effectsCategory": "Effects",
       "curvesCategory": "Curves",
       "curveChannels": "Curve channels",
+      "targetedCurve": "Targeted curve adjustment",
       "curveChannelNames": { "master": "RGB master", "red": "Red", "green": "Green", "blue": "Blue" },
       "curveGraph": "Point curve graph",
       "curveHistory": { "master": "Point Curve", "red": "Red Curve", "green": "Green Curve", "blue": "Blue Curve",

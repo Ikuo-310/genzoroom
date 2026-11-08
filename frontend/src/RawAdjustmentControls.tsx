@@ -100,13 +100,16 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
           </label>)}
         </div>
       </div>}
-      {category === 'curves' && <RawPointCurveControls key={raw.assetId} curve={settings.curve}
+        {category === 'curves' && <RawPointCurveControls key={raw.assetId} curve={{ ...settings.curve,
+          ...(raw.targetedCurvePoints?.channel ? { [raw.targetedCurvePoints.channel]: raw.targetedCurvePoints.points } : {}) }}
+          channel={raw.curveChannel} onChannelChange={raw.setCurveChannel}
+          targetedActive={raw.targetedCurveActive} onToggleTargeted={raw.toggleTargetedCurve}
         editDisabled={actionsLocked} syncKey={raw.operationError ?? raw.editError ?? raw.saveError}
         onReset={channel => operate({ kind: 'curveReset', metadata: { channel } })}
         onPointEdit={operateCurve} onDragStart={channel => raw.beginCurveInteraction(channel)}
         onDragChange={(_channel, points) => raw.updateCurveInteraction(points)}
         onDragCancel={() => raw.cancelCurveInteraction()}
-        onDragCommit={({ channel, after, changed }) => raw.finishCurveInteraction(channel, after, changed)} />}
+          onDragCommit={({ channel, after, changed }) => raw.finishCurveInteraction(channel, after, changed)} />}
       <div className={category === 'detail' ? 'raw-detail-controls' : undefined}>{(category === 'grading' ? [`grading.${gradingBand}.hue`, `grading.${gradingBand}.sat`, `grading.${gradingBand}.lum`, 'grading.blending', 'grading.balance'] as RawControlId[] : controls).map((control, index) => {
         const spec = settings.controls.find(spec => spec.id === control)!;
         const id = category === 'grading' ? control : ids[index];

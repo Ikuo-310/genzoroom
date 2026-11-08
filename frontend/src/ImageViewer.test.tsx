@@ -188,6 +188,39 @@ afterEach(() => {
 });
 
 describe('Viewer edit settings context menu', () => {
+  it('captures a RAW target point and emits ordered vertical steps independent of zoom or DPR', () => {
+    const begin = vi.fn(() => true), move = vi.fn(), finish = vi.fn(), cancel = vi.fn();
+    act(() => root.render(<ImageViewer src="blob:target" documentKey="raw-target" previewPixels
+      rawFrame={{ nativeWidth: 4000, nativeHeight: 3000, geometryId: 'a'.repeat(64) }} rawTargetedActive
+      rawTargetCrop={{ geometry: { rect: { x0: 0, y0: 0, x1: 1, y1: 1 }, angle: 0 }, aspect: null, flip_h: false, flip_v: false }}
+      rawTargetOrientation="Normal" rawTargetSourceSize={{ x: 4000, y: 3000 }} onRawTargetBegin={begin}
+      onRawTargetMove={move} onRawTargetFinish={finish} onRawTargetCancel={cancel}
+      alt="raw" leftOpen rightOpen onToggleLeft={() => {}} onToggleRight={() => {}} />));
+    const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+    Object.defineProperty(viewport, 'setPointerCapture', { value: vi.fn() });
+    const position = host.querySelector<HTMLElement>('.viewer-image-position')!;
+    vi.spyOn(position, 'getBoundingClientRect').mockReturnValue({ left: 100, top: 100, width: 200, height: 100 } as DOMRect);
+    const image = position.querySelector<HTMLImageElement>('img')!;
+    Object.defineProperty(image, 'naturalWidth', { configurable: true, value: 400 });
+    Object.defineProperty(image, 'naturalHeight', { configurable: true, value: 300 });
+    act(() => image.dispatchEvent(new Event('load')));
+    const pointer = (type: string, y: number) => {
+      const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: 150, clientY: y });
+      Object.defineProperty(event, 'pointerId', { value: 77 }); act(() => viewport.dispatchEvent(event));
+    };
+    pointer('pointerdown', 125);
+    expect(begin).toHaveBeenCalledWith({ x: .25, y: .25 });
+    expect(viewport.setPointerCapture).toHaveBeenCalledWith(77);
+    expect(position.style.cursor).toBe('ns-resize');
+    pointer('pointermove', 123);
+    pointer('pointermove', 125);
+    expect(move.mock.calls).toEqual([[[1]], [[-1]]]);
+    pointer('pointerup', 125);
+    expect(finish).toHaveBeenCalledOnce();
+    expect(cancel).not.toHaveBeenCalled();
+    expect(position.style.cursor).toBe('crosshair');
+  });
+
   it.each([1, 1.25, 2])('samples the displayed retained Whole, rejects drag/outside/stale identity at DPR %s', dpr => {
     Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: dpr });
     const picked = vi.fn(), cancel = vi.fn();

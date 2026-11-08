@@ -7,6 +7,7 @@ import { C1_REGION_BUDGET, validRegionGeometry, type RegionGeometry } from './ra
 
 export type RawDocument = {
   workspaceId: string; handle: string; assetId: string; generation: number; documentToken: string; revision: number;
+  sourceWidth?: number; sourceHeight?: number;
   recipeRevision?: number; recipeFingerprint?: string | null; settingsFingerprint?: string; importDefaultsFingerprint?: string;
   beforeKey?: string | null;
 };
@@ -577,17 +578,47 @@ export async function cancelRawCurveInteraction(doc: RawSettings, interactionId:
   await request(`/documents/${doc.handle}/curve-interaction/cancel`, post({ ...identityBody(doc),
     documentRevision: doc.revision, interactionId }));
 }
+export async function updateRawTargetedCurve(doc: RawDocument, serial: number, signal: AbortSignal, target: RawDisplayTarget,
+  interaction: { id: string; target: { x: number; y: number }; steps: number[] }): Promise<{ sequence: number; points: RawCurvePoint[] }> {
+  const response = await request(`/documents/${doc.handle}/curve-interaction/update`, { ...post({ ...identityBody(doc),
+    documentRevision: doc.revision, interactionId: interaction.id, target: interaction.target, steps: interaction.steps,
+    serial, maxSide: target.maxSide, viewGeneration: target.viewGeneration, geometryId: target.geometryId }),
+    signal: AbortSignal.any([signal, AbortSignal.timeout(90_000)]) });
+  if (response.status === 204) {
+    const reason = response.headers.get('x-raw-superseded-reason');
+    if (reason !== 'revision' && reason !== 'replaced' && reason !== 'cancelled') throw new RawApiError('raw_invalid_response');
+    throw new RawSuperseded(reason);
+  }
+  if (response.status !== 200 || response.headers.get('content-type')?.split(';')[0] !== 'application/json') throw new RawApiError('raw_invalid_response');
+  let value: any;
+  try { value = JSON.parse(new TextDecoder().decode(await readBounded(response, 512 * 1024))); }
+  catch { throw new RawApiError('raw_invalid_response'); }
+  if (!value || value.interactionId !== interaction.id || !Number.isSafeInteger(value.interactionSequence)
+    || value.interactionSequence < 1 || !Array.isArray(value.curvePoints) || value.curvePoints.length > 4096
+    || value.curvePoints.some((p: unknown) => !p || typeof p !== 'object' || !Number.isFinite((p as RawCurvePoint).x)
+      || !Number.isFinite((p as RawCurvePoint).y) || (p as RawCurvePoint).x < 0 || (p as RawCurvePoint).x > 1
+      || (p as RawCurvePoint).y < 0 || (p as RawCurvePoint).y > 1)) throw new RawApiError('raw_invalid_response');
+  return { sequence: value.interactionSequence, points: value.curvePoints };
+}
 export async function rawPreview(doc: RawDocument, serial: number, signal: AbortSignal, kind: 'before' | 'after' = 'after', target?: RawDisplayTarget,
   interaction?: { id: string; points: RawCurveCommandPoint[] },
-  targetedInteraction?: { id: string; target: { x: number; y: number }; steps: number[] }): Promise<RawFrame> {
+  targetedInteraction?: { id: string; target: { x: number; y: number }; steps: number[] } | { id: string; sequence: number }): Promise<RawFrame> {
   if (target && (!Number.isInteger(target.maxSide) || target.maxSide < 16 || target.maxSide > RAW_PREVIEW_MAX_SIDE))
     throw new RawApiError('raw_invalid_preview_request');
+  if (targetedInteraction && 'steps' in targetedInteraction) {
+    if (!target || kind !== 'after') throw new RawApiError('raw_invalid_preview_request');
+    const readback = await updateRawTargetedCurve(doc, serial, signal, target, targetedInteraction);
+    const frame = await rawPreview(doc, serial, signal, 'after', target, undefined,
+      { id: targetedInteraction.id, sequence: readback.sequence });
+    return { ...frame, curvePoints: readback.points };
+  }
   const started = performance.now();
   const activeInteraction = targetedInteraction ?? interaction;
-  const response = await request(`/documents/${doc.handle}/${activeInteraction ? 'curve-interaction/update' : 'preview'}`, { ...post({ workspaceId: doc.workspaceId,
+  const previewSequence = targetedInteraction && 'sequence' in targetedInteraction ? targetedInteraction.sequence : undefined;
+  const response = await request(`/documents/${doc.handle}/${activeInteraction ? `curve-interaction/${previewSequence ? 'preview' : 'update'}` : 'preview'}`, { ...post({ workspaceId: doc.workspaceId,
     generation: doc.generation, documentToken: doc.documentToken,
     ...(activeInteraction ? { documentRevision: doc.revision, interactionId: activeInteraction.id,
-      ...(targetedInteraction ? { target: targetedInteraction.target, steps: targetedInteraction.steps } : { points: interaction!.points }),
+      ...(previewSequence ? { interactionSequence: previewSequence } : { points: interaction!.points }),
       serial, maxSide: target?.maxSide ?? RAW_PREVIEW_MAX_SIDE, viewGeneration: target?.viewGeneration ?? 0,
       geometryId: target?.geometryId ?? null } : { revision: doc.revision, serial, ...target, ...(kind === 'before' ? { kind } : {}) }) }),
     signal: AbortSignal.any([signal, AbortSignal.timeout(90_000)]) });

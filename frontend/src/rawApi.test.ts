@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { LIGHTCRAFT_ENGINE } from './lightcraftEngine';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createRawWorkspace,abortRawWorkspaceRequests,discardRawWorkspace, rawCapability, rawPreview, beginRawCurveInteraction, cancelRawCurveInteraction, readRawSettings, setRawControls, saveRawRecipe, saveRawHistory, readRawHistory, readRawRecipe, rawWorkspaceEmpty,
+import { createRawWorkspace,abortRawWorkspaceRequests,discardRawWorkspace, rawCapability, rawPreview, beginRawCurveInteraction, cancelRawCurveInteraction, updateRawTargetedCurve, readRawSettings, setRawControls, saveRawRecipe, saveRawHistory, readRawHistory, readRawRecipe, rawWorkspaceEmpty,
   RAW_CONTROL_IDS, RawSaveError, type RawDocument, type RawHistoryRequest, type RawHistoryOperation, validRawCurve, validRawCurveInput } from './rawApi';
 import { downloadRawLensDatabase, readRawLensDatabaseStatus } from './rawApi';
 import { rawSettings } from './test/rawSettings';
@@ -31,6 +31,25 @@ describe('RAW point curve readback contract', () => {
     { master: [[0, 0]], red: [], green: [], blue: [] },
     { master: [], red: [], green: [], blue: [], extra: [] },
   ])('rejects malformed readback %#', curve => expect(validRawCurve(curve)).toBe(false));
+});
+it('returns targeted curve readback before requesting the matching interaction preview', async () => {
+  const interactionId = 'd'.repeat(32), points = [{ x: .2, y: .4 }];
+  const fetch = vi.fn<typeof globalThis.fetch>()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ interactionId, interactionSequence: 7, curvePoints: points }),
+      { headers: { 'Content-Type': 'application/json' } }))
+    .mockResolvedValueOnce(response({ ...adaptiveHeaders(), 'X-Raw-Serial': '5',
+      'X-Raw-Interaction-Id': interactionId, 'X-Raw-Interaction-Sequence': '7' }));
+  vi.stubGlobal('fetch', fetch);
+  const result = await updateRawTargetedCurve(doc, 4, new AbortController().signal, adaptiveTarget,
+    { id: interactionId, target: { x: .3, y: .6 }, steps: [1, -1] });
+  expect(result).toEqual({ sequence: 7, points });
+  const firstBody = JSON.parse((fetch.mock.calls[0][1] as RequestInit).body as string);
+  expect(fetch.mock.calls[0][0]).toBe(`/api/raw/documents/${doc.handle}/curve-interaction/update`);
+  expect(firstBody).toMatchObject({ interactionId, target: { x: .3, y: .6 }, steps: [1, -1], serial: 4 });
+  const frame = await rawPreview(doc, 5, new AbortController().signal, 'after', adaptiveTarget, undefined, { id: interactionId, sequence: 7 });
+  expect(frame.interactionSequence).toBe(7);
+  expect(fetch.mock.calls[1][0]).toBe(`/api/raw/documents/${doc.handle}/curve-interaction/preview`);
+  expect(JSON.parse((fetch.mock.calls[1][1] as RequestInit).body as string)).toMatchObject({ interactionId, interactionSequence: 7, serial: 5 });
 });
 describe('RAW point curve Native input contract', () => {
   it('accepts pair arrays for each supported channel', () => {

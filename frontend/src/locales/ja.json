@@ -398,6 +398,7 @@
       "effectsCategory": "エフェクト",
       "curvesCategory": "カーブ",
       "curveChannels": "カーブチャンネル",
+      "targetedCurve": "ターゲット調整",
       "curveChannelNames": { "master": "RGB全体", "red": "赤", "green": "緑", "blue": "青" },
       "curveGraph": "ポイントカーブグラフ",
       "curveHistory": { "master": "ポイントカーブ", "red": "レッドカーブ", "green": "グリーンカーブ", "blue": "ブルーカーブ",

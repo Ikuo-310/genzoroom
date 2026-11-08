@@ -111,7 +111,7 @@ class RawPreviewApi:
             Route("/documents/{handle}/geometry/begin", self.endpoint, methods=["POST"]),
             Route("/documents/{handle}/geometry", self.endpoint, methods=["POST"]),
             *[Route(f"/documents/{{handle}}/curve-interaction/{action}", self.endpoint, methods=["POST"])
-              for action in ("begin", "update", "cancel")],
+              for action in ("begin", "update", "preview", "cancel")],
             Route("/documents/{handle}/recipe", self.endpoint, methods=["GET", "PUT"]),
             Route("/documents/{handle}/history", self.endpoint, methods=["GET"]),
             *[Route(f"/documents/{{handle}}/history/{action}", self.endpoint, methods=["POST"])
@@ -257,7 +257,7 @@ class RawPreviewApi:
                 return self._cancel_region(request, body)
             curve_interaction = "/curve-interaction/" in request.url.path
             region = request.url.path.endswith("/region") and request.method == "POST"
-            preview = request.url.path.endswith("/preview") or region or request.url.path.endswith("/curve-interaction/update")
+            preview = request.url.path.endswith("/preview") or region or request.url.path.endswith("/curve-interaction/preview")
             if region:
                 self._region_owner(request, body)
                 target = body["target"]
@@ -623,6 +623,8 @@ class RawPreviewApi:
                 self.document = {"handle": secrets.token_hex(16), "assetId": str(asset_id),
                                  "generation": handle.generation, "documentToken": handle.document_token,
                                  "revision": snapshot.revision, "workspaceId": self.workspace,
+                                 "sourceWidth": self.raw._photo(handle, active=True).source_size[0],
+                                 "sourceHeight": self.raw._photo(handle, active=True).source_size[1],
                                  "recipeStatus": recipe_status, "recipeRevision": recipe_revision,
                                  "importDefaultsFingerprint": import_defaults_fingerprint}
                 self.document.update(self._edit_budget())
@@ -821,14 +823,36 @@ class RawPreviewApi:
             await self.raw.cancel_curve_interaction(self._raw_handle, body["interactionId"], doc["revision"])
             return Response(status_code=204, headers={"Cache-Control": "no-store"})
         targeted = "steps" in body
+        if action == "preview":
+            required = identity | {"interactionId", "interactionSequence", "serial", "maxSide", "viewGeneration", "geometryId"}
+            if set(body) != required or type(body.get("interactionId")) is not str or \
+                    type(body.get("interactionSequence")) is not int or not 1 <= body["interactionSequence"] <= 2**31 - 1 or \
+                    type(body.get("serial")) is not int or not 0 <= body["serial"] <= 2**31 - 1 or \
+                    type(body.get("viewGeneration")) is not int or body["viewGeneration"] < 0 or \
+                    type(body.get("maxSide")) is not int or not 16 <= body["maxSide"] <= MAX_PREVIEW_SIDE or \
+                    not (body["geometryId"] is None or type(body["geometryId"]) is str and re.fullmatch(r"[a-f0-9]{64}", body["geometryId"])):
+                raise LightCraftError("raw_invalid_request")
+            interaction = self.raw._ensure_curve_interaction_owner(body["interactionId"])
+            if interaction is None or interaction.handle != self._raw_handle:
+                raise LightCraftError("raw_curve_interaction_stale")
+            ticket = interaction.preview_tickets.pop(body["interactionSequence"], None)
+            if ticket is None:
+                if body["interactionSequence"] <= interaction.latest_sequence:
+                    return Response(status_code=204, headers={"X-Raw-Superseded-Reason": "replaced", "Cache-Control": "no-store"})
+                raise LightCraftError("raw_curve_interaction_stale")
+            update = None
+        else:
+            update = None
         required = identity | ({"interactionId", "target", "steps", "serial", "maxSide", "viewGeneration", "geometryId"} if targeted else {"interactionId", "points", "serial", "maxSide", "viewGeneration", "geometryId"})
-        if set(body) != required or type(body.get("interactionId")) is not str or \
+        if action != "preview" and (set(body) != required or type(body.get("interactionId")) is not str or \
                 type(body.get("serial")) is not int or not 0 <= body["serial"] <= 2**31 - 1 or \
                 type(body.get("maxSide")) is not int or not 16 <= body["maxSide"] <= MAX_PREVIEW_SIDE or \
                 type(body.get("viewGeneration")) is not int or body["viewGeneration"] < 0 or \
-                not (body["geometryId"] is None or type(body["geometryId"]) is str and re.fullmatch(r"[a-f0-9]{64}", body["geometryId"])):
+                not (body["geometryId"] is None or type(body["geometryId"]) is str and re.fullmatch(r"[a-f0-9]{64}", body["geometryId"]))):
             raise LightCraftError("raw_invalid_request")
-        if targeted:
+        if action == "preview":
+            pass
+        elif targeted:
             update = await self.raw.update_targeted_curve_interaction(self._raw_handle, body["interactionId"],
                 doc["revision"], body["target"], body["steps"], max_side=body["maxSide"],
                 view_generation=body["viewGeneration"], geometry_id=body["geometryId"])
@@ -836,9 +860,16 @@ class RawPreviewApi:
             update = await self.raw.update_curve_interaction(self._raw_handle, body["interactionId"],
                 doc["revision"], body["points"], max_side=body["maxSide"],
                 view_generation=body["viewGeneration"], geometry_id=body["geometryId"])
-        if update is SUPERSEDED or not update.applied or update.preview_ticket is None:
+        if action == "update" and targeted:
+            if update is SUPERSEDED or not update.applied:
+                return Response(status_code=204, headers={"X-Raw-Superseded-Reason": "replaced", "Cache-Control": "no-store"})
+            return JSONResponse({"interactionId": update.interaction_id, "interactionSequence": update.sequence,
+                "curvePoints": update.settings["curve"][self.raw._curve_interaction.channel]}, headers={"Cache-Control": "no-store"})
+        if action != "preview":
+            ticket = update.preview_ticket if update is not SUPERSEDED and update.applied else None
+        if update is SUPERSEDED or action != "preview" and (not update.applied or ticket is None):
             return Response(status_code=204, headers={"X-Raw-Superseded-Reason": "replaced", "Cache-Control": "no-store"})
-        frame = await update.preview_ticket
+        frame = await ticket
         if frame is SUPERSEDED:
             return Response(status_code=204, headers={"X-Raw-Superseded-Reason": "replaced", "Cache-Control": "no-store"})
         async with self._lock:

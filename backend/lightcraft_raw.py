@@ -183,6 +183,7 @@ class _CurveInteraction:
     working_points: list | None = None
     update_attempts: int = 0
     pending: _CurveUpdateRequest | None = None
+    preview_tickets: dict = field(default_factory=dict, repr=False)
     update_task: asyncio.Task | None = None
     final_points: list | None = None
     final_result: CurveInteractionResult | None = None
@@ -1162,6 +1163,10 @@ class LightCraftRawSession:
             points = curve_readback(json.loads(encoded))[interaction.channel]
             interaction.working_points = [[p["x"], p["y"]] for p in points]
             ticket = self.request_curve_interaction_preview(handle, interaction_id, seq, max_side, view_generation, geometry_id)
+            interaction.preview_tickets[seq] = ticket
+            # The renderer supersedes older frames; retain only the recent waiter tickets per open gesture.
+            for old_sequence in sorted(interaction.preview_tickets)[:-2]:
+                interaction.preview_tickets.pop(old_sequence, None)
             return CurveInteractionUpdate(interaction_id, seq, True, encoded, ticket)
 
     async def _drain_curve_updates(self, interaction):

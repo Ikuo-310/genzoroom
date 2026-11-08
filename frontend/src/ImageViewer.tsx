@@ -1,5 +1,6 @@
 import { RawCropSurface, type RawCropBinding } from './RawCropSurface';
 import { cropFitScale } from './rawCropMath';
+import { rawTargetPoint } from './rawTargetCoordinates';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { wholeImagePoint, calculateFitScale, clampViewerPan, clampZoom, panForCenteredZoom, zoomAroundPoint, type Point } from './viewerMath';
@@ -24,6 +25,14 @@ type ImageViewerProps = {
   rawFrame?: { nativeWidth: number; nativeHeight: number; geometryId: string };
   rawRegionDisplay?: RawRegionDisplay;
   rawPickActive?: boolean;
+  rawTargetedActive?: boolean;
+  rawTargetCrop?: import('./rawApi').RawCrop;
+  rawTargetOrientation?: string;
+  rawTargetSourceSize?: Point;
+  onRawTargetBegin?: (point: Point) => boolean;
+  onRawTargetMove?: (steps: number[]) => void;
+  onRawTargetFinish?: () => void;
+  onRawTargetCancel?: () => void;
   rawPickTargets?: { after?: RawPickTarget; before?: RawPickTarget };
   onRawPick?: (target: RawPickTarget, point: Point) => void;
   onRawPickCancel?: () => void;
@@ -70,7 +79,7 @@ const EMPTY_IMAGE_SIZE: Point = { x: 0, y: 0 };
 const NAVIGATOR_LONG_EDGE = 180;
 const PICK_CURSOR = `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="m14 5 5 5M16 3l5 5-3 3-1-1-10 10-4 1 1-4L14 7l-1-1z" fill="white" stroke="black" stroke-width="1.5"/></svg>')}") 3 21, crosshair`;
 
-export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, beforeFrame, rawRegionDisplay, rawRegionOutline = false, rawPickActive = false, rawPickTargets, onRawPick, onRawPickCancel, onRawViewChange, rawDiagnosticView, previewStatus, statusNote, previewPixels = false, beforeAvailable = true, beforeSrc, beforeStatus, onBeforeRetry, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, onInteractionStart, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
+export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, beforeFrame, rawRegionDisplay, rawRegionOutline = false, rawPickActive = false, rawTargetedActive = false, rawTargetCrop, rawTargetOrientation = 'Normal', rawTargetSourceSize, onRawTargetBegin, onRawTargetMove, onRawTargetFinish, onRawTargetCancel, rawPickTargets, onRawPick, onRawPickCancel, onRawViewChange, rawDiagnosticView, previewStatus, statusNote, previewPixels = false, beforeAvailable = true, beforeSrc, beforeStatus, onBeforeRetry, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, onInteractionStart, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
   const { t } = useTranslation();
   const settings = useAppSettings();
   const shortcut = useShortcutDisplay();
@@ -93,6 +102,10 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
   const [spaceHand, setSpaceHand] = useState(false);
   const pointerInsideViewer=useRef(false);
   const [viewerPanActive,setViewerPanActive]=useState(false);
+  const targetDragRef = useRef<{pointerId:number;lastY:number;acc:number;target:Point}|null>(null);
+  const targetCancelRef = useRef(onRawTargetCancel);
+  targetCancelRef.current = onRawTargetCancel;
+  const [targetDragging,setTargetDragging] = useState(false);
   const cropSizeRef = useRef<{ identity: string; size: Point } | null>(null);
   if (rawCrop?.surface) cropSizeRef.current = { identity: imageIdentity, size: {x:rawCrop.surface.frame.nativeWidth,y:rawCrop.surface.frame.nativeHeight} };
   const cropSize = rawCrop?.active && cropSizeRef.current?.identity === imageIdentity ? cropSizeRef.current.size : undefined;
@@ -201,6 +214,24 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
     pickPointer.current = null;
     if (keyboardBlocked) onRawPickCancel?.();
   }, [rawPickActive, imageIdentity, keyboardBlocked]);
+  useEffect(() => {
+    if (!rawTargetedActive || showBeforeAdjustments || rawCrop?.active || keyboardBlocked) {
+      if (targetDragRef.current) { targetDragRef.current = null; setTargetDragging(false); onRawTargetCancel?.(); }
+    }
+  }, [rawTargetedActive, showBeforeAdjustments, rawCrop?.active, keyboardBlocked, imageIdentity]);
+  useEffect(() => {
+    if (!targetDragging) return;
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.isComposing && !event.defaultPrevented) {
+        event.preventDefault(); targetDragRef.current = null; setTargetDragging(false); onRawTargetCancel?.();
+      }
+    };
+    window.addEventListener('keydown', escape);
+    return () => window.removeEventListener('keydown', escape);
+  }, [targetDragging, onRawTargetCancel]);
+  useEffect(() => () => {
+    if (targetDragRef.current) { targetDragRef.current = null; targetCancelRef.current?.(); }
+  }, []);
   useEffect(() => {
     if (!rawPickActive) return;
     const escape = (event: KeyboardEvent) => {
@@ -434,6 +465,20 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
       }
       return;
     }
+    if (rawTargetedActive && !spaceHand && !showBeforeAdjustments && event.button === 0 && !targetDragRef.current
+      && !keyboardBlocked && !previewStatus && imageState === 'ready' && rawTargetSourceSize && imagePositionRef.current) {
+      const bounds = imagePositionRef.current.getBoundingClientRect();
+      const outputPoint = wholeImagePoint({x:event.clientX,y:event.clientY},bounds);
+      const swap = ['Transpose','Rotate90','Transverse','Rotate270'].includes(rawTargetOrientation);
+      const oriented = {x:swap ? rawTargetSourceSize.y : rawTargetSourceSize.x,y:swap ? rawTargetSourceSize.x : rawTargetSourceSize.y};
+      const nativePoint = outputPoint && rawTargetPoint(outputPoint,rawTargetCrop,oriented);
+      if (!nativePoint || !onRawTargetBegin?.(nativePoint)) return;
+      event.preventDefault(); event.stopPropagation();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      targetDragRef.current = {pointerId:event.pointerId,lastY:event.clientY,acc:0,target:nativePoint};
+      setTargetDragging(true);
+      return;
+    }
     if (event.button === 0) panMovedRef.current = false;
     if (scale <= fitScale || event.button !== 0 || rawCrop?.active && !spaceHand) return;
     onInteractionStart?.();
@@ -444,6 +489,14 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
   }
 
   function movePan(event: ReactPointerEvent<HTMLDivElement>) {
+    const targetDrag = targetDragRef.current;
+    if (targetDrag && targetDrag.pointerId === event.pointerId) {
+      targetDrag.acc -= (event.clientY - targetDrag.lastY) * .5;
+      targetDrag.lastY = event.clientY;
+      const step = Math.trunc(targetDrag.acc);
+      if (step) { targetDrag.acc -= step; onRawTargetMove?.([step]); }
+      return;
+    }
     const pick = pickPointer.current;
     if (pick && pick.id === event.pointerId) {
       if (Math.hypot(event.clientX - pick.origin.x, event.clientY - pick.origin.y) >= 4) pick.moved = true;
@@ -457,6 +510,13 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
   }
 
   function stopPan(event: ReactPointerEvent<HTMLDivElement>) {
+    const targetDrag = targetDragRef.current;
+    if (targetDrag && targetDrag.pointerId === event.pointerId) {
+      targetDragRef.current = null;
+      setTargetDragging(false);
+      if (event.type === 'pointerup') onRawTargetFinish?.(); else onRawTargetCancel?.();
+      return;
+    }
     const pick = pickPointer.current;
     if (pick && pick.id === event.pointerId) {
       pickPointer.current = null;
@@ -564,7 +624,7 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
     setPan({ x: rawDiagnosticView.nativePanX / dpr, y: rawDiagnosticView.nativePanY / dpr });
   }, [rawDiagnosticView?.actual, rawDiagnosticView?.nativePanX, rawDiagnosticView?.nativePanY, !!rawFrame, fitScale, dpr]);
 
-  return <section className="viewer-panel" aria-label={t('workspace.viewer')}
+  return <section className={`viewer-panel${targetDragging ? ' is-raw-target-dragging' : rawTargetedActive ? ' is-raw-target-active' : ''}`} aria-label={t('workspace.viewer')}
     onPointerDownCapture={() => onInteractionStart?.()} onClickCapture={() => onInteractionStart?.()}>
     <div className="viewer-toolbar">
       <button type="button" className="tool-button icon-button panel-toggle" onClick={onToggleLeft}
@@ -656,7 +716,7 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
       onPointerCancel={stopPan}
     >
       {rawCrop?.active && <RawCropSurface binding={rawCrop} viewport={viewportSize} scale={scale} pan={pan} busy={setCropBusy} handTool={spaceHand && scale>fitScale || viewerPanActive} panning={viewerPanActive} />}
-      <div ref={imagePositionRef} className="viewer-image-position" style={{ display: rawCrop?.active ? 'none' : undefined, transform: `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px))` }}
+      <div ref={imagePositionRef} className="viewer-image-position" style={{ display: rawCrop?.active ? 'none' : undefined, cursor: targetDragging ? 'ns-resize' : rawTargetedActive && !showBeforeAdjustments ? 'crosshair' : undefined, transform: `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px))` }}
         onPointerDown={(event) => {
           if (event.button === 0) viewportRef.current?.focus({ preventScroll: true });
         }}>

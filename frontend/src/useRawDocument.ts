@@ -57,13 +57,19 @@ async function decodeFrame(frame: RawFrame, signal: AbortSignal, urls: RawPrevie
 }
 
 export function useRawDocument(assetId: string | null, beforeRequested = false) {
+  const [curveChannel, setCurveChannel] = useState<import('./rawApi').RawCurveChannel>('master');
+  const [targetedCurveActive, setTargetedCurveActive] = useState(false);
+  // The pointer-down channel is fixed for the complete Native interaction even if UI state changes later.
+  const targetedChannel = useRef(curveChannel);
+  // Temporary Native readback is displayed here and only enters History on the existing finish path.
+  const [targetedCurvePoints, setTargetedCurvePoints] = useState<{channel: import('./rawApi').RawCurveChannel; points: import('./rawApi').RawCurvePoint[]; sequence: number} | undefined>();
   const [urls] = useState(() => new RawPreviewUrls());
   const wholeSurfaces = useRef<{ after?: RawWholeSurface; before?: RawWholeSurface }>({});
   const curveTarget = useRef<RawDisplayTarget>({ quality: 'draft', mode: 'whole', maxSide: 1024, viewGeneration: 0, geometryId: null });
   const curvePresentation = useRef<{ active: boolean; sequence: number; displayedSequence: number; url?: string; baseline?: {
     url?: string; width?: number; height?: number; frame?: RawGeometry; quality?: 'draft' | 'full';
     imageRevision?: number; surface?: RawWholeSurface;
-  } }>({ active: false, sequence: 0, displayedSequence: -1 });
+  }; target?: {x:number;y:number} }>({ active: false, sequence: 0, displayedSequence: -1 });
   const comparing = useRef(beforeRequested); comparing.current = beforeRequested;
   const overlayRef = useRef<RawRegionOverlay | null>(null);
   const [, regionChanged] = useState(0);
@@ -92,6 +98,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   const [straightenTool,setStraightenTool]=useState(false);
   const [overlay,setOverlay]=useState<import('./rawCropOverlay').CropOverlay>('thirds');
   useEffect(()=>{setStraightenTool(false);},[assetId]);
+  useEffect(()=>{setTargetedCurveActive(false);setTargetedCurvePoints(undefined);setCurveChannel('master');},[assetId]);
+  useEffect(()=>{if(beforeRequested)cancelTargetedCurve();},[beforeRequested]);
   const cropSnapshotRef=useRef<CropSnapshot|null>(null);
   const cropVisualRef=useRef<{snapshot:CropSnapshot;start:NonNullable<RawSettings['crop']>;latest:NonNullable<RawSettings['crop']>;owner:RawRecipeSave}|null>(null);
   const cropActiveRef = useRef(false);
@@ -317,6 +325,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     const settleCurvePresentation = (cancelled: boolean) => {
       const owner = curvePresentation.current;
       owner.active = false;
+      setTargetedCurvePoints(undefined);
       if (cancelled) {
         if (owner.url) urls.release(owner.url);
         owner.url = undefined;
@@ -560,6 +569,10 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       editor = installed;
       saver = new RawRecipeSave(settings, { schedule: enqueue, changed: notify, controls: installed,
         curveSettled: settleCurvePresentation,
+        curveReadback: (channel, points, sequence) => {
+          if (current() && curvePresentation.current.active)
+            setTargetedCurvePoints({ channel, points: points.map(point => ({...point})), sequence });
+        },
         curvePreviewError: cause => {
           const code = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
           if (current() && curvePresentation.current.active) setState(previous => previous && ({ ...previous, displayError: code }));
@@ -938,6 +951,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
 
   // Hide old ownership synchronously, before passive effects revoke its URLs.
   const visible = assetId ? state?.assetId === assetId ? state : { assetId, status: 'loading' as const } : null;
+  useEffect(() => { if (visible?.cropMode) cancelTargetedCurve(); }, [visible?.cropMode]);
   const beforeMatches = before?.owner === beforeOwner && before?.key === beforeKey;
   // Whole switching owns an independent decoded image; shared Region geometry is checked separately.
   const beforeSizeMatches = beforeMatches && !visible?.cropMode && !visible?.pending
@@ -966,6 +980,39 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     return { url: surface.url, doc: { ...doc }, frame: { kind, geometryId: surface.frame.geometryId,
       quality: surface.quality, maxSide: surface.maxSide } };
   };
+  const cancelTargetedCurve = () => {
+    setTargetedCurveActive(false);
+    cancelTargetedGesture();
+  };
+  const cancelTargetedGesture = () => {
+    setTargetedCurvePoints(undefined);
+    curvePresentation.current.active = false;
+    if (saverRef.current?.curveInteracting) void saverRef.current.cancelCurveInteraction();
+  };
+  const beginTargetedCurve = (point: {x:number;y:number}) => {
+    const editor = callbackEditor(), saver = saverRef.current;
+    if (!targetedCurveActive || pickActive || beforeRequested || visible?.cropMode || !editor || !saver || frozen.current
+      || saver.locked || !visible?.frame || visible.imageRevision !== editor.confirmed.revision
+      || !editor.confirmed.sourceWidth || !editor.confirmed.sourceHeight) return false;
+    const started = saver.beginTargetedCurveInteraction(curveChannel, point);
+    if (!started) return false;
+    targetedChannel.current = curveChannel;
+    curvePresentation.current = { active: true, sequence: 0, displayedSequence: -1, baseline: {
+      url: visible.url, width: visible.width, height: visible.height, frame: visible.frame, quality: visible.quality,
+      imageRevision: visible.imageRevision, surface: wholeSurfaces.current.after ? { ...wholeSurfaces.current.after } : undefined,
+    }, target: { ...point } };
+    return true;
+  };
+  const updateTargetedCurve = (steps: number[]) => {
+    const saver = saverRef.current;
+    if (!steps.length || !curvePresentation.current.active || frozen.current || !saver) return;
+    saver.updateTargetedCurveInteraction(steps, { ...curveTarget.current, quality: 'draft', mode: 'whole',
+      maxSide: Math.min(512, curveTarget.current.maxSide) });
+  };
+  const finishTargetedCurve = () => { void saverRef.current?.finishTargetedCurveInteraction(targetedChannel.current).catch(cause => {
+    const code = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
+    setState(previous => previous && ({ ...previous, displayError: code }));
+  }); };
   const resume = () => {
     if (!activeEditor()) return;
     if (renewalLockedRef.current()) return;
@@ -1072,10 +1119,20 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     beforeAvailable: !!beforeKey,
     pickActive, pickAvailable,
     cancelPick,
+    curveChannel, setCurveChannel,
+    targetedCurveActive, targetedCurvePoints,
+    toggleTargetedCurve: () => {
+      if (targetedCurveActive) { cancelTargetedCurve(); return; }
+      if (!callbackEditor() || frozen.current || visible?.cropMode || visible?.imageRevision !== visible?.document?.revision) return;
+      if (pickActive) cancelPick();
+      setTargetedCurveActive(true);
+    },
+    beginTargetedCurve, updateTargetedCurve, finishTargetedCurve, cancelTargetedCurve, cancelTargetedGesture,
     togglePick: () => {
       if (!pickAvailable || frozen.current || !callbackEditor()) return;
       const ticket = ++pickStart.current, editor = callbackEditor(), saver = saverRef.current;
       if (pickActive) { setPickOwner(null); return; }
+      setTargetedCurveActive(false);
       saver?.end();
       // Finish the existing gesture on its queue before enabling sampling; departure invalidates this owner.
       void saver?.save().then(() => {

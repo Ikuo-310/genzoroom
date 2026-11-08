@@ -154,12 +154,19 @@ def test_curve_interaction_preview_cancel_and_single_history_confirmation(local,
                 update = await http.post(f'/api/raw/documents/{doc["handle"]}/curve-interaction/update', json=identity_body | {
                     "interactionId": interaction_id, "target": target, "steps": [2, -1], "serial": 1, "maxSide": 1024,
                     "viewGeneration": 0, "geometryId": None})
-                assert update.status_code == 200
-                assert update.headers["x-raw-quality"] == "draft"
-                assert update.headers["x-raw-interaction-id"] == interaction_id
-                assert update.headers["x-raw-interaction-sequence"] == "1"
-                assert json.loads(update.headers["x-raw-curve-points"])[1]["x"] == .5
-                assert update.content.startswith(b"\x89PNG\r\n\x1a\n")
+                assert update.status_code == 200, update.text
+                assert update.json()["interactionId"] == interaction_id
+                assert update.json()["interactionSequence"] == 1
+                readback = update.json()["curvePoints"]
+                assert readback[1]["x"] == .5
+                preview = await http.post(f'/api/raw/documents/{doc["handle"]}/curve-interaction/preview', json=identity_body | {
+                    "interactionId": interaction_id, "interactionSequence": 1, "serial": 1, "maxSide": 1024,
+                    "viewGeneration": 0, "geometryId": None})
+                assert preview.status_code == 200
+                assert preview.headers["x-raw-quality"] == "draft"
+                assert preview.headers["x-raw-interaction-id"] == interaction_id
+                assert preview.headers["x-raw-interaction-sequence"] == "1"
+                assert preview.content.startswith(b"\x89PNG\r\n\x1a\n")
                 cancelled = await http.post(f'/api/raw/documents/{doc["handle"]}/curve-interaction/cancel',
                     json=identity_body | {"interactionId": interaction_id})
                 assert cancelled.status_code == 204
@@ -172,8 +179,12 @@ def test_curve_interaction_preview_cancel_and_single_history_confirmation(local,
                     "interactionId": interaction_id, "target": target, "steps": [2, -1], "serial": 2, "maxSide": 1024,
                     "viewGeneration": 0, "geometryId": None})
                 assert update.status_code == 200
-                assert update.headers["x-raw-interaction-sequence"] == "1"
-                curve_points = json.loads(update.headers["x-raw-curve-points"])
+                assert update.json()["interactionSequence"] == 1
+                curve_points = update.json()["curvePoints"]
+                preview = await http.post(f'/api/raw/documents/{doc["handle"]}/curve-interaction/preview', json=identity_body | {
+                    "interactionId": interaction_id, "interactionSequence": 1, "serial": 2, "maxSide": 1024,
+                    "viewGeneration": 0, "geometryId": None})
+                assert preview.status_code == 200
                 history_points = [[p["x"], p["y"]] for p in curve_points]
                 before_targeted_commands = sum(name == "develop.targeted" for name, _ in children[0].commands)
                 assert len(store.get_raw_history(api._history_identity)["history"]["steps"]) == 0

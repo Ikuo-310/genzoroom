@@ -807,6 +807,15 @@ export function AnshitsuPage() {
           onRawPick={rawDocument?.pick}
           onRawPickCancel={rawDocument?.cancelPick}
           rawFrame={rawDocument?.frame}
+          rawTargetedActive={!!rawDocument?.targetedCurveActive}
+          rawTargetCrop={rawDocument?.settings?.crop}
+          rawTargetOrientation={rawDocument?.settings?.orientation}
+          rawTargetSourceSize={rawDocument?.document?.sourceWidth && rawDocument?.document?.sourceHeight
+            ? { x: rawDocument.document.sourceWidth, y: rawDocument.document.sourceHeight } : undefined}
+          onRawTargetBegin={rawDocument?.beginTargetedCurve}
+          onRawTargetMove={rawDocument?.updateTargetedCurve}
+          onRawTargetFinish={rawDocument?.finishTargetedCurve}
+          onRawTargetCancel={rawDocument?.cancelTargetedGesture}
           beforeFrame={rawDocument?.beforeFrame}
           rawCrop={rawDocument?.crop}
           rawRegionDisplay={rawDocument?.regionDisplay}

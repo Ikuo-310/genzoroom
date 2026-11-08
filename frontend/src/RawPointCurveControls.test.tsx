@@ -61,6 +61,23 @@ it('updates the displayed channel when RAW settings change', () => {
   expect(d).toContain('244,12');
 });
 
+it('keeps targeted mode active across controlled channel changes and leaves the curve graph editable', () => {
+  const channelChange = vi.fn(), toggle = vi.fn(), pointEdit = vi.fn();
+  const curve = emptyCurve();
+  const render = (channel: 'master' | 'red' | 'green' | 'blue') => act(() => root.render(<RawPointCurveControls
+    curve={curve} channel={channel} onChannelChange={channelChange} targetedActive onToggleTargeted={toggle} onPointEdit={pointEdit} />));
+  render('master');
+  const toggleButton = host.querySelector<HTMLButtonElement>('.raw-curve-target')!;
+  expect(toggleButton.getAttribute('aria-pressed')).toBe('true');
+  act(() => host.querySelector<HTMLButtonElement>('[data-channel="red"]')!.click());
+  expect(channelChange).toHaveBeenCalledWith('red');
+  expect(toggle).not.toHaveBeenCalled();
+  render('red');
+  expect(host.querySelector<SVGSVGElement>('[data-testid="raw-curve-graph"]')!.dataset.channel).toBe('red');
+  clickPoint(host.querySelector<SVGSVGElement>('[data-testid="raw-curve-graph"]')!, .4, .6);
+  expect(pointEdit).toHaveBeenCalledOnce();
+});
+
 it('marks endpoint and interior cursor targets and preserves the active drag target', () => {
   const curve = emptyCurve();
   curve.master = [{ x: 0, y: 0 }, { x: 0.5, y: 0.6 }, { x: 1, y: 1 }];

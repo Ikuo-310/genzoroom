@@ -82,8 +82,11 @@ function smoothCurvePath(points: RawCurvePoint[]) {
   return path;
 }
 
-export function RawPointCurveControls({ curve, onDragStart, onDragChange, onDragCancel, onDragCommit, onPointEdit, onReset, editDisabled = false, syncKey }: {
+export function RawPointCurveControls({ curve, channel: controlledChannel, onChannelChange, targetedActive = false, onToggleTargeted,
+  onDragStart, onDragChange, onDragCancel, onDragCommit, onPointEdit, onReset, editDisabled = false, syncKey }: {
   curve: Record<RawCurveChannel, RawCurvePoint[]>;
+  channel?: RawCurveChannel; onChannelChange?: (channel: RawCurveChannel) => void;
+  targetedActive?: boolean; onToggleTargeted?: () => void;
   onDragStart?: (channel: RawCurveChannel, before: RawCurvePoint[]) => void;
   onDragChange?: (channel: RawCurveChannel, points: RawCurvePoint[]) => void;
   onDragCancel?: (channel: RawCurveChannel, before: RawCurvePoint[]) => void;
@@ -94,7 +97,9 @@ export function RawPointCurveControls({ curve, onDragStart, onDragChange, onDrag
   syncKey?: unknown;
 }) {
   const { t } = useTranslation();
-  const [channel, setChannel] = useState<RawCurveChannel>('master');
+  const [localChannel, setLocalChannel] = useState<RawCurveChannel>('master');
+  const channel = controlledChannel ?? localChannel;
+  const selectChannel = (value: RawCurveChannel) => { setLocalChannel(value); onChannelChange?.(value); };
   const [draft, setDraft] = useState<CurveDraft>(() => copyCurve(curve));
   const [selected, setSelected] = useState<ChannelSelection>({ master: null, red: null, green: null, blue: null });
   const [dragging, setDragging] = useState(false);
@@ -317,11 +322,19 @@ export function RawPointCurveControls({ curve, onDragStart, onDragChange, onDrag
     <div className="raw-curve-channels" role="group" aria-label={t('workspace.rawPreview.curveChannels')}
       onFocus={focusAdjustmentCategory} onKeyDown={event => navigateAdjustments(event.nativeEvent, event.target as HTMLElement)}>
       {RAW_CURVE_CHANNELS.map(item => <button key={item} type="button" className="raw-curve-channel"
+        disabled={editDisabled}
         data-channel={item} aria-label={t(`workspace.rawPreview.curveChannelNames.${item}`)}
-        aria-pressed={channel === item} onClick={() => { setContextMenu(null); if (item !== channel) cancelDrag(); setChannel(item); }}
+        aria-pressed={channel === item} onClick={() => { setContextMenu(null); if (item !== channel) cancelDrag(); selectChannel(item); }}
         onContextMenu={event => openResetMenu(event, item)}>
         {channelLabels[item]}
       </button>)}
+      {onToggleTargeted && <button type="button" className={`raw-curve-channel raw-curve-target${targetedActive ? ' is-selected' : ''}`}
+        aria-label={t('workspace.rawPreview.targetedCurve')} aria-pressed={targetedActive} disabled={editDisabled}
+        onClick={onToggleTargeted} onFocus={focusAdjustmentCategory}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+          <path d="M5 19 19 5M7 5h12v12"/><circle cx="5" cy="19" r="2"/>
+        </svg>
+      </button>}
     </div>
     <svg className={`raw-curve-graph is-${channel}${dragging ? ` is-dragging is-dragging-${draggingEndpoint ? 'endpoint' : 'interior'}` : ''}`} viewBox={`0 0 ${graphSize} ${graphSize}`} role="img" tabIndex={0}
       aria-label={t('workspace.rawPreview.curveGraph')} data-testid="raw-curve-graph" data-channel={channel}
