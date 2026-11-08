@@ -17,18 +17,30 @@ vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawA
   rawPreview: vi.fn(), cancelRawPreview: vi.fn(async () => {}), readRawDocument: vi.fn(), readRawSettings: vi.fn(), setRawControls: vi.fn(), releaseRawWorkspace: vi.fn(), rawWorkspaceEmpty: vi.fn(),
   readRawHistory: vi.fn(), saveRawHistory: vi.fn(), saveRawRecipe: vi.fn(), readRawRecipe: vi.fn() }));
 const commitHistory = vi.fn(async (request: api.RawHistoryRequest): Promise<api.RawHistoryResult> => rawHistoryResult(request));
-let root: Root;
+let root: Root, host: HTMLDivElement;
 let current: ReturnType<typeof useRawDocument>;
 const createURL = vi.fn(), revokeURL = vi.fn();
 let decode: () => Promise<void>;
 function Harness({ id, before = false }: { id: string | null; before?: boolean }) { current = useRawDocument(id, before); return <span>{current?.url}</span>; }
+function TargetedViewerHarness({ id }: { id: string }) {
+  current = useRawDocument(id);
+  const source = current?.document;
+  return current?.url ? <ImageViewer src={current.url} documentKey={`${id}:${source?.generation}:${source?.documentToken}`}
+    previewPixels rawFrame={current.frame} rawTargetedActive={current.targetedCurveActive}
+    rawTargetCrop={current.settings?.crop} rawTargetOrientation={current.settings?.orientation}
+    rawTargetSourceSize={source?.sourceWidth && source?.sourceHeight ? { x: source.sourceWidth, y: source.sourceHeight } : undefined}
+    onRawTargetBegin={current.beginTargetedCurve} onRawTargetMove={current.updateTargetedCurve}
+    onRawTargetFinish={current.finishTargetedCurve} onRawTargetCancel={current.cancelTargetedGesture}
+    onRawTargetEscape={current.cancelTargetedCurve} alt="raw" leftOpen={false} rightOpen={false}
+    onToggleLeft={() => {}} onToggleRight={() => {}} /> : null;
+}
 async function render(id: string | null, before = false) { await act(async () => { root.render(<Harness id={id} before={before} />); }); }
 async function flush() { await act(async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); }); }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes; }); return { promise, resolve }; }
 beforeEach(() => {
   vi.mocked(api.readRawHistory).mockReset().mockImplementation(async doc => rawHistoryData(doc));
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-  root = createRoot(document.createElement('div'));
+  host = document.createElement('div'); root = createRoot(host);
   vi.clearAllMocks(); decode = async () => {};
   vi.stubGlobal('Image', class { src = ''; naturalWidth = 16; naturalHeight = 12; decode() { return decode(); } removeAttribute() {} });
   vi.stubGlobal('URL', { createObjectURL: createURL, revokeObjectURL: revokeURL });
@@ -79,6 +91,57 @@ it('connects Region only explicitly and clears document-owned candidates on phot
   await render(null); await flush();
   expect(delivery.candidate).toBeUndefined(); expect(delivery.state.pending).toBeUndefined();
   expect(delivery.submit({ planGeneration: 101, items: [item] })).toBe(false);
+});
+
+it('turns targeted mode off on hover Escape and cancels one active interaction without saving History', async () => {
+  const asset = regionRequest().identity.assetId;
+  vi.mocked(api.readRawDocument).mockImplementation(async doc => ({ ...doc, sourceWidth: 16, sourceHeight: 12 }));
+  vi.mocked(api.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), sourceWidth: 16, sourceHeight: 12 }));
+  vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence: 1,
+    frame: { geometryId: 'a'.repeat(64), nativeWidth: 16, nativeHeight: 12, aspect: 4/3,
+      fullWidth: 16, fullHeight: 12, window: null } });
+  let resize = () => {};
+  vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resize = callback; } observe() {} disconnect() {} });
+  await act(async () => root.render(<TargetedViewerHarness id={asset} />)); await flush();
+  const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+  Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 400 });
+  Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 300 });
+  vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 400, 300));
+  act(() => resize());
+  const image = host.querySelector<HTMLImageElement>('.raw-whole-base')!;
+  Object.defineProperty(image, 'naturalWidth', { configurable: true, value: 16 });
+  Object.defineProperty(image, 'naturalHeight', { configurable: true, value: 12 });
+  act(() => image.dispatchEvent(new Event('load')));
+  const position = host.querySelector<HTMLElement>('.viewer-image-position')!;
+  vi.spyOn(position, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 100, 200, 100));
+  Object.defineProperty(viewport, 'setPointerCapture', { configurable: true, value: vi.fn() });
+
+  const historyWrites = vi.mocked(api.saveRawHistory).mock.calls.length;
+  act(() => current!.toggleTargetedCurve());
+  act(() => viewport.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 150, clientY: 125 })));
+  expect(current!.targetedCurveActive).toBe(true);
+  expect(host.querySelector('[data-testid="viewer-point-loupe"]')).not.toBeNull();
+  act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+  expect(current!.targetedCurveActive).toBe(false);
+  expect(host.querySelector('[data-testid="viewer-point-loupe"]')).toBeNull();
+  expect(api.cancelRawCurveInteraction).not.toHaveBeenCalled();
+  expect(vi.mocked(api.saveRawHistory)).toHaveBeenCalledTimes(historyWrites);
+
+  act(() => current!.toggleTargetedCurve());
+  const down = new MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, clientX: 150, clientY: 125 });
+  Object.defineProperty(down, 'pointerId', { value: 91 });
+  act(() => viewport.dispatchEvent(down)); await flush();
+  expect(api.beginRawCurveInteraction).toHaveBeenCalledOnce();
+  expect(host.querySelector<HTMLElement>('[data-testid="viewer-point-loupe"]')?.dataset.fixed).toBe('true');
+
+  act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+  await flush();
+  expect(current!.targetedCurveActive).toBe(false);
+  expect(api.cancelRawCurveInteraction).toHaveBeenCalledOnce();
+  expect(host.querySelector('[data-testid="viewer-point-loupe"]')).toBeNull();
+  expect(position.style.cursor).toBe('');
+  expect(vi.mocked(api.saveRawHistory)).toHaveBeenCalledTimes(historyWrites);
+  expect(vi.mocked(api.saveRawHistory).mock.calls.some(([request]) => request.action === 'operate')).toBe(false);
 });
 
 it.each(['pagehide', 'departure', 'photoSwitch', 'galleryReturn', 'mutation', 'beforeEnd'])('reclaims a decoded Region display on %s', async boundary => {
@@ -273,7 +336,7 @@ it.each(['currentBefore', 'oldBeforeReceipt', 'staleAfter', 'beforeKeyChange', '
   expect(commitHistory.mock.calls[0][0].operation).toEqual({ kind: 'wbPick', metadata: {}, frame: {
     kind: 'before', geometryId: 'a'.repeat(64), maxSide: displayed.maxSide, quality: displayed.quality, x: .4, y: .6 } });
 });
-afterEach(async () => { act(() => root.unmount()); await flush(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+afterEach(async () => { act(() => root.unmount()); await flush(); host.remove(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 it('RAW Viewer smoke representative lifecycle', async () => {
   vi.useFakeTimers(); enableAutomaticNative();

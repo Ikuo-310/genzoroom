@@ -125,14 +125,14 @@ function NativePreviewHarness({ src, documentKey, previewStatus, autoLoad }: {
 }
 
 function RawTargetHarness({ src = 'blob:target', documentKey = 'raw-target', active = true,
-  begin = vi.fn(() => true), move = vi.fn(), finish = vi.fn(), cancel = vi.fn() }: {
+  begin = vi.fn(() => true), move = vi.fn(), finish = vi.fn(), cancel = vi.fn(), escape }: {
   src?: string; documentKey?: string; active?: boolean; begin?: (point: { x: number; y: number }) => boolean;
-  move?: (steps: number[]) => void; finish?: () => void; cancel?: () => void;
+  move?: (steps: number[]) => void; finish?: () => void; cancel?: () => void; escape?: () => void;
 }) {
   return <ImageViewer src={src} documentKey={documentKey} previewPixels rawFrame={{ nativeWidth: 4000, nativeHeight: 3000, geometryId: 'a'.repeat(64) }}
     rawTargetedActive={active} rawTargetCrop={{ geometry: { rect: { x0: 0, y0: 0, x1: 1, y1: 1 }, angle: 0 }, aspect: null, flip_h: false, flip_v: false }}
     rawTargetOrientation="Normal" rawTargetSourceSize={{ x: 4000, y: 3000 }} onRawTargetBegin={begin}
-    onRawTargetMove={move} onRawTargetFinish={finish} onRawTargetCancel={cancel}
+    onRawTargetMove={move} onRawTargetFinish={finish} onRawTargetCancel={cancel} onRawTargetEscape={escape}
     alt="raw" leftOpen rightOpen onToggleLeft={() => {}} onToggleRight={() => {}} />;
 }
 
@@ -201,10 +201,10 @@ afterEach(() => {
 
 describe('Viewer edit settings context menu', () => {
   it('captures a RAW target point and emits ordered vertical steps independent of zoom or DPR', () => {
-    const begin = vi.fn(() => true), move = vi.fn(), finish = vi.fn(), cancel = vi.fn();
+    const begin = vi.fn(() => true), move = vi.fn(), finish = vi.fn(), cancel = vi.fn(), escape = vi.fn();
     let resize = () => {};
     vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resize = callback; } observe() {} disconnect() {} });
-    act(() => root.render(<RawTargetHarness begin={begin} move={move} finish={finish} cancel={cancel} />));
+    act(() => root.render(<RawTargetHarness begin={begin} move={move} finish={finish} cancel={cancel} escape={escape} />));
     const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
     Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 400 });
     Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 300 });
@@ -254,8 +254,45 @@ describe('Viewer edit settings context menu', () => {
     expect(host.querySelector<HTMLElement>('[data-testid="viewer-point-loupe"]')?.dataset.fixed).toBe('false');
     pointer('pointerdown', 125);
     act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
-    expect(cancel).toHaveBeenCalledTimes(2);
-    expect(host.querySelector<HTMLElement>('[data-testid="viewer-point-loupe"]')?.dataset.fixed).toBe('false');
+    expect(escape).toHaveBeenCalledOnce();
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(host.querySelector('[data-testid="viewer-point-loupe"]')).toBeNull();
+    act(() => root.render(<RawTargetHarness active={false} begin={begin} move={move} finish={finish} cancel={cancel} escape={escape} />));
+    expect(position.style.cursor).toBe('');
+  });
+
+  it('dismisses the targeted hover on Escape but leaves composing and modal Escape to their owner', () => {
+    let resize = () => {};
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resize = callback; } observe() {} disconnect() {} });
+    const escape = vi.fn();
+    act(() => root.render(<RawTargetHarness escape={escape} />));
+    const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+    Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 400 });
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 300 });
+    vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 400, height: 300 } as DOMRect);
+    act(() => resize());
+    const image = host.querySelector<HTMLImageElement>('.raw-whole-base')!;
+    Object.defineProperty(image, 'naturalWidth', { configurable: true, value: 4000 });
+    Object.defineProperty(image, 'naturalHeight', { configurable: true, value: 3000 });
+    act(() => image.dispatchEvent(new Event('load')));
+    const position = host.querySelector<HTMLElement>('.viewer-image-position')!;
+    vi.spyOn(position, 'getBoundingClientRect').mockReturnValue({ left: 100, top: 100, width: 200, height: 100 } as DOMRect);
+    act(() => viewport.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 150, clientY: 125 })));
+    expect(host.querySelector('[data-testid="viewer-point-loupe"]')).not.toBeNull();
+
+    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true, cancelable: true })));
+    const prevented = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    host.addEventListener('keydown', event => event.preventDefault(), { once: true });
+    act(() => host.dispatchEvent(prevented));
+    const dialog = document.createElement('dialog'); dialog.open = true; host.append(dialog);
+    act(() => dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+    expect(escape).not.toHaveBeenCalled();
+    expect(host.querySelector('[data-testid="viewer-point-loupe"]')).not.toBeNull();
+
+    dialog.remove();
+    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+    expect(escape).toHaveBeenCalledOnce();
+    expect(host.querySelector('[data-testid="viewer-point-loupe"]')).toBeNull();
   });
 
   it('hides the loupe when the picker turns off or the RAW document changes', () => {

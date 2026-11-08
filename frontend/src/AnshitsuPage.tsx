@@ -816,6 +816,7 @@ export function AnshitsuPage() {
           onRawTargetMove={rawDocument?.updateTargetedCurve}
           onRawTargetFinish={rawDocument?.finishTargetedCurve}
           onRawTargetCancel={rawDocument?.cancelTargetedGesture}
+          onRawTargetEscape={rawDocument?.cancelTargetedCurve}
           beforeFrame={rawDocument?.beforeFrame}
           rawCrop={rawDocument?.crop}
           rawRegionDisplay={rawDocument?.regionDisplay}

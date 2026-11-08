@@ -34,6 +34,7 @@ type ImageViewerProps = {
   onRawTargetMove?: (steps: number[]) => void;
   onRawTargetFinish?: () => void;
   onRawTargetCancel?: () => void;
+  onRawTargetEscape?: () => void;
   rawPickTargets?: { after?: RawPickTarget; before?: RawPickTarget };
   onRawPick?: (target: RawPickTarget, point: Point) => void;
   onRawPickCancel?: () => void;
@@ -81,7 +82,7 @@ const NAVIGATOR_LONG_EDGE = 180;
 const PICK_CURSOR = `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="m14 5 5 5M16 3l5 5-3 3-1-1-10 10-4 1 1-4L14 7l-1-1z" fill="white" stroke="black" stroke-width="1.5"/></svg>')}") 3 21, crosshair`;
 type TargetLoupePoint = { anchor: Point; imagePoint: Point; nativePoint: Point; fixed: boolean };
 
-export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, beforeFrame, rawRegionDisplay, rawRegionOutline = false, rawPickActive = false, rawTargetedActive = false, rawTargetCrop, rawTargetOrientation = 'Normal', rawTargetSourceSize, onRawTargetBegin, onRawTargetMove, onRawTargetFinish, onRawTargetCancel, rawPickTargets, onRawPick, onRawPickCancel, onRawViewChange, rawDiagnosticView, previewStatus, statusNote, previewPixels = false, beforeAvailable = true, beforeSrc, beforeStatus, onBeforeRetry, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, onInteractionStart, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
+export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, beforeFrame, rawRegionDisplay, rawRegionOutline = false, rawPickActive = false, rawTargetedActive = false, rawTargetCrop, rawTargetOrientation = 'Normal', rawTargetSourceSize, onRawTargetBegin, onRawTargetMove, onRawTargetFinish, onRawTargetCancel, onRawTargetEscape, rawPickTargets, onRawPick, onRawPickCancel, onRawViewChange, rawDiagnosticView, previewStatus, statusNote, previewPixels = false, beforeAvailable = true, beforeSrc, beforeStatus, onBeforeRetry, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, onInteractionStart, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
   const { t } = useTranslation();
   const settings = useAppSettings();
   const shortcut = useShortcutDisplay();
@@ -255,17 +256,22 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
     if (targetPointerRef.current) refreshTargetLoupe(targetPointerRef.current);
   }, [scale, pan.x, pan.y, imageIdentity, displayedUrl, imageState]);
   useEffect(() => {
-    if (!targetDragging) return;
+    if (!rawTargetedActive) return;
     const escape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !event.isComposing && !event.defaultPrevented) {
-        event.preventDefault(); targetDragRef.current = null; setTargetDragging(false); onRawTargetCancel?.();
-        const pointer = targetPointerRef.current;
-        if (pointer) refreshTargetLoupe(pointer);
-      }
+      if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented || event.repeat || keyboardBlocked
+        || isNativeEditingTarget(event.target)
+        || document.querySelector('dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')) return;
+      event.preventDefault();
+      // Drop the local owner before mode-off renders, so its cleanup cannot cancel the same Native gesture twice.
+      targetDragRef.current = null;
+      targetPointerRef.current = undefined;
+      setTargetDragging(false);
+      publishTargetLoupe();
+      (onRawTargetEscape ?? onRawTargetCancel)?.();
     };
     window.addEventListener('keydown', escape);
     return () => window.removeEventListener('keydown', escape);
-  }, [targetDragging, onRawTargetCancel]);
+  }, [rawTargetedActive, keyboardBlocked, onRawTargetEscape, onRawTargetCancel]);
   useEffect(() => () => {
     if (targetDragRef.current) { targetDragRef.current = null; targetCancelRef.current?.(); }
     targetLoupeRef.current = undefined;
