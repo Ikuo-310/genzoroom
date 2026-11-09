@@ -200,7 +200,7 @@ index 0acda876d12743f07c6028586373a9fadcc99d53..ea74a5f5a9546577dc8b8f24f31634c9
              quick: None,
              display: None,
 diff --git a/crates/gpu/src/lib.rs b/crates/gpu/src/lib.rs
-index 1e06e9f1ad9dfbef85b9de8e30a24d49827d3bc4..7d8a9386faad812e0d8a47287fb6596cfbe74d1c 100644
+index 1e06e9f1ad9dfbef85b9de8e30a24d49827d3bc4..b5469c47ab8aa668c3223c7409f6eef5041eab3f 100644
 --- a/crates/gpu/src/lib.rs
 +++ b/crates/gpu/src/lib.rs
 @@ -150,6 +150,10 @@ impl Fallback {
@@ -214,7 +214,104 @@ index 1e06e9f1ad9dfbef85b9de8e30a24d49827d3bc4..7d8a9386faad812e0d8a47287fb6596c
      /// The per-pixel stage's work never runs (what a driver that silently drops or resets a
      /// submission looks like: the readback holds no image).
      DropWork,
-@@ -529,7 +533,7 @@ pub fn try_render(
+@@ -497,6 +501,96 @@ pub fn stage_bytes(stages: &StageCache) -> usize {
+     }
+ }
+ 
++/// Host source capacities pinned by a view's GPU stages.
++pub fn stage_host_bytes(stages: &StageCache) -> usize {
++    #[cfg(not(target_arch = "wasm32"))]
++    {
++        stages.peek_extension::<GpuStages>().map(|g| g.host_source_bytes()).unwrap_or(0)
++    }
++    #[cfg(target_arch = "wasm32")]
++    {
++        let _ = stages;
++        0
++    }
++}
++
++/// Retained CPU and device allocation capacities across views, deduplicated by allocation identity.
++pub fn stage_capacities(caches: &[&StageCache]) -> Option<(usize, usize)> {
++    let mut host = Vec::new();
++    let mut device = Vec::new();
++    for cache in caches {
++        host.extend(cache.host_allocations(true));
++        #[cfg(not(target_arch = "wasm32"))]
++        if let Some(stages) = cache.peek_extension::<GpuStages>() {
++            let (stage_host, stage_device) = stages.allocations();
++            host.extend(stage_host);
++            device.extend(stage_device);
++        }
++    }
++    Some((allocation_bytes(&host)?, allocation_bytes(&device)?))
++}
++
++fn allocation_bytes(allocations: &[(usize, usize)]) -> Option<usize> {
++    let mut seen = Vec::new();
++    allocations.iter().try_fold(0usize, |total, &(identity, bytes)| {
++        if seen.contains(&identity) {
++            Some(total)
++        } else {
++            seen.push(identity);
++            total.checked_add(bytes)
++        }
++    })
++}
++
++/// Cache-owned CPU and device peak reservation. Transient scratch/readback and driver memory have
++/// separate owners and are intentionally outside this StageCache contract.
++pub fn stage_admission_bytes(
++    caches: &[&StageCache],
++    target: Option<&StageCache>,
++    src: &Arc<Rgb32f>,
++    info: &SourceInfo,
++    settings: &DevelopSettings,
++    req: &RenderRequest,
++) -> Option<usize> {
++    #[cfg(not(target_arch = "wasm32"))]
++    {
++        let cpu_required = StageCache::cpu_admission_bytes(caches, target, src, info, settings, req)?;
++        let mut cpu_existing_allocations = Vec::new();
++        let mut held_host_allocations = Vec::new();
++        for cache in caches {
++            let cpu_allocations = cache.host_allocations(true);
++            cpu_existing_allocations.extend(cpu_allocations.iter().copied());
++            held_host_allocations.extend(cpu_allocations);
++            #[cfg(not(target_arch = "wasm32"))]
++            if let Some(stages) = cache.peek_extension::<GpuStages>() {
++                held_host_allocations.extend(stages.allocations().0);
++            }
++        }
++        let src_id = Arc::as_ptr(src) as usize;
++        if held_host_allocations.iter().any(|(identity, _)| *identity == src_id) {
++            cpu_existing_allocations.push((src_id, src.data.capacity().checked_mul(std::mem::size_of::<[f32; 3]>())?));
++        }
++        let cpu_existing = allocation_bytes(&cpu_existing_allocations)?;
++        let cpu_additional = cpu_required.checked_sub(cpu_existing)?;
++        let (host_existing, device_existing) = stage_capacities(caches)?;
++
++        let effective = settings.effective();
++        let rendition = lightcraft_pipeline::settings_for(&effective, req);
++        let plan = lightcraft_pipeline::plan(src, info, &rendition, req);
++        let empty = GpuStages::default();
++        let stages = target.and_then(|cache| cache.peek_extension::<GpuStages>());
++        let gpu_additional = stages.as_deref().unwrap_or(&empty).additional(src, &plan)?;
++        let held = host_existing.checked_add(device_existing)?;
++        let shared_source = render::shared_source_admission(src)?;
++        held.checked_add(cpu_additional)?.checked_add(gpu_additional)?.checked_add(shared_source)
++    }
++    #[cfg(target_arch = "wasm32")]
++    {
++        let _ = (caches, target, src, info, settings, req);
++        None
++    }
++}
++
+ /// Render `src` with `s` on the GPU, reusing the device-resident stages kept with `stages` (the
+ /// view's CPU stage cache). `None`: render on the CPU instead. [`try_render`] also says why.
+ pub fn render(src: &Arc<Rgb32f>, info: &SourceInfo, s: &DevelopSettings, req: &RenderRequest, stages: Option<&StageCache>) -> Option<Rendered> {
+@@ -529,7 +623,7 @@ pub fn try_render(
  ) -> Result<Rendered, Fallback> {
      #[cfg(not(target_arch = "wasm32"))]
      {
@@ -223,7 +320,7 @@ index 1e06e9f1ad9dfbef85b9de8e30a24d49827d3bc4..7d8a9386faad812e0d8a47287fb6596c
              render::Output::Image(r) => Ok(r),
              // (not asked for)
              render::Output::Display { .. } => Err(Fallback::NotTried),
-@@ -542,12 +546,25 @@ pub fn try_render(
+@@ -542,12 +636,25 @@ pub fn try_render(
      }
  }
  
@@ -250,7 +347,7 @@ index 1e06e9f1ad9dfbef85b9de8e30a24d49827d3bc4..7d8a9386faad812e0d8a47287fb6596c
  }
  
  /// Whether renders run on the window's device (and so can be handed over as textures).
-@@ -709,7 +726,12 @@ fn run(
+@@ -709,7 +816,12 @@ fn run(
              (Ok(Some(_)), None) if BROKEN.load(Ordering::Relaxed) => {
                  format!("device failure during the render: {}", unavailable_reason().unwrap_or_default())
              }
@@ -264,11 +361,157 @@ index 1e06e9f1ad9dfbef85b9de8e30a24d49827d3bc4..7d8a9386faad812e0d8a47287fb6596c
              // every path of `render::render` that gives up records a failure first; should one
              // not, the CPU renders it rather than nothing
              (Ok(None), None) => "GPU render: no image came back".to_string(),
+@@ -758,4 +870,11 @@ mod tests {
+         assert!(!super::handles(OutputDepth::U8, true, Overlay::None));
+         assert!(!super::handles(OutputDepth::U8, false, Overlay::HdrRange));
+     }
++
++    #[test]
++    fn stage_capacity_identity_dedupes_and_overflow_is_rejected() {
++        assert_eq!(super::allocation_bytes(&[(1, 120), (1, 120), (2, 80)]), Some(200));
++        assert_eq!(super::allocation_bytes(&[(1, usize::MAX), (2, 1)]), None);
++        assert_eq!(super::stage_capacities(&[]), Some((0, 0)));
++    }
+ }
 diff --git a/crates/gpu/src/render.rs b/crates/gpu/src/render.rs
-index 4d658c3ca076c2bddf1c9413baf0ec337d771267..61f53ffe8888584a7ec27d9a660d65ce7ececf1c 100644
+index 4d658c3ca076c2bddf1c9413baf0ec337d771267..62c4d233d882977e0cbfffbef8b8733d858560e3 100644
 --- a/crates/gpu/src/render.rs
 +++ b/crates/gpu/src/render.rs
-@@ -684,6 +684,14 @@ pub fn render(
+@@ -28,6 +28,27 @@ pub struct GpuStages {
+ 
+ const CAPACITY: usize = 2;
+ 
++fn unique_bytes(items: &[(usize, usize)]) -> Option<usize> {
++    let mut seen = Vec::new();
++    items.iter().try_fold(0usize, |total, &(id, bytes)| {
++        if seen.contains(&id) {
++            Some(total)
++        } else {
++            seen.push(id);
++            total.checked_add(bytes)
++        }
++    })
++}
++
++fn capacity_with_pool_spare(logical_bytes: usize) -> Option<usize> {
++    logical_bytes.checked_add(logical_bytes / 4)
++}
++
++fn shared_source_reservation(current_bytes: usize, source_bytes: usize, same_source: bool) -> Option<usize> {
++    let replacement = if source_bytes > RETAIN_SOURCE_BYTES && !same_source { capacity_with_pool_spare(source_bytes)? } else { 0 };
++    current_bytes.checked_add(replacement)
++}
++
+ #[derive(Clone)]
+ struct Entry {
+     src: Arc<Rgb32f>,
+@@ -88,34 +109,64 @@ impl GpuStages {
+         self.lock().len()
+     }
+ 
+-    /// Device bytes held (each buffer counted once).
+-    pub fn bytes(&self) -> usize {
+-        let mut seen: Vec<*const Buf> = Vec::new();
+-        let mut total = 0;
+-        let mut add = |b: &Arc<Buf>| {
+-            let p = Arc::as_ptr(b);
+-            if !seen.contains(&p) {
+-                seen.push(p);
+-                total += b.len * 4;
+-            }
++    /// Host and device allocations retained by this view's GPU stages.
++    pub fn allocations(&self) -> (Vec<(usize, usize)>, Vec<(usize, usize)>) {
++        let mut host = Vec::new();
++        let mut device = Vec::new();
++        let add = |buffer: &Arc<Buf>, device: &mut Vec<(usize, usize)>| {
++            device.push((Arc::as_ptr(buffer) as usize, usize::try_from(buffer.raw().size()).unwrap_or(usize::MAX)));
+         };
+         for e in self.lock().iter() {
+-            add(&e.sampled);
++            host.push((Arc::as_ptr(&e.src) as usize, e.src.data.capacity().checked_mul(std::mem::size_of::<[f32; 3]>()).unwrap_or(usize::MAX)));
++            add(&e.sampled, &mut device);
+             if let Some((_, b)) = &e.lin {
+-                add(b);
++                add(b, &mut device);
+             }
+             let p = &e.planes;
+-            p.log_l.iter().for_each(&mut add);
+-            p.base.iter().for_each(|(_, b)| add(b));
+-            p.clarity.iter().for_each(|(_, b)| add(b));
+-            p.texture.iter().for_each(|(_, b)| add(b));
+-            p.sharpen.iter().for_each(|(_, b)| add(b));
+-            p.dark.iter().for_each(|(_, b, _)| add(b));
++            p.log_l.iter().for_each(|b| add(b, &mut device));
++            p.base.iter().for_each(|(_, b)| add(b, &mut device));
++            p.clarity.iter().for_each(|(_, b)| add(b, &mut device));
++            p.texture.iter().for_each(|(_, b)| add(b, &mut device));
++            p.sharpen.iter().for_each(|(_, b)| add(b, &mut device));
++            p.dark.iter().for_each(|(_, b, _)| add(b, &mut device));
++            p.chroma.iter().for_each(|(_, b)| add(b, &mut device));
+         }
+-        if let Some((_, b)) = &*self.source.lock().unwrap_or_else(|e| e.into_inner()) {
+-            add(b);
++        if let Some((src, b)) = &*self.source.lock().unwrap_or_else(|e| e.into_inner()) {
++            host.push((Arc::as_ptr(src) as usize, src.data.capacity().checked_mul(std::mem::size_of::<[f32; 3]>()).unwrap_or(usize::MAX)));
++            add(b, &mut device);
+         }
+-        total
++        (host, device)
++    }
++
++    /// Additional device allocation capacity needed while old entries remain alive.
++    pub fn additional(&self, src: &Arc<Rgb32f>, plan: &Plan<'_>) -> Option<usize> {
++        let cached = self.get(src, plan.geo);
++        let pixels = plan.w.checked_mul(plan.h)?;
++        let mut words_per_pixel = 6usize.checked_add(3)?; // six scalar planes plus RGB chroma
++        if cached.is_none() {
++            words_per_pixel = words_per_pixel.checked_add(3)?;
++        }
++        if cached.as_ref().and_then(|entry| entry.lin.as_ref()).is_none_or(|(key, _)| *key != plan.lin_key) {
++            words_per_pixel = words_per_pixel.checked_add(3)?;
++        }
++        let logical_bytes = pixels.checked_mul(words_per_pixel)?.checked_mul(4)?;
++        let mut additional = capacity_with_pool_spare(logical_bytes)?;
++        let source_bytes = src.data.len().checked_mul(std::mem::size_of::<[f32; 3]>())?;
++        let same_source = self.source.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|(source, _)| Arc::ptr_eq(source, src));
++        if source_bytes <= RETAIN_SOURCE_BYTES && !same_source {
++            additional = additional.checked_add(capacity_with_pool_spare(source_bytes)?)?;
++        }
++        Some(additional)
++    }
++
++    /// Device bytes held, deduplicated by buffer allocation identity.
++    pub fn bytes(&self) -> usize {
++        unique_bytes(&self.allocations().1).unwrap_or(usize::MAX)
++    }
++
++    /// Host capacity pinned by GPU entries; it is also represented by the CPU cache owner.
++    pub fn host_source_bytes(&self) -> usize {
++        unique_bytes(&self.allocations().0).unwrap_or(usize::MAX)
+     }
+ 
+     /// Drop everything (e.g. when memory is needed).
+@@ -534,7 +585,18 @@ pub(crate) fn release_shared_source() {
+ 
+ /// Device bytes of the shared big source, 0 when there is none.
+ pub(crate) fn shared_source_bytes() -> usize {
+-    SHARED_SOURCE.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map_or(0, |(_, b)| b.len * 4)
++    SHARED_SOURCE.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map_or(0, |(_, b)| usize::try_from(b.raw().size()).unwrap_or(usize::MAX))
++}
++
++pub(crate) fn shared_source_admission(src: &Arc<Rgb32f>) -> Option<usize> {
++    let held = SHARED_SOURCE.lock().unwrap_or_else(|e| e.into_inner());
++    let current = match held.as_ref() {
++        Some((_, buffer)) => usize::try_from(buffer.raw().size()).ok()?,
++        None => 0,
++    };
++    let same = held.as_ref().is_some_and(|(weak, _)| weak.upgrade().is_some_and(|source| Arc::ptr_eq(&source, src)));
++    let source_bytes = src.data.len().checked_mul(std::mem::size_of::<[f32; 3]>())?;
++    shared_source_reservation(current, source_bytes, same)
+ }
+ 
+ pub(crate) fn source_uploads() -> u64 {
+@@ -684,6 +746,14 @@ pub fn render(
          None => cx.flush(),
      };
      let plan = lightcraft_pipeline::plan(src, info, s, req);
@@ -283,16 +526,58 @@ index 4d658c3ca076c2bddf1c9413baf0ec337d771267..61f53ffe8888584a7ec27d9a660d65ce
      let (w, h) = (plan.w, plan.h);
      let Some(n) = w.checked_mul(h).filter(|n| n.checked_mul(12).is_some()) else {
          fail(FailKind::Limit, format!("{w}×{h} output is too large"));
-@@ -917,7 +925,7 @@ pub fn render(
+@@ -754,9 +824,18 @@ pub fn render(
+         prep.air = a;
+     }
+     lap("planes", &mut t, &mut cx);
+-    if let Some(c) = stages {
+-        c.put(Entry { src: src.clone(), geo: plan.geo, sampled, lin: Some((plan.lin_key, lin.clone())), colour_noise, planes });
+-    }
++    let store_stages = || {
++        if let Some(cache) = stages {
++            cache.put(Entry {
++                src: src.clone(),
++                geo: plan.geo,
++                sampled: sampled.clone(),
++                lin: Some((plan.lin_key, lin.clone())),
++                colour_noise,
++                planes: planes.clone(),
++            });
++        }
++    };
+ 
+     // 4. masks
+     let (masks, terms) = masks(&mut cx, &lin, &prep, &plan, &mut host);
+@@ -836,10 +915,17 @@ pub fn render(
+     if deep {
+         let rendered = read_deep(&mut cx, &out, &plan, req);
+         lap("finish + readback (deep)", &mut t, &mut cx);
++        if rendered.is_some() {
++            store_stages();
++        }
+         return rendered.map(Output::Image);
+     }
+     if display && can_display(gpu, &plan, req) {
+-        return to_texture(&mut cx, &out, w, h).map(|(frame, histogram)| Output::Display { frame, histogram });
++        let rendered = to_texture(&mut cx, &out, w, h).map(|(frame, histogram)| Output::Display { frame, histogram });
++        if rendered.is_some() {
++            store_stages();
++        }
++        return rendered;
+     }
+     // the alpha a mask overlay shows: copied out before the readback below submits
+     let overlay_mask = req.overlay.mask(s).map(|m| {
+@@ -917,7 +1003,8 @@ pub fn render(
      if let Some(k) = plan.keep {
          image = image.crop(k.x, k.y, k.w, k.h);
      }
 -    Some(Output::Image(Rendered { image, histogram, deep: None }))
++    store_stages();
 +    Some(Output::Image(Rendered { execution: None, frame: Some(plan.frame.clone()), image, histogram, deep: None }))
  }
  
  /// The finished float output `out` (three words per pixel) read back as the CPU's float render
-@@ -947,7 +955,7 @@ fn read_deep(cx: &mut Cx<'_>, out: &Buf, plan: &Plan<'_>, req: &RenderRequest) -
+@@ -947,7 +1034,7 @@ fn read_deep(cx: &mut Cx<'_>, out: &Buf, plan: &Plan<'_>, req: &RenderRequest) -
          fail(FailKind::Blank, "the GPU result is entirely black; rendering it on the CPU to be sure".into());
          return None;
      }
@@ -301,6 +586,90 @@ index 4d658c3ca076c2bddf1c9413baf0ec337d771267..61f53ffe8888584a7ec27d9a660d65ce
  }
  
  /// The finished output `out` (`w × h` packed RGBA8) as a texture on the device, with its
+@@ -1883,3 +1970,83 @@ mod tests {
+         }
+     }
+ }
++
++#[cfg(test)]
++mod stage_capacity_tests {
++    use super::*;
++    use lightcraft_develop::DevelopSettings;
++    use lightcraft_pipeline::{RenderRequest, SourceInfo};
++
++    #[test]
++    fn retained_stages_use_physical_buffer_size_and_dedupe_aliases() {
++        if !crate::available() {
++            lightcraft_testkit::skip!(Gpu, "device-buffer capacity fixture requires a GPU adapter");
++            return;
++        }
++        let gpu = crate::device().expect("available device");
++        gpu.trim(0);
++        drop(gpu.buffer(120));
++        let shared = Arc::new(gpu.buffer(100));
++        assert_eq!(shared.len, 100);
++        assert_eq!(shared.raw().size(), 480, "recycled allocation exceeds its logical length");
++
++        let source = Arc::new(Rgb32f::from_fn(12, 8, |_, _| [0.2; 3]));
++        let info = SourceInfo::default();
++        let settings = DevelopSettings::default();
++        let request = RenderRequest::fit(12, 8);
++        let plan = lightcraft_pipeline::plan(&source, &info, &settings, &request);
++        let stages = GpuStages::default();
++        stages.put(Entry {
++            src: source.clone(),
++            geo: plan.geo,
++            sampled: shared.clone(),
++            lin: Some((plan.lin_key, shared.clone())),
++            colour_noise: None,
++            planes: Planes {
++                key: plan.lin_key,
++                log_l: Some(shared.clone()),
++                sharpen: Some((local::sharpen_key(&plan.settings, 1.0), shared.clone())),
++                chroma: Some((1, shared.clone())),
++                ..Default::default()
++            },
++        });
++        assert_eq!(stages.bytes(), 480, "sample, lin, sharpen and chroma alias one allocation");
++        assert_eq!(stages.host_source_bytes(), source.data.capacity() * std::mem::size_of::<[f32; 3]>());
++    }
++
++    #[test]
++    fn incomplete_gpu_render_does_not_retain_stage_entries() {
++        let _serial = crate::DEVICE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
++        if !crate::available() {
++            lightcraft_testkit::skip!(Gpu, "failed-stage cache fixture requires a GPU adapter");
++            return;
++        }
++        let source = Arc::new(Rgb32f::from_fn(32, 24, |x, y| [0.05 + (x + y) as f32 / 200.0; 3]));
++        let info = SourceInfo::default();
++        let settings = DevelopSettings::default();
++        let request = RenderRequest::fit(32, 24);
++        let cache = lightcraft_pipeline::StageCache::default();
++        crate::inject_fault(crate::Fault::DropWork);
++        let result = crate::try_render(&source, &info, &settings, &request, Some(&cache));
++        crate::reset_failures();
++
++        assert!(result.is_err(), "the injected incomplete result must fall back");
++        assert_eq!(cache.peek_extension::<GpuStages>().map_or(0, |stages| stages.len()), 0);
++    }
++
++    #[test]
++    fn gpu_admission_reserves_per_view_and_shared_source_upload_capacity() {
++        let source = Arc::new(Rgb32f::from_fn(8, 8, |_, _| [0.2; 3]));
++        let info = SourceInfo::default();
++        let settings = DevelopSettings::default();
++        let request = RenderRequest::fit(8, 8);
++        let plan = lightcraft_pipeline::plan(&source, &info, &settings, &request);
++        let additional = GpuStages::default().additional(&source, &plan).unwrap();
++        assert_eq!(additional, 64 * 15 * 4 * 5 / 4 + 64 * 12 * 5 / 4);
++
++        assert_eq!(shared_source_reservation(1024, RETAIN_SOURCE_BYTES, false), Some(1024));
++        assert_eq!(shared_source_reservation(1024, 100 << 20, false), Some(1024 + (100 << 20) * 5 / 4));
++        assert_eq!(shared_source_reservation(1024, 100 << 20, true), Some(1024), "the current photo upload is reused");
++        assert_eq!(capacity_with_pool_spare(usize::MAX), None);
++    }
++}
 diff --git a/crates/gpu/tests/display.rs b/crates/gpu/tests/display.rs
 index 525743b9fbbb98b5d1e8839fc7fe68529f037170..0fbd1026fb973190dcf94f9b042ee81de5892073 100644
 --- a/crates/gpu/tests/display.rs
@@ -423,17 +792,150 @@ index 4f9251bcba216893241308d83f9f92ea8fc8e204..b8ad1f05c83c18aa7862845369de07e0
  
 diff --git a/crates/mcp/src/preview.rs b/crates/mcp/src/preview.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..62387c0c5f26263cff9493c650124a5e86fd7c69
+index 0000000000000000000000000000000000000000..53120b85df699a30db195d487436842a0ac2012a
 --- /dev/null
 +++ b/crates/mcp/src/preview.rs
-@@ -0,0 +1,260 @@
+@@ -0,0 +1,471 @@
 +//! Canonical geometry metadata shared by the MCP preview and region contracts.
 +use lightcraft_engine::pipeline::geometry::Frame;
++use lightcraft_engine::{
++    develop::DevelopSettings,
++    gpu,
++    pipeline::{RenderRequest, SourceInfo, StageCache},
++};
 +use serde_json::{Value, json};
 +use sha2::{Digest, Sha256};
++use std::sync::Arc;
 +
 +pub(crate) const GEOMETRY_DESCRIPTOR_CONTRACT: u64 = 2;
 +const GEOMETRY_SUBPIXELS_PER_PIXEL: f64 = 256.0;
++
++/// Independent Before and After cache owners; no preview command is connected in this phase.
++#[derive(Default)]
++pub(crate) struct StagePool {
++    slots: [Option<Arc<StageCache>>; 2],
++    signatures: [String; 2],
++    geometries: [String; 2],
++    budget: Option<usize>,
++    source: String,
++}
++
++pub(crate) struct CpuStageInput<'a> {
++    pub source: &'a Arc<lightcraft_raster::Rgb32f>,
++    pub info: &'a SourceInfo,
++    pub settings: &'a DevelopSettings,
++    pub request: &'a RenderRequest,
++}
++
++impl StagePool {
++    pub fn source(&mut self, source: &str) {
++        if self.source != source {
++            self.clear();
++            self.source = source.to_owned();
++        }
++    }
++
++    pub fn clear(&mut self) {
++        for cache in self.slots.iter().flatten() {
++            cache.clear();
++        }
++        self.slots = Default::default();
++        self.signatures = Default::default();
++        self.geometries = Default::default();
++    }
++
++    pub fn discard(&mut self, side: usize) {
++        if side < self.slots.len() {
++            if let Some(cache) = self.slots[side].take() {
++                cache.clear();
++            }
++            self.signatures[side].clear();
++            self.geometries[side].clear();
++        }
++    }
++
++    fn capacities(&self) -> Option<(usize, usize)> {
++        let caches: Vec<_> = self.slots.iter().flatten().map(Arc::as_ref).collect();
++        gpu::stage_capacities(&caches)
++    }
++
++    fn cpu_only(&self) -> bool {
++        self.slots.iter().flatten().all(|cache| gpu::stage_host_bytes(cache) == 0 && gpu::stage_bytes(cache) == 0)
++    }
++
++    fn configure(&mut self, budget: Option<usize>) {
++        if self.budget != budget {
++            self.clear();
++            self.budget = budget;
++        }
++        if budget.is_none() {
++            self.clear();
++        }
++    }
++
++    /// Admission controls retention only. A rejected cache must not prevent the caller's render.
++    pub fn prepare(&mut self, side: usize, signature: &str, budget: Option<usize>, input: CpuStageInput<'_>) -> (Option<Arc<StageCache>>, bool) {
++        self.configure(budget);
++        let Some(limit) = budget else { return (None, false) };
++        if side >= self.slots.len() {
++            return (None, false);
++        }
++        if self.signatures[side] != signature {
++            self.discard(side);
++            self.signatures[side] = signature.to_owned();
++        }
++        let caches: Vec<_> = self.slots.iter().flatten().map(Arc::as_ref).collect();
++        let required = if !gpu::enabled() && self.cpu_only() {
++            StageCache::cpu_admission_bytes(&caches, self.slots[side].as_deref(), input.source, input.info, input.settings, input.request)
++        } else {
++            gpu::stage_admission_bytes(&caches, self.slots[side].as_deref(), input.source, input.info, input.settings, input.request)
++        };
++        if required.is_none_or(|bytes| bytes > limit) {
++            self.discard(side);
++            return (None, false);
++        }
++        let cache = self.slots[side].get_or_insert_with(|| Arc::new(StageCache::default())).clone();
++        (Some(cache), true)
++    }
++
++    pub fn geometry(&mut self, side: usize, geometry: &str) {
++        if side >= self.slots.len() {
++            return;
++        }
++        if !self.geometries[side].is_empty() && self.geometries[side] != geometry {
++            if let Some(cache) = &self.slots[side] {
++                cache.clear();
++            }
++        }
++        self.geometries[side] = geometry.to_owned();
++    }
++
++    pub fn finish(&mut self, side: usize, budget: Option<usize>, applied: bool) -> Value {
++        if side >= self.slots.len() {
++            return json!({"mode":"off","applied":false,"reason":"budget","cpuBytes":0,"gpuBytes":0,"retainedBytes":0,"budgetBytes":0});
++        }
++        let limit = budget.unwrap_or(0);
++        if budget.is_none() {
++            self.clear();
++        } else {
++            match self.capacities().and_then(|(host, device)| host.checked_add(device)) {
++                None => self.clear(),
++                Some(total) if total > limit => {
++                    self.discard(1 - side);
++                    if self.capacities().and_then(|(host, device)| host.checked_add(device)).is_none_or(|retained| retained > limit) {
++                        self.discard(side);
++                    }
++                }
++                Some(_) => {}
++            }
++        }
++        let (cpu, gpu_bytes) = self.capacities().unwrap_or((usize::MAX, usize::MAX));
++        let retained = cpu.checked_add(gpu_bytes).unwrap_or(usize::MAX);
++        json!({"mode":if budget.is_some(){"on"}else{"off"},"applied":applied && retained <= limit,
++            "reason":if budget.is_some() && (!applied || retained > limit) {"budget"} else {"none"},
++            "cpuBytes":cpu,"gpuBytes":gpu_bytes,"retainedBytes":retained,"budgetBytes":limit})
++    }
++}
 +
 +fn canonical_crop(frame: &Frame, original: (usize, usize)) -> (Value, f64) {
 +    let (grid_w, grid_h) = if frame.orient.swaps_axes() { (original.1, original.0) } else { original };
@@ -687,6 +1189,84 @@ index 0000000000000000000000000000000000000000..62387c0c5f26263cff9493c650124a5e
 +        assert_eq!(frame_metadata(&frame, (4064, 3056), "source-one", 2048, 1538), Err("preview_geometry_mismatch"));
 +    }
 +}
++
++#[cfg(test)]
++mod stage_pool_tests {
++    use super::{CpuStageInput, StagePool};
++    use lightcraft_engine::{
++        develop::DevelopSettings,
++        pipeline::{self, RenderRequest, SourceInfo},
++    };
++    use lightcraft_raster::Rgb32f;
++    use std::sync::Arc;
++
++    fn input<'a>(source: &'a Arc<Rgb32f>, info: &'a SourceInfo, settings: &'a DevelopSettings, request: &'a RenderRequest) -> CpuStageInput<'a> {
++        CpuStageInput { source, info, settings, request }
++    }
++
++    #[test]
++    fn before_after_caches_share_source_accounting_and_are_evicted_by_budget() {
++        let source = Arc::new(Rgb32f::from_fn(48, 32, |x, y| [0.1 + (x + y) as f32 / 400.0; 3]));
++        let info = SourceInfo::default();
++        let settings = DevelopSettings::default();
++        let request = RenderRequest::fit(48, 32);
++        let mut pool = StagePool::default();
++        pool.source("asset-one");
++
++        let budget = 64 << 20;
++        let (after, accepted) = pool.prepare(1, "after-revision", Some(budget), input(&source, &info, &settings, &request));
++        assert!(accepted);
++        let after = after.unwrap();
++        pipeline::render_cached(&source, &info, &settings, &request, &after);
++        pool.geometry(1, "geometry-a");
++
++        let (before, accepted) = pool.prepare(0, "before-revision", Some(budget), input(&source, &info, &settings, &request));
++        assert!(accepted);
++        let before = before.unwrap();
++        assert!(!Arc::ptr_eq(&after, &before));
++        pipeline::render_cached(&source, &info, &settings, &request, &before);
++        let combined = lightcraft_engine::gpu::stage_capacities(&[&after, &before]).unwrap().0;
++        assert!(combined < after.retained_bytes() + before.retained_bytes(), "the pinned source allocation is shared");
++
++        assert_eq!(pool.finish(1, Some(1), true)["retainedBytes"], 0);
++        assert!(pool.slots.iter().all(Option::is_none), "finish releases caches that exceed a lowered budget");
++        let (rejected, accepted) = pool.prepare(0, "tiny-budget", Some(1), input(&source, &info, &settings, &request));
++        assert!(rejected.is_none() && !accepted);
++        assert!(pool.slots.iter().all(Option::is_none), "shrinking budget drops retained entries");
++        let report = pool.finish(0, Some(1), false);
++        assert_eq!(report["retainedBytes"], 0);
++
++        let (off, accepted) = pool.prepare(1, "cache-off", None, input(&source, &info, &settings, &request));
++        assert!(off.is_none() && !accepted);
++        assert!(pool.slots.iter().all(Option::is_none));
++    }
++
++    #[test]
++    fn stage_pool_rejects_unknown_sizes_and_discards_failed_or_replaced_entries() {
++        let source = Arc::new(Rgb32f::from_fn(24, 16, |_, _| [0.2; 3]));
++        let info = SourceInfo::default();
++        let settings = DevelopSettings::default();
++        let request = RenderRequest::fit(24, 16);
++        let mut pool = StagePool::default();
++        let budget = 64 << 20;
++        let (cache, accepted) = pool.prepare(0, "one", Some(budget), input(&source, &info, &settings, &request));
++        assert!(accepted);
++        let cache = cache.unwrap();
++        pipeline::render_cached(&source, &info, &settings, &request, &cache);
++        assert!(cache.len() > 0);
++        pool.discard(0);
++        assert!(pool.slots[0].is_none());
++
++        let (cache, accepted) = pool.prepare(0, "two", Some(budget), input(&source, &info, &settings, &request));
++        assert!(accepted && cache.is_some());
++        let mut malformed = (*source).clone();
++        malformed.width = usize::MAX;
++        let malformed = Arc::new(malformed);
++        let (rejected, accepted) = pool.prepare(0, "bad", Some(budget), input(&malformed, &info, &settings, &request));
++        assert!(rejected.is_none() && !accepted);
++        assert!(pool.slots[0].is_none(), "unmeasurable admission cannot retain a cache");
++    }
++}
 diff --git a/crates/pipeline/src/geometry.rs b/crates/pipeline/src/geometry.rs
 index 5d8a07489a81ea3a77564450beccbf7fcb431932..8b827bf0fe9498bb8e86275010064b093733c8e3 100644
 --- a/crates/pipeline/src/geometry.rs
@@ -710,7 +1290,7 @@ index 5d8a07489a81ea3a77564450beccbf7fcb431932..8b827bf0fe9498bb8e86275010064b09
          let a = self.aspect();
          let (mw, mh) = (max_w.max(1) as f64, max_h.max(1) as f64);
 diff --git a/crates/pipeline/src/lib.rs b/crates/pipeline/src/lib.rs
-index 34bd402336fe6682be52a254fda253611ce9cfd2..d41a8ca84ffa9aee27350a50f6a814edf76f6bcf 100644
+index 34bd402336fe6682be52a254fda253611ce9cfd2..f602940f66d8e25846a28ecdec5a97a080cfb580 100644
 --- a/crates/pipeline/src/lib.rs
 +++ b/crates/pipeline/src/lib.rs
 @@ -233,7 +233,18 @@ impl RenderRequest {
@@ -732,7 +1312,137 @@ index 34bd402336fe6682be52a254fda253611ce9cfd2..d41a8ca84ffa9aee27350a50f6a814ed
      /// The result, 8-bit (for deep renders: `deep` reduced to 8 bits, display-encoded).
      pub image: Rgba8,
      pub histogram: Histogram,
-@@ -752,7 +763,7 @@ fn render_impl(src: Src<'_>, info: &SourceInfo, s: &DevelopSettings, req: &Rende
+@@ -339,29 +350,92 @@ impl StageCache {
+     /// Bytes of the intermediate images held (each buffer counted once; the sources they were
+     /// made from belong to their owner and are not counted).
+     pub fn bytes(&self) -> usize {
+-        fn size<T>(i: &lightcraft_raster::Image<T>) -> usize {
+-            i.data.len() * std::mem::size_of::<T>()
++        allocation_bytes(&self.host_allocations(false)).unwrap_or(usize::MAX)
++    }
++
++    /// CPU image capacity retained by this cache, including source images pinned by entries.
++    pub fn retained_bytes(&self) -> usize {
++        allocation_bytes(&self.host_allocations(true)).unwrap_or(usize::MAX)
++    }
++
++    /// Host image allocations owned by this cache, with allocation identities for cross-view dedupe.
++    pub fn host_allocations(&self, include_sources: bool) -> Vec<(usize, usize)> {
++        fn allocation<T>(image: &Arc<lightcraft_raster::Image<T>>) -> (usize, usize) {
++            (Arc::as_ptr(image) as usize, image.data.capacity().checked_mul(std::mem::size_of::<T>()).unwrap_or(usize::MAX))
+         }
+-        let mut seen: Vec<usize> = Vec::new();
+-        let mut total = 0;
+-        let mut add = |p: usize, n: usize| {
+-            if !seen.contains(&p) {
+-                seen.push(p);
+-                total += n;
++        let mut allocations = Vec::new();
++        for entry in self.lock().iter() {
++            if include_sources {
++                allocations.push(allocation(&entry.src));
+             }
+-        };
+-        for e in self.lock().iter() {
+-            add(Arc::as_ptr(&e.sampled) as usize, size(&e.sampled));
+-            if let Some((_, l)) = &e.lin {
+-                add(Arc::as_ptr(l) as usize, size(l));
++            allocations.push(allocation(&entry.sampled));
++            if let Some((_, image)) = &entry.lin {
++                allocations.push(allocation(image));
+             }
+-            let pl = &e.planes;
+-            let planes = pl.log_l.iter().chain(pl.base.iter().map(|x| &x.1)).chain(pl.clarity.iter().map(|x| &x.1));
+-            for p in planes.chain(pl.texture.iter().map(|x| &x.1)).chain(pl.sharpen.iter().map(|x| &x.1)).chain(pl.dark.iter().map(|x| &x.1)) {
+-                add(Arc::as_ptr(p) as usize, size(p));
++            let planes = &entry.planes;
++            for plane in planes
++                .log_l
++                .iter()
++                .chain(planes.base.iter().map(|(_, image)| image))
++                .chain(planes.clarity.iter().map(|(_, image)| image))
++                .chain(planes.texture.iter().map(|(_, image)| image))
++                .chain(planes.sharpen.iter().map(|(_, image)| image))
++                .chain(planes.dark.iter().map(|(_, image, _)| image))
++            {
++                allocations.push(allocation(plane));
+             }
++            if let Some((_, chroma)) = &planes.chroma {
++                allocations.push(allocation(chroma));
++            }
++            // JointNoise is Copy and contains only fixed-size scalars/arrays, not an image buffer.
++        }
++        allocations
++    }
++
++    /// Bound cache-owned CPU buffers alive during the next render, including replaced entries.
++    pub fn cpu_admission_bytes(
++        caches: &[&StageCache],
++        target: Option<&StageCache>,
++        src: &Arc<Rgb32f>,
++        info: &SourceInfo,
++        settings: &DevelopSettings,
++        req: &RenderRequest,
++    ) -> Option<usize> {
++        if req.window.is_some()
++            || req.depth != OutputDepth::U8
++            || src.width == 0
++            || src.height == 0
++            || src.width.checked_mul(src.height)? != src.data.len()
++        {
++            return None;
++        }
++
++        let effective = settings.effective();
++        let rendition = settings_for(&effective, req);
++        let plan = plan(src, info, &rendition, req);
++        let pixels = plan.w.checked_mul(plan.h)?;
++        if pixels == 0 {
++            return None;
++        }
++
++        let mut retained = Vec::new();
++        for cache in caches {
++            retained.extend(cache.host_allocations(true));
+         }
+-        total
++        retained.push((Arc::as_ptr(src) as usize, src.data.capacity().checked_mul(std::mem::size_of::<[f32; 3]>())?));
++        let mut total = allocation_bytes(&retained)?;
++
++        let cached = target.and_then(|cache| cache.get(src, plan.geo));
++        // A new output-size entry needs a sampled RGB image; stale entries remain alive until put().
++        let mut new_per_pixel = if cached.is_none() { std::mem::size_of::<[f32; 3]>() } else { 0 };
++        if cached.as_ref().and_then(|entry| entry.lin.as_ref()).is_none_or(|(key, _)| *key != plan.lin_key) {
++            new_per_pixel = new_per_pixel.checked_add(std::mem::size_of::<[f32; 3]>())?;
++        }
++        // log-luma, base, clarity, texture, sharpen, dark and chroma are independently retained.
++        let spatial_per_pixel = 6usize.checked_mul(std::mem::size_of::<f32>())?.checked_add(std::mem::size_of::<[f32; 3]>())?;
++        let additional = pixels.checked_mul(new_per_pixel.checked_add(spatial_per_pixel)?)?;
++        total = total.checked_add(additional)?;
++        Some(total)
+     }
+ 
+     /// Number of cached output sizes.
+@@ -391,6 +465,18 @@ impl StageCache {
+     }
+ }
+ 
++fn allocation_bytes(allocations: &[(usize, usize)]) -> Option<usize> {
++    let mut seen = Vec::new();
++    allocations.iter().try_fold(0usize, |total, &(identity, bytes)| {
++        if seen.contains(&identity) {
++            Some(total)
++        } else {
++            seen.push(identity);
++            total.checked_add(bytes)
++        }
++    })
++}
++
+ #[derive(Clone)]
+ struct CacheEntry {
+     src: Arc<Rgb32f>,
+@@ -752,7 +838,7 @@ fn render_impl(src: Src<'_>, info: &SourceInfo, s: &DevelopSettings, req: &Rende
          let image = deep.to_rgba8();
          let histogram = Histogram::of_srgb8(&image);
          lap("finish (deep)", &mut t);
@@ -741,7 +1451,7 @@ index 34bd402336fe6682be52a254fda253611ce9cfd2..d41a8ca84ffa9aee27350a50f6a814ed
      }
      let image = finish::finish(&prep, s, frame, info, req);
      lap("finish", &mut t);
-@@ -778,7 +789,7 @@ fn render_impl(src: Src<'_>, info: &SourceInfo, s: &DevelopSettings, req: &Rende
+@@ -778,7 +864,7 @@ fn render_impl(src: Src<'_>, info: &SourceInfo, s: &DevelopSettings, req: &Rende
          }
          lap("visualize hdr", &mut t);
      }
@@ -751,10 +1461,10 @@ index 34bd402336fe6682be52a254fda253611ce9cfd2..d41a8ca84ffa9aee27350a50f6a814ed
  
  /// The colour a colour-range mask would sample at normalized image point `p` (OkLab of the
 diff --git a/crates/pipeline/src/tests.rs b/crates/pipeline/src/tests.rs
-index f1229bd5690a6a163a60db82624358f31a973e2b..e16e5e0b8e0b2f142fcf127af77c9738f3356356 100644
+index f1229bd5690a6a163a60db82624358f31a973e2b..113070ed791b6fd41d8b395eee9f092ec28296cf 100644
 --- a/crates/pipeline/src/tests.rs
 +++ b/crates/pipeline/src/tests.rs
-@@ -14,12 +14,43 @@ fn scene() -> Rgb32f {
+@@ -14,12 +14,131 @@ fn scene() -> Rgb32f {
  #[test]
  fn default_render_is_sane() {
      let r = render(&scene(), &SourceInfo::default(), &DevelopSettings::default(), &RenderRequest::fit(240, 240));
@@ -766,6 +1476,94 @@ index f1229bd5690a6a163a60db82624358f31a973e2b..e16e5e0b8e0b2f142fcf127af77c9738
      assert!(r.histogram.total > 0);
  }
  
++#[test]
++fn stage_cache_counts_capacity_aliases_sharpen_and_chroma_once() {
++    use crate::{CacheEntry, StageCache, local};
++    use lightcraft_raster::Plane;
++    use std::sync::Arc;
++
++    let source = Arc::new(Rgb32f { width: 1, height: 1, data: Vec::with_capacity(4) });
++    let sampled = source.clone();
++    let lin = Arc::new(Rgb32f { width: 1, height: 1, data: Vec::with_capacity(5) });
++    let sharpen = Arc::new(Plane { width: 1, height: 1, data: Vec::with_capacity(6) });
++    let chroma = Arc::new(Rgb32f { width: 1, height: 1, data: Vec::with_capacity(7) });
++    let cache = StageCache::default();
++    cache.put(CacheEntry {
++        src: source.clone(),
++        geo: 1,
++        sampled,
++        lin: Some((1, lin)),
++        colour_noise: Some((
++            1,
++            crate::nrc_joint::JointNoise { model: local::NrcNoise { alpha: [0.1; 3], beta: [0.01; 3] }, ymax: [1.0; 3], tolerance: 0.5 },
++        )),
++        planes: local::Planes {
++            key: 1,
++            sharpen: Some(((0, lightcraft_develop::Process::LATEST), sharpen)),
++            chroma: Some((1, chroma)),
++            ..Default::default()
++        },
++    });
++
++    let expected = 4 * std::mem::size_of::<[f32; 3]>()
++        + 5 * std::mem::size_of::<[f32; 3]>()
++        + 6 * std::mem::size_of::<f32>()
++        + 7 * std::mem::size_of::<[f32; 3]>();
++    assert_eq!(cache.retained_bytes(), expected);
++    assert_eq!(cache.bytes(), expected, "an allocation aliased as a stage remains part of stage bytes");
++    assert_eq!(cache.host_allocations(true).iter().filter(|(id, _)| *id == Arc::as_ptr(&source) as usize).count(), 2);
++}
++
++#[test]
++fn cpu_admission_uses_keys_and_rejects_unbounded_requests() {
++    use crate::{StageCache, plan, render_cached};
++    use std::sync::Arc;
++
++    let source = Arc::new(Rgb32f::from_fn(48, 32, |_, _| [0.2; 3]));
++    let info = SourceInfo::default();
++    let req = RenderRequest::fit(48, 32);
++    let cache = StageCache::default();
++    let mut settings = DevelopSettings::default();
++    settings.detail.sharpen_amount = 70.0;
++    let first = plan(&source, &info, &settings, &req);
++    let first_pre_nr = first.pre_nr_key;
++    let first_noise = first.noise_key;
++    let first_lin = first.lin_key;
++    drop(first);
++    let fresh = StageCache::cpu_admission_bytes(&[], None, &source, &info, &settings, &req).unwrap();
++    assert!(fresh > source.data.capacity() * std::mem::size_of::<[f32; 3]>());
++    render_cached(&source, &info, &settings, &req, &cache);
++    let warm = StageCache::cpu_admission_bytes(&[&cache], Some(&cache), &source, &info, &settings, &req).unwrap();
++    assert!(warm >= cache.retained_bytes());
++
++    settings.detail.nr_luminance += 1.0;
++    let nr_changed = plan(&source, &info, &settings, &req);
++    assert_eq!(first_pre_nr, nr_changed.pre_nr_key, "pre-NR stages stay reusable across an NR adjustment");
++    assert_ne!(first_noise, nr_changed.noise_key);
++    assert!(StageCache::cpu_admission_bytes(&[&cache], Some(&cache), &source, &info, &settings, &req).unwrap() > warm);
++    assert_eq!(render_cached(&source, &info, &settings, &req, &cache).image, crate::render(&source, &info, &settings, &req).image);
++
++    settings = DevelopSettings::default();
++    settings.detail.sharpen_radius = 2.0;
++    let sharpen_changed = plan(&source, &info, &settings, &req);
++    assert_eq!(first_lin, sharpen_changed.lin_key, "sharpen only invalidates its plane");
++    let base_sigma = crate::local::sharpen_sigma(crate::local::sharpen_sigma_raw(&DevelopSettings::default(), 48.0, 48.0));
++    let changed_sigma = crate::local::sharpen_sigma(crate::local::sharpen_sigma_raw(&settings, 48.0, 48.0));
++    assert_ne!(
++        crate::local::sharpen_key(&DevelopSettings::default(), base_sigma),
++        crate::local::sharpen_key(&settings, changed_sigma),
++        "the sharpen cache key includes the changed radius"
++    );
++    assert_eq!(render_cached(&source, &info, &settings, &req, &cache).image, crate::render(&source, &info, &settings, &req).image);
++
++    let mut invalid_source = (*source).clone();
++    invalid_source.width = usize::MAX;
++    assert!(StageCache::cpu_admission_bytes(&[], None, &Arc::new(invalid_source), &info, &settings, &req).is_none());
++    let mut windowed = req;
++    windowed.window = Some(crate::PixelWindow { x: 0, y: 0, w: 1, h: 1 });
++    assert!(StageCache::cpu_admission_bytes(&[], None, &source, &info, &settings, &windowed).is_none());
++}
++
 +#[test]
 +fn cpu_deep_render_carries_the_geometry_plan() {
 +    let src = scene();
