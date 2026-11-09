@@ -16,7 +16,7 @@ from starlette.background import BackgroundTask
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend_logging import LogLevel, backend_logger
-from storage import (StorageInitializationError, initialize_storage, log_storage_failure,
+from storage import (WINDOWS_STORAGE, StorageInitializationError, initialize_storage, log_storage_failure,
                      validate_existing_database)
 from edit_state import InvalidEditState, validate_snapshot, has_non_default_recipe
 from edit_state import _recipe
@@ -502,6 +502,12 @@ async def save_asset_edit_state(asset_id: UUID, request: Request) -> dict:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/development-policy")
+def development_policy() -> dict[str, str]:
+    """Expose the startup-selected engine independently of its current availability."""
+    return {"engine": "lightcraft" if WINDOWS_STORAGE else "jpeg"}
 
 
 @app.get(

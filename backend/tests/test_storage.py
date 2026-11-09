@@ -34,6 +34,16 @@ def test_default_layout_has_one_internal_root():
     assert edit_store.DB_PATH == storage.DB_PATH
 
 
+def test_windows_development_policy_is_independent_of_native_state(monkeypatch):
+    monkeypatch.setattr(main, "WINDOWS_STORAGE", True)
+    assert main.development_policy() == {"engine": "lightcraft"}
+
+
+def test_docker_development_policy_keeps_jpeg_engine(monkeypatch):
+    monkeypatch.setattr(main, "WINDOWS_STORAGE", False)
+    assert main.development_policy() == {"engine": "jpeg"}
+
+
 @pytest.mark.parametrize("mountinfo,expected", [
     ("10 1 0:1 / / rw - overlay overlay rw\n", False),
     ("11 1 0:2 /host/genzoroom /genzoroom rw - ext4 /dev/sda rw\n", True),
