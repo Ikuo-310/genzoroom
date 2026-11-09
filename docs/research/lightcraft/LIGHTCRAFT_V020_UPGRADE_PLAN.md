@@ -1,3 +1,128 @@
+# LightCraft v0.20.0 統合計画 — 最小公開APIへの移行
+
+正式改訂：2026-11-10（Asia/Tokyo）。対象ブランチ：`feature/lightcraft-v020-port`。
+
+**本書前半の改訂計画を今後の実装方針とする。旧方針「Native内部契約の全面移植」は廃止し、既存Engineを利用する最小公開APIへの移行を採用する。** 後半の旧P0計画・技術調査・P1〜P4-A1の検証記録は履歴として保持する。旧P1〜P12の工程順・完了条件・必須metadata・全hunk移植を、新計画の完了条件へ引き継がない。
+
+本改訂は計画書のみの変更であり、Native／Backend／Frontendの実装、patch、manifest、EXE、receiptを変更した記録ではない。新工程はすべて未着手。
+
+## 改訂1. 目的・責任境界・不変条件
+
+GenzoRoomはLightCraftに現像パラメーターを渡し、Preview画像と現像成果物を受け取る。LightCraftはdecode、現像アルゴリズム、GPU／CPU実行、StageCache、メモリ管理、画像生成、Exportを所有する。接続アダプターは既存Engineへの呼出し、通信、基本入力・応答・成果物の検証を担当する。
+
+GenzoRoomはImmich連携、編集UI、要求の世代管理、Recipe／HistoryとUndo／Redo／Jump、STACK、Export Queue、生成fileの寿命と登録処理を所有する。Nativeのパラメーター解釈・現像計算をBackendへ複製しない。
+
+- 通常PreviewとExportは上流標準APIを優先する。Before／Draft／Region／Crop表示／WB／レンズ情報は、上流Engineの機能を呼ぶ最小限のMCP公開APIとして維持する。
+- **LightCraft更新前後の画質一致は要求しない。** 同じRecipeの色・階調・NR・シャープネスの変化を許容し、旧エンジン出力再現用の互換処理・比較テストは作らない。
+- 保存した操作状態の復元、History、Preview操作、Thumbnail、Export、Immich登録の機能的整合性は維持する。DB migrationや旧Recipe一括書換えを前提にしない。
+- RAW／JPEG等を受理するWindows Native経路を維持する。DockerのJPEG経路と独立DBは維持する。
+
+| 区分 | 正式tag | 固定commit |
+|---|---|---|
+| 現行稼働 | v0.18.1 | `57024f072c234e0c6c850e0940a261790f976575` |
+| 更新対象 | v0.20.0 | `192ff72923c39e6623f2c7ff67ab3a119deb8071` |
+
+未リリースmainは採用対象にしない。候補の正式採用までは現行manifest、v0.18.1 EXE／receipt、利用者の実行環境を維持する。
+
+## 改訂2. 最小公開APIと必要な結果
+
+既存のtool名・command経路を優先し、並行する別名APIを増やさない。下表は機能契約であり、新しいwire field名を確定するschemaではない。実装時に既存Backendとの対応を確認し、必須fieldを省略したまま旧capabilityを名乗らない。
+
+| 機能 | 公開する入力・結果 | 委譲先・制約 |
+|---|---|---|
+| 通常Whole Preview | photo、要求サイズ、画像、実寸法、要求に対応する識別情報 | 標準`render_photo`／`ui.render`／`Session::render_now`を優先。独自公開が必要な部分だけ補う |
+| Before | Before指定、実際のkindと実効Before識別情報、画像 | `Session::before_settings`、`build_job`のBefore設定・profile・source選択を利用 |
+| Draft／Full | 明示qualityと実適用品質 | `RenderJob::draft()`／標準Full。未対応値を拒否し、FullをDraftとして返さない |
+| Region | plan／render、仮想Full寸法、window、実画像、有効領域・対応識別情報 | `region_job`／`region_job_before`等を利用。内部samplingをGenzoRoomで実装しない |
+| Crop編集表示 | 未crop画像、編集対象cropと表示座標の対応 | `apply_crop=false`等の既存機能を利用。保存設定を表示のために変更しない |
+| WB | AWB／スポイト候補、対象settings・表示frameとの対応 | 上流WB処理を利用。候補取得と候補適用を分離し、読取要求では編集状態を変えない |
+| レンズ情報 | 写真metadata、実際の補正profile情報 | 読取queryのみ追加。補正計算・profile選択は上流が所有 |
+| Export | 凍結settingsと原本、標準Export引数、生成file情報 | 上流Exportへ委譲。Queue、成果物検証、metadata付与、Immich登録はGenzoRoom |
+
+共通検証は入力の基本型・範囲、operation success、photo／要求／世代の対応、quality／kind、実画像寸法、転送上限、原本保護、一時fileの後片付けを対象とする。settingsの未知fieldは保存・復元を妨げない範囲で保持する。現像内部の全field不変検証や内部cache keyの照合は必須にしない。
+
+### Geometryの公開範囲
+
+Frontendは次を使う。必要な情報を小さな描画結果として返し、GenzoRoomには内部Render Planの所有・再構成を持たせない。
+
+| field・情報 | 用途 |
+|---|---|
+| `geometryId` | Whole／Region／Beforeの対応とstale表示拒否 |
+| `nativeWidth`／`nativeHeight` | Fit／Zoom、要求密度、座標変換 |
+| `aspect` | 実際の表示座標系の比率 |
+| `fullWidth`／`fullHeight` | Whole bitmap／Region仮想Fullとの対応 |
+| `window` | Region配置。Wholeはnull |
+| Regionの`validRegion` | 有効部分の配置・採用 |
+| Crop編集表示のcrop・座標対応 | 未crop画像に対する編集overlay |
+
+根拠となる接続箇所は`frontend/src/rawWholePreview.ts`、`rawRegionOverlay.ts`、`rawCropDisplay.ts`、`useRawDocument.ts`。寸法だけからwarp・crop・samplingを推測して補完しない。必要ならNativeの実描画Frameから結果を取得する最小接点を残す。画像を生成した座標系との対応は必要だが、内部Plan全体のsidecar維持やGenzoRoomでの再planは要求しない。
+
+geometry identityはtone変更と座標変更を区別し、解像度変更とWhole／Region配置を扱えることを完了条件とする。settings全体のhashへの置換は採用しない。具体的な生成方法は上流の実結果に基づき実装工程で確定する。
+
+## 改訂3. StageCache・executionと既存成果の整理
+
+### StageCache
+
+GenzoRoom専用のCPU／GPU allocation列挙、capacity集計、固定budget、追加容量予約式、admission制御、`cpuBytes`／`gpuBytes`／`retainedBytes`／`budgetBytes`の必須応答を**削除対象**とする。GenzoRoomはRSS／VRAM上限の代替保証を設けない。上流StageCacheの保持・再利用は維持し、必要な接続層はcache owner・解放・失敗後の再利用防止に限定する。
+
+Cache OFFを維持する場合の意味は「接続層が中間StageCacheを保持しない」。上流source cache・GPU buffer poolを含む全cache停止とはしない。既存の固定budget設定・容量診断UIは整理対象。変更はNativeとBackend／Frontendを整合させて行う。
+
+### GPU execution
+
+GPU成功／未試行／CPU fallback詳細はPreview／Region画像成立の必須契約から外す。取得できる情報は任意の診断とし、欠落時は不明と表示する。GPU設定からGPU成功を推定しない。画像成功・品質・kind・geometry・要求対応の検証は維持する。
+
+関連変更箇所：`backend/lightcraft_runtime.py`のcapability・引数、`lightcraft_raw.py`のmetadata／budget照合、`raw_region.py`のdiagnostics必須shape、`windows_raw_api.py`の応答、Frontendの`rawApi.ts`・Region契約・`rawDiagnostics.ts`・`RawPreviewDiagnostics.tsx`。詳細診断がない正常画像を拒否しない構成へ揃える。
+
+### P1〜P4-A1成果の扱い
+
+| 旧成果 | 新計画での扱い |
+|---|---|
+| P1 実描画Frameとの対応・試験 | UI座標に必要な最小接点と試験を再利用。全constructorのexecution sidecar等、診断専用変更は削除・縮小 |
+| P2 descriptor・座標試験 | UIのWhole／Region対応と解像度間整合の試験を再利用。内部Plan表現への依存を縮小 |
+| P3 allocation計量・admission | 削除対象。上流stage再利用、OFF解放、失敗後回復に必要な最小部分を抽出 |
+| P4-A1 source保持 | source_identity追随とcold WB学習保護を再利用候補として保持。通常render／acceptで足りる経路にpreflightを義務付けない |
+| P4-A2 | Before経路の調査完了・動作検証保留。実装完了とは扱わない |
+| P4-B1 | 未実装。旧方針のgeometry／execution必須化を再開条件にしない |
+
+現行正式patchはまだ変更していない。上記は将来候補patchの方針であり、既存成果を今回削除した意味ではない。既存の累積暫定patch・source snapshot・checkpointは追跡資料として保持する。
+
+## 改訂4. 実装順序と機能単位の完了条件
+
+新工程はN1〜N6とする。旧P工程のhunk数・完了扱いを新工程の進捗へ換算しない。工程を細分化するのは具体的な依存や検証上の阻害がある場合に限る。
+
+| 工程 | 依存 | 変更範囲・動く機能 | 完了条件 |
+|---|---|---|---|
+| N1 通常Wholeの簡素化 | なし | 最小応答契約、標準Preview接続、独自admission・必須execution／容量metadataの整理をNativeとadapterへ一体反映 | After／Full画像を既存UIで表示。入力・PNG・要求対応・必要なgeometryを検証し、詳細診断なしでも正常採用。上流StageCache再利用を維持し、OFFで中間stageを解放。失敗後再描画可能 |
+| N2 Before／Draft | N1 | 既存EngineのBefore設定・profile／source選択、Draft公開、表示要求接続 | Before／AfterとDraft／Fullを正しく区別。切替・同写真再選択・cold WB metadata・保存状態不変をfocused検証 |
+| N3 Region | N1、比較表示はN2 | 既存Region API、最小geometry、Whole baseとRegion配置・要求管理 | Zoom／Pan、crop／rotate／flip、Before pair、stale拒否・失敗時Whole継続を確認。Full／window／PNG実寸と有効領域が整合 |
+| N4 Crop／WB／レンズ情報 | N1〜N3の必要な座標契約 | 薄いCrop表示・WB候補・レンズqueryをUIへ接続 | Crop編集、AWB／スポイト、レンズ情報表示が動作し、読取でsettings／Historyを変更しない。適用操作は通常の保存経路へ合流 |
+| N5 保存復元・Thumbnail・Immich Export | N2〜N4 | Recipe／History、nr_outliers省略の復元、標準Export・Queue・登録連携 | 保存／再open／Undo／Redo／Jump／Reset、Thumbnail、JPEG ExportとImmich登録・STACKの機能整合を確認。原本・save失敗保護を維持 |
+| N6 候補生成・受入・正式採用 | N1〜N5 | 最小patchの正式化、候補build／receipt、identity切替 | 固定sourceからclean適用・build、実EXEのschema／SHA／receipt、対象回帰とCPU／DX12・利用者受入を確認後に正式manifestを採用 |
+
+N1で取り除くのは独自計量と必須診断依存であり、cache再利用の性能機能を落として完了とはしない。通常renderの上流戻り値だけで必要なUI座標が得られない場合は、その結果取得に限る薄いNative追加を行う。N4の3機能は順次確認できるが、独立した多数の固定工程番号は設けない。
+
+各工程は変更したcrate／adapter／UIのfocused testと必要なcompile・型チェックで確認する。N1〜N4はNative入口から画像・結果を取得するfocused統合確認を含める。全suiteを毎工程で要求しない。N6は既存結果を再利用し、未検証境界と以後の変更を補う。
+
+## 改訂5. 性能の未検証事項と保護・成果物境界
+
+**独自admission削除後のlatency・RSS／VRAM・長時間挙動は未測定。性能維持やメモリ削減は未検証である。** 既存受入のcache適用時速度は上流stage再利用の価値を示すが、独自allocation計量そのものの必要性を証明しない。
+
+N1でcache再利用／OFFの操作応答を対象サイズで確認し、N3でWholeとRegionのcold／warm source取得・表示latencyを評価する。必要なRSS／VRAM観測はN6受入へ持ち越せるが、具体的なメモリ異常が出た場合は先に解消する。測定結果を理由なくGenzoRoom独自admissionの復活へ結び付けず、上流管理・保持寿命・公開呼出し方を先に調べる。旧画質比較は実施しない。
+
+- `RAW_ADAPTIVE_PREVIEW_DESIGN.md`の操作速度・cache受入記録と、`RAW_REGION_PREVIEW_DESIGN.md`のcold Plan約660ms／再Plan約0.25ms等は過去条件の実測として参照する。新構成の保証値にはしない。
+- Before profile切替、decoder／database lens identity変更、実RAW cold WB学習、保存状態不変、Geometry最小化後のWB／Crop座標はfocused検証が必要。
+- nr_outliers省略falseとRAW import default trueの機能的不整合はN5で扱う。旧履歴§8は技術根拠として参照し、旧P9の工程番号や全チェックを自動継承しない。
+- 作業はfeature branchと独立したNative作業source／targetで進め、未記録差分はReset／Cleanせず照合する。既存Native source差分、旧checkpoint、v0.18.1成果物を保護する。
+- 工程ごとに許可された変更だけをCommitし、累積候補patchとGit管理外snapshot／checkpointに固定upstream・source hash・patch hash・検証結果・残件を記録する。Commit／Pushは各タスクの明示許可に従う。
+- N6までruntimeが候補EXEを採用しない状態を維持する。途中sourceを正式`build.py`検証へ合わせるために検証を緩めたり、仮receiptを作ったりしない。
+- N6で最終patchをclean sourceへ適用して候補を生成し、実EXEのschema・応答・SHA-256／receipt・manifest整合を検証する。正式採用と必要なFrontend identity更新は一体で行う。実環境の操作はそのタスクの許可範囲で行う。
+
+---
+
+# 履歴：旧P0計画・技術調査・実装検証記録
+
+**以下は旧方針の履歴であり、今後の実装指示・完了基準ではない。** 「決定」「必須」「未着手」「P4以降」の記述は当時の状態を示す。実際の完了記録は末尾のP4-A1と既存checkpointを参照し、現在の方針・順序・完了条件は上記改訂1〜5を正本とする。旧本文は技術根拠と追跡性のため保持する。
+
 # LightCraft v0.20.0 追随・実装分割計画（P0）
 
 作成日：2026-11-09（Asia/Tokyo）。対象：GenzoRoom `main`から作成した`feature/lightcraft-v020-port`。状態：**P0の調査・設計完了。P1（GPU／CPU結果・execution）とP2（Geometry descriptor 2）は実装・focused検証済み。P3以降は未着手**。
