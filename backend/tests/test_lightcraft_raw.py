@@ -110,6 +110,8 @@ class RawProcess(FakeProcess):
         self.before_supported = False
         self.before_wrong_kind = False
         self.adaptive_supported = False
+        self.frame_supported = False
+        self.frame_fault = None
         self.execution = None
         self.preview_arguments = []
         self.preview_error_code = None
@@ -126,6 +128,9 @@ class RawProcess(FakeProcess):
 
     def respond(self, message):
         if message["method"] == "tools/list":
+            if self.frame_supported:
+                return reply(self.stdout, message, {"tools": [{"name": "render_preview", "inputSchema": {
+                    "properties": {"include_frame": {"type": "boolean"}}}}]})
             if self.adaptive_supported:
                 return reply(self.stdout, message, {"tools": [{"name": "render_preview", "inputSchema": {"properties": {
                     "before": {"type": "boolean"}, "quality": {"type": "string", "enum": ["draft", "full"]},
@@ -161,6 +166,14 @@ class RawProcess(FakeProcess):
                                         "kind": "after" if self.before_wrong_kind else "before",
                                         "beforeFingerprint": "b" * 16, "effectiveBeforeFingerprint": "e" * 16,
                                         "geometry": {name: settings.get(name) for name in ("crop", "orientation")}}
+                            result["content"][1]["text"] = json.dumps(metadata)
+                        if args.get("include_frame"):
+                            metadata = json.loads(result["content"][1]["text"])
+                            if self.frame_fault != "missing":
+                                metadata["frame"] = {"geometryId": "a" * 64, "nativeWidth": 6000,
+                                    "nativeHeight": 4500, "aspect": 4 / 3,
+                                    "fullWidth": 15 if self.frame_fault == "size" else 16,
+                                    "fullHeight": 12, "window": None}
                             result["content"][1]["text"] = json.dumps(metadata)
                         if self.bad_image:
                             result["content"][0]["data"] = "broken"
@@ -1357,4 +1370,60 @@ def test_invalid_process_or_schema_never_silently_converts_to_v1(tmp_path, parti
             assert len(children[0].commands) == before
         finally:
             await raw.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("quality", [None, "full"])
+@pytest.mark.parametrize("fault", [None, "size", "missing"])
+def test_frame_only_whole_preview_uses_native_frame_without_adaptive_contract(tmp_path, fault, quality):
+    async def run():
+        raw, manager, children, files = await create(tmp_path)
+        try:
+            child = children[0]
+            child.frame_supported = True
+            child.frame_fault = fault
+            handle, initial = await raw.open_raw("pixel", files[0])
+            assert await manager._raw_frame_supported(handle.generation)
+            assert not await manager._raw_preview_supported(handle.generation)
+            with pytest.raises(LightCraftError, match="raw_preview_unsupported"):
+                await manager._raw_preview(handle.generation, 1, 1024, timeout=1, quality="draft")
+            ticket = raw.request_preview(handle, initial.revision, quality=quality)
+            if fault:
+                with pytest.raises(LightCraftError, match="lightcraft_invalid_preview"):
+                    await ticket
+            else:
+                frame = await ticket
+                assert frame.data.startswith(b"\x89PNG\r\n\x1a\n")
+                assert (frame.width, frame.height) == (16, 12)
+                assert frame.frame["geometryId"] == "a" * 64
+                assert frame.frame["fullWidth"] == frame.width
+                assert frame.frame["fullHeight"] == frame.height
+                assert child.preview_arguments[-1] == {"id": 1, "max_side": 1024, "format": "png", "include_frame": True}
+                assert not any(k in child.preview_arguments[-1] for k in ("quality", "preview_contract", "stage_cache"))
+        finally:
+            await raw.close()
+            await manager.close()
+    asyncio.run(run())
+
+
+def test_frame_only_preview_discards_stale_response(tmp_path):
+    async def run():
+        raw, manager, children, files = await create(tmp_path)
+        try:
+            child = children[0]
+            child.frame_supported = True
+            handle, settings = await raw.open_raw("pixel", files[0])
+            child.gate = asyncio.Event()
+            old = raw.request_preview(handle, settings.revision, quality="full")
+            await child.render_started.wait()
+            latest = raw.request_preview(handle, settings.revision, quality="full")
+            child.gate.set()
+            assert await old is SUPERSEDED
+            frame = await latest
+            assert frame.sequence == latest.sequence
+            assert frame.frame["geometryId"] == "a" * 64
+            assert child.max_inflight == 1
+        finally:
+            await raw.close()
+            await manager.close()
     asyncio.run(run())

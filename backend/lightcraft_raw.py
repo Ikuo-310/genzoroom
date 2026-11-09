@@ -372,7 +372,7 @@ def _source_info(value):
         raise LightCraftError("raw_source_unavailable") from None
 
 
-def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=None, geometry=None, quality=None):
+def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=None, geometry=None, quality=None, frame_only=False):
     try:
         content = result["content"]
         if len(content) != 2 or any(not isinstance(c, dict) for c in content):
@@ -393,9 +393,11 @@ def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=N
             allowed |= {"kind", "beforeFingerprint", "effectiveBeforeFingerprint", "geometry"}
         elif isinstance(metadata, dict) and "kind" in metadata:
             allowed.add("kind")
-        if quality is not None:
+        if frame_only:
+            allowed.add("frame")
+        elif quality is not None:
             allowed |= {"kind", "previewContract", "quality", "mode", "frame", "stageCache"}
-        if quality is not None and isinstance(metadata, dict) and "execution" in metadata:
+        if not frame_only and quality is not None and isinstance(metadata, dict) and "execution" in metadata:
             allowed.add("execution")
             execution = metadata["execution"]
             if not isinstance(execution, dict) or set(execution) != {"outcome", "backend", "reason"} or not (
@@ -416,15 +418,18 @@ def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=N
                 or _object_json(metadata["geometry"], MAX_METADATA_BYTES) != _object_json(geometry, MAX_METADATA_BYTES)):
             raise ValueError()
         w, h = metadata["width"], metadata["height"]
-        if quality is not None:
-            frame, cache = metadata["frame"], metadata["stageCache"]
-            if type(metadata["previewContract"]) is not int or metadata["previewContract"] != 1 or \
-                    metadata["quality"] != quality or metadata["mode"] != "whole" or \
-                    not isinstance(frame, dict) or set(frame) != {"geometryId", "nativeWidth", "nativeHeight", "aspect", "fullWidth", "fullHeight", "window"} or \
+        if frame_only or quality is not None:
+            frame = metadata["frame"]
+            if not isinstance(frame, dict) or set(frame) != {"geometryId", "nativeWidth", "nativeHeight", "aspect", "fullWidth", "fullHeight", "window"} or \
                     not isinstance(frame["geometryId"], str) or not re.fullmatch(r"[a-f0-9]{64}", frame["geometryId"]) or \
                     any(type(frame[k]) is not int or not 0 < frame[k] <= 2**31 - 1 for k in ("nativeWidth", "nativeHeight", "fullWidth", "fullHeight")) or \
                     type(frame["aspect"]) not in (int, float) or not math.isfinite(frame["aspect"]) or frame["aspect"] <= 0 or \
-                    (frame["fullWidth"], frame["fullHeight"]) != (w, h) or frame["window"] is not None or \
+                    (frame["fullWidth"], frame["fullHeight"]) != (w, h) or frame["window"] is not None:
+                raise ValueError()
+        if not frame_only and quality is not None:
+            cache = metadata["stageCache"]
+            if type(metadata["previewContract"]) is not int or metadata["previewContract"] != 1 or \
+                    metadata["quality"] != quality or metadata["mode"] != "whole" or \
                     not isinstance(cache, dict) or set(cache) != {"mode", "applied", "reason", "cpuBytes", "gpuBytes", "retainedBytes", "budgetBytes"} or \
                     cache["mode"] not in ("off", "on") or type(cache["applied"]) is not bool or cache["reason"] not in ("none", "budget") or \
                     any(type(cache[k]) is not int or not 0 <= cache[k] <= 2**53 - 1 for k in ("cpuBytes", "gpuBytes", "retainedBytes", "budgetBytes")) or \
@@ -464,7 +469,7 @@ def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=N
                 opened.verify()
             with Image.open(io.BytesIO(raw)) as opened:
                 opened.load()
-        return (raw, w, h, metadata) if quality is not None else (raw, w, h)
+        return (raw, w, h, metadata) if quality is not None or frame_only else (raw, w, h)
     except Exception:
         # Never retain a Pillow/upstream exception (or its image/path-bearing traceback).
         raise LightCraftError("lightcraft_invalid_preview") from None
@@ -2008,8 +2013,8 @@ class LightCraftRawSession:
         except LightCraftError:
             return False
 
-    async def _image(self, result, photo_id, max_side, kind="after", before_fingerprint=None, geometry=None, quality=None, *, _validation_job=None):
-        args = (quality,) if quality is not None else ()
+    async def _image(self, result, photo_id, max_side, kind="after", before_fingerprint=None, geometry=None, quality=None, *, _validation_job=None, frame_only=False):
+        args = (quality, True) if frame_only else (quality,) if quality is not None else ()
         function, parameters = _validation_job or (_validate_png, (result, photo_id, max_side, kind, before_fingerprint, geometry, *args))
         _, future = _thread_job(function, *parameters)
         self._validation = future
@@ -2085,6 +2090,12 @@ class LightCraftRawSession:
                             args['crop_edit'] = {'settings_fingerprint':fingerprint, 'request_id':request_id}
                             crop_expected = {'requestId':request_id,'settingsFingerprint':fingerprint,
                                              'canonicalGeometry':self._before_geometry(photo)}
+                        # The frame-only contract is independent of the older Adaptive capability.
+                        frame_only = (ticket.region_operation is None and crop_expected is None
+                                      and ticket.kind == "after" and ticket.quality == "full"
+                                      and await self.manager._raw_frame_supported(self._generation))
+                        if frame_only:
+                            args = {"include_frame": True}
                         native_started = monotonic()
                         try:
                             if ticket.region_operation is not None:
@@ -2140,12 +2151,12 @@ class LightCraftRawSession:
                     else:
                         image = await self._image(result, photo.photo_id, ticket.max_side, ticket.kind,
                                               photo.before_fingerprint, geometry,
-                                              *([ticket.quality] if ticket.adaptive else []))
+                                              *([ticket.quality] if ticket.adaptive and not frame_only else []), frame_only=frame_only)
                     validation_ms = (monotonic() - validation_started) * 1000
                     del result
                     data, w, h = image[:3]
-                    metadata = image[3] if ticket.adaptive else None
-                    if metadata and (metadata["stageCache"]["mode"] != self._stage_mode or
+                    metadata = image[3] if ticket.adaptive or frame_only else None
+                    if metadata and not frame_only and (metadata["stageCache"]["mode"] != self._stage_mode or
                             self._stage_mode == "on" and metadata["stageCache"]["budgetBytes"] != self._stage_budget):
                         raise LightCraftError("lightcraft_invalid_preview")
                     self._preview_trials += 1
@@ -2161,7 +2172,7 @@ class LightCraftRawSession:
                         execution=metadata.get("execution") if metadata else None,
                         pngSha256=digest,
                         nativeMs=native_ms, validationMs=validation_ms,
-                        width=w, height=h, payloadBytes=len(data), stageCache=metadata["stageCache"] if metadata else None)
+                        width=w, height=h, payloadBytes=len(data), stageCache=metadata.get("stageCache") if metadata else None)
                     if metadata and metadata.get("execution", {}).get("outcome") == "cpu_fallback":
                         lightcraft_log("preview.gpuFallback", level="warn", generation=self._generation,
                             revision=ticket.revision, sequence=ticket.sequence, configuredBackend=self.manager._gpu_backend,
@@ -2174,7 +2185,7 @@ class LightCraftRawSession:
                                              _frame_json=json.dumps(metadata["frame"]) if metadata else None,
                                              _metrics_json=json.dumps({"nativeMs": native_ms,
                                                  "validationMs": validation_ms,
-                                                 "pngSha256": digest, "stageCache": metadata["stageCache"],
+                                                 "pngSha256": digest, **({"stageCache": metadata["stageCache"]} if "stageCache" in metadata else {}),
                                                  **({"execution": metadata["execution"]} if "execution" in metadata else {})})
                                                  if self._diagnostics and metadata else None,
                                              interaction_id=ticket.interaction_id,

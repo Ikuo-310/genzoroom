@@ -59,6 +59,7 @@ class _Session:
     temp_lock: threading.Lock = field(default_factory=threading.Lock)
     before_preview: bool | None = None
     adaptive_preview: bool | None = None
+    whole_frame: bool | None = None
     region_preview: bool | None = None
     white_balance: bool | None = None
 
@@ -629,6 +630,22 @@ class LightCraftManager:
                     and props["stage_cache_budget_bytes"].get("type") == "integer")
         return session.adaptive_preview
 
+    async def _raw_frame_supported(self, generation):
+        session = self._raw_session(generation)
+        if session.whole_frame is None:
+            result = await session.client.request("tools/list", timeout=self._timeouts.request)
+            self._check_raw_session(session)
+            tools = result.get("tools", []) if isinstance(result, dict) else []
+            session.whole_frame = any(
+                isinstance(tool, dict) and tool.get("name") == "render_preview"
+                and isinstance(tool.get("inputSchema"), dict)
+                and isinstance(tool["inputSchema"].get("properties"), dict)
+                and isinstance(tool["inputSchema"]["properties"].get("include_frame"), dict)
+                and tool["inputSchema"]["properties"]["include_frame"].get("type") == "boolean"
+                for tool in (tools if isinstance(tools, list) else [])
+            )
+        return session.whole_frame
+
     async def _raw_region_supported(self, generation):
         from raw_region import supports_region
         session = self._raw_session(generation)
@@ -665,12 +682,16 @@ class LightCraftManager:
                     lightcraft_log('region.tempCleanupFailed', level='warn', generation=generation, errorCode=error.code)
 
     async def _raw_preview(self, generation, photo_id, max_side, *, timeout, before=False,
-                           quality=None, stage_cache="off", stage_cache_budget_bytes=None, crop_edit=None):
+                           quality=None, stage_cache="off", stage_cache_budget_bytes=None, crop_edit=None, include_frame=False):
         session = self._raw_session(generation)
         if before and not await self._raw_before_supported(generation):
             raise LightCraftError("raw_before_unsupported")
         options = {}
-        if quality is not None:
+        if include_frame:
+            if before or crop_edit is not None or quality not in (None, "full") or not await self._raw_frame_supported(generation):
+                raise LightCraftError("raw_preview_unsupported")
+            options["include_frame"] = True
+        elif quality is not None:
             if not await self._raw_preview_supported(generation):
                 raise LightCraftError("raw_preview_unsupported")
             options = {"quality": quality, "preview_contract": 1, "stage_cache": stage_cache}

@@ -4,7 +4,7 @@
 
 **本書前半の改訂計画を今後の実装方針とする。旧方針「Native内部契約の全面移植」は廃止し、既存Engineを利用する最小公開APIへの移行を採用する。** 後半の旧P0計画・技術調査・P1〜P4-A1の検証記録は履歴として保持する。旧P1〜P12の工程順・完了条件・必須metadata・全hunk移植を、新計画の完了条件へ引き継がない。
 
-本改訂は計画書のみの変更であり、Native／Backend／Frontendの実装、patch、manifest、EXE、receiptを変更した記録ではない。新工程はすべて未着手。
+本改訂は計画書のみの変更であり、Native／Backend／Frontendの実装、patch、manifest、EXE、receiptを変更した記録ではない。N1の途中段階としてN1-1a／N1-1bを実施。N1全体とN2以降は未完了。
 
 ## 改訂1. 目的・責任境界・不変条件
 
@@ -102,6 +102,12 @@ GPU成功／未試行／CPU fallback詳細はPreview／Region画像成立の必�
 N1で取り除くのは独自計量と必須診断依存であり、cache再利用の性能機能を落として完了とはしない。通常renderの上流戻り値だけで必要なUI座標が得られない場合は、その結果取得に限る薄いNative追加を行う。N4の3機能は順次確認できるが、独立した多数の固定工程番号は設けない。
 
 各工程は変更したcrate／adapter／UIのfocused testと必要なcompile・型チェックで確認する。N1〜N4はNative入口から画像・結果を取得するfocused統合確認を含める。全suiteを毎工程で要求しない。N6は既存結果を再利用し、未検証境界と以後の変更を補う。
+
+### N1-1b 実施記録：Backend Whole Frame受信
+
+N1-1aは標準`render_preview`／`render_photo`に任意`include_frame`を追加し、同一`render_now()`結果のFrameからmetadataを返す。N1-1bではBackendが`render_preview`のschemaで`include_frame: boolean`を独立検出し、対応Nativeへの通常Whole After／Full要求に指定する。従来のAdaptive capability判定は変更しない。Frameのみの応答はPNG・photo ID・Frameの型／範囲・画像寸法との一致を検証し、`stageCache`／`execution`詳細を要求しない。旧Nativeには従来経路を使う。要求世代・revision・stale拒否は既存経路を利用する。
+
+MCP模擬のfocused testで正常PNG／Frame、Frame欠落・実寸不一致の拒否、Adaptive非対応とDraft拒否、stale応答の破棄を確認。旧Adaptiveのサイズ・execution検証等もfocused regressionで確認した。v0.20.0実EXE、Frontend表示、Before／Draft／Region、詳細cache整理は未検証・後続。N1-1bはBackend接続の限定完了でありN1全体の完了を意味しない。
 
 ## 改訂5. 性能の未検証事項と保護・成果物境界
 
