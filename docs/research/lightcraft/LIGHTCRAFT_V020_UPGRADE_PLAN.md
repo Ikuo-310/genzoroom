@@ -1,6 +1,6 @@
 # LightCraft v0.20.0 追随・実装分割計画（P0）
 
-作成日：2026-11-09（Asia/Tokyo）。対象：GenzoRoom `main`から作成した`feature/lightcraft-v020-port`。状態：**P0の調査・設計完了。P1は本branchで実装・focused検証済み。P2以降は未着手**。
+作成日：2026-11-09（Asia/Tokyo）。対象：GenzoRoom `main`から作成した`feature/lightcraft-v020-port`。状態：**P0の調査・設計完了。P1（GPU／CPU結果・execution）とP2（Geometry descriptor 2）は実装・focused検証済み。P3以降は未着手**。
 
 ## 1. 目的・対象バージョン・確定方針
 

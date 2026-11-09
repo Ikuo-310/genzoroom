@@ -1,3 +1,15 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index fd19f6812655726ab8f6f32d8eee1778d9b0ba92..5e28fc471f1430d4b0b8faae6d613ea444f66e66 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -3885,6 +3885,7 @@ dependencies = [
+  "lightcraft-raster",
+  "log",
+  "serde_json",
++ "sha2",
+ ]
+ 
+ [[package]]
 diff --git a/crates/engine/src/media/quick.rs b/crates/engine/src/media/quick.rs
 index f7163b069322c239488aca24d1bc09c48f0eb2b9..2d35d99720a1688b914e9f0b4c503ce908434bf3 100644
 --- a/crates/engine/src/media/quick.rs
@@ -386,6 +398,317 @@ index ee917570680e21c82128b65d6d271970f6e293c9..c84b03feaeaac16efca2bc3181202546
      // the per-pixel work never runs (a driver dropping a submission without an error): before
      // the fix this came back as a fully black image
      lightcraft_gpu::inject_fault(Fault::DropWork);
+diff --git a/crates/mcp/Cargo.toml b/crates/mcp/Cargo.toml
+index b05dae56ff5fccab298fc6dee10239ddd47ed4b9..2de01852f042f6d57040223c2e9764fdd4618fc1 100644
+--- a/crates/mcp/Cargo.toml
++++ b/crates/mcp/Cargo.toml
+@@ -13,4 +13,5 @@ lightcraft-engine = { workspace = true }
+ lightcraft-codecs = { workspace = true }
+ lightcraft-raster = { workspace = true }
+ serde_json = { workspace = true }
++sha2 = { workspace = true }
+ log = { workspace = true }
+diff --git a/crates/mcp/src/lib.rs b/crates/mcp/src/lib.rs
+index 4f9251bcba216893241308d83f9f92ea8fc8e204..b8ad1f05c83c18aa7862845369de07e0ebf77cc8 100644
+--- a/crates/mcp/src/lib.rs
++++ b/crates/mcp/src/lib.rs
+@@ -19,6 +19,8 @@
+ mod backend;
+ mod base64;
+ mod headless;
++#[allow(dead_code)] // P4/P5 connect the descriptor helpers to MCP handlers.
++mod preview;
+ mod server;
+ mod tools;
+ 
+diff --git a/crates/mcp/src/preview.rs b/crates/mcp/src/preview.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..62387c0c5f26263cff9493c650124a5e86fd7c69
+--- /dev/null
++++ b/crates/mcp/src/preview.rs
+@@ -0,0 +1,260 @@
++//! Canonical geometry metadata shared by the MCP preview and region contracts.
++use lightcraft_engine::pipeline::geometry::Frame;
++use serde_json::{Value, json};
++use sha2::{Digest, Sha256};
++
++pub(crate) const GEOMETRY_DESCRIPTOR_CONTRACT: u64 = 2;
++const GEOMETRY_SUBPIXELS_PER_PIXEL: f64 = 256.0;
++
++fn canonical_crop(frame: &Frame, original: (usize, usize)) -> (Value, f64) {
++    let (grid_w, grid_h) = if frame.orient.swaps_axes() { (original.1, original.0) } else { original };
++    let scale_x = grid_w as f64 * GEOMETRY_SUBPIXELS_PER_PIXEL;
++    let scale_y = grid_h as f64 * GEOMETRY_SUBPIXELS_PER_PIXEL;
++    let mut crop = frame.crop;
++    // Frame's constrained crop uses pixel-space tolerances; normalize subpixel solver noise across proxies.
++    let x0 = (crop.rect.x0 * scale_x).round() / scale_x;
++    let x1 = (crop.rect.x1 * scale_x).round() / scale_x;
++    if x0 < x1 {
++        crop.rect.x0 = x0;
++        crop.rect.x1 = x1;
++    }
++    let y0 = (crop.rect.y0 * scale_y).round() / scale_y;
++    let y1 = (crop.rect.y1 * scale_y).round() / scale_y;
++    if y0 < y1 {
++        crop.rect.y0 = y0;
++        crop.rect.y1 = y1;
++    }
++    let native_aspect = (crop.rect.width() * grid_w as f64) / (crop.rect.height() * grid_h as f64);
++    (json!(crop), native_aspect)
++}
++
++pub(crate) fn frame_metadata(frame: &Frame, original: (usize, usize), source: &str, width: usize, height: usize) -> Result<Value, &'static str> {
++    let (native_w, native_h) = frame.native_size_at(original.0, original.1).ok_or("preview_geometry_unavailable")?;
++    let (crop, native_aspect) = canonical_crop(frame, original);
++    let sampling_aspect = frame.aspect();
++    let mut coordinates = vec![frame.ow, frame.oh, frame.crop.angle, frame.crop.rect.x0, frame.crop.rect.y0, frame.crop.rect.x1, frame.crop.rect.y1];
++    if let Some(warp) = &frame.warp {
++        coordinates.extend([warp.w, warp.h, warp.k1, warp.lens_dist]);
++        coordinates.extend(warp.ca);
++        coordinates.extend(warp.persp.0);
++        if let Some(lens) = &warp.lens {
++            if let Some(lens_warp) = &lens.warp {
++                coordinates.extend([lens_warp.center.x, lens_warp.center.y, lens_warp.radius]);
++                coordinates.extend(lens_warp.planes.iter().flatten().copied());
++            }
++            for stage in lens.stages.iter().flatten() {
++                coordinates.extend([stage.center.x, stage.center.y, stage.radius]);
++                coordinates.extend(stage.planes.iter().flatten().copied());
++            }
++        }
++    }
++    if !sampling_aspect.is_finite()
++        || sampling_aspect <= 0.0
++        || !native_aspect.is_finite()
++        || native_aspect <= 0.0
++        || width == 0
++        || height == 0
++        || frame.src_w == 0
++        || frame.src_h == 0
++        || frame.fit(width, height) != (width, height)
++        || coordinates.iter().any(|value| !value.is_finite())
++    {
++        return Err("preview_geometry_mismatch");
++    }
++
++    // Gain-only vignetting does not move coordinates and must not invalidate the geometry identity.
++    let warp = frame.warp.as_ref().filter(|warp| warp.moves_pixels()).map(|warp| {
++        let mut lens = warp.lens;
++        if let Some(lens) = &mut lens {
++            lens.vignette = None;
++        }
++        json!({
++            "perspective": warp.persp,
++            "k1": warp.k1,
++            "ca": warp.ca,
++            "lens": if warp.lens_dist == 0.0 { None } else { lens },
++            "lensDist": warp.lens_dist
++        })
++    });
++    // Sampling dimensions validate this frame; canonical identity uses original-grid geometry.
++    let descriptor = json!({
++        "contract": GEOMETRY_DESCRIPTOR_CONTRACT,
++        "source": source,
++        "original": [original.0, original.1],
++        "nativeAspect": native_aspect,
++        "orientation": frame.orient,
++        "crop": crop,
++        "flip": [frame.flip_h, frame.flip_v],
++        "warp": warp
++    });
++    let bytes = serde_json::to_vec(&descriptor).map_err(|_| "preview_geometry_unavailable")?;
++    let geometry_id = format!("{:x}", Sha256::digest(bytes));
++    Ok(json!({
++        "geometryId": geometry_id,
++        "nativeWidth": native_w.round().max(1.0) as u64,
++        "nativeHeight": native_h.round().max(1.0) as u64,
++        "aspect": sampling_aspect,
++        "fullWidth": width,
++        "fullHeight": height,
++        "window": null
++    }))
++}
++
++#[cfg(test)]
++mod tests {
++    use lightcraft_engine::{
++        develop::{DevelopSettings, EmbeddedLens},
++        pipeline::geometry::Frame,
++    };
++    use serde_json::json;
++    use sha2::{Digest, Sha256};
++
++    use super::{canonical_crop, frame_metadata};
++
++    fn geometry_id(settings: &DevelopSettings, proxy: (usize, usize), original: (usize, usize)) -> String {
++        let frame = Frame::new(proxy.0, proxy.1, settings, true);
++        let (width, height) = frame.fit(2048, 2048);
++        frame_metadata(&frame, original, "source-one", width, height).unwrap()["geometryId"].as_str().unwrap().to_owned()
++    }
++
++    #[test]
++    fn native_size_uses_original_grid_and_orientation() {
++        let original = (4064, 3056);
++        for orientation in ["Normal", "Rotate90", "Rotate180", "Rotate270"] {
++            let settings = DevelopSettings::default().merged(&json!({"orientation":orientation})).unwrap();
++            let frame = Frame::new(2560, 1925, &settings, true);
++            let expected = if frame.orient.swaps_axes() { (3056.0, 4064.0) } else { (4064.0, 3056.0) };
++            assert_eq!(frame.native_size_at(original.0, original.1), Some(expected));
++            assert_eq!(frame.native_size_at(0, original.1), None);
++            assert_eq!(frame.native_size_at(original.0, 0), None);
++        }
++        let cropped = DevelopSettings::default().merged(&json!({"crop":{"geometry":{"rect":{"x0":0.125,"y0":0.2,"x1":0.875,"y1":0.9}}}})).unwrap();
++        let frame = Frame::new(2560, 1925, &cropped, true);
++        assert_eq!(frame.native_size_at(original.0, original.1), Some((3048.0, 2139.2)));
++
++        let settings = DevelopSettings::default();
++        let frame = Frame::new(2560, 1925, &settings, true).window(2048, 1539, lightcraft_engine::pipeline::PixelWindow { x: 0, y: 0, w: 64, h: 64 });
++        assert_eq!(frame.native_size_at(original.0, original.1), None);
++    }
++
++    #[test]
++    fn descriptor_keeps_native_aspect_across_rounded_proxy_sampling() {
++        let original = (4064, 3056);
++        let mut expected_id = None;
++        for proxy in [(508, 382), (2032, 1528), (2560, 1925), original] {
++            let frame = Frame::new(proxy.0, proxy.1, &DevelopSettings::default(), true);
++            let (native_w, native_h) = frame.native_size_at(original.0, original.1).unwrap();
++            assert_eq!((native_w, native_h), (4064.0, 3056.0));
++            let (width, height) = frame.fit(2048, 2048);
++            let metadata = frame_metadata(&frame, original, "source-one", width, height).unwrap();
++            let (crop, native_aspect) = canonical_crop(&frame, original);
++            let descriptor = json!({
++                "contract": 2,
++                "source": "source-one",
++                "original": [4064, 3056],
++                "nativeAspect": native_aspect,
++                "orientation": frame.orient,
++                "crop": crop,
++                "flip": [false, false],
++                "warp": null
++            });
++            let calculated_id = format!("{:x}", Sha256::digest(serde_json::to_vec(&descriptor).unwrap()));
++            assert_eq!(metadata["geometryId"], calculated_id);
++            assert_eq!(metadata["nativeWidth"], 4064);
++            assert_eq!(metadata["nativeHeight"], 3056);
++            assert_eq!(metadata["aspect"], frame.aspect());
++            if proxy == (2560, 1925) {
++                assert_ne!(frame.src_w as f64 / frame.src_h as f64, native_w / native_h);
++            } else {
++                assert_eq!(frame.src_w as f64 / frame.src_h as f64, native_w / native_h);
++            }
++            if let Some(expected_id) = &expected_id {
++                assert_eq!(&metadata["geometryId"], expected_id);
++            } else {
++                expected_id = Some(metadata["geometryId"].clone());
++            }
++        }
++        let cropped = DevelopSettings::default()
++            .merged(&json!({
++                "orientation":"Rotate90",
++                "crop":{"geometry":{"angle":7.0,"rect":{"x0":0.125,"y0":0.2,"x1":0.875,"y1":0.9}}}
++            }))
++            .unwrap();
++        assert_eq!(
++            geometry_id(&cropped, (2560, 1925), original),
++            geometry_id(&cropped, original, original),
++            "crop, straighten, and orientation resolve on the original grid across proxy sizes"
++        );
++    }
++
++    #[test]
++    fn descriptor_tracks_geometry_but_ignores_tone_and_gain_edits() {
++        let base = DevelopSettings::default();
++        let initial = geometry_id(&base, (2560, 1925), (4064, 3056));
++        for patch in [
++            json!({"crop":{"geometry":{"rect":{"x0":0.1,"y0":0.2,"x1":0.9,"y1":0.8}}}}),
++            json!({"crop":{"geometry":{"angle":7.0}}}),
++            json!({"orientation":"Rotate90"}),
++            json!({"crop":{"flip_h":true}}),
++            json!({"crop":{"flip_v":true}}),
++            json!({"geometry":{"vertical":12.0}}),
++            json!({"geometry":{"horizontal":9.0}}),
++            json!({"geometry":{"rotate":4.0}}),
++            json!({"optics":{"distortion":20.0}}),
++            json!({"optics":{"ca_red":3.0,"ca_blue":-2.0}}),
++        ] {
++            let changed = base.merged(&patch).unwrap();
++            assert_ne!(initial, geometry_id(&changed, (2560, 1925), (4064, 3056)), "{patch}");
++        }
++        for patch in [
++            json!({"light":{"exposure":1.0,"contrast":15.0,"highlights":-20.0,"shadows":30.0}}),
++            json!({"wb":{"mode":"custom","temp":5000.0,"tint":12.0}}),
++            json!({"color":{"saturation":20.0}}),
++            json!({"optics":{"vignetting":30.0}}),
++        ] {
++            let changed = base.merged(&patch).unwrap();
++            assert_eq!(initial, geometry_id(&changed, (2560, 1925), (4064, 3056)), "{patch}");
++        }
++    }
++
++    #[test]
++    fn descriptor_includes_lens_warp_but_excludes_lens_vignetting() {
++        let base = DevelopSettings::default();
++        let mut lens: EmbeddedLens = serde_json::from_value(json!({
++            "warp": {
++                "center": {"x": 0.5, "y": 0.5},
++                "radius": 0.7,
++                "planes": [
++                    [1.0, 0.02, 0.0, 0.0, 0.0, 0.0],
++                    [1.0, 0.02, 0.0, 0.0, 0.0, 0.0],
++                    [1.0, 0.02, 0.0, 0.0, 0.0, 0.0]
++                ]
++            }
++        }))
++        .unwrap();
++        let enabled = base.merged(&json!({"optics":{"lens_profile":true}})).unwrap();
++        let warped_id = geometry_id_with_lens(&enabled, (2560, 1925), (4064, 3056), Some(&lens));
++        let plain_id = geometry_id_with_lens(&enabled, (2560, 1925), (4064, 3056), None);
++        assert_ne!(warped_id, plain_id);
++        assert_eq!(warped_id, geometry_id_with_lens(&enabled, (4064, 3056), (4064, 3056), Some(&lens)));
++        lens.vignette = Some(Default::default());
++        assert_eq!(warped_id, geometry_id_with_lens(&enabled, (2560, 1925), (4064, 3056), Some(&lens)));
++    }
++
++    fn geometry_id_with_lens(settings: &DevelopSettings, proxy: (usize, usize), original: (usize, usize), lens: Option<&EmbeddedLens>) -> String {
++        let frame = Frame::with_lens(proxy.0, proxy.1, settings, true, lens);
++        let (width, height) = frame.fit(2048, 2048);
++        frame_metadata(&frame, original, "source-one", width, height).unwrap()["geometryId"].as_str().unwrap().to_owned()
++    }
++
++    #[test]
++    fn malformed_frame_metadata_is_rejected() {
++        let settings = DevelopSettings::default();
++        let mut frame = Frame::new(2560, 1925, &settings, true);
++        frame.crop.angle = f64::NAN;
++        assert_eq!(frame_metadata(&frame, (4064, 3056), "source-one", 2048, 1539), Err("preview_geometry_mismatch"));
++        let frame = Frame::new(2560, 1925, &settings, true);
++        assert_eq!(frame_metadata(&frame, (4064, 3056), "source-one", 0, 1539), Err("preview_geometry_mismatch"));
++        assert_eq!(frame_metadata(&frame, (4064, 3056), "source-one", 2048, 1538), Err("preview_geometry_mismatch"));
++    }
++}
+diff --git a/crates/pipeline/src/geometry.rs b/crates/pipeline/src/geometry.rs
+index 5d8a07489a81ea3a77564450beccbf7fcb431932..8b827bf0fe9498bb8e86275010064b093733c8e3 100644
+--- a/crates/pipeline/src/geometry.rs
++++ b/crates/pipeline/src/geometry.rs
+@@ -206,6 +206,17 @@ impl Frame {
+         (r.width(), r.height())
+     }
+ 
++    /// Resolve the crop on the original's EXIF-oriented pixel grid, independent of proxy sampling.
++    pub fn native_size_at(&self, original_w: usize, original_h: usize) -> Option<(f64, f64)> {
++        if original_w == 0 || original_h == 0 || self.view.is_some() {
++            return None;
++        }
++        let (w, h) = if self.orient.swaps_axes() { (original_h, original_w) } else { (original_w, original_h) };
++        let rect = self.crop.rect_px(w as f64, h as f64);
++        let size = (rect.width(), rect.height());
++        (size.0.is_finite() && size.1.is_finite() && size.0 > 0.0 && size.1 > 0.0).then_some(size)
++    }
++
+     pub fn fit(&self, max_w: usize, max_h: usize) -> (usize, usize) {
+         let a = self.aspect();
+         let (mw, mh) = (max_w.max(1) as f64, max_h.max(1) as f64);
 diff --git a/crates/pipeline/src/lib.rs b/crates/pipeline/src/lib.rs
 index 34bd402336fe6682be52a254fda253611ce9cfd2..d41a8ca84ffa9aee27350a50f6a814edf76f6bcf 100644
 --- a/crates/pipeline/src/lib.rs
