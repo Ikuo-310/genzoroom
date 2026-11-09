@@ -447,3 +447,13 @@ P12の正式採用までは候補manifestをruntimeへ読み込ませず、ユ�
 P0は上記2タグのidentity、対象ソース、現行29ファイル69 hunk＋0003の割当、build.pyと関連研究・architectureの契約を確認した。patch適用・生成、Native／製品コード変更、build、test、バイナリ実行／差替え、receipt発行、稼働環境操作は行わない。
 
 文書完成時にhunk表の69件対応、工程依存、ローカルリンク、許可2文書だけのstage、`git diff --check`／`git diff --cached --check`を確認する。これはP1以降の実装合格記録ではない。
+
+## P4-A1 検証確定記録
+
+P4をP4-A1（StagePool metadata・Preview source保持の既存実装確定）、P4-A2（Before設定・profile選択）、P4-A3（C1残条件のfocused検証）へ分割する。P4-A1はC1全体の完了ではない。各小工程は検証済み累積暫定patchと本計画をCommit／Pushする。P5以降の番号・方針は維持する。P4-BはWhole MCP公開接続と関連focused test、P4-Cは統合e2eと必要な修正を担当する。
+
+P4-A1ではStagePoolの対象slot・budget・applied整合と、Session::accept_preview_sourceのsource_identity照合・WB学習前の保持抑制を確定した。Engineの既存focused test 1件、StagePool 2件が成功（失敗・skip 0）。Engine／MCP test compileとCLI checkはlocked/offline、target-v020-portで成功。formatの初回不一致は整形のみで修正し再確認した。clean固定sourceへapply --check／適用に成功し、全累積sourceは改行正規化後一致、適用後diff --check成功。Windows core.autocrlfによる物理改行差とpatch内context空白警告はソース不具合と区別する。
+
+decoder／database lens変更時、実RAWのWB学習、実際の再選択とSettings／History／選択不変性のfixture実証は未完了。今回のEngine testは同一photoのjob再作成・Loaded再利用・stale identity拒否を確認した範囲であり、これら未実証条件を保証したとは扱わない。Before追加実装、MCP Whole接続、実EXE／DX12受入は後続へ残す。
+
+累積patch SHA-256: `d8e7dbcceed4e7088f0fbc9d09c7c727bfc03e1ee70e5a916b566e9f2e14ccb6`。checkpoint: `.tmp/lightcraft-v020-state/P4-A1/CHECKPOINT.md`。

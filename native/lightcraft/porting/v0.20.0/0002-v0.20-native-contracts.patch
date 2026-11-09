@@ -111,8 +111,42 @@ index bd8ee5292f08b345aa6386687a9f9b6d28b615af..fc4de0526e42832ee262002f523292a4
      (rendered, fallback)
  }
  
+diff --git a/crates/engine/src/media/session.rs b/crates/engine/src/media/session.rs
+index 4bf40bbf5719b6faa2919902d932d835b5e2e090..0cc1f71cc7e0d62262bf6f02713ff39689f65207 100644
+--- a/crates/engine/src/media/session.rs
++++ b/crates/engine/src/media/session.rs
+@@ -516,6 +516,29 @@ impl crate::Session {
+         }
+     }
+ 
++    /// Retain a source decoded during preview preflight only while it still identifies this photo.
++    /// A cold RAW decode must pass through `accept` once so its decoder WB facts are learned.
++    pub fn accept_preview_source(&mut self, job: &RenderJob, source: super::source::DecodedSource) -> bool {
++        let Some(photo) = self.catalog.photo(job.photo) else { return false };
++        if job.source_key != Some(super::quick::source_identity(photo)) {
++            return false;
++        }
++        let needs_wb = source.info.as_ref().is_some_and(|info| {
++            info.raw
++                && !info.relative_wb
++                && photo.develops_raw()
++                && !photo.relative_wb()
++                && info.as_shot_temp.is_finite()
++                && info.as_shot_tint.is_finite()
++                && photo.as_shot_wb != Some((info.as_shot_temp, info.as_shot_tint))
++        });
++        if needs_wb {
++            return false;
++        }
++        self.media.insert_source(job.photo, job.level, source);
++        true
++    }
++
+     /// Record the as-shot white balance a decode of photo `id`'s file read (`info`) when the catalog has another:
+     /// a raw imported before its camera's matrices gave it a Kelvin scale keeps 6500 / 0 (the relative scale's
+     /// reference) until its file is next decoded (issue #730). Bookkeeping, not an undo step; the look does not
 diff --git a/crates/engine/src/media/tests.rs b/crates/engine/src/media/tests.rs
-index 4790a409b093ee67fa2c5ec5b7085b33e10ce87e..eb997fe74a3b9420cebce363a7a97a1ccdf77857 100644
+index 4790a409b093ee67fa2c5ec5b7085b33e10ce87e..b533cc7d1aa4f8363ab66abd8a8792a7d27d1fc9 100644
 --- a/crates/engine/src/media/tests.rs
 +++ b/crates/engine/src/media/tests.rs
 @@ -6,10 +6,14 @@ use super::*;
@@ -186,6 +220,28 @@ index 4790a409b093ee67fa2c5ec5b7085b33e10ce87e..eb997fe74a3b9420cebce363a7a97a1c
  #[test]
  fn renders_know_the_original_size_whichever_level_they_come_from() {
      // issue #960: noise reduction works in the original's pixels, so a grid cell drawn from the
+@@ -660,3 +711,21 @@ fn a_thumbnail_is_cut_from_the_decoded_full_source() {
+     let cached = s.media.get(p.id, SourceLevel::Thumb).unwrap();
+     assert_eq!((cached.width, cached.height), (512, 341), "a thumbnail-sized source is kept, not the full source");
+ }
++
++#[test]
++fn preview_source_preflight_is_identity_checked_and_reused_for_same_photo() {
++    let mut session = crate::Session::with_demo();
++    let id = session.active().unwrap();
++    let job = session.render_job(id, 64, 64, false, true).unwrap();
++    let source = super::source::DecodedSource::new(Arc::new(Rgb32f::from_fn(32, 24, |_, _| [0.2; 3])), None);
++    assert!(session.accept_preview_source(&job, source));
++    let repeated = session.render_job(id, 64, 64, false, true).unwrap();
++    assert!(matches!(repeated.source, SourceRef::Loaded(_)), "same photo reuses the accepted preview source");
++
++    let mut stale = session.render_job(id, 64, 64, false, true).unwrap();
++    stale.source_key = Some(Hasher128::new().str("stale source identity").finish());
++    let source = super::source::DecodedSource::new(Arc::new(Rgb32f::from_fn(32, 24, |_, _| [0.8; 3])), None);
++    assert!(!session.accept_preview_source(&stale, source));
++    let fresh = session.render_job(id, 64, 64, false, true).unwrap();
++    assert!(matches!(fresh.source, SourceRef::Loaded(_)), "rejected stale preflight did not replace the valid cache entry");
++}
 diff --git a/crates/engine/src/slide_title.rs b/crates/engine/src/slide_title.rs
 index 0acda876d12743f07c6028586373a9fadcc99d53..ea74a5f5a9546577dc8b8f24f31634c9daf21051 100644
 --- a/crates/engine/src/slide_title.rs
@@ -792,10 +848,10 @@ index 4f9251bcba216893241308d83f9f92ea8fc8e204..b8ad1f05c83c18aa7862845369de07e0
  
 diff --git a/crates/mcp/src/preview.rs b/crates/mcp/src/preview.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..53120b85df699a30db195d487436842a0ac2012a
+index 0000000000000000000000000000000000000000..62b4dd33e4e7aa98a6e2861f5169b1cadd756156
 --- /dev/null
 +++ b/crates/mcp/src/preview.rs
-@@ -0,0 +1,471 @@
+@@ -0,0 +1,477 @@
 +//! Canonical geometry metadata shared by the MCP preview and region contracts.
 +use lightcraft_engine::pipeline::geometry::Frame;
 +use lightcraft_engine::{
@@ -931,8 +987,10 @@ index 0000000000000000000000000000000000000000..53120b85df699a30db195d487436842a
 +        }
 +        let (cpu, gpu_bytes) = self.capacities().unwrap_or((usize::MAX, usize::MAX));
 +        let retained = cpu.checked_add(gpu_bytes).unwrap_or(usize::MAX);
-+        json!({"mode":if budget.is_some(){"on"}else{"off"},"applied":applied && retained <= limit,
-+            "reason":if budget.is_some() && (!applied || retained > limit) {"budget"} else {"none"},
++        // Admission alone is insufficient: finish may have evicted the current side.
++        let applied = applied && budget.is_some() && self.slots[side].is_some() && retained <= limit;
++        json!({"mode":if budget.is_some(){"on"}else{"off"},"applied":applied,
++            "reason":if budget.is_some() && !applied {"budget"} else {"none"},
 +            "cpuBytes":cpu,"gpuBytes":gpu_bytes,"retainedBytes":retained,"budgetBytes":limit})
 +    }
 +}
@@ -1228,7 +1286,9 @@ index 0000000000000000000000000000000000000000..53120b85df699a30db195d487436842a
 +        let combined = lightcraft_engine::gpu::stage_capacities(&[&after, &before]).unwrap().0;
 +        assert!(combined < after.retained_bytes() + before.retained_bytes(), "the pinned source allocation is shared");
 +
-+        assert_eq!(pool.finish(1, Some(1), true)["retainedBytes"], 0);
++        let evicted = pool.finish(1, Some(1), true);
++        assert_eq!(evicted["retainedBytes"], 0);
++        assert_eq!(evicted["applied"], false);
 +        assert!(pool.slots.iter().all(Option::is_none), "finish releases caches that exceed a lowered budget");
 +        let (rejected, accepted) = pool.prepare(0, "tiny-budget", Some(1), input(&source, &info, &settings, &request));
 +        assert!(rejected.is_none() && !accepted);
@@ -1256,6 +1316,8 @@ index 0000000000000000000000000000000000000000..53120b85df699a30db195d487436842a
 +        assert!(cache.len() > 0);
 +        pool.discard(0);
 +        assert!(pool.slots[0].is_none());
++        assert_eq!(pool.finish(0, Some(budget), true)["applied"], false);
++        assert_eq!(pool.finish(0, None, true)["applied"], false);
 +
 +        let (cache, accepted) = pool.prepare(0, "two", Some(budget), input(&source, &info, &settings, &request));
 +        assert!(accepted && cache.is_some());
