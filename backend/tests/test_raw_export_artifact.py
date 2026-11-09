@@ -91,20 +91,32 @@ def test_cyclic_ifd_rejected():
         extract_raw_metadata(bytes(raw))
 
 
-@pytest.mark.parametrize('mode', ['success', 'mismatch', 'failure', 'cancel', 'non_tiff', 'unreadable', 'source_match', 'source_mismatch', 'legacy_grading'])
-def test_isolated_session_cleanup(tmp_path, mode):
+@pytest.mark.parametrize('mode', ['success', 'mismatch', 'failure', 'cancel', 'non_tiff', 'unreadable', 'source_match', 'source_mismatch', 'legacy_grading', 'jpeg', 'jpeg_legacy_wb', 'dng_kelvin_wb', 'kelvin_mismatch'])
+def test_isolated_session_cleanup(tmp_path, mode, monkeypatch):
+    import raw_export_artifact as module
+    diagnostics = []
+    monkeypatch.setattr(module, 'lightcraft_log', lambda event, **context: diagnostics.append((event, context)))
     from raw_export_artifact import RawExportInput, export_raw_artifact
     settings = {'process': 5, 'test': 'saved', 'grading': {'shadows': {'hue': 240, 'sat': 25, 'lum': -4}, 'blending': 67, 'balance': -23}}
+    if mode in ('jpeg_legacy_wb', 'dng_kelvin_wb', 'kelvin_mismatch'):
+        scale = 'legacy' if mode == 'jpeg_legacy_wb' else 'kelvin'
+        settings['wb'] = {'mode': 'custom', 'temp': 6500, 'tint': 12, 'scale': scale}
     if mode == 'legacy_grading':
         settings.pop('grading')
     original_settings = copy.deepcopy(settings)
     native_settings = copy.deepcopy(settings)
+    if mode == 'kelvin_mismatch':
+        native_settings['wb']['scale'] = 'legacy'
     if mode == 'legacy_grading':
         from tests.test_lightcraft_raw import DEFAULT
         native_settings['grading'] = copy.deepcopy(DEFAULT['grading'])
     from raw_controls import with_legacy_curve_defaults, with_legacy_grading_defaults
     native_settings = with_legacy_curve_defaults(with_legacy_grading_defaults(native_settings))
+    if mode == 'jpeg_legacy_wb':
+        # Native serializes its default legacy scale as an omitted field.
+        native_settings['wb'].pop('scale')
     events = []
+    native_sequence = []
     class Owned:
         async def start(self):
             events.append('start')
@@ -117,12 +129,13 @@ def test_isolated_session_cleanup(tmp_path, mode):
         async def close(self):
             events.append('close')
         async def call_tool_result(self, name, args, **kwargs):
+            native_sequence.append(args.get('id', name) if name == 'command_run' else name)
             value = {}
             if name == 'command_run' and args['id'] == 'photo.inspect':
                 value = {'content_hash': 'different' if mode == 'source_mismatch' else 'expected'}
             if name == 'import':
                 assert Path(args['paths'][0]).is_file()
-                assert Path(args['paths'][0]).name == ('sample.CR3' if mode == 'non_tiff' else 'source.dng')
+                assert Path(args['paths'][0]).name == ('sample.CR3' if mode == 'non_tiff' else 'source.jpg' if mode in ('jpeg', 'jpeg_legacy_wb') else 'source.dng')
                 assert Path(args['paths'][0]).parent.parent.parent == tmp_path
                 if mode == 'unreadable':
                     from lightcraft_mcp import MCPToolError
@@ -146,26 +159,41 @@ def test_isolated_session_cleanup(tmp_path, mode):
         def diagnostic_manager(self, backend):
             assert backend == 'dx12'
             return Owned()
-    raw = b'unsupported metadata container' if mode == 'non_tiff' else source()
-    filename = 'sample.CR3' if mode == 'non_tiff' else 'source.dng'
+    raw = b'unsupported metadata container' if mode == 'non_tiff' else jpeg() if mode in ('jpeg', 'jpeg_legacy_wb') else source()
+    filename = 'sample.CR3' if mode == 'non_tiff' else 'source.jpg' if mode in ('jpeg', 'jpeg_legacy_wb') else 'source.dng'
     request = RawExportInput(raw, filename, (), settings, datetime.now(timezone.utc),
         expected_content_hash='expected' if mode in ('source_match','source_mismatch') else None)
     async def run():
         return await export_raw_artifact(request, manager=Manager(), temp_root=tmp_path)
-    if mode in ('success', 'non_tiff', 'source_match', 'legacy_grading'):
+    if mode in ('success', 'non_tiff', 'source_match', 'legacy_grading', 'jpeg', 'jpeg_legacy_wb', 'dng_kelvin_wb'):
         result = asyncio.run(run())
         assert result.filename == ('sample-Genzo01.jpg' if mode == 'non_tiff' else 'source-Genzo01.jpg')
         with Image.open(BytesIO(result.jpeg)) as image:
             assert image.getexif()[305] == 'GenzoRoom'
             assert image.getexif()[274] == 1
     else:
-        expected = asyncio.CancelledError if mode == 'cancel' else RawExportError if mode in ('mismatch', 'unreadable', 'source_mismatch') else RuntimeError
+        expected = asyncio.CancelledError if mode == 'cancel' else RawExportError if mode in ('mismatch', 'unreadable', 'source_mismatch', 'kelvin_mismatch') else RuntimeError
         with pytest.raises(expected):
             asyncio.run(run())
     assert events == ['start', 'close']
     assert not list(tmp_path.iterdir())
     assert settings == original_settings
     assert request.source == raw
+    if mode == 'mismatch':
+        failure = next(context for event, context in diagnostics if event == 'export.failed')
+        assert failure['phase'] == 'settings_validation_before_export'
+        assert failure['errorCode'] == 'raw_export_settings_mismatch'
+        assert failure['exceptionType'] == 'RawExportError'
+    if mode == 'failure':
+        failure = next(context for event, context in diagnostics if event == 'export.failed')
+        assert failure['phase'] == 'export' and failure['exceptionType'] == 'RuntimeError'
+        assert 'native failed' not in str(diagnostics)
+    if mode in ('jpeg_legacy_wb', 'dng_kelvin_wb'):
+        assert native_sequence[-5:] == ['develop.reset', 'develop.merge', 'get_develop', 'export', 'get_develop']
+        assert settings['wb']['scale'] == ('legacy' if mode == 'jpeg_legacy_wb' else 'kelvin')
+    if mode == 'kelvin_mismatch':
+        failure = next(context for event, context in diagnostics if event == 'export.failed')
+        assert failure['phase'] == 'settings_validation_before_export'
 
 
 @pytest.mark.parametrize('curve_case', ['legacy', 'master', 'red', 'green', 'blue', 'multiple', 'identity'])

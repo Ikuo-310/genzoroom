@@ -20,7 +20,7 @@ from raw_recipe_store import MAX_SETTINGS_BYTES
 from raw_controls import with_legacy_grading_defaults, with_legacy_curve_defaults
 import jpeg_metadata as metadata
 from lightcraft_runtime import LightCraftManager, lightcraft_log
-from lightcraft_mcp import MCPToolError
+from lightcraft_mcp import MCPToolError, LightCraftError
 
 
 MAX_RAW_BYTES = 512 * 1024 * 1024
@@ -32,6 +32,14 @@ class RawExportError(ValueError):
     def __init__(self, code):
         self.code = code
         super().__init__(code)
+
+
+def _export_comparison_settings(settings):
+    wb = settings.get("wb") if isinstance(settings, dict) else None
+    if type(wb) is not dict or "scale" in wb:
+        return settings
+    # Native omits its serde-default legacy scale; compare its semantic value, not serialization shape.
+    return {**settings, "wb": {**wb, "scale": "legacy"}}
 
 
 def extract_raw_metadata(source):
@@ -313,7 +321,8 @@ async def export_raw_artifact(request: RawExportInput, *, manager=None, temp_roo
         if len(encoded_settings.encode("utf-8")) > MAX_SETTINGS_BYTES:
             raise ValueError
         settings = json.loads(encoded_settings)
-        expected_settings = with_legacy_curve_defaults(with_legacy_grading_defaults(settings))
+        expected_settings = _export_comparison_settings(
+            with_legacy_curve_defaults(with_legacy_grading_defaults(settings)))
     except (TypeError, ValueError, RecursionError) as error:
         raise RawExportError("raw_export_invalid_settings") from error
     source = bytes(request.source)
@@ -324,6 +333,7 @@ async def export_raw_artifact(request: RawExportInput, *, manager=None, temp_roo
     owned = (manager or LightCraftManager()).diagnostic_manager(
         manager._gpu_backend if manager is not None else "dx12")
     lightcraft_log("export.started", sourceBytes=len(source))
+    phase = "prepare"
     try:
         with tempfile.TemporaryDirectory(prefix="genzoroom-raw-export-", dir=temp_root) as directory:
             input_directory = Path(directory) / "input"
@@ -332,6 +342,7 @@ async def export_raw_artifact(request: RawExportInput, *, manager=None, temp_roo
             output = Path(directory) / "output.jpg"
             original.write_bytes(source)
             try:
+                phase = "engine_start"
                 await owned.start()
                 async with asyncio.timeout(20):
                     while owned.status().state not in ("ready", "failed", "disabled"):
@@ -340,6 +351,8 @@ async def export_raw_artifact(request: RawExportInput, *, manager=None, temp_roo
                     raise RawExportError("raw_export_engine_unavailable")
                 client = owned._ready_client()
                 async def tool(name, arguments):
+                    nonlocal phase
+                    phase = arguments['id'] if name == 'command_run' else name
                     result = await client.call_tool_result(name, arguments, timeout=120)
                     if "structuredContent" in result:
                         return result["structuredContent"]
@@ -352,6 +365,7 @@ async def export_raw_artifact(request: RawExportInput, *, manager=None, temp_roo
                     imported = await tool("import", {"paths": [str(original)], "mode": "add"})
                 except MCPToolError as error:
                     raise RawExportError("raw_export_source_unreadable") from error
+                phase = "import_validation"
                 ids = imported.get("imported") if isinstance(imported, dict) else None
                 if not isinstance(ids, list) or len(ids) != 1 or type(ids[0]) is not int:
                     raise RawExportError("raw_export_invalid_import")
@@ -360,20 +374,27 @@ async def export_raw_artifact(request: RawExportInput, *, manager=None, temp_roo
                 if request.expected_content_hash is not None:
                     # Bind the frozen Recipe to its input; output byte determinism is unrelated.
                     info = await command("photo.inspect", {"id": photo})
+                    phase = "source_hash_validation"
                     if not isinstance(info, dict) or info.get("content_hash") != request.expected_content_hash:
                         raise RawExportError("raw_export_source_mismatch")
                 await command("develop.reset", {"ids": [photo]})
                 await command("develop.merge", {"settings": settings})
-                if await tool("get_develop", {"id": photo}) != expected_settings:
+                restored = await tool("get_develop", {"id": photo})
+                phase = "settings_validation_before_export"
+                if _export_comparison_settings(restored) != expected_settings:
                     raise RawExportError("raw_export_settings_mismatch")
                 result = await tool("export", {"id": photo, "path": str(output), "format": "jpeg", "longEdge": 0,
                     "quality": 95, "colorSpace": "srgb", "bitDepth": 8, "hdr": False, "sharpen": "none",
                     "metadata": "none", "addToPhotos": False})
+                phase = "output_file_validation"
                 if output.is_symlink() or not output.is_file() or output.stat().st_size > MAX_JPEG_BYTES:
                     raise RawExportError("raw_export_invalid_output")
                 jpeg = output.read_bytes()
-                if await tool("get_develop", {"id": photo}) != expected_settings:
+                restored = await tool("get_develop", {"id": photo})
+                phase = "settings_validation_after_export"
+                if _export_comparison_settings(restored) != expected_settings:
                     raise RawExportError("raw_export_settings_mismatch")
+                phase = "artifact_validation_metadata"
                 artifact = create_raw_export_artifact(source, jpeg, request.source_filename,
                     family_filenames, timestamp=request.timestamp,
                     expected_dimensions=(result.get("width"), result.get("height")))
@@ -383,8 +404,12 @@ async def export_raw_artifact(request: RawExportInput, *, manager=None, temp_roo
                 # Reap Native before deleting its source/output files, including cancellation.
                 await owned.close()
     except MCPToolError as error:
-        lightcraft_log("export.failed", level="error", errorCode="raw_export_native_failed")
+        lightcraft_log("export.failed", level="error", errorCode="raw_export_native_failed",
+                       phase=phase, exceptionType=type(error).__name__, nativeErrorCode=error.code)
         raise RawExportError("raw_export_native_failed") from error
-    except BaseException:
-        lightcraft_log("export.failed", level="error", errorCode="raw_export_failed")
+    except BaseException as error:
+        # Only local typed codes are safe; exception text and Native bodies may contain private paths.
+        code = error.code if isinstance(error, (RawExportError, LightCraftError)) else "raw_export_failed"
+        lightcraft_log("export.failed", level="error", errorCode=code,
+                       phase=phase, exceptionType=type(error).__name__)
         raise
