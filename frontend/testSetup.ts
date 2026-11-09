@@ -5,3 +5,9 @@ Object.defineProperty(globalThis, 'BroadcastChannel', {
   writable: true,
   value: undefined,
 });
+
+import { vi } from 'vitest';
+
+vi.mock('./src/useDevelopmentEngine', () => ({
+  useDevelopmentEngine: () => ({ engine: 'jpeg', loading: false }),
+}));

@@ -11,6 +11,7 @@ import { updateSetting } from './appSettings';
 import { DEVELOP_STATUS_FILTER_SESSION_KEYS, EDIT_STATUS_FILTER_SESSION_KEYS, PHOTO_FILTER_SESSION_KEYS,
   writeDevelopStatusFilterMode, writePhotoFilterMode } from './photoFilters';
 import i18n from './i18n';
+vi.mock('./useDevelopmentEngine', () => ({ useDevelopmentEngine: () => ({ engine: 'lightcraft', loading: false }) }));
 vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(),
   listExportQueue: async () => [] }));
 
@@ -20,7 +21,7 @@ vi.mock('./useDevelopmentExclusions', () => ({ useDevelopmentExclusions: () => (
 const api = vi.hoisted(() => ({ recent: vi.fn(), favorites: vi.fn(), statuses: vi.fn() }));
 vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>()),
   fetchRecentAssets: api.recent, fetchFavoriteAssets: api.favorites }));
-vi.mock('./editStateApi', async original => ({ ...(await original<typeof import('./editStateApi')>()), getAssetEditStatuses: api.statuses }));
+vi.mock('./editStateApi', async original => ({ ...(await original<typeof import('./editStateApi')>()), getRawAssetEditStatuses: api.statuses, getAssetEditStatuses: api.statuses }));
 
 const photos: RecentAsset[] = Array.from({ length: 4 }, (_, index) => ({ id: `photo-${index}`,
   filename: `photo-${index}`, date: '2026-09-01', thumbnail_url: `/thumb/${index}`,

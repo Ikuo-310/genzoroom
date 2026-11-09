@@ -10,6 +10,7 @@ import type { HomeTab } from './homeReturn';
 import { writeEditStatusFilterMode, writePhotoFilterMode, writeStackFilterMode } from './photoFilters';
 import { updateSetting } from './appSettings';
 import i18n from './i18n';
+vi.mock('./useDevelopmentEngine', () => ({ useDevelopmentEngine: () => ({ engine: 'lightcraft', loading: false }) }));
 
 vi.mock('./useDevelopmentExclusions', () => ({ useDevelopmentExclusions: () => ({
   stateFor: () => ({ target: null, excluded: false, known: true }), setExcluded: async () => {}, generation: 0, failure: null,

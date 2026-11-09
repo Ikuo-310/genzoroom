@@ -112,7 +112,26 @@ afterEach(() => { act(() => root.unmount()); host.remove(); sessionStorage.clear
   vi.unstubAllGlobals(); updateSetting('recentPhotoCount', 100); });
 
 describe('Home bulk edit status', () => {
+  it('keeps Docker RAW unedited even when JPEG status lookup fails', async () => {
+    api.recent.mockResolvedValue([assets[1]]);
+    api.statuses.mockRejectedValue(new Error('unavailable'));
+    await mount();
+    expect(api.rawStatuses).not.toHaveBeenCalled();
+    expect(host.querySelectorAll('.edited-badge')).toHaveLength(0);
+    changeEditFilter('edited');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(0);
+    changeEditFilter('unedited');
+    expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
+  });
+  it('does not query either edit engine before the development policy is available', async () => {
+    developmentPolicy.engine = null;
+    await mount();
+    expect(api.statuses).not.toHaveBeenCalled();
+    expect(api.rawStatuses).not.toHaveBeenCalled();
+  });
+
   it('uses the persisted RAW Recipe status in the existing badge and edited filter', async () => {
+    developmentPolicy.engine = 'lightcraft';
     const raw = assets[1];
     api.recent.mockResolvedValue([raw]);
     api.statuses.mockResolvedValue({ [raw.id]: false });
@@ -134,6 +153,7 @@ describe('Home bulk edit status', () => {
   });
 
   it('keeps RAW status acquisition failures unknown instead of filtering them as unedited', async () => {
+    developmentPolicy.engine = 'lightcraft';
     const raw = assets[1];
     api.recent.mockResolvedValue([raw]);
     api.statuses.mockResolvedValue({ [raw.id]: false });
@@ -289,6 +309,7 @@ describe('Home bulk edit status', () => {
   });
 
   it('keeps unknown edit statuses visible while the lookup is pending, then applies the filter', async () => {
+    developmentPolicy.engine = 'lightcraft';
     const waiting = deferred<Record<string, boolean | undefined>>();
     api.statuses.mockReturnValueOnce(waiting.promise);
     api.rawStatuses.mockReturnValueOnce(waiting.promise);
@@ -339,17 +360,19 @@ describe('Home bulk edit status', () => {
   });
 
   it('renders edited badges for a 150-photo Home list', async () => {
+    developmentPolicy.engine = 'lightcraft';
     const manyAssets = Array.from({ length: 150 }, (_, index) => ({ ...assets[index % assets.length],
       id: `large-${index}`, filename: `large-${index}.jpg` }));
     api.recent.mockResolvedValue(manyAssets);
     api.statuses.mockImplementation(async (ids: string[]) => Object.fromEntries(ids.map(id => [id, true])));
     await mount();
     expect(host.querySelectorAll('.photo-card')).toHaveLength(150);
-    expect(api.statuses.mock.calls.map(([ids]) => ids.length)).toEqual([100, 50]);
+    expect(api.rawStatuses.mock.calls.map(([ids]) => ids.length)).toEqual([100, 50]);
     expect(host.querySelectorAll('.edited-badge')).toHaveLength(150);
   });
 
   it('rechecks only service status and preserves a pending edit-status response', async () => {
+    developmentPolicy.engine = 'lightcraft';
     const waiting = deferred<Record<string, boolean>>();
     const recheck = deferred<Response>();
     let healthCalls = 0;
@@ -369,7 +392,8 @@ describe('Home bulk edit status', () => {
     });
     expect(host.querySelector<HTMLDetailsElement>('.connection-control')?.open).toBe(true);
     expect(retry.disabled).toBe(true);
-    expect(api.statuses).toHaveBeenCalledTimes(1);
+    expect(api.rawStatuses).toHaveBeenCalledTimes(1);
+    expect(api.statuses).not.toHaveBeenCalled();
     expect(api.recent).toHaveBeenCalledTimes(1);
     expect(host.querySelector('.photo-card')).not.toBeNull();
     await act(async () => recheck.resolve(new Response(JSON.stringify({ status: 'ok' }))));

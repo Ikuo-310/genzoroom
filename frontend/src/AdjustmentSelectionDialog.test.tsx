@@ -50,7 +50,7 @@ describe('adjustment selection dialog', () => {
     expect(ADJUSTMENT_IDS.every((id) => item(id).checked && !item(id).disabled)).toBe(true);
     expect(categories().every((input) => input.checked && !input.indeterminate)).toBe(true);
     expect(Array.from(host.querySelectorAll('h3')).map((heading) => heading.textContent)).toEqual(['Shadows', 'Midtones', 'Highlights']);
-    expect(host.querySelectorAll('input')).toHaveLength(20);
+    expect(host.querySelectorAll('input')).toHaveLength(19);
   });
   it('supports individual, category, all and zero-item selection with indeterminate feedback', () => {
     mount(); click(item('exposure'));
@@ -61,7 +61,7 @@ describe('adjustment selection dialog', () => {
     expect(categories()[1].indeterminate).toBe(false);
     click(categories()[1]);
     expect(BASIC_ADJUSTMENT_KEYS.every((id) => !item(id).checked)).toBe(true);
-    click(categories()[3]);
+    click(categories()[2]);
     expect(COLOR_GRADING_ADJUSTMENT_KEYS.every((id) => !item(id).checked)).toBe(true);
     click(button('Clear all'));
     expect(button('Copy').disabled).toBe(true);

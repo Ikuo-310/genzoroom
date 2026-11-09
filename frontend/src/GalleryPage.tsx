@@ -234,18 +234,15 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
           : null;
   const editStatusAssets = photoView?.state === 'ready' ? photoView.assets : [];
   const stackStatusIds = stackEditStatusIds(editStatusAssets);
-  const legacyRawStatusIds = [...new Set(editStatusAssets.flatMap(asset => [
-    ...(asset.is_raw ? [asset.id] : []), ...(asset.stackId ? asset.stackMemberIds ?? [] : []),
-    ...(asset.stackMembers ?? []).filter(member => member.is_raw).map(member => member.id),
-  ]))];
   const editStatusIds = active && developmentEngine === 'jpeg' ? stackStatusIds : [];
-  const rawEditStatusIds = active && usesLightcraft ? stackStatusIds
-    : active && developmentEngine === 'jpeg' ? legacyRawStatusIds : [];
-  const knownRawStatusIds = usesLightcraft ? rawEditStatusIds : developmentEngine === 'jpeg' ? editStatusAssets.flatMap(asset => [
+  const rawEditStatusIds = active && usesLightcraft ? stackStatusIds : [];
+  const knownRawStatusIds = developmentEngine === 'jpeg' ? editStatusAssets.flatMap(asset => [
       ...(asset.is_raw ? [asset.id] : []), ...(asset.stackMembers ?? []).filter(member => member.is_raw).map(member => member.id),
     ]) : [];
-  const editStatusSnapshot = useEditStatusesSnapshot(editStatusIds, rawEditStatusIds, 0, knownRawStatusIds);
-  const editStatuses = editStatusSnapshot.statuses;
+  const editStatusSnapshot = useEditStatusesSnapshot(editStatusIds, rawEditStatusIds);
+  // Docker RAW is uneditable even when JPEG status loading fails.
+  const editStatuses = { ...editStatusSnapshot.statuses,
+    ...Object.fromEntries(knownRawStatusIds.map(id => [id, false])), };
   const photoFilters = photoFiltersForMode('both');
   const viewKey = showStacks ? 'stacks' : showExport ? 'export' : homeViewKey(activeTab, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate, calendarMode);
   const galleryViewState = photoView?.state ?? (activeTab === 'albums' ? albumState : calendarState);

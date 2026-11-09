@@ -682,7 +682,8 @@ it.each([0, 10])('keeps ten %s-Stack targets confirmed through delayed initial r
     await act(async () => updateSetting('showKeyboardShortcuts', false));
   }
   expect(api.save.mock.calls.map(([target]) => target.id)).toEqual(samples.map(photo => photo.stackId ?? photo.id));
-});
+// Ten sequential saves and separate pending/completed rerenders exceed 5s under full-suite contention.
+}, 10000);
 
 it('matches four Stack successes and six single-Asset blocks when the Backend returns unknown for singles', async () => {
   const samples = librarySamples(4); api.photos.mockResolvedValue(samples);

@@ -8,6 +8,7 @@ import type { RecentAsset, WorkspaceNavigationState } from './assets';
 import type { HomeTab } from './homeReturn';
 import { writeEditStatusFilterMode, writePhotoFilterMode, writeStackFilterMode } from './photoFilters';
 import i18n from './i18n';
+vi.mock('./useDevelopmentEngine', () => ({ useDevelopmentEngine: () => ({ engine: 'lightcraft', loading: false }) }));
 import { makeGalleryStack } from './gallerySelectionTestHelpers';
 import { clearWorkspaceSession, rememberWorkspaceSession } from './workspaceResume';
 import { restoreGalleryStackSelectionsFromSession, setManualGalleryStackSelection } from './useGalleryStackSelections';
@@ -27,7 +28,7 @@ vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>
   fetchFavoriteAssets: api.favorites, fetchAlbums: api.albums, fetchCalendarMinYear: api.minYear,
   fetchCalendarHeatmap: api.heatmap }));
 vi.mock('./editStateApi', async original => ({ ...(await original<typeof import('./editStateApi')>()),
-  getRawAssetEditStatuses: (ids: string[], signal: AbortSignal) => api.statuses.getMockImplementation()!(ids, signal),
+  getRawAssetEditStatuses: (ids: string[], signal: AbortSignal) => api.statuses(ids, signal),
   getAssetEditStatuses: api.statuses }));
 
 function asset(id: string, isRaw = false): RecentAsset {

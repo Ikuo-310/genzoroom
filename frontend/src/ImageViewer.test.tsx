@@ -549,7 +549,7 @@ describe('Viewer edit settings context menu', () => {
     const pan = host.querySelector<HTMLElement>('.viewer-image-position')!.style.transform;
     key('keydown');
     expect(image.getAttribute('src')).toBe('blob:after');
-    expect(host.textContent).toContain('Preparing RAW Before');
+    expect(host.textContent).toContain('Preparing Before; showing After.');
     act(() => root.render(<RawComparisonHarness beforeSrc="blob:before" beforeStatus="ready" />));
     expect(host.querySelector('img')).toBe(image);
     expect(image.getAttribute('src')).toBe('blob:before');
@@ -559,7 +559,7 @@ describe('Viewer edit settings context menu', () => {
     expect(host.querySelector<HTMLElement>('.viewer-image-position')!.style.transform).toBe(pan);
     act(() => root.render(<RawComparisonHarness beforeStatus="error" />));
     expect(image.getAttribute('src')).toBe('blob:after');
-    expect(host.textContent).toContain('RAW Before could not be compared');
+    expect(host.textContent).toContain('Before could not be compared; showing After.');
     expect(mockImage.renders).toBe(renders);
     Object.defineProperty(image, 'naturalWidth', { configurable: true, value: 200 });
     Object.defineProperty(image, 'naturalHeight', { configurable: true, value: 100 });

@@ -8,6 +8,7 @@ import type { RecentAsset } from './assets';
 import { updateSetting } from './appSettings';
 import { writePhotoFilterMode } from './photoFilters';
 import i18n from './i18n';
+vi.mock('./useDevelopmentEngine', () => ({ useDevelopmentEngine: () => ({ engine: 'lightcraft', loading: false }) }));
 vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(),
   listExportQueue: async () => [] }));
 
@@ -18,7 +19,7 @@ const api = vi.hoisted(() => ({ recent: vi.fn(), albums: vi.fn(), albumAssets: v
 vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>()),
   fetchRecentAssets: api.recent, fetchAlbums: api.albums, fetchAlbumAssets: api.albumAssets }));
 vi.mock('./editStateApi', async original => ({ ...(await original<typeof import('./editStateApi')>()),
-  getAssetEditStatuses: api.statuses }));
+  getRawAssetEditStatuses: api.statuses, getAssetEditStatuses: api.statuses }));
 
 const albumA = { id: 'album-a', albumName: '車両整備関係', albumThumbnailAssetId: null, assetCount: 3,
   startDate: null, endDate: null };

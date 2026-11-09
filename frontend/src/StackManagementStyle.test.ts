@@ -129,7 +129,8 @@ it('keeps Gallery and Stack trash menu hover and keyboard focus dark above the g
   });
   const rule = (selector: string) => rules.find(item => typeof item.selectorText === 'string' && item.selectorText.split(',').map(part => part.trim()).includes(selector))?.style;
   const globalHover = rule('button:hover:not(:disabled)');
-  expect(globalHover?.background).toBe('#e3f0d6');
+  expect(globalHover).toBeUndefined();
+  expect(rule('.developer-page button:hover:not(:disabled)')?.background).toBe('#e3f0d6');
 
   for (const [selector, background] of [
     ['.stack-photo-context-menu .stack-photo-menu-row:not(:has(input:disabled)):hover', '#38383b'],
