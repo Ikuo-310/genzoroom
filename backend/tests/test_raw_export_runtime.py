@@ -7,6 +7,7 @@ import pytest
 import edit_store
 import raw_recipe_store as raw
 import export_runtime as runtime_module
+import storage
 from edit_store import enqueue_export_assets, list_export_queue
 from export_artifact import ExportArtifact
 from export_runtime import ExportRuntime, RegistrationResult
@@ -74,6 +75,48 @@ def test_optics_frozen_recipe_reaches_export_and_registrar(db):
     assert result.items[0].recipe['settings'] == saved
     assert result.items[0].status == 'succeeded'
     assert len(registrar.calls) == 1 and registrar.calls[0][1].jpeg == b'raw-jpeg'
+
+
+def test_windows_native_export_accepts_non_raw_immich_asset(db, monkeypatch):
+    monkeypatch.setattr(storage, "WINDOWS_STORAGE", True)
+    save_raw()
+    enqueue_export_assets([A])
+    registrar = Recorder()
+    async def artifact(request):
+        assert request.source_filename == "IMG.PNG"
+        return ExportArtifact("IMG-Genzo04.jpg", b"native-jpeg")
+    source = Source()
+    async def detail(asset_id):
+        value = await Source.detail(source, asset_id)
+        return value.model_copy(update={"format": "PNG", "is_raw": False, "filename": "IMG.PNG"})
+    source.detail = detail
+    async def run():
+        runtime = ExportRuntime(source=source, family=Family(), registrar=registrar, raw_artifact=artifact)
+        run_id = await runtime.start([A])
+        await runtime.wait()
+        return get_export_run(run_id)
+    result = asyncio.run(run())
+    assert result.items[0].status == "succeeded"
+    assert registrar.calls[0][1].jpeg == b"native-jpeg"
+
+
+def test_windows_recovery_fails_old_jpeg_processing_version_without_fallback(db, monkeypatch):
+    save_jpeg(A)
+    enqueue_export_assets([A])
+    previous = create_export_run([A], worker_id=uuid4())
+    monkeypatch.setattr(storage, "WINDOWS_STORAGE", True)
+    source = Source()
+    async def unexpected_detail(asset_id):
+        raise AssertionError("old JPEG run must not acquire or render its source")
+    source.detail = unexpected_detail
+    async def run():
+        runtime = ExportRuntime(source=source, family=Family(), registrar=Recorder())
+        assert await runtime.recover() == previous.run_id
+        await runtime.wait()
+        return get_export_run(previous.run_id)
+    result = asyncio.run(run())
+    assert result.items[0].status == "failed"
+    assert result.items[0].error_code == "unsupported_processing_version"
 
 
 def test_raw_eligibility_and_start_freeze(db):

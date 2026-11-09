@@ -69,6 +69,16 @@ class OriginalTests(unittest.TestCase):
                 self.assertEqual(stream.reads, 0)
         asyncio.run(run())
 
+    def test_native_original_does_not_filter_asset_format_or_response_mime(self):
+        async def run():
+            stream = TrackedStream()
+            original = await get_asset_original("http://immich", "secret", ASSET_ID,
+                transport=transport_for(stream, "photo.png", media_type="text/html"), allow_native=True)
+            self.assertEqual(stream.reads, 0)
+            self.assertEqual(sum([len(chunk) async for chunk in original.chunks()]), 3 * 65536)
+            self.assertTrue(stream.closed)
+        asyncio.run(run())
+
     def test_streams_without_reading_ahead_and_closes_on_partial_consumption(self):
         async def run():
             for filename in ("photo.jpeg", "PXL_RAW-01.COVER.jpg"):

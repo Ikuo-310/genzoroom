@@ -466,3 +466,23 @@ def test_legacy_missing_grading_defaults_do_not_create_an_edit(db, fingerprinted
     raw.append_raw_history(identity(), initialized['current']['revision'], uuid4(), current,
                            kind='control', metadata={'control': 'grading.blending'})
     assert raw.get_raw_saved_state(identity()['assetId'])['exportEligible'] is False
+
+
+def test_windows_export_and_edit_status_use_native_recipe_without_jpeg_fallback(db, monkeypatch):
+    from tests.test_export_queue import B, snapshot as jpeg_snapshot
+    from edit_store import QueueRejected, enqueue_export_assets
+
+    monkeypatch.setattr(storage, "WINDOWS_STORAGE", True)
+    asset_a = UUID(identity()["assetId"])
+    baseline = settings()
+    changed = copy.deepcopy(baseline)
+    changed["light"]["exposure"] = .75
+    save(value=changed, import_defaults_fingerprint=raw._digest(raw._settings_json(baseline, 1)))
+    edit_store.put_edit_state(asset_a, 0, uuid4(), jpeg_snapshot(asset_a, edited=True))
+    edit_store.put_edit_state(B, 0, uuid4(), jpeg_snapshot(B, edited=True))
+
+    assert edit_store.get_edit_statuses([asset_a, B]) == {str(asset_a): True, str(B): False}
+    queued = enqueue_export_assets([asset_a])
+    assert queued[0]["assetId"] == str(asset_a)
+    with pytest.raises(QueueRejected, match="asset_not_eligible"):
+        enqueue_export_assets([B])

@@ -847,10 +847,9 @@ class LightCraftRawSession:
         try:
             info = await self._command("photo.inspect", {"id": photo_id}, deadline)
             if not isinstance(info, dict) or type(info.get("id")) is not int or info["id"] != photo_id or \
-                    info.get("kind") != "raw" or info.get("preview_only") is not None or \
                     any(type(info.get(k)) is not int or info[k] <= 0 for k in ("width", "height")) or \
                     not isinstance(info.get("content_hash"), str) or not re.fullmatch(r"[0-9a-fA-F]{16,128}", info["content_hash"]):
-                raise LightCraftError("raw_unsupported_source")
+                raise LightCraftError("raw_invalid_import_response")
             if previous is not None and (previous.fingerprint != fingerprint or previous.content_hash != info["content_hash"]):
                 raise LightCraftError("raw_source_changed")
             handle = RawHandle(key, uuid.uuid4().hex, self._generation)
@@ -1579,7 +1578,7 @@ class LightCraftRawSession:
         async def estimate(current, deadline):
             nonlocal expected
             owner()
-            if not current.wb_auto or not current.wb_kelvin or 'color' in json.loads(original).get('disabled_sections', []):
+            if not current.wb_auto or 'color' in json.loads(original).get('disabled_sections', []):
                 raise LightCraftError('raw_wb_unavailable')
             lightcraft_log('raw.wb.started', level='info', generation=self._generation, revision=expected_revision)
             native = await self.manager._raw_native_settings(self._generation, current.photo_id, timeout=self._remaining(deadline))
@@ -1670,8 +1669,7 @@ class LightCraftRawSession:
         disabled = original.get("disabled_sections", [])
         needs_wb = (kind == "allReset" or kind == "sectionReset" and metadata["section"] == "color"
                     or kind == "controlReset" and metadata["control"].startswith("wb."))
-        if needs_wb and photo.as_shot_wb is None:
-            raise LightCraftError("raw_wb_unavailable")
+        reset_to_as_shot = needs_wb and photo.wb_kelvin and photo.as_shot_wb is not None
         if kind == "vignetteStyle":
             if original.get("vignette", {}).get("style") == metadata["style"]:
                 return self.confirmed_settings(handle, expected_revision)
@@ -1684,10 +1682,10 @@ class LightCraftRawSession:
         elif kind == "sectionToggle":
             commands = [("develop.sectionEnabled", metadata)]
         elif kind == "controlReset":
-            commands = [("develop.wb", {"mode": "asShot"})] if needs_wb else [("develop.resetControl", metadata)]
+            commands = [("develop.wb", {"mode": "asShot"})] if reset_to_as_shot else [("develop.resetControl", metadata)]
         else:
             commands = [("develop.reset", {"ids": [photo.photo_id]})] if kind == "allReset" else [("develop.resetSection", metadata)]
-            if needs_wb:
+            if reset_to_as_shot:
                 commands.append(("develop.wb", {"mode": "asShot"}))
             if kind == "allReset":
                 # An import look may carry bypass flags; preserve even an originally empty list.
@@ -1716,7 +1714,7 @@ class LightCraftRawSession:
                                  + ([] if metadata["enabled"] else [metadata["section"]])) if kind == "sectionToggle" else disabled
             if actual.get("disabled_sections", []) != expected_disabled:
                 raise LightCraftError("raw_operation_readback_mismatch")
-            if needs_wb:
+            if reset_to_as_shot:
                 wb = actual.get("wb", {})
                 temp, tint = photo.as_shot_wb
                 if any(wb.get(key) != value for key, value in
@@ -1737,7 +1735,7 @@ class LightCraftRawSession:
                 elif kind in ("opticsFlag", "opticsFlagReset"):
                     parent, key = control_location(expected, metadata["control"])
                     parent[key] = metadata.get("enabled", False)
-                elif needs_wb:
+                elif reset_to_as_shot:
                     expected["wb"].update(mode="asShot", temp=temp, tint=tint, scale="kelvin")
                 else:
                     parent, key = control_location(expected, metadata["control"])

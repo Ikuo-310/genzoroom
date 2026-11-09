@@ -216,13 +216,15 @@ def controls_state(snapshot):
                         if key not in ("profileHasDistortion", "profileHasVignetting")}
     public_lens_info["profileApplied"] = lens_applied
     curve_points = curve_readback(settings)
-    return {**geometry_state(settings), "values": values, "curve": curve_points, "opticsFlags": flags, "vignetteStyle": style, "wbAutoAvailable": snapshot.wb_auto and snapshot.wb_kelvin,
+    wb_scale = wb.get("scale", "legacy")
+    wb_available = wb_scale in ("kelvin", "legacy")
+    return {**geometry_state(settings), "values": values, "curve": curve_points, "opticsFlags": flags, "vignetteStyle": style, "wbAutoAvailable": snapshot.wb_auto and wb_available,
             "lensProfileInfo": public_lens_info,
             "sections": {section: section not in disabled for section in SETTINGS_SECTIONS},
             "controls": [dict(id=key, min=v[0], max=v[1], step=v[2], default=v[3], precision=v[4])
                                            for key, v in CONTROLS.items()],
-            "wb": {"available": snapshot.wb_kelvin and wb.get("scale") == "kelvin",
-                   "mode": wb.get("mode", "asShot"), "scale": wb.get("scale", "legacy")}, "process": settings["process"]}
+            "wb": {"available": wb_available,
+                   "mode": wb.get("mode", "asShot"), "scale": wb_scale}, "process": settings["process"]}
 
 
 def validate_controls(values, wb_available):

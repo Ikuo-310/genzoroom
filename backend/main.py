@@ -16,7 +16,7 @@ from starlette.background import BackgroundTask
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend_logging import LogLevel, backend_logger
-from storage import (WINDOWS_STORAGE, StorageInitializationError, initialize_storage, log_storage_failure,
+from storage import (development_engine, StorageInitializationError, initialize_storage, log_storage_failure,
                      validate_existing_database)
 from edit_state import InvalidEditState, validate_snapshot, has_non_default_recipe
 from edit_state import _recipe
@@ -507,7 +507,7 @@ def health() -> dict[str, str]:
 @app.get("/development-policy")
 def development_policy() -> dict[str, str]:
     """Expose the startup-selected engine independently of its current availability."""
-    return {"engine": "lightcraft" if WINDOWS_STORAGE else "jpeg"}
+    return {"engine": development_engine()}
 
 
 @app.get(
@@ -656,6 +656,8 @@ async def asset_thumbnail(asset_id: UUID) -> Response:
 
 async def generate_saved_thumbnail(asset_id, *, immich_url, api_key):
     detail = await get_asset_detail(immich_url, api_key, asset_id)
+    if development_engine() == "lightcraft" or detail.is_raw:
+        return await generate_thumbnail(asset_id, immich_url=immich_url, api_key=api_key, input_kind="raw")
     return await generate_thumbnail(asset_id, immich_url=immich_url, api_key=api_key,
                                     input_kind="raw" if detail.is_raw else "jpeg")
 
@@ -665,8 +667,8 @@ async def thumbnail_recipe_reason(asset_id):
         detail = await get_asset_detail(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"), asset_id)
     except ImmichRequestError as error:
         raise _upstream_error(error) from error
-    if detail.is_raw:
-        # A legacy JPEG-preview record must never authorize a known RAW's stale cache.
+    if development_engine() == "lightcraft" or detail.is_raw:
+        # Windows cache eligibility follows Native state regardless of Immich classification.
         state = await run_in_threadpool(get_raw_saved_state, asset_id)
         if state is None:
             return "recipe_missing"

@@ -403,7 +403,7 @@ def test_candidate_scale_is_applied_without_forcing_kelvin(local, tmp_path, monk
                 doc = await initialize(http, local)
                 children[0].wb_candidate['scale'] = 'legacy'
                 result = await operation(http, doc, 'operate', aw(doc))
-                assert result['wb']['scale'] == 'legacy' and not result['wb']['available']
+                assert result['wb']['scale'] == 'legacy' and result['wb']['available']
                 state = store.get_raw_history(api._history_identity)
                 assert state['recipe']['settings']['wb']['scale'] == 'legacy'
                 restored = await operation(http, result, 'undo')

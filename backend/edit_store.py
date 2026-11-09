@@ -324,6 +324,10 @@ def get_edit_state(asset_id: UUID) -> dict:
 
 
 def get_edit_statuses(asset_ids: list[UUID]) -> dict[str, bool]:
+    from storage import development_engine
+    if development_engine() == "lightcraft":
+        from raw_recipe_store import get_raw_edit_statuses
+        return {asset_id: status is True for asset_id, status in get_raw_edit_statuses(asset_ids).items()}
     result = {str(asset_id): False for asset_id in asset_ids}
     if not asset_ids:
         return result
@@ -436,6 +440,9 @@ def _export_saved_state(connection, asset_id):
     raw = select_raw_export_state(connection, asset_id)
     if raw is not None:
         return raw
+    from storage import development_engine
+    if development_engine() == "lightcraft":
+        return None
     saved = connection.execute("SELECT * FROM asset_edit_states WHERE asset_id=?", (str(asset_id),)).fetchone()
     return None if saved is None else _snapshot(saved, asset_id) | {"revision": saved["revision"]}
 

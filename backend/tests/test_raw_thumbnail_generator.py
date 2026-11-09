@@ -73,14 +73,14 @@ def test_saved_state_source_history_and_cache(db, tmp_path, monkeypatch, failure
             self.closed = True
     original = Original()
     async def detail(*a, **k):
-        return SimpleNamespace(is_raw=True, filename="arbitrary.PEF")
+        return SimpleNamespace(is_raw=False, filename="arbitrary.PNG")
     async def fetch(*a, **k):
-        assert k["allow_raw"] is True
+        assert k["allow_native"] is True
         return original
     async def render(asset, path, recipe, **kw):
         assert asset == ASSET and recipe == saved["recipe"]
         assert recipe["settings"]["grading"] == current["grading"]
-        assert path.read_bytes() == b"immutable RAW" and path.suffix == ".PEF"
+        assert path.read_bytes() == b"immutable RAW" and path.suffix == ".PNG"
         paths.append(path)
         if failure:
             raise ValueError("private failure")

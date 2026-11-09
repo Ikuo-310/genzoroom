@@ -147,8 +147,8 @@ def test_controls_readback_revision_and_preview(local, tmp_path, monkeypatch):
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("white,scale,available", [(None, "kelvin", False), ([5200., 6.], "legacy", False),
-                                                   ([5200., 6.], None, False), ([5200., 6.], "kelvin", True)])
+@pytest.mark.parametrize("white,scale,available", [(None, "kelvin", True), ([5200., 6.], "legacy", True),
+                                                   ([5200., 6.], None, True), ([5200., 6.], "kelvin", True)])
 def test_wb_capability_and_as_shot_custom_transition(local, tmp_path, monkeypatch, white, scale, available):
     monkeypatch.setitem(DEFAULT["wb"], "mode", "asShot")
     monkeypatch.setitem(DEFAULT["wb"], "scale", scale)

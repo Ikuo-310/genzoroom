@@ -159,7 +159,8 @@ def test_actual_adapter_render_preview_and_safe_release(local, tmp_path, monkeyp
                 assert set(doc) == {"handle", "assetId", "generation", "documentToken", "revision", "workspaceId",
                                     "recipeStatus", "recipeRevision", "settingsFingerprint", "recipeFingerprint",
                                     "importDefaultsFingerprint",
-                                    "mutationAttempts", "mutationLimit", "regenerationThreshold", "beforeKey"}
+                                    "mutationAttempts", "mutationLimit", "regenerationThreshold", "beforeKey",
+                                    "sourceWidth", "sourceHeight"}
                 assert doc["recipeStatus"] == "none" and doc["recipeRevision"] == 0
                 state = await http.get(f'/api/raw/documents/{doc["handle"]}', headers={"X-Raw-Workspace": workspace})
                 assert state.json()["revision"] == doc["revision"]
@@ -399,7 +400,7 @@ def test_failed_open_cleanup_blocks_reopen_until_explicit_release(local, tmp_pat
                         await close()
                 monkeypatch.setattr(cache, "_remove", blocked_remove)
                 if failure == "timeout": monkeypatch.setattr(cache, "close", short_close)
-                children[0].kind = "jpeg"
+                children[0].import_failure = True
                 failed = await http.post("/api/raw/documents", json={"workspaceId": workspace, "assetId": str(uuid4())})
                 assert failed.status_code in (409, 502)
                 assert "PRIVATE" not in failed.text
@@ -426,6 +427,7 @@ def test_failed_open_cleanup_blocks_reopen_until_explicit_release(local, tmp_pat
                 assert (await http.delete(f"/api/raw/workspaces/{workspace}")).status_code == 204
                 assert api._workspace_state == "empty" and not list(root.iterdir())
                 assert manager.status().generation == generation
+                children[0].import_failure = False
                 next_workspace, doc = await open_document(http)
                 assert next_workspace != workspace and doc["generation"] == generation
                 new_path = next(root.rglob("*.dng"))

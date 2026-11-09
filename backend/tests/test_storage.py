@@ -35,12 +35,12 @@ def test_default_layout_has_one_internal_root():
 
 
 def test_windows_development_policy_is_independent_of_native_state(monkeypatch):
-    monkeypatch.setattr(main, "WINDOWS_STORAGE", True)
+    monkeypatch.setattr(storage, "WINDOWS_STORAGE", True)
     assert main.development_policy() == {"engine": "lightcraft"}
 
 
 def test_docker_development_policy_keeps_jpeg_engine(monkeypatch):
-    monkeypatch.setattr(main, "WINDOWS_STORAGE", False)
+    monkeypatch.setattr(storage, "WINDOWS_STORAGE", False)
     assert main.development_policy() == {"engine": "jpeg"}
 
 

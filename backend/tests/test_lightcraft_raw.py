@@ -775,22 +775,37 @@ def test_reopen_rotates_token_and_reuses_photo_without_import(tmp_path):
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("mode,code", [("failed", "raw_import_failed"), ("partial", "raw_import_failed"),
-                                      ("jpeg", "raw_unsupported_source"), ("preview", "raw_unsupported_source")])
+@pytest.mark.parametrize("mode,code", [("failed", "raw_import_failed"), ("partial", "raw_import_failed")])
 def test_import_failures_and_raw_confirmation(tmp_path, mode, code):
     async def run():
         raw, manager, children, files = await create(tmp_path)
         child = children[0]
         child.import_failure = mode == "failed"
         child.partial_failure = mode == "partial"
-        child.kind = "jpeg" if mode == "jpeg" else "raw"
-        child.preview_only = "unsupported" if mode == "preview" else None
+        child.kind = "raw"
+        child.preview_only = None
         try:
             with pytest.raises(LightCraftError, match=code):
                 await raw.open_raw("raw", files[0])
             assert manager.status().state == "ready"
             if mode != "failed":
                 assert raw.status().state == "desynchronized"
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("kind,preview_only", [("image", None), ("raw", "embedded")])
+def test_native_image_and_preview_only_imports_are_accepted(tmp_path, kind, preview_only):
+    async def run():
+        raw, _, children, files = await create(tmp_path)
+        children[0].kind = kind
+        children[0].preview_only = preview_only
+        try:
+            handle, snapshot = await raw.open_raw("native-source", files[0])
+            assert snapshot.handle == handle
+            assert snapshot.revision == 1
+            assert raw.status().state == "synced"
         finally:
             await raw.close()
     asyncio.run(run())

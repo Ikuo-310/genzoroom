@@ -416,18 +416,18 @@ def test_operation_endpoint_rejects_unallowlisted_intent(local, tmp_path, monkey
     asyncio.run(run())
 
 
-def test_missing_as_shot_rejects_reset_without_guess_or_pending_save(local, tmp_path, monkeypatch):
+def test_missing_as_shot_uses_native_reset_without_blocking_wb_history(local, tmp_path, monkeypatch):
     async def run():
         api, _, children, _ = await setup(tmp_path, local, monkeypatch)
         try:
             async with client(local) as http:
                 doc = await open_history(http, local, api)
-                commands = list(children[0].commands)
                 for kind, metadata in [("controlReset", {"control": "wb.temp"}), ("controlReset", {"control": "wb.tint"}),
                                        ("sectionReset", {"section": "color"}), ("allReset", {})]:
                     response = await http.post(url(doc, "operate"), json=body(doc) | {"kind": kind, "metadata": metadata})
-                    assert response.status_code == 400 and response.json()["code"] == "raw_wb_unavailable"
-                    assert children[0].commands == commands and api._history_save["stage"] == "complete"
+                    assert response.status_code == 200, response.text
+                    doc = response.json()
+                    assert api._history_save["stage"] == "complete"
         finally:
             await api.close()
     asyncio.run(run())

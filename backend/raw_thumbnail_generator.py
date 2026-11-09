@@ -1,4 +1,4 @@
-"""Regenerable RAW display cache bytes; no editing, persistence or Export writes."""
+"""Regenerable Native display cache bytes; no editing, persistence or Export writes."""
 
 import asyncio
 from io import BytesIO
@@ -69,12 +69,10 @@ async def generate_raw_thumbnail(asset_id, *, immich_url, api_key, transport=Non
     try:
         recipe = await run_in_threadpool(_load_recipe, asset_id)
         detail = await get_asset_detail(immich_url, api_key, asset_id, transport=transport)
-        if not detail.is_raw:
-            raise ThumbnailGenerationError("raw_source_required")
         with tempfile.TemporaryDirectory(prefix="genzoroom-raw-thumbnail-") as directory:
             # Keep only the suffix for decoder hints; never use an upstream path or filename.
             source = Path(directory) / ("source" + Path(detail.filename).suffix)
-            original = await get_asset_original(immich_url, api_key, asset_id, transport=transport, allow_raw=True)
+            original = await get_asset_original(immich_url, api_key, asset_id, transport=transport, allow_native=True)
             try:
                 size = 0
                 with source.open("wb") as output:

@@ -12,7 +12,7 @@ from raw_recipe_store import RAW_EXPORT_PROCESSING_VERSION, validate_raw_recipe,
 
 
 ACTIVE_ITEM_STATUSES = frozenset(("waiting", "encoding", "registering"))
-FAILURE_CODES = frozenset(("source_fetch_failed", "source_not_jpeg", "source_kind_mismatch", "family_context_failed",
+FAILURE_CODES = frozenset(("source_fetch_failed", "source_not_jpeg", "source_kind_mismatch", "source_too_large", "unsupported_processing_version", "family_context_failed",
                            "encoding_failed", "registration_failed", "invalid_registration_result",
                            "invalid_jpeg", "not_jpeg", "invalid_icc_profile", "unsupported_jpeg_color_space",
                            "jpeg_encode_failed", "invalid_export_filename", "invalid_export_timestamp",

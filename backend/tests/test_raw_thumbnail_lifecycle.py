@@ -10,6 +10,7 @@ import pytest
 import edit_store
 import main
 import raw_recipe_store as store
+import storage
 from immich import ImmichThumbnail
 from thumbnail_cache import ThumbnailCache
 from thumbnail_lifecycle import mutate_raw_edits
@@ -26,6 +27,7 @@ from tests.test_raw_controls import identity as document_identity
 
 @pytest.fixture
 def lifecycle(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage, "WINDOWS_STORAGE", False)
     monkeypatch.setattr(edit_store, "DB_PATH", tmp_path / "edits.db")
     edit_store.initialize_database()
     cache = ThumbnailCache(tmp_path / "thumbnails")
@@ -88,6 +90,17 @@ def test_raw_post_only_queues_eligible_saved_state(lifecycle, kind, reason):
             assert cache.read(ASSET) == (None if reason else b"old")
             generate.assert_not_called()
     asyncio.run(run())
+
+
+def test_windows_thumbnail_dispatch_ignores_asset_raw_classification(lifecycle, monkeypatch):
+    _, _, _, _ = lifecycle
+    monkeypatch.setattr(storage, "WINDOWS_STORAGE", True)
+    monkeypatch.setattr(main, "get_asset_detail", AsyncMock(return_value=SimpleNamespace(is_raw=False)))
+    rendered = AsyncMock(return_value=b"native-thumbnail")
+    monkeypatch.setattr(main, "generate_thumbnail", rendered)
+    result = asyncio.run(main.generate_saved_thumbnail(ASSET, immich_url=None, api_key=None))
+    assert result == b"native-thumbnail"
+    assert rendered.await_args.kwargs["input_kind"] == "raw"
 
 
 def test_mutation_commit_debounce_replay_failure_default_unknown_delete(lifecycle):

@@ -1,4 +1,4 @@
-"""Read-only Immich RAW acquisition into a bounded, privately owned local cache."""
+"""Read-only Native source acquisition into a bounded, privately owned local cache."""
 
 import asyncio
 import os
@@ -8,7 +8,7 @@ import uuid
 
 import httpx
 
-from immich import (IMMICH_TIMEOUT, RAW_FORMATS, ImmichOriginal, ImmichRequestError,
+from immich import (IMMICH_TIMEOUT, ImmichOriginal, ImmichRequestError,
                     _immich_request, _require_configuration, _request_error, get_asset_detail)
 from lightcraft_mcp import LightCraftError
 from lightcraft_runtime import _trusted_temp_root
@@ -23,19 +23,15 @@ IO_SECONDS = 5
 async def get_raw_original(asset_id, *, transport=None):
     url, key = _require_configuration(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"))
     detail = await get_asset_detail(url, key, asset_id, transport=transport)
-    if str(detail.id) != str(asset_id) or not detail.is_raw or detail.format not in RAW_FORMATS:
-        raise LightCraftError("raw_unsupported_source")
+    if str(detail.id) != str(asset_id):
+        raise LightCraftError("raw_source_identity_mismatch")
     client = httpx.AsyncClient(timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False, transport=transport)
     response = None
     try:
         response = await _immich_request(client, "GET", url, f"/assets/{asset_id}/original", stream=True,
-                                         headers={"x-api-key": key, "Accept": "application/octet-stream,image/*"})
+                                         headers={"x-api-key": key, "Accept": "*/*"})
         if response.status_code != 200:
             raise _request_error(response)
-        # A successful HTML/JSON error page must never become a cached source file.
-        mime = response.headers.get("content-type", "").split(";")[0].strip().lower()
-        if mime != "application/octet-stream" and not mime.startswith("image/"):
-            raise LightCraftError("raw_unsupported_source")
         return ImmichOriginal(response, client), detail.format.lower()
     except BaseException:
         if response is not None:
@@ -149,8 +145,6 @@ class RawSourceCache:
                 if self.directory is None:
                     await self._io(self._create)
                 original, extension = await self._acquire(asset_id)
-                if extension.upper() not in RAW_FORMATS:
-                    raise LightCraftError("raw_unsupported_source")
                 length = original.response.headers.get("content-length")
                 if length is not None and (not length.isascii() or not length.isdecimal() or int(length) > MAX_RAW_BYTES):
                     raise LightCraftError("raw_source_too_large")

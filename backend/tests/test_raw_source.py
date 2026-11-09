@@ -51,16 +51,21 @@ def test_raw_download_uses_read_only_original_endpoint_and_existing_auth(monkeyp
 
 
 @pytest.mark.parametrize("kind", ["JPEG", "PNG", "unknown"])
-def test_non_raw_never_downloads_original(monkeypatch, kind):
+def test_native_source_does_not_filter_by_format_or_mime(monkeypatch, kind):
     monkeypatch.setenv("IMMICH_URL", "http://immich.example")
     monkeypatch.setenv("IMMICH_API_KEY", "secret")
     async def detail(*args, **kwargs):
         return SimpleNamespace(id=args[2], is_raw=kind == "unknown", format=kind)
     monkeypatch.setattr(module, "get_asset_detail", detail)
+    calls = []
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, content=b"original", headers={"Content-Type": "text/html"})
     async def run():
-        with pytest.raises(LightCraftError, match="raw_unsupported_source"):
-            await get_raw_original(uuid4(), transport=httpx.MockTransport(lambda _: pytest.fail("original fetched")))
+        original, _ = await get_raw_original(uuid4(), transport=httpx.MockTransport(handler))
+        assert b"".join([chunk async for chunk in original.chunks()]) == b"original"
     asyncio.run(run())
+    assert len(calls) == 1 and calls[0].headers["accept"] == "*/*"
 
 
 @pytest.mark.parametrize("failure,code", [

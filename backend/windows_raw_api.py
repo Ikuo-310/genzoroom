@@ -633,7 +633,7 @@ class RawPreviewApi:
                 self._recipe_save = None
                 self._history_save = None
                 self._history_enabled = False
-                self._wb_available = snapshot.wb_kelvin and snapshot.settings.get("wb", {}).get("scale") == "kelvin"
+                self._wb_available = controls_state(snapshot)["wb"]["available"]
                 self._touched = monotonic()
                 lightcraft_log("raw.document.ready", assetId=str(asset_id), generation=handle.generation,
                                revision=snapshot.revision)

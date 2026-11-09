@@ -19,7 +19,8 @@ from export_runtime_store import (
 from immich import AssetDetail, ImmichOriginal, get_asset_detail, get_asset_original
 from jpeg_codec import JpegCodecError, decode_jpeg
 from jpeg_renderer import JpegRenderer
-from raw_export_artifact import RawExportInput, RawExportError, export_raw_artifact
+from raw_export_artifact import MAX_RAW_BYTES, RawExportInput, RawExportError, export_raw_artifact
+from storage import development_engine
 
 
 # One coordinator may execute in this process, even across different event loops/instances.
@@ -77,7 +78,8 @@ class ImmichExportSource:
         return await get_asset_detail(self._url, self._api_key, asset_id, transport=self._transport)
 
     async def original(self, asset_id: UUID) -> ImmichOriginal:
-        return await get_asset_original(self._url, self._api_key, asset_id, transport=self._transport, allow_raw=True)
+        return await get_asset_original(self._url, self._api_key, asset_id, transport=self._transport,
+                                        allow_raw=True, allow_native=development_engine() == "lightcraft")
 
 
 def _artifact(source: bytearray, filename: str, family: Sequence[str], recipe: dict, export_timestamp: str | None = None) -> ExportArtifact:
@@ -229,17 +231,28 @@ class ExportRuntime:
         runtime_log("item.started", runId=str(run_id), assetId=str(item.asset_id),
                     position=item.position, frozenRevision=item.frozen_revision)
         try:
+            if development_engine() == "lightcraft" and item.kind != "raw":
+                await _persist(fail_export_item, run_id, item.asset_id, worker_id, status,
+                               "unsupported_processing_version")
+                return
             runtime_log("acquisition.started", level="debug", runId=str(run_id), assetId=str(item.asset_id))
             detail = await self._source.detail(item.asset_id)
-            valid_source = detail.is_raw if item.kind == "raw" else detail.format == "JPEG" and not detail.is_raw
+            native = development_engine() == "lightcraft" and item.kind == "raw"
+            valid_source = (native or detail.is_raw) if item.kind == "raw" else detail.format == "JPEG" and not detail.is_raw
             if detail.id != item.asset_id or not valid_source:
-                code = "source_kind_mismatch" if item.kind == "raw" else "source_not_jpeg"
+                code = "source_kind_mismatch" if item.kind == "raw" and not native else "source_not_jpeg"
                 await _persist(fail_export_item, run_id, item.asset_id, worker_id, status, code)
                 return
             try:
                 original = await self._source.original(item.asset_id)
+                if item.kind == "raw":
+                    length = getattr(getattr(original, "response", None), "headers", {}).get("content-length")
+                    if length is not None and length.isascii() and length.isdecimal() and int(length) > MAX_RAW_BYTES:
+                        raise RawExportError("raw_export_source_too_large")
                 async for chunk in original.chunks():
                     source.extend(chunk)
+                    if item.kind == "raw" and len(source) > MAX_RAW_BYTES:
+                        raise RawExportError("raw_export_source_too_large")
             finally:
                 if original is not None:
                     await original.close()
@@ -279,6 +292,8 @@ class ExportRuntime:
                     "encoding": "encoding_failed", "registration": "registration_failed"}[phase]
             if isinstance(error, JpegCodecError) and error.code in FAILURE_CODES:
                 code = error.code
+            if isinstance(error, RawExportError) and error.code == "raw_export_source_too_large":
+                code = "source_too_large"
             if isinstance(error, RawExportError) and error.code == "raw_export_source_mismatch":
                 code = "source_kind_mismatch"
             # Retry snapshots current edits; only JPEG registration failures retain checksum identity.

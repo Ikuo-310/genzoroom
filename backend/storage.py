@@ -17,6 +17,11 @@ DB_PATH = STORAGE_ROOT / "data" / "genzoroom.db"
 WINDOWS_STORAGE = False
 
 
+def development_engine() -> str:
+    """Keep renderer selection tied to the startup-selected deployment, not Native health."""
+    return "lightcraft" if WINDOWS_STORAGE else "jpeg"
+
+
 def configure_windows_storage(profile: str | None = None) -> None:
     """Select the deployment's isolated user directory before importing persistence consumers."""
     global STORAGE_ROOT, DB_PATH, WINDOWS_STORAGE
