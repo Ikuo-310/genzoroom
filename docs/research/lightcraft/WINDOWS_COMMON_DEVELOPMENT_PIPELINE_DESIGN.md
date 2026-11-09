@@ -2,7 +2,7 @@
 
 設計決定日：2026-11-09（Asia/Tokyo）。対象ブランチ：`feature/lightcraft-integration`。調査時の製品コード：`ab31ff7`。
 
-**状態：方針・実装計画を確定。共通化は未実装。Phase 1も開始していない。** 本文の「現状」はコードで確認した事実、「決定」は今回採用する仕様、「実装」は今後の変更を意味する。コードを読んだことを、Native実行成功やWindows実機受入とは扱わない。
+**状態：Phase 1〜4実装済み。Windows Desktopでの代表JPEG縦断とRAW回帰を実機確認済み。** WindowsはRAW／JPEG等の全画像をLightCraft Nativeへ渡し、Dockerは従来JPEG現像経路を使う。実装で維持される現行契約は§10、各Phaseの変更と検証の履歴は§11にまとめる。以下の§2〜§9は実装前調査・当時の最小変更設計を残した記録であり、「今後の変更」「未実装」「未確認」の記述は調査時点のものとして読む。形式別デコーダー網羅試験や全Native受理形式を保証するものではない。
 
 ## 1. 決定事項と前回調査からの変更
 
@@ -43,7 +43,7 @@ Native側の参照は固定commitの[WB settings](https://github.com/storytold/l
 
 拡張子は私有原本コピーの安全なsuffixとして保持してもよいが、許可リストやengine選択には使用しない。MIMEをNative入力形式の判定へ使わない。取得失敗の判定はHTTP状態・ストリーム完全性などで行い、200応答の内容をNativeが読めなければ読込失敗として扱う。画像のmetadata抽出失敗も画像形式非対応の根拠にしない。
 
-## 4. 実行方針・共有状態と初期化順序
+## 4. 実行方針・共有状態と初期化順序（実装前調査）
 
 **決定：** 共通Backendに小さな現像方針応答（計画上`GET /development-policy`、値`engine: lightcraft | jpeg`）を追加する。Windows起動で既に確定する`storage.WINDOWS_STORAGE`を方針の根拠として再利用し、OS推測・Frontend UA・Nativeの現在のreadyから推測しない。新しいengine plugin基盤や任意切替設定は作らない。
 
@@ -138,7 +138,7 @@ document open失敗時は、既存`RawPreviewApi`の`_release`経路でNative処
 
 PVには失敗状態を保持し、明示Retryまたは別Assetへの切替を可能にする。失敗後に別の受理可能な画像を開けることを最小回帰に含める。再importは既存Session再生成を使い、並列Session・自動形式probe・別engine fallbackを追加しない。Native本文、原本パス、Recipe本文をログへ出さず、既存の安全なerrorCode／phase／generation等で診断する。
 
-## 8. 実装Phaseと受入条件（すべて未着手）
+## 8. 実装Phaseと受入条件（実装前計画）
 
 4 Phaseを維持する。各Phaseをreview可能なCommitへまとめ、形式別開放には分割しない。Phase 1〜3の内部工程完了と、共通化全体の受入完了を区別する。
 
@@ -176,10 +176,32 @@ PVには失敗状態を保持し、明示Retryまたは別Assetへの切替を�
 
 **完成条件：** JPEGの代表縦断、既存RAW、Docker JPEGの必要な回帰を満たし、Windows実機受入の結果を自動テストと区別して記録する。PreviewだけでExport／登録できない状態は完成ではない。一方、JPEG以外の形式別実ファイル試験、全機種RAW、画質比較、全decoder仕様の独立検証は完成の必須条件ではない。
 
-## 9. 未確認事項・今回の検証範囲
+## 9. 未確認事項・当時の検証範囲
 
-- すべての共通化機能は未実装。今回のWB公式Desktop数式・範囲・Reset gate等はソース確認であり、共通化後の実binary／Windows操作結果ではない。
+- 当時の調査では共通化機能は未実装で、WB数式・範囲・Reset gateはソース確認のみだった。後続実装とWindows受入の結果は§11を参照。
 - Native importの拒否理由は現行adapterで情報が集約される。安全に形式非対応を確定できないケースは一般読込失敗とする。エラーcodeの最終命名は既存schema・翻訳に合わせて実装時に決める。
 - RAWの特殊なrelative／legacy状態についてNativeから取得できる表示能力の形を実装時に確認する。非RAWには確認済みの公式相対表示を適用し、この確認を形式別開放工程へ拡大しない。
 - 実Immich、Windows実機、Native JPEG縦断、Docker実環境の受入はPhase 4の未確認項目。今回形式別試験やブラウザ操作は行っていない。
-- 本作業の変更はこの設計、architectureの方針追記、開発ノート、研究索引のみ。追加ローカルリンク35件の参照先、固定commitのNativeソース参照5件をローカルcheckoutと照合し、4文書だけの差分と`git diff --check`成功を確認した。製品コード・testは変更せず、test・buildも実行していない。利用者向けREADMEとCHANGELOGも変更していない。
+- 上記は設計確定時の記録である。後続の実装・テスト・手動検証は§11に追記した。
+
+## 10. 現行実装仕様
+
+Windows DesktopはBackend起動時に確定する`development-policy`（`lightcraft`）を現像経路の基準とする。Dockerは`jpeg`を使う。Nativeの利用可能状態は別管理で、方針取得失敗やNative停止をJPEG fallback条件にしない。`is_raw`は写真分類、STACK、Trash等に残し、Windowsの現像エンジン選択には使わない。Windowsは旧JPEG Recipe／Historyを自動移行・削除しない。GenzoRoom独自の形式allowlistを設けず、原本をNativeへ渡し、受理可否はNativeに委ねる。拒否時はPVに失敗を表示し、旧JPEG engineや中間変換へ切り替えない。
+
+Windowsでは既存Native Sessionを非RAW画像にも共通利用する。Preview／適応解像度、各調整、WB／AWB／スポイト、ポイントカーブとターゲット調整、Geometry、History／Undo／Redo／Jump、Recipe保存・復元、編集済みサムネイル、Queue Exportを同じ経路で扱う。RAW固有のas-shot情報やKelvin利用可否はNativeが示す設定・capabilityに従う。`raw`を含む既存ファイル名・API・識別子は残り、今回の全面リネームは行っていない。
+
+WB Recipe／HistoryはNative値を保持する。非RAWの`legacy` WBはDesktop相対表示（−100〜+100、中央0）を使い、表示変換はUI境界に限る。RAW Kelvin表示・操作を維持する。Nativeの既定`wb.scale: legacy`はreadback JSONで省略されることがある。Export設定比較では比較用に限って省略を`legacy`として扱う。Recipe値、Native送信値、保存snapshotは書き換えず、明示Kelvinや他の設定不一致は拒否する。
+
+Export Queue開始時に保存RecipeとRevisionを固定し、原本hashを照合してNativeへ原本を渡す。Recipeをreset／mergeで復元し、Export前後のsettings readbackを検証してからNative JPEG Artifactを確認し、既存Immich Registrarへ渡す。診断には安全なphase、errorCode、exceptionTypeを使用し、原本パス、Recipe値、認証情報、画像内容を記録しない。WindowsサムネイルはNative Recipe／generator、DockerサムネイルはJPEG Recipe／generatorを使う。Native Retryは登録後続処理の失敗時に再生成となり、重複出力が生じ得る（既知R-01）。重複登録防止は実装済みではない。
+
+異方針の保存済みExport runは`unsupported_processing_version`で失敗させ、原本取得や異なるengineのArtifact生成へ進めない。Recipeを変換・削除せず、既存run／Queueの失敗状態を記録する。
+
+## 11. 実装・検証の完了記録
+
+- **Phase 1：方針分離** — Backendの`development-policy`でWindows=`lightcraft`／Docker=`jpeg`を公開し、Native capabilityと分離。Frontendは方針取得失敗をDockerとして扱わない。
+- **Phase 2：Backend共通化** — Windows Native原本取得、Session、Native WB、Recipe／History、サムネイル、Exportへ非RAWを接続。Docker JPEG経路を維持。
+- **Phase 3：Frontend共通化** — Windowsは`is_raw`によらずNative暗室、Preview、WB、History、Recipeへ接続。Legacy WB表示とKelvin表示をNative scaleで切替。
+- **Phase 4：縦断確認** — ユーザー報告によるWindows実機でJPEGの読み込み、編集、保存、Native Export、Immich登録成功を確認。RAW／DNG Export成功、STACK登録も確認。Native未対応形式を全件試験したものではない。
+- **F-01/F-02** — Docker JPEG方針を明示するFrontend test fixtureへ修正。保存Recipe選択、異方針runの原本取得前拒否、Windows／Docker thumbnail dispatchを方針ベースに統一。
+- **自動検証** — 直近修正のFrontend Persistence 76件、Backend Runtime／Thumbnail関連69件、Backend Queue／Retry等を含む175件、TypeScript、`git diff --check`が成功。これは自動テスト結果で、Windows／Docker手動受入とは分ける。
+- **手動受入** — Windows JPEG Export／Immich登録とRAW/DNGの成功はユーザー報告。Docker実環境のNative不在起動・実際のJPEG編集／Exportを今回の自動検証から推定しない。

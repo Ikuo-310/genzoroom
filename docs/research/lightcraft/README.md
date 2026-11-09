@@ -7,7 +7,7 @@ GenzoRoomのLightCraft統合を判断するための研究記録。個々の設�
 
 | 文書 | 内容 |
 |---|---|
-| [WINDOWS_COMMON_DEVELOPMENT_PIPELINE_DESIGN.md](WINDOWS_COMMON_DEVELOPMENT_PIPELINE_DESIGN.md) | 2026-11-09設計確定・全Phase未着手：WindowsをNative唯一の現像経路へ統一し、形式判定をNativeへ委譲。相対WB、保存・サムネイル・Export、PVエラー、Docker維持、4 Phaseの実装・受入計画 |
+| [WINDOWS_COMMON_DEVELOPMENT_PIPELINE_DESIGN.md](WINDOWS_COMMON_DEVELOPMENT_PIPELINE_DESIGN.md) | 2026-11-09設計・Phase 1〜4完了記録：Windows Native共通現像、Docker JPEG維持、相対WB、Recipe／History／サムネイル／Export、実装前調査・実装結果・検証根拠 |
 | [RAW_ADAPTIVE_PREVIEW_DESIGN.md](RAW_ADAPTIVE_PREVIEW_DESIGN.md) | A〜B1の適応型Preview契約、B1 Windows受入完了と未確認項目 |
 | [RAW_REGION_PREVIEW_DESIGN.md](RAW_REGION_PREVIEW_DESIGN.md) | 工程C：C0〜C2実装・Windows受入、RAW Preview機能完了、C3性能調査と非blockingな将来候補 |
 | [BASELINE.md](BASELINE.md) | 基準バージョン・commit、crate構成、Rust・Docker条件、ライセンス |

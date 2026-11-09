@@ -2366,3 +2366,25 @@ Frontend 366件、Backend 104件が成功した。Frontend生成HTTP Body 28件�
 ユーザーのWindows Desktop確認で、RAW Crop操作が正常に動作することを確認済み。自動テストの結果と実機確認を区別し、個々の操作やUndo／Redo／Jumpの実機確認範囲をこれ以上広げて記録しない。
 
 同日に確認したWB `frame`欠落と今回のGeometry `geometry`欠落は、どちらもFrontendのHistory HTTP BodyとBackend契約の不一致だった。今後History操作を追加・変更するときは、操作オブジェクトの生成だけで完了とせず、実際のHTTP BodyとBackend入力検証の整合性を確認する。
+
+## Windows LightCraft共通現像 Phase 1〜4／統合前監査F-01・F-02完了（2026-11-09）
+
+### 確定した現行仕様
+
+Windows Desktopの現像方針はBackend起動環境が返す`GET /api/development-policy`の`lightcraft`で決まり、Nativeの一時的なready／unavailable状態とは別に扱う。WindowsはRAW／JPEGその他の全画像原本をLightCraft Nativeへ渡し、GenzoRoom独自の拡張子・MIME許可リストを設けず、Native拒否時も旧JPEGエンジンへFallbackしない。方針取得失敗をDocker（`jpeg`）扱いにも変換しない。`is_raw`はGallery、STACK、保護等の写真分類として維持し、Windowsのエンジン選択には使わない。Dockerは従来のJPEG WebGPU／CPU編集・保存・Export経路を維持し、Nativeを起動要件にしない。旧JPEG Recipe／HistoryのNativeへの自動移行や削除は行わない。
+
+Windowsでは既存Native Document／Session、Previewと適応解像度、現像調整、WB／AWB／スポイト、カーブ／ターゲットポイント、Geometry、History（Undo／Redo／Jump）、Recipe、編集済みサムネイル、Export Queue／Native JPEG ExportをRAW・Nativeが受理する非RAWで共通利用する。Export結果は既存Immich Registrarに渡し、Album継承およびSTACK連携を利用する。RAW固有のKelvin WB等の操作契約は維持し、共通化はRAW分類やRAW専用機能自体を取り除くものではない。ソース内の`raw`系名称は一斉リネームしていない。
+
+WBはNative scaleに従う。RAWは従来のKelvin表示・操作、非RAWの相対WBは`legacy` scaleとLightCraft Desktopに合わせた相対UIを使う。UIの表示値とNativeへ保存する設定値を区別し、Recipe／HistoryにはNative設定を保持する。JPEG ExportのreadbackではNative既定の`wb.scale: "legacy"`が省略されることがあるため、設定一致の比較時だけ省略値を`legacy`として扱う。Recipe保存値やNative送信値はこの比較正規化で変更しない。明示的な`kelvin`や他の設定不一致は引き続き拒否する。
+
+Export Queue開始時に保存RecipeとRevisionを固定し、原本をNativeへ渡してRecipeを復元し、Export前後の設定を検証してからJPEG Artifactを検査・再構築し、Registrar経由でImmichへ登録する。安全な診断情報としてphase、errorCode、exceptionType等を記録し、認証情報、原本パス、Recipe値は記録しない。サムネイルもWindowsは方針に従ってNative Recipe／generator、DockerはJPEG Recipe／generatorを使う。Native RetryはImmich登録途中の失敗後に重複出力を生じ得る既知制約（R-01）が残り、重複登録防止は実装済みではない。
+
+### F-01／F-02監査修正と検証記録
+
+統合前監査F-01では`AnshitsuPersistence.test.tsx`のDocker JPEG編集fixtureが追加されたdevelopment-policy契約を返さず、76件中63件が失敗していた。fixtureを明示的に`jpeg`方針とし、個別fetch mockでも方針応答を維持するよう修正した。修正後は76件成功し、保存・History・切替・終了・サムネイル予約の検証目的を維持した。
+
+F-02ではDockerでNative Recipeが優先される保存状態選択、異方針Export runへの進入、`is_raw`に依存したNative thumbnail dispatchを修正した。保存状態とサムネイルgenerator選択をBackend方針に統一し、Windowsの旧JPEG Processing VersionとDockerのNative Processing Versionを対称的に拒否する。異方針runは原本取得／Artifact生成前に`unsupported_processing_version`で安全に終端化し、既存Queue／run／item状態更新を利用する。Recipeの変換・削除は行わない。既存の複数Asset runは維持し、同一方針の複数Asset正常系へテストを再構成した。
+
+自動検証結果はRuntime／Thumbnail関連69件成功、Queue／Retry等を含むBackend関連175件成功、Frontend Persistence 76件成功、TypeScriptチェック成功、`git diff --check`成功。69件は175件の関連Backend検証範囲に一部重なるため、合算件数ではない。これらは自動テスト結果であり、実機操作とは区別する。別途、ユーザー報告によるWindows Desktop実機ではJPEG Native ExportとImmich登録、DNG ExportおよびSTACK作成を確認済み。今回の修正に関するDocker実環境の追加手動検証をCodexが実施したものではない。
+
+Phase 1〜4の仕様、コード経路、実装前調査との区別および受入根拠は[共通現像設計](research/lightcraft/WINDOWS_COMMON_DEVELOPMENT_PIPELINE_DESIGN.md)を参照する。これはPhase完了記録であり、次段階のコード変更を開始した記録ではない。

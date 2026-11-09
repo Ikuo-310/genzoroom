@@ -8,6 +8,10 @@ Internal changes are omitted unless they affect users.
 
 ### Changed
 
+- Windows Desktop now uses LightCraft Native as the shared development engine for RAW and Native-accepted non-RAW images, including JPEG. The existing darkroom adjustments, relative WB display, Recipes, History, rendered thumbnails, and JPEG Export are shared; Native read failures do not fall back to the JPEG engine.
+- Windows Native JPEG Export now treats an omitted default `legacy` WB scale as equivalent during settings verification, fixing JPEG Export failures while preserving strict checks for other settings.
+- Docker retains its existing JPEG WebGPU/CPU editing, thumbnail, and Export engines.
+
 - Escape now exits RAW curve targeting and cancels an active drag. The RAW curve and WB pickers use the same eyedropper icon, and button hover colors are clearer across the darkroom.
 
 - Updated the Windows RAW engine to LightCraft v0.18.1, preserving RAW Crop, Preview, Export, and saved Recipe compatibility. Lens corrections now avoid blank image edges independently of Constrain Crop; perspective corrections continue to follow that setting.
