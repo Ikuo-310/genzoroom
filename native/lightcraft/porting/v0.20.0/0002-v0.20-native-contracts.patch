@@ -10,6 +10,19 @@ index fd19f6812655726ab8f6f32d8eee1778d9b0ba92..5e28fc471f1430d4b0b8faae6d613ea4
  ]
  
  [[package]]
+diff --git a/crates/engine/src/media.rs b/crates/engine/src/media.rs
+index dcba02494dbf7f58877690f420d7f40079fb0763..24fab68d4684d4990a874db766d63e616fa58019 100644
+--- a/crates/engine/src/media.rs
++++ b/crates/engine/src/media.rs
+@@ -37,7 +37,7 @@ mod source;
+ pub use cache::DenoiseIndex;
+ #[cfg(test)]
+ pub(crate) use cache::rendered_budget;
+-pub use quick::{QuickJob, QuickSource, content_key, source_info};
++pub use quick::{QuickJob, QuickSource, content_key, source_identity, source_info};
+ pub use render::{RenderJob, RenderResult, ScreenFrame, develop, develop_reporting, fit_cached, fit_for_display};
+ #[cfg(test)]
+ use settings_hash::SETTINGS_HASH_ENTRIES;
 diff --git a/crates/engine/src/media/quick.rs b/crates/engine/src/media/quick.rs
 index f7163b069322c239488aca24d1bc09c48f0eb2b9..2d35d99720a1688b914e9f0b4c503ce908434bf3 100644
 --- a/crates/engine/src/media/quick.rs
@@ -833,6 +846,64 @@ index b05dae56ff5fccab298fc6dee10239ddd47ed4b9..2de01852f042f6d57040223c2e9764fd
  serde_json = { workspace = true }
 +sha2 = { workspace = true }
  log = { workspace = true }
+diff --git a/crates/mcp/src/headless.rs b/crates/mcp/src/headless.rs
+index 11de914173043a86ea701ee0f9d55a89e92f2add..882a9edea83e3f3580b29ae188d0195f661ef43a 100644
+--- a/crates/mcp/src/headless.rs
++++ b/crates/mcp/src/headless.rs
+@@ -55,7 +55,11 @@ impl Headless {
+     pub fn render(&mut self, p: &Value, default_size: u64) -> Result<Rgba8, String> {
+         let id = self.photo_or_active(p)?;
+         let size = p.get("size").or(p.get("longEdge")).and_then(Value::as_u64).unwrap_or(default_size).clamp(16, 16384) as usize;
+-        Ok(self.session.render_now(id, size, size)?.image)
++        Ok(self.render_photo_result(id, size)?.image)
++    }
++
++    fn render_photo_result(&mut self, id: PhotoId, size: usize) -> Result<lightcraft_engine::pipeline::Rendered, String> {
++        self.session.render_now(id, size, size)
+     }
+ 
+     /// The UI command `app.export`, emulated with the same parameters as the desktop app
+@@ -139,15 +143,32 @@ impl Backend for Headless {
+                 Ok(Value::Array(v))
+             }
+             "ui.render" => {
+-                let img = self.render(&p, 1600)?;
+-                match p.get("path").and_then(Value::as_str) {
+-                    Some(path) => {
+-                        self.session.check_write_target(path)?;
+-                        write_image(Path::new(path), &img, 92)?;
+-                        Ok(json!({"path": path, "width": img.width, "height": img.height}))
+-                    }
+-                    None => Ok(json!({"width": img.width, "height": img.height})),
++                if p.get("include_frame").is_some_and(|v| !v.is_boolean()) {
++                    return Err("invalid include_frame".into());
++                }
++                let id = self.photo_or_active(&p)?;
++                let photo = self.session.catalog.photo(id).ok_or("no such photo")?;
++                let original = (photo.width as usize, photo.height as usize);
++                let source = format!("{:?}", lightcraft_engine::media::source_identity(photo));
++                let size = p.get("size").or(p.get("longEdge")).and_then(Value::as_u64).unwrap_or(1600).clamp(16, 16384) as usize;
++                let rendered = self.render_photo_result(id, size)?;
++                let img = rendered.image;
++                let geometry = if p.get("include_frame") == Some(&json!(true)) {
++                    let frame = rendered.frame.as_ref().ok_or("preview_geometry_unavailable")?;
++                    Some(crate::preview::frame_metadata(frame, original, &source, img.width, img.height)?)
++                } else {
++                    None
++                };
++                let mut result = json!({"width": img.width, "height": img.height});
++                if let Some(frame) = geometry {
++                    result["frame"] = frame;
++                }
++                if let Some(path) = p.get("path").and_then(Value::as_str) {
++                    self.session.check_write_target(path)?;
++                    write_image(Path::new(path), &img, 92)?;
++                    result["path"] = json!(path);
+                 }
++                Ok(result)
+             }
+             "app.export" => self.export(&p),
+             m if m.starts_with("ui.") || m == "app.quit" => {
 diff --git a/crates/mcp/src/lib.rs b/crates/mcp/src/lib.rs
 index 4f9251bcba216893241308d83f9f92ea8fc8e204..b8ad1f05c83c18aa7862845369de07e0ebf77cc8 100644
 --- a/crates/mcp/src/lib.rs
@@ -1329,6 +1400,92 @@ index 0000000000000000000000000000000000000000..62b4dd33e4e7aa98a6e2861f5169b1ca
 +        assert!(pool.slots[0].is_none(), "unmeasurable admission cannot retain a cache");
 +    }
 +}
+diff --git a/crates/mcp/src/tests.rs b/crates/mcp/src/tests.rs
+index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..e43518d4fe6b47c35d4038842480a1fda7c937fd 100644
+--- a/crates/mcp/src/tests.rs
++++ b/crates/mcp/src/tests.rs
+@@ -602,3 +602,32 @@ fn render_and_screenshot_pngs_go_through_a_private_folder() {
+         folders.push(dir);
+     }
+ }
++
++#[test]
++fn whole_frame_metadata_matches_png_and_legacy_render() {
++    let mut h = Headless::demo();
++    let id = h.session.active().unwrap().0;
++    let legacy = call_tool(&mut h, "render_photo", &json!({"id": id, "size": 64}));
++    assert!(!legacy.is_error, "{legacy:?}");
++    let legacy_meta: Value = serde_json::from_str(legacy.content[1]["text"].as_str().unwrap()).unwrap();
++    assert!(legacy_meta.get("frame").is_none());
++    let result = call_tool(&mut h, "render_photo", &json!({"id": id, "size": 64, "include_frame": true}));
++    assert!(!result.is_error, "{result:?}");
++    let meta: Value = serde_json::from_str(result.content[1]["text"].as_str().unwrap()).unwrap();
++    let (encoded, mime) = result.image().unwrap();
++    assert_eq!(mime, "image/png");
++    let bytes = crate::base64::base64_decode(encoded).unwrap();
++    assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n");
++    let width = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
++    let height = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
++    assert_eq!(meta["width"], width);
++    assert_eq!(meta["height"], height);
++    assert_eq!(meta["frame"]["fullWidth"], width);
++    assert_eq!(meta["frame"]["fullHeight"], height);
++    assert_eq!(meta["frame"]["window"], Value::Null);
++    assert_eq!(meta["frame"]["geometryId"].as_str().unwrap().len(), 64);
++    let preview = call_tool(&mut h, "render_preview", &json!({"id": id, "max_side": 64, "include_frame": true}));
++    assert!(!preview.is_error, "{preview:?}");
++    let preview_meta: Value = serde_json::from_str(preview.content[1]["text"].as_str().unwrap()).unwrap();
++    assert_eq!(preview_meta["frame"]["geometryId"], meta["frame"]["geometryId"]);
++}
+diff --git a/crates/mcp/src/tools.rs b/crates/mcp/src/tools.rs
+index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..766c8b513fe16da58ee41da30e6a278669b6c816 100644
+--- a/crates/mcp/src/tools.rs
++++ b/crates/mcp/src/tools.rs
+@@ -120,6 +120,7 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
+             json!({
+                 "id": {"type": "integer", "description": "Photo id (default: the active photo); selection is unchanged"},
+                 "max_side": {"type": "integer", "description": "Long edge in pixels (default 1024, max 4096)"},
++                "include_frame": {"type": "boolean", "description": "Include geometry of the rendered frame"},
+                 "format": {"type": "string", "enum": ["png", "jpeg"], "description": "Image encoding (default png; jpeg is smaller)"},
+             }),
+             &[],
+@@ -219,6 +220,7 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
+             json!({
+                 "id": {"type": "integer", "description": "Photo id (default: the active photo); selection is unchanged"},
+                 "size": {"type": "integer", "description": "Long edge in pixels (default 1024, max 4096)"},
++                "include_frame": {"type": "boolean", "description": "Include geometry of the rendered frame"},
+                 "format": {"type": "string", "enum": ["png", "jpeg"], "description": "Image encoding (default png; jpeg is smaller)"},
+                 "path": {"type": "string", "description": "Also save the rendered file here"}
+             }),
+@@ -557,11 +559,18 @@ fn render_photo(b: &mut dyn Backend, args: &Value) -> ToolResult {
+         Err(e) => return ToolResult::error(e),
+     };
+     let path = tmp.file.to_string_lossy().to_string();
+-    let meta = match b.call("ui.render", json!({"id": id, "size": size, "path": path})) {
++    let mut request = json!({"id": id, "size": size, "path": path});
++    if let Some(include) = args.get("include_frame") {
++        request["include_frame"] = include.clone();
++    }
++    let meta = match b.call("ui.render", request) {
+         Ok(m) => m,
+         Err(e) => return ToolResult::error(e),
+     };
+     let mut meta = meta;
++    if args.get("include_frame") == Some(&json!(true)) && !meta.get("frame").is_some_and(Value::is_object) {
++        return ToolResult::error("preview_geometry_unavailable");
++    }
+     meta["id"] = json!(id);
+     image_result(&tmp.file, None, args.get("format").and_then(Value::as_str).unwrap_or("png"), args.get("path").and_then(Value::as_str), meta)
+ }
+@@ -664,7 +673,7 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
+         }
+         "doc_inspect" => ToolResult::from(doc_inspect(b)),
+         "render_preview" => {
+-            let mut a = obj(args, &["id", "format"]);
++            let mut a = obj(args, &["id", "format", "include_frame"]);
+             if let Some(m) = args.get("max_side") {
+                 a["size"] = m.clone();
+             }
 diff --git a/crates/pipeline/src/geometry.rs b/crates/pipeline/src/geometry.rs
 index 5d8a07489a81ea3a77564450beccbf7fcb431932..8b827bf0fe9498bb8e86275010064b093733c8e3 100644
 --- a/crates/pipeline/src/geometry.rs
