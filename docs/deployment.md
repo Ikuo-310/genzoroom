@@ -6,6 +6,8 @@ This guide explains how to deploy GenzoRoom using the official Docker image publ
 
 GenzoRoom runs as a single container and can be deployed using Docker Compose.
 
+This Docker edition uses the existing JPEG WebGPU / CPU development pipeline. RAW development is not supported, and LightCraft Native is not required to build or run the container. The Windows Desktop build is a separate development and validation target with its own database; this guide does not describe a general Windows installer or shared editing data between platforms.
+
 ## Requirements
 
 - Docker Engine and Docker Compose v2
@@ -120,6 +122,8 @@ Depending on your environment, this may be a LAN address, an HTTPS URL, or a ser
 If accessing Immich through an existing Docker network, attach the GenzoRoom container to that network as needed.
 
 ## Deployment with Docker Compose
+
+### Install the GHCR distribution without cloning source
 
 ### 1. Prepare the Configuration
 

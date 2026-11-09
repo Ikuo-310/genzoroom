@@ -6,6 +6,8 @@
 
 GenzoRoomは単一コンテナで動作し、Docker Composeを使って導入できます。
 
+Docker版は従来のJPEG WebGPU／CPU現像経路を使用し、RAW現像には対応していません。LightCraft NativeはDockerイメージのビルド・起動に不要です。Windows Desktop版は独立したデータベースを使う開発・検証対象であり、このガイドはWindowsインストーラーの一般配布や両プラットフォーム間の編集データ共有を案内するものではありません。
+
 ## 必要条件
 
 - Docker Engine / Docker Compose v2

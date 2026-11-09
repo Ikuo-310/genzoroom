@@ -6,18 +6,37 @@ Internal changes are omitted unless they affect users.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-09
+
+### Added
+
+- Windows Desktop (development/validation) adds RAW point-curve editing for the master, red, green, and blue channels, with graph point editing, reset, and History, Recipe, and RAW Export integration.
+- Windows Desktop (development/validation) adds image-targeted curve adjustment with a circular magnifier for precise sampling.
+- Windows Desktop (development/validation) adds a shared magnifier to the RAW WB eyedropper for inspecting sampling points in both Before and After views.
+
+- Windows Desktop (development/validation) now provides Lensfun database status and explicit download/update controls using LightCraft's pinned, integrity-checked database. Configured `LIGHTCRAFT_LENSFUN_DIR` locations are respected, and newly available profiles are checked when a RAW photo is reopened.
+- Windows Desktop (development/validation) adds RAW Lens Corrections controls inside Detail, including profile status, manual and profile adjustments, defringe, and lateral chromatic aberration. All settings use the existing RAW History, Reset, Preview, and Recipe paths; Docker JPEG development is unchanged.
+- Windows Desktop (development/validation) adds non-destructive RAW Crop and Straighten editing, with interactive crop-frame dragging and resizing, aspect-ratio presets and locking, 90° rotation, horizontal/vertical flipping, and composition overlays.
+- Windows Desktop (development/validation) adds line-based Straighten correction, Space-drag panning, and Shift-drag axis locking for crop-frame movement, with boundary-aware dragging and integration with RAW History, Undo/Redo, Reset, saved Recipes, Export, and rendered thumbnails.
+- Windows Desktop (development/validation) shows saved RAW edits in thumbnails across Gallery, Filmstrip, Stack Edited Preview, and immersive previews.
+- The shared photo Viewer now toggles between Fit and Actual Size on image double-click, and offers a configurable corner Zoom Navigator for locating and panning around magnified images.
+- Windows Desktop (development/validation) RAW Whole-frame previews adapt to Viewer size, display pixel density and zoom up to 2048 pixels, while preserving pan/zoom and matching Before/After preview sizes.
+- Windows Desktop (development/validation) includes File, View, and Help menus with Preferences (`Ctrl+P`), Exit (`Ctrl+Q`), Full Screen, Developer Diagnostics, and About GenzoRoom. Menu labels follow the app's Japanese or English language setting.
+
+- Windows Desktop (development/validation) uses LightCraft Native Export to develop supported RAW and non-RAW originals to JPEG and register the result through the existing Immich Export flow.
+
 ### Changed
 
-- Windows Desktop now uses LightCraft Native as the shared development engine for RAW and Native-accepted non-RAW images, including JPEG. The existing darkroom adjustments, relative WB display, Recipes, History, rendered thumbnails, and JPEG Export are shared; Native read failures do not fall back to the JPEG engine.
-- Windows Native JPEG Export now treats an omitted default `legacy` WB scale as equivalent during settings verification, fixing JPEG Export failures while preserving strict checks for other settings.
-- Docker retains its existing JPEG WebGPU/CPU editing, thumbnail, and Export engines.
+- Windows Desktop (development/validation) uses LightCraft Native as the shared development engine for RAW and Native-accepted non-RAW images, including JPEG. The existing darkroom adjustments, relative WB display, Recipes, History, rendered thumbnails, and JPEG Export are shared; Native read failures do not fall back to the JPEG engine.
+- Windows Desktop (development/validation) Native JPEG Export treats an omitted default `legacy` WB scale as equivalent during settings verification, fixing JPEG Export failures while preserving strict checks for other settings.
+- Docker retains its existing JPEG-only WebGPU/CPU editing, thumbnail, and Export engines; RAW development remains unsupported and LightCraft Native is not required.
 
 - Escape now exits RAW curve targeting and cancels an active drag. The RAW curve and WB pickers use the same eyedropper icon, and button hover colors are clearer across the darkroom.
 
-- Updated the Windows RAW engine to LightCraft v0.18.1, preserving RAW Crop, Preview, Export, and saved Recipe compatibility. Lens corrections now avoid blank image edges independently of Constrain Crop; perspective corrections continue to follow that setting.
-- Windows LightCraft RAW development now includes three-band Color Grading for Shadows, Midtones, and Highlights, with Hue, Saturation, and Luminance sliders plus shared Blending and Balance controls. Hue uses a rainbow slider. Grading follows existing RAW saving, History, Undo/Redo, Reset, Export, and rendered-thumbnail paths, with improved compatibility for older RAW Recipes. JPEG Color Grading remains unchanged.
-- Windows RAW photos now show the existing Edited badge in Home and the Filmstrip when their saved or current DevelopSettings differ from that photo's import defaults. Stack aggregation and the Edited filter include RAW edit status.
-- Windows native RAW darkroom now offers one-shot Auto White Balance and a WB eyedropper for sampling a neutral point in the image. Both apply through existing RAW History, Undo/Redo, and Recipe saving; the picker supports Before/After views and Viewer Zoom/Pan.
+- Windows Desktop (development/validation) updated the RAW engine to LightCraft v0.18.1, preserving RAW Crop, Preview, Export, and saved Recipe compatibility. Lens corrections now avoid blank image edges independently of Constrain Crop; perspective corrections continue to follow that setting.
+- Windows Desktop (development/validation) includes three-band LightCraft RAW Color Grading for Shadows, Midtones, and Highlights, with Hue, Saturation, and Luminance sliders plus shared Blending and Balance controls. Hue uses a rainbow slider. Grading follows existing RAW saving, History, Undo/Redo, Reset, Export, and rendered-thumbnail paths, with improved compatibility for older RAW Recipes. JPEG Color Grading remains unchanged.
+- Windows Desktop (development/validation) shows the existing Edited badge for RAW photos in Gallery and the Filmstrip when their saved or current DevelopSettings differ from import defaults. Stack aggregation and the Edited filter include RAW edit status.
+- Windows Desktop (development/validation) provides one-shot Auto White Balance and a WB eyedropper for sampling a neutral point in RAW images. Both use existing RAW History, Undo/Redo, and Recipe saving; the picker supports Before/After views and Viewer Zoom/Pan.
 - Gallery (Recent, Favorites, Calendar, and Album details), the Album list, Export, and STACK now share eight fixed card-width presets from 140px to 280px (200px by default). Grids center their available columns with fixed card gaps, while the final row starts at the first column; columns adapt to available width and existing saved column settings migrate to the equivalent width.
 
 - Reorganized JPEG development controls into Color, Basic, and Color Grading. Temperature and Tint now live under Color with Vibrance and Saturation. Per-adjustment ON/OFF switches were removed while retaining compatibility with existing saved Recipes.
@@ -26,20 +45,15 @@ Internal changes are omitted unless they affect users.
 - RAW History now displays all retained steps on initial load instead of paging in groups of 20.
 - Repeated keyboard and wheel adjustments to the same RAW control now stay in one History entry until an operation boundary.
 
-### Added
+- Windows Desktop (development/validation) packaging supports a bilingual per-user NSIS installer with app shortcuts, bundled Backend and WebView2 setup, and prompts users to close GenzoRoom before installing or uninstalling. Choosing uninstall from the same-version setup flow exits the installer after removal succeeds.
+- Windows Desktop packaging uses the GenzoRoom release tag for a release build's version; development and validation builds remain clearly marked as validation builds. The v0.3.0 release does not promise a stable Windows installer for general distribution.
 
-- Added RAW point-curve editing for the master, red, green, and blue channels, with graph point editing, reset, and History, Recipe, and RAW Export integration.
-- Added image-targeted curve adjustment with a circular magnifier for precise sampling.
-- Added a shared magnifier to the RAW WB eyedropper for inspecting sampling points in both Before and After views.
+- Normalize Stack Albums onto the final COVER, preserve Albums for ordinary departures, and expand membership when dissolving Stacks. Stack management now also requires `albumAsset.delete`; trash reservations keep their Album memberships.
+- Fixed duplicate Album photos when exporting a non-COVER Stack photo: the developed JPEG inherits the Stack's Albums and replaces the old COVER as their Album member.
+- Prevented duplicate output Assets on Retry after a partial Album addition failure by retaining the Export timestamp for unchanged saved edits.
 
-- Windows desktop now provides Lensfun database status and explicit download/update controls using LightCraft's pinned, integrity-checked database. Configured `LIGHTCRAFT_LENSFUN_DIR` locations are respected, and newly available profiles are checked when a RAW photo is reopened.
-- Added RAW Lens Corrections controls inside Detail, including profile status, manual and profile adjustments, defringe, and lateral chromatic aberration. All settings use the existing RAW History, Reset, Preview, and Recipe paths; JPEG development is unchanged.
-- Added non-destructive RAW Crop and Straighten editing in the Windows darkroom, with interactive crop-frame dragging and resizing, aspect-ratio presets and locking, 90° rotation, horizontal/vertical flipping, and composition overlays.
-- Added line-based Straighten correction, Space-drag panning, and Shift-drag axis locking for crop-frame movement, with boundary-aware dragging and integration with RAW History, Undo/Redo, Reset, saved Recipes, Export, and rendered thumbnails.
-- Saved RAW edits are now reflected in thumbnails across Gallery, Filmstrip, Stack Edited Preview, and immersive previews.
-- The shared photo Viewer now toggles between Fit and Actual Size on image double-click, and offers a configurable corner Zoom Navigator for locating and panning around magnified images.
-- RAW Whole-frame previews now adapt to Viewer size, display pixel density and zoom up to 2048 pixels, while preserving pan/zoom and matching Before/After preview sizes.
-- Windows desktop now includes File, View, and Help menus with Preferences (`Ctrl+P`), Exit (`Ctrl+Q`), Full Screen, Developer Diagnostics, and About GenzoRoom. Menu labels follow the app's Japanese or English language setting.
+- Docker keeps its existing JPEG WebGPU/CPU development, thumbnail, and Export paths and does not require LightCraft Native. Windows Desktop uses LightCraft Native for RAW and Native-accepted non-RAW images, including JPEG; its Native Recipe, History, Preview, rendered thumbnails, and JPEG Export use the same pipeline. Windows and Docker use independent databases and do not share or migrate Recipe, History, or edit state.
+- Windows Gallery edit-status lookup uses Native state for RAW and non-RAW images. Docker uses the JPEG edit-status API only and treats RAW as unedited; Gallery does not call the Native status API in Docker.
 
 ### Fixed
 
@@ -58,14 +72,7 @@ Internal changes are omitted unless they affect users.
 - Windows PoC now exits safely when its initial UI cannot become ready, correlates close failures to their request, confirms before closing during a page reload, and blocks a second Tauri host while an older WebView remains open.
 - Windows diagnostic Settings now displays the active environment-based Immich target instead of a different saved connection.
 
-### Changed
-
-- Windows desktop now has a bilingual per-user NSIS installer with app shortcuts, bundled Backend and WebView2 setup, and prompts users to close GenzoRoom before installing or uninstalling. Choosing uninstall from the same-version setup flow exits the installer after removal succeeds.
-- Windows distribution builds now use the GenzoRoom release tag for their stable version, while development and validation builds remain clearly marked as validation builds.
-
-- Normalize Stack Albums onto the final COVER, preserve Albums for ordinary departures, and expand membership when dissolving Stacks. Stack management now also requires `albumAsset.delete`; trash reservations keep their Album memberships.
-- Fixed duplicate Album photos when exporting a non-COVER Stack photo: the developed JPEG inherits the Stack's Albums and replaces the old COVER as their Album member.
-- Prevented duplicate output Assets on Retry after a partial Album addition failure by retaining the Export timestamp for unchanged saved edits.
+- Fixed Docker Gallery edit badges and Edited / Unedited filtering for RAW and mixed STACKs by keeping RAW unedited and separating JPEG and Native edit-status requests by platform.
 
 ## [0.2.5] - 2026-10-26
 

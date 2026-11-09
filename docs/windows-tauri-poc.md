@@ -1,6 +1,6 @@
 # Windows Tauri 2 開発・配布版（Phase 3C）
 
-既存React UIをTauri 2 / WebView2で表示するWindowsホストです。開発起動ではリポジトリの`.venv`、配布版ではPyInstaller onedirのBackendを自動起動し、終了も管理します。Immich接続はSettingsで登録し、APIキーはWindows資格情報マネージャーへ保存します。Windows配布版はTauri 2.12.2／NSISのユーザー単位インストーラーを使用します。LightCraft、RAW現像、自動更新は含みません。以下の従来PoC手順・保存先は開発モードのものです。配布版との差分は末尾を参照してください。
+既存React UIをTauri 2 / WebView2で表示するWindowsホストです。開発起動ではリポジトリの`.venv`、パッケージ検証ではPyInstaller onedirのBackendを自動起動し、終了も管理します。Immich接続はSettingsで登録し、APIキーはWindows資格情報マネージャーへ保存します。現行Windows DesktopはLightCraft NativeをRAWとNativeが受理するJPEG等の現像に使用します。本書のPoC手順・保存先は開発モード、後半のNSIS記録はローカル検証用パッケージの手順です。Windows Desktopは開発・検証段階であり、v0.3.0では一般向け安定版インストーラーを配布しません。公開配布には未完了のライセンスレビューも残っています。Docker版とは独立したデータベースを使用します。
 
 ## Phase 3B：同梱版のビルドと起動（2026-10-19）
 

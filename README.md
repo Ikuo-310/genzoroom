@@ -11,13 +11,13 @@ The name **GenzoRoom** comes from the Japanese word *現像室* (genzōshitsu), 
 
 It helps manage RAW+JPEG pairs that can be difficult to organize in Immich by automatically detecting stack candidates. You can also manually reorganize stacks and change their cover photos.
 
-GenzoRoom also provides non-destructive JPEG editing for adjusting exposure and color. Developed photos are exported back to Immich without replacing the originals, automatically grouped into stacks with their source photos, and set as the new stack covers.  
+The Docker edition provides non-destructive JPEG editing for adjusting exposure and color. RAW development is not supported in Docker. Developed photos are exported back to Immich without replacing the originals, automatically grouped into stacks with their source photos, and set as the new stack covers.
 Immich remains responsible for managing your photo library. GenzoRoom never directly modifies or deletes your original image files.  
 Because GenzoRoom is designed specifically for Immich integration, it does not support importing photos from external sources or exporting files to local storage.
 
 The user interface is available in Japanese and English. Contributions to translate GenzoRoom into other languages are welcome.
 
-JPEG editing is currently supported, with RAW development planned for the future.
+The Windows Desktop build uses LightCraft Native for RAW and Native-accepted JPEG and other images. It is currently in development and validation; a stable Windows installer for general distribution is not part of this release. Docker and Windows use separate databases, and their editing engines and saved development state are not shared.
 
 ## Current Features
 
@@ -50,7 +50,7 @@ GenzoRoom does not directly modify or delete the original image files.
 ### 〇 Develop Workspace 〇
 
 Send photos selected in the Gallery to Develop to adjust exposure and color.  
-JPEG editing is currently supported, with RAW development planned for the future.
+The Docker edition develops JPEG images with its existing WebGPU / CPU pipeline and does not support RAW development. The Windows Desktop build is in development and validation and uses LightCraft Native for RAW and Native-accepted JPEG and other images. Windows adds Native Preview, Recipe and History, rendered thumbnails, and JPEG Export, including RAW Crop / Straighten, Lens Corrections, Point Curve, White Balance sampling, and Color Grading. Windows editing data is stored separately from the Docker database; Windows is not yet offered as a stable general-purpose installer.
 
 Develop is designed around keyboard shortcuts to minimize mouse interaction.  
 When working with multiple photos, you can switch between them using the filmstrip.
@@ -126,11 +126,11 @@ In the Gallery, exported photos are identified by a 「現」 badge.
 
 ## Current Limitations
 
-- **Supported image formats:**  
-  Only JPEG images can currently be developed. RAW (including DNG), HEIC, PNG, and other formats are not supported for editing.
+- **Docker image formats:**
+  The Docker edition develops JPEG only. RAW (including DNG), HEIC, PNG, and other formats are not supported for Docker editing. In Windows Desktop, LightCraft Native determines whether it can accept an image format.
 
 - **Color space:**  
-  Image processing uses 8-bit sRGB. Wide-gamut and HDR development are not supported.
+  The Docker JPEG pipeline uses 8-bit sRGB; wide-gamut and HDR development are not supported there. Windows Native Export produces sRGB JPEG output.
 
 - **Saving edits:**  
   Edits are saved automatically, but recent changes may be lost if the browser is closed or reloaded before saving finishes.
@@ -146,15 +146,13 @@ In the Gallery, exported photos are identified by a 「現」 badge.
 
 ## Features Under Consideration
 
-The following features are being considered for future development:
+The following features remain candidates for future development:
 
-- RAW development
-- Cropping, rotation, and straightening
 - Noise reduction and sharpening
 - Masking and selective adjustments
 - Additional scopes, including Waveform Monitor (WFM), RGB Parade, and Vectorscope
 
-These are potential future features, not confirmed commitments or a fixed release roadmap.
+These are potential future features, not confirmed commitments or a fixed release roadmap. Their availability is platform-specific; Windows features under development do not imply Docker support.
 
 ## Security and Data Handling
 

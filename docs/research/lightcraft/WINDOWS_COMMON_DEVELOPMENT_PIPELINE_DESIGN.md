@@ -188,6 +188,8 @@ PVには失敗状態を保持し、明示Retryまたは別Assetへの切替を�
 
 Windows DesktopはBackend起動時に確定する`development-policy`（`lightcraft`）を現像経路の基準とする。Dockerは`jpeg`を使う。Nativeの利用可能状態は別管理で、方針取得失敗やNative停止をJPEG fallback条件にしない。`is_raw`は写真分類、STACK、Trash等に残し、Windowsの現像エンジン選択には使わない。Windowsは旧JPEG Recipe／Historyを自動移行・削除しない。GenzoRoom独自の形式allowlistを設けず、原本をNativeへ渡し、受理可否はNativeに委ねる。拒否時はPVに失敗を表示し、旧JPEG engineや中間変換へ切り替えない。
 
+Windows DesktopとDockerは独立したデータベースを使い、Recipe、History、編集状態を共有・移行しない。Galleryの編集状態取得も同じ方針に従い、WindowsはRAW／非RAWともNative状態を使う。DockerはJPEG状態APIのみを呼び出し、RAW素材とRAWを含むSTACK memberは未編集として扱う。JPEG状態取得に失敗した場合は未編集ではなく状態不明とする。
+
 Windowsでは既存Native Sessionを非RAW画像にも共通利用する。Preview／適応解像度、各調整、WB／AWB／スポイト、ポイントカーブとターゲット調整、Geometry、History／Undo／Redo／Jump、Recipe保存・復元、編集済みサムネイル、Queue Exportを同じ経路で扱う。RAW固有のas-shot情報やKelvin利用可否はNativeが示す設定・capabilityに従う。`raw`を含む既存ファイル名・API・識別子は残り、今回の全面リネームは行っていない。
 
 WB Recipe／HistoryはNative値を保持する。非RAWの`legacy` WBはDesktop相対表示（−100〜+100、中央0）を使い、表示変換はUI境界に限る。RAW Kelvin表示・操作を維持する。Nativeの既定`wb.scale: legacy`はreadback JSONで省略されることがある。Export設定比較では比較用に限って省略を`legacy`として扱う。Recipe値、Native送信値、保存snapshotは書き換えず、明示Kelvinや他の設定不一致は拒否する。
@@ -205,3 +207,4 @@ Export Queue開始時に保存RecipeとRevisionを固定し、原本hashを照�
 - **F-01/F-02** — Docker JPEG方針を明示するFrontend test fixtureへ修正。保存Recipe選択、異方針runの原本取得前拒否、Windows／Docker thumbnail dispatchを方針ベースに統一。
 - **自動検証** — 直近修正のFrontend Persistence 76件、Backend Runtime／Thumbnail関連69件、Backend Queue／Retry等を含む175件、TypeScript、`git diff --check`が成功。これは自動テスト結果で、Windows／Docker手動受入とは分ける。
 - **手動受入** — Windows JPEG Export／Immich登録とRAW/DNGの成功はユーザー報告。Docker実環境のNative不在起動・実際のJPEG編集／Exportを今回の自動検証から推定しない。
+- **統合後Docker実機確認（ユーザー報告）** — Portainerで`main`から再ビルドし、起動、Immich接続、サムネイルプレビュー、JPEG現像・Export、RAW編集不可を確認。これは今回の自動テスト結果とは別の実機受入である。

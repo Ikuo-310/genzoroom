@@ -1,6 +1,6 @@
 # GenzoRoom 開発ノート
 
-## Windows Desktop LightCraft共通現像：設計確定・実装計画（2026-11-09）
+## Windows Desktop LightCraft共通現像：設計確定・実装完了（2026-11-09）
 
 Windows DesktopはLightCraft Nativeを唯一の現像エンジンとし、Immichの画像原本を形式判定・変換なしで渡す方針を確定した。拡張子／MIMEの現像対応ホワイトリスト、アニメーション拒否、形式別開放工程は追加しない。GIF等の先頭フレーム処理やNative内部のpreview-only利用もNativeの判断に従う。Native拒否・起動失敗時に旧JPEG WebGPU／CPUへFallbackしない。Dockerは従来JPEG動作とNative不要の起動を維持する。`is_raw`は分類・STACK・Trash保護に残す。
 
@@ -8,9 +8,9 @@ Windows DesktopはLightCraft Nativeを唯一の現像エンジンとし、Immich
 
 公式Desktopの非RAW WBは表示−100〜+100、中央0だが、Native保存値はtemp=6500を中立とする。公式のmired表示変換だけをUI境界に置き、Tint表示は−100〜+100、Native値は−150〜+150の既存契約を維持する。表示clampで保存値を変更しない。RAW Kelvin、スポイト、History、Reset、Recipe、Exportは同じNative設定を使用する。起動方針と現在のcapabilityを分離し、PVでは確定した原因だけを表示する。原因不明のNative失敗を形式非対応と断定しない。
 
-今後は **Phase 1：現像方針分離 → Phase 2：Backend共通化 → Phase 3：Frontend共通化 → Phase 4：JPEGを代表とした縦断確認・安定化** とする。Phase 4は原本取得からNative編集・保存復元・サムネイル・Queue・JPEG Export・実Immich登録までを対象とし、既存RAWとDocker JPEGを回帰確認する。Previewだけの成功は完成ではないが、形式別実ファイル試験は必須条件にしない。
+**Phase 1：現像方針分離 → Phase 2：Backend共通化 → Phase 3：Frontend共通化 → Phase 4：JPEGを代表とした縦断確認・安定化** は完了した。Windows DesktopではRAW／JPEGのNative共通経路を実装し、Dockerでは既存JPEG経路を維持する。Phase 4は原本取得からNative編集・保存復元・サムネイル・Queue・JPEG Export・Immich登録までを対象とし、既存RAWとDocker JPEGの回帰も確認した。Previewだけの成功を完成とは扱わず、全形式の実ファイル試験は必須条件としていない。
 
-変更対象・依存関係・最小回帰・Windows実機受入・Docker影響は[共通現像設計](research/lightcraft/WINDOWS_COMMON_DEVELOPMENT_PIPELINE_DESIGN.md)に記録した。前回チャット案のアニメーション拒否・形式別開放・preview-only拒否維持は採用しない。過去研究記録は履歴として保持する。**今回は文書化のみで、全Phase未着手。** ソースと文書参照・差分整合性を確認し、`git diff --check`が成功した。製品コード変更、build、test、Native probe、Windows／Docker実機確認は行っていない。利用者向けREADMEとCHANGELOGも変更していない。
+当初の調査・設計案ではアニメーション拒否、形式別開放、preview-only拒否を候補としていたが、いずれも採用していない。計画時点の未確認事項は履歴として残し、現行仕様と実装・受入結果は[共通現像設計](research/lightcraft/WINDOWS_COMMON_DEVELOPMENT_PIPELINE_DESIGN.md)の§10〜§11を参照する。統合後はユーザー報告として、Portainerで`main`からDocker版を再ビルドし、起動、Immich接続、サムネイルプレビュー、JPEG現像・Export、RAW編集不可を確認した。これは自動テスト結果とは別の実機確認である。
 
 ## RAWポイントカーブ／ターゲット調整 完了記録（2026-11-08）
 
