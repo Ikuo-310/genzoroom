@@ -52,6 +52,7 @@ import { useShortcutDisplay } from './useShortcutDisplay';
 import { frontendLogger } from './frontendLogging';
 import { requestThumbnailGeneration } from './thumbnailApi';
 import { useDesktopCloseGuard } from './DesktopLifecycle';
+import { useDevelopmentEngine } from './useDevelopmentEngine';
 
 type DetailState = 'loading' | 'ready' | 'error';
 type SelectionRequest = { mode: 'copy'; assetId: string }
@@ -64,7 +65,17 @@ function logExclusion(event: 'start' | 'complete' | 'failed' | 'undo', context: 
   } catch { /* Diagnostics must not change saving, exclusion or restoration. */ }
 }
 
+function rawPreviewMessage(code: string | undefined): string {
+  if (code === 'raw_unavailable' || code === 'lightcraft_not_ready') return 'nativeUnavailable';
+  if (['raw_download_failed', 'raw_download_timeout', 'raw_source_unavailable', 'raw_source_too_large', 'raw_source_incomplete'].includes(code ?? ''))
+    return 'originalFailed';
+  if (code === 'raw_import_failed') return 'imageReadFailed';
+  return 'error';
+}
+
 export function AnshitsuPage() {
+  const { engine: developmentEngine, loading: developmentEngineLoading } = useDevelopmentEngine();
+  const usesLightcraft = developmentEngine === 'lightcraft';
   const shortcut = useShortcutDisplay();
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
@@ -89,11 +100,15 @@ export function AnshitsuPage() {
   const activeRouteRef = useRef(assetId);
   activeRouteRef.current = assetId;
   const [rawStatusRefresh, setRawStatusRefresh] = useState(0);
-  const savedEditStatuses = useEditStatuses(selectedAssets.map(asset => asset.id),
-    [...new Set(selectedAssets.flatMap(asset => [
-      ...(asset.is_raw ? [asset.id] : []), ...(asset.stackId ? asset.stackMemberIds ?? [] : []),
-      ...(asset.stackMembers ?? []).filter(member => member.is_raw).map(member => member.id),
-    ]))], rawStatusRefresh, selectedAssets.filter(asset => asset.is_raw).map(asset => asset.id));
+  const nativeStatusIds = [...new Set(selectedAssets.flatMap(asset => [asset.id,
+    ...(asset.stackId ? asset.stackMemberIds ?? [] : []), ...(asset.stackMembers ?? []).map(member => member.id)]))];
+  const legacyRawStatusIds = [...new Set(selectedAssets.flatMap(asset => [
+    ...(asset.is_raw ? [asset.id] : []), ...(asset.stackId ? asset.stackMemberIds ?? [] : []),
+    ...(asset.stackMembers ?? []).filter(member => member.is_raw).map(member => member.id),
+  ]))];
+  const rawStatusIds = usesLightcraft ? nativeStatusIds : developmentEngine === 'jpeg' ? legacyRawStatusIds : [];
+  const savedEditStatuses = useEditStatuses(developmentEngine === 'jpeg' ? selectedAssets.map(asset => asset.id) : [], rawStatusIds,
+    rawStatusRefresh, usesLightcraft ? nativeStatusIds : developmentEngine === 'jpeg' ? selectedAssets.filter(asset => asset.is_raw).map(asset => asset.id) : []);
   const exportQueue = useExportQueue();
   const queueToggleRef = useRef<(id: string) => Promise<void>>(async () => {});
   const queueOperations = useRef(new Set<string>());
@@ -138,17 +153,18 @@ export function AnshitsuPage() {
   const workspaceKeyboardBlocked = settingsOpen || selection !== null || historyMenu !== null || categoryMenu !== null || sliderMenu !== null || rangeMenu !== null || historyConfirmation !== null
     || switching || excluding || exitSaving || exitFailure !== null || failedSwitch !== null;
   const [initialGpu, setInitialGpu] = useState<{ assetId: string; usable: boolean } | null>(null);
-  const jpegOriginal = useJpegOriginal(activeDetail, settings.initialImage, initialGpu?.assetId === assetId && initialGpu.usable);
-  const rawDocument = useRawDocument(activeDetail?.is_raw ? assetId : null, viewerShowsBefore);
-  const canEdit = !!activeDetail && supportsEditing(activeDetail);
+  const jpegOriginal = useJpegOriginal(developmentEngine === 'jpeg' ? activeDetail : null, settings.initialImage,
+    initialGpu?.assetId === assetId && initialGpu.usable);
+  const rawDocument = useRawDocument(usesLightcraft && activeDetail ? assetId : null, viewerShowsBefore);
+  const canEdit = developmentEngine === 'jpeg' && !!activeDetail && supportsEditing(activeDetail);
   const { session, dispatch, canUndo, organizeHistory, loadStatus, save, discard, retryLoad, pauseAutosave, resumeAutosave, autosaveError,
     recipeChangeRevision,
     saveEditedAssetsForExit, resumeAfterExitFailure, localStateFor, retainForUndo } = useAssetEdits(assetId, canEdit, workspaceKeyboardBlocked, {
       onEdit: clearExclusionUndo, undo: () => undoExclusionRef.current(),
       history: type => {
-        if (!activeDetail?.is_raw) return false;
+        if (!usesLightcraft) return false;
         rawHistoryAction(type);
-        return true; // RAW claims the event even when unavailable; JPEG must not also dispatch it.
+        return true; // LightCraft claims the event even when unavailable; JPEG must not also dispatch it.
       },
     });
   const editable = canEdit && loadStatus === 'ready';
@@ -172,10 +188,16 @@ export function AnshitsuPage() {
       || queueOperations.current.has(id) || exportQueue.mutationFor(id).operation) return;
     const status = exportQueue.getStatus(id);
     if (status === 'waiting' || status === 'encoding' || status === 'registering') return;
-    const rawAsset = selectedAssets.find(asset => asset.id === id)?.is_raw
-      ?? (id === assetId && activeDetail?.is_raw) ?? false;
+    const rawAsset = usesLightcraft || (selectedAssets.find(asset => asset.id === id)?.is_raw
+      ?? (id === assetId && activeDetail?.is_raw) ?? false);
     const removing = status === 'queued' || status === 'failed';
+    const nativeNonDefault = usesLightcraft
+      ? id === assetId && rawDocument?.settings
+        ? rawDocument.settings.settingsFingerprint !== rawDocument.settings.importDefaultsFingerprint
+        : savedEditStatuses[id]
+      : undefined;
     // A default Recipe has no Queue control, even while saved cleanup membership is still refreshing.
+    if (usesLightcraft && !removing && nativeNonDefault === false) return;
     if (!rawAsset && localStateFor(id).nonDefaultRecipe === false) return;
     if (!removing && id === assetId && (rawAsset
       ? rawDocument?.status !== 'ready' || !rawDocument.settings || rawDocument.regenerating || rawDocument.resetting
@@ -227,7 +249,8 @@ export function AnshitsuPage() {
   queueToggleRef.current = toggleQueue;
   const [histograms, setHistograms] = useState<AssetHistograms | null>(null);
   const histogramSourceKey = editable && jpegOriginal.source ? `${jpegOriginal.source.kind}:${jpegOriginal.source.url}` : null;
-  const gpu = useWorkspaceGpu(`${assetId}:${histogramSourceKey ?? 'none'}`, false, !activeDetail || activeDetail.is_raw);
+  const gpu = useWorkspaceGpu(`${assetId}:${histogramSourceKey ?? 'none'}`, false,
+    developmentEngine !== 'jpeg' || !activeDetail || activeDetail.is_raw);
   useEffect(() => {
     // Preserve source-bound GPU ownership so an old render cannot overlap a new source upload.
     // Original promotion is latched by useJpegOriginal while the new renderer prepares.
@@ -249,7 +272,7 @@ export function AnshitsuPage() {
   }, [assetId]);
   useEffect(() => { setHistograms(null); }, [assetId, histogramSourceKey]);
   const clipboardEnabled = editable && !switching && !exitSaving && !failedSwitch && !exitFailure;
-  const rawResetEnabled = !!activeDetail?.is_raw && !!rawDocument && !rawDocument.resetting
+  const rawResetEnabled = usesLightcraft && !!rawDocument && !rawDocument.resetting
     && (rawDocument.status === 'error' || !rawDocument.saving && !rawDocument.pending && !rawDocument.regenerating)
     && !switching && !exitSaving && !failedSwitch && !exitFailure;
   useEffect(() => {
@@ -272,7 +295,7 @@ export function AnshitsuPage() {
     return () => window.removeEventListener('keydown', keydown);
   }, [assetId, workspaceKeyboardBlocked]);
   const historyEnabled = clipboardEnabled && selection === null && historyConfirmation === null;
-  const rawHistoryEnabled = !!activeDetail?.is_raw && rawDocument?.status === 'ready' && !!rawDocument.history
+  const rawHistoryEnabled = usesLightcraft && rawDocument?.status === 'ready' && !!rawDocument.history
     && (!rawDocument.locked || rawDocument.crop.operation === 'straighten' && !rawDocument.saveError) && !rawDocument.historyLoading && !rawDocument.historyError && !workspaceKeyboardBlocked;
   function rawHistoryAction(type: 'undo' | 'redo') {
     if (!rawHistoryEnabled || !rawDocument || !(type === 'undo' ? rawDocument.canUndo : rawDocument.canRedo)) return;
@@ -295,7 +318,7 @@ export function AnshitsuPage() {
   useEffect(() => { setSelection(null); setHistoryMenu(null); setCategoryMenu(null); setSliderMenu(null); setRangeMenu(null); setHistoryConfirmation(null); setHistoryError(false); }, [assetId]);
   useEffect(() => {
     if (!historyEnabled) { setHistoryMenu(null); setCategoryMenu(null); setSliderMenu(null); setRangeMenu(null); }
-    // RAW reset owns a separate availability gate because JPEG clipboard support excludes RAW.
+    // Native reset owns a separate availability gate from JPEG clipboard support.
     if (historyConfirmation?.operation === 'resetRaw' ? !rawResetEnabled : !clipboardEnabled) setHistoryConfirmation(null);
   }, [historyEnabled, clipboardEnabled, rawResetEnabled, historyConfirmation]);
 
@@ -448,7 +471,7 @@ export function AnshitsuPage() {
     if (nextId === assetId || switchingRef.current || exclusionBusy.current || exitRef.current || failedSwitch && !retryRaw
       || excludedIdsRef.current.has(nextId)) return;
     clearExclusionUndo();
-    if (activeDetail?.is_raw && rawDocument) {
+    if (usesLightcraft && rawDocument) {
       switchingRef.current = true;
       setSwitching(true);
       setFailedSwitch(null);
@@ -498,7 +521,7 @@ export function AnshitsuPage() {
     setExitSaving(true);
     if (retryRaw) setExitFailure(null);
     try {
-      if (activeDetail?.is_raw && rawDocument) {
+      if (usesLightcraft && rawDocument) {
         try { await rawDocument.prepareSave(retryRaw); }
         catch (cause) {
           setExitFailure({ assetId, error: 'unexpected', raw: true, code: cause instanceof RawApiError ? cause.code : 'raw_connection_failed' });
@@ -513,7 +536,7 @@ export function AnshitsuPage() {
         return;
       }
       const thumbnailAssetIds = new Set(result.thumbnailAssetIds);
-      if (activeDetail?.is_raw) thumbnailAssetIds.add(assetId);
+      if (usesLightcraft) thumbnailAssetIds.add(assetId);
       for (const id of thumbnailAssetIds) requestThumbnailGeneration(id, 'exit');
       returnToHome();
     } catch {
@@ -539,7 +562,7 @@ export function AnshitsuPage() {
       exitRef.current = true;
       setExitSaving(true);
       try {
-        if (activeDetail?.is_raw) await rawDocument?.prepareSave(retry);
+        if (usesLightcraft) await rawDocument?.prepareSave(retry);
         const result = await saveEditedAssetsForExit();
         if (result.ok) return true;
       } catch(cause) { resumeDesktopExit(); throw cause; }
@@ -548,7 +571,7 @@ export function AnshitsuPage() {
     },
     resume: resumeDesktopExit,
     failureCode:()=>rawDocument?.saveError ?? rawDocument?.regenerationError ?? exitFailure?.code ?? failedSwitch?.code,
-    discard: activeDetail?.is_raw && rawDocument ? async()=>{
+    discard: usesLightcraft && rawDocument ? async()=>{
       await rawDocument.discardChanges();
       const result=await saveEditedAssetsForExit();
       if(!result.ok)throw new RawApiError('edit_save_failed');
@@ -594,7 +617,7 @@ export function AnshitsuPage() {
     pauseAutosave(id);
     logExclusion('start', { assetId: id });
     try {
-      const activeRawAsset = id === assetId && activeDetail?.is_raw;
+      const activeRawAsset = id === assetId && usesLightcraft;
       if (activeRawAsset) await rawDocument?.prepareSave();
       // Unvisited assets have no local edits to save. Validated inactive records use the same save boundary.
       const local = localStateFor(id);
@@ -771,14 +794,14 @@ export function AnshitsuPage() {
           onClick={(event) => { if (historyMenu) closeHistoryMenu(); else openHistoryMenu(undefined, event.currentTarget); }}>⋯</button>}>
           <div className="edit-actions">
             <button className="tool-button" title={shortcut.title(t('workspace.undo'), 'undo')}
-              disabled={activeDetail?.is_raw ? !rawHistoryEnabled || !rawDocument?.canUndo : !historyEnabled || !canUndo}
-              onClick={() => activeDetail?.is_raw ? rawHistoryAction('undo') : dispatch({ type: 'undo' })}>{t('workspace.undo')}</button>
+              disabled={usesLightcraft ? !rawHistoryEnabled || !rawDocument?.canUndo : !historyEnabled || !canUndo}
+              onClick={() => usesLightcraft ? rawHistoryAction('undo') : dispatch({ type: 'undo' })}>{t('workspace.undo')}</button>
             <button className="tool-button" title={shortcut.title(t('workspace.redo'), 'redo')}
-              disabled={activeDetail?.is_raw ? !rawHistoryEnabled || !rawDocument?.canRedo : !historyEnabled || session.cursor >= session.history.length || !!session.pending}
-              onClick={() => activeDetail?.is_raw ? rawHistoryAction('redo') : dispatch({ type: 'redo' })}>{t('workspace.redo')}</button>
+              disabled={usesLightcraft ? !rawHistoryEnabled || !rawDocument?.canRedo : !historyEnabled || session.cursor >= session.history.length || !!session.pending}
+              onClick={() => usesLightcraft ? rawHistoryAction('redo') : dispatch({ type: 'redo' })}>{t('workspace.redo')}</button>
           </div>
           <div className="history-scroll-region">
-          {activeDetail?.is_raw && rawDocument ? <RawEditHistory raw={rawDocument} disabled={workspaceKeyboardBlocked}
+          {usesLightcraft && rawDocument ? <RawEditHistory raw={rawDocument} disabled={workspaceKeyboardBlocked}
             onReset={trigger => setHistoryConfirmation({ assetId, operation: 'resetRaw', trigger })} />
             : session.history.length === 0 ? <p>{t('workspace.historyEmpty')}</p>
             : <EditHistory history={session.history} cursor={session.cursor} disabled={!historyEnabled}
@@ -795,12 +818,15 @@ export function AnshitsuPage() {
       viewer={detailState === 'ready' && activeDetail ? (
         <ImageViewer gpuRenderer={gpu.renderer} onGpuError={gpu.fail} onBackendChange={gpu.reportBackend}
           key={assetId}
-          src={rawDocument?.status === 'ready' ? rawDocument.url ?? '' : rawDocument && rawDocument.status !== 'unavailable' ? '' : activeDetail.preview_url}
+          src={usesLightcraft ? rawDocument?.status === 'ready' ? rawDocument.url ?? '' : '' : activeDetail.preview_url}
           documentKey={rawDocument?.document ? `${assetId}:${rawDocument.document.generation}:${rawDocument.document.documentToken}` : undefined}
-          previewStatus={rawDocument?.status === 'loading' ? 'loading' : rawDocument?.status === 'error' || rawDocument?.displayError && !rawDocument.url ? 'error' : undefined}
-          statusNote={rawDocument ? (rawDocument.pending && !rawDocument.editError)
+          previewStatus={!developmentEngine ? developmentEngineLoading ? 'loading' : 'error'
+            : usesLightcraft ? rawDocument?.status === 'loading' ? 'loading' : rawDocument?.status === 'error' || rawDocument?.status === 'unavailable' || rawDocument?.displayError && !rawDocument.url ? 'error' : undefined : undefined}
+          statusNote={!developmentEngine ? t(developmentEngineLoading ? 'workspace.developmentPolicy.loading' : 'workspace.developmentPolicy.error')
+            : rawDocument ? rawDocument.status === 'unavailable' ? t('workspace.rawPreview.nativeUnavailable') : (rawDocument.pending && !rawDocument.editError)
             || (rawDocument.status === 'ready' && !rawDocument.editError && !rawDocument.displayError) ? undefined
-            : t(`workspace.rawPreview.${rawDocument.editError ? 'editFailed' : rawDocument.displayError ? 'error' : rawDocument.status}`) : undefined}
+            : t(`workspace.rawPreview.${rawDocument.editError ? 'editFailed' : rawDocument.displayError ? rawPreviewMessage(rawDocument.displayError)
+              : rawDocument.status === 'error' ? rawPreviewMessage(rawDocument.code) : rawDocument.status}`) : undefined}
           previewPixels={!!rawDocument}
           rawPickActive={rawDocument?.pickActive}
           rawPickTargets={rawDocument?.pickTargets}
@@ -822,16 +848,16 @@ export function AnshitsuPage() {
           rawRegionDisplay={rawDocument?.regionDisplay}
           rawRegionOutline={rawDocument?.regionOutline}
           onRawViewChange={rawDocument?.viewChanged}
-          beforeAvailable={!activeDetail.is_raw || !!rawDocument?.beforeAvailable}
-          beforeSrc={activeDetail.is_raw ? rawDocument?.beforeUrl : undefined}
-          beforeStatus={activeDetail.is_raw ? rawDocument?.beforeStatus : undefined}
-          onBeforeRetry={activeDetail.is_raw ? rawDocument?.retryBefore : undefined}
+          beforeAvailable={!usesLightcraft || !!rawDocument?.beforeAvailable}
+          beforeSrc={usesLightcraft ? rawDocument?.beforeUrl : undefined}
+          beforeStatus={usesLightcraft ? rawDocument?.beforeStatus : undefined}
+          onBeforeRetry={usesLightcraft ? rawDocument?.retryBefore : undefined}
           editSource={editable ? jpegOriginal.source : undefined}
           originalStatus={jpegOriginal.status}
           showingOriginal={jpegOriginal.showingOriginal}
           onOriginalToggle={jpegOriginal.toggle}
           onInteractionStart={commitJpegAdjustmentGesture}
-          onImageError={jpegOriginal.failDecode}
+          onImageError={usesLightcraft ? undefined : jpegOriginal.failDecode}
           recipe={editable ? session.recipe : undefined}
           onHistogramChange={receiveHistograms}
           alt={activeDetail.filename}
@@ -919,20 +945,23 @@ export function AnshitsuPage() {
           </> : canEdit ? <div role="status" className={loadStatus === 'error' ? 'error-text' : undefined}>
             <p>{t(loadStatus === 'error' ? 'workspace.editStateLoadFailed' : 'workspace.editStateLoading')}</p>
             {loadStatus === 'error' && <button type="button" className="tool-button" onClick={retryLoad}>{t('workspace.retry')}</button>}
-          </div> : rawDocument?.crop.active ? <RawCropControls key={assetId} raw={rawDocument} disabled={workspaceKeyboardBlocked} /> : rawDocument ? <RawAdjustmentControls raw={{ ...rawDocument, changeControls: values => {
+          </div> : !developmentEngine ? <p role="status">{t(developmentEngineLoading ? 'workspace.developmentPolicy.loading' : 'workspace.developmentPolicy.error')}</p>
+          : rawDocument?.crop.active ? <RawCropControls key={assetId} raw={rawDocument} disabled={workspaceKeyboardBlocked} /> : rawDocument ? <RawAdjustmentControls raw={{ ...rawDocument, changeControls: values => {
             if (!rawDocument.locked && !workspaceKeyboardBlocked) clearExclusionUndo();
             rawDocument.changeControls(values);
-          } }} disabled={workspaceKeyboardBlocked} /> : <p>{t('workspace.jpegOnly')}</p>}
+          } }} disabled={workspaceKeyboardBlocked} /> : <p>{usesLightcraft ? t('workspace.rawPreview.loading') : t('workspace.jpegOnly')}</p>}
         </DevelopPanel>
       </>}
       filmstrip={<Filmstrip
         assets={visibleAssets}
-        editStatuses={Object.fromEntries(selectedAssets.map(asset => [asset.id, asset.is_raw
+        editStatuses={Object.fromEntries(selectedAssets.map(asset => [asset.id, usesLightcraft
           ? asset.id === assetId && rawDocument?.settings
             ? rawDocument.settings.settingsFingerprint !== rawDocument.settings.importDefaultsFingerprint
             : savedEditStatuses[asset.id]
-          : localStateFor(asset.id, savedEditStatuses[asset.id]).nonDefaultRecipe]))}
-        historyOnlyStatuses={Object.fromEntries(selectedAssets.map(asset => [asset.id, !asset.is_raw && localStateFor(asset.id).historyOnly]))}
+          : developmentEngine === 'jpeg' && asset.is_raw ? savedEditStatuses[asset.id]
+            : developmentEngine === 'jpeg' ? localStateFor(asset.id, savedEditStatuses[asset.id]).nonDefaultRecipe : undefined]))}
+        historyOnlyStatuses={Object.fromEntries(selectedAssets.map(asset => [asset.id,
+          developmentEngine === 'jpeg' && !asset.is_raw && localStateFor(asset.id).historyOnly]))}
         activeAssetId={assetId}
         recipeChangeRevision={recipeChangeRevision}
         disabled={switching || excluding || exitSaving || exitFailure !== null || failedSwitch !== null}

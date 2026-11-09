@@ -9,6 +9,7 @@ import { RawPointCurveControls } from './RawPointCurveControls';
 import { RawEyedropperIcon } from './RawEyedropperIcon';
 import { RAW_VIGNETTE_STYLES, type RawControlId, type RawCurvePoint, type RawHistoryControlId, type RawHistoryOperation, type RawOpticsFlagId, type RawSectionId, type RawVignetteStyle } from './rawApi';
 import type { useRawDocument } from './useRawDocument';
+import { displayTemperature, displayTint, nativeTemperature } from './rawWhiteBalance';
 
 type RawCategoryId = 'basic' | 'color' | 'grading' | 'curves' | 'effects' | 'detail';
 const sections: Record<Exclude<RawCategoryId, 'curves'>, RawSectionId> = { basic: 'light', color: 'color', grading: 'grading', effects: 'effects', detail: 'detail' };
@@ -114,7 +115,13 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
       <div className={category === 'detail' ? 'raw-detail-controls' : undefined}>{(category === 'grading' ? [`grading.${gradingBand}.hue`, `grading.${gradingBand}.sat`, `grading.${gradingBand}.lum`, 'grading.blending', 'grading.balance'] as RawControlId[] : controls).map((control, index) => {
         const spec = settings.controls.find(spec => spec.id === control)!;
         const id = category === 'grading' ? control : ids[index];
-        const value = raw.desired?.[control] ?? settings.values[control];
+        const nativeValue = raw.desired?.[control] ?? settings.values[control];
+        const relativeWb = settings.wb.scale === 'legacy';
+        const relativeWbControl = relativeWb && control.startsWith('wb.');
+        const value = control === 'wb.temp' ? displayTemperature(nativeValue, settings.wb.scale)
+          : control === 'wb.tint' ? displayTint(nativeValue) : nativeValue;
+        const min = relativeWbControl ? -100 : spec.min;
+        const max = relativeWbControl ? 100 : spec.max;
         const trackGradient = control.startsWith('grading.') && control.endsWith('.hue') ? 'linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)' : control === 'wb.temp' ? TEMPERATURE_TRACK_GRADIENT : control === 'wb.tint' ? TINT_TRACK_GRADIENT : undefined;
         const enabled = category === 'curves' ? true : settings.sections[sections[category]];
         const dependent = control.startsWith('vignette.') && control !== 'vignette.amount'
@@ -132,16 +139,19 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
           {detailHeadings[control] && <h4 className="adjustment-subsection-title">{t(`workspace.rawPreview.${detailHeadings[control]}`)}</h4>}
           <AdjustmentSlider adjustmentId={id} className={dependent ? 'is-dependent-disabled' : undefined}
           commitPolicy="operation-boundary" hideToggle
-          trackGradient={trackGradient} valueSuffix={control.endsWith('.hue') ? '°' : control === 'wb.temp' ? 'K' : undefined}
+          trackGradient={trackGradient} valueSuffix={control.endsWith('.hue') ? '°' : control === 'wb.temp' && !relativeWb ? 'K' : undefined}
           label={t(`workspace.${labelKey}`)} accessibleLabel={control === 'detail.nrDetail' || control === 'detail.nrColorDetail'
             ? t(`workspace.${labelKey}Name`) : undefined} enabled={enabled} onToggle={() => {}}
           onReset={() => operate({ kind: 'controlReset', metadata: { control } })} onBegin={() => raw.beginControls(control)}
-          value={value} min={spec.min} max={spec.max} step={spec.step} precision={spec.precision}
-          defaultValue={spec.default} resetLabel={t(control.startsWith('wb.') ? 'workspace.rawPreview.wbResetAsShot' : `workspace.${labelKey}Reset`)} valueLabel={t(`workspace.${labelKey}Value`)}
-          valueText={`${value.toFixed(spec.precision)}${control.endsWith('.hue') ? '°' : control === 'wb.temp' ? ' K' : control === 'light.exposure' ? ' EV' : ''}`}
+          value={value} min={min} max={max} step={relativeWbControl ? 1 : spec.step}
+          precision={relativeWbControl ? 0 : spec.precision}
+          defaultValue={relativeWbControl ? 0 : spec.default}
+          resetLabel={t(control.startsWith('wb.') ? 'workspace.rawPreview.wbResetAsShot' : `workspace.${labelKey}Reset`)} valueLabel={t(`workspace.${labelKey}Value`)}
+          valueText={`${value.toFixed(relativeWbControl ? 0 : spec.precision)}${control.endsWith('.hue') ? '°' : control === 'wb.temp' && !relativeWb ? ' K' : control === 'light.exposure' ? ' EV' : ''}`}
           disabled={locked || !enabled || dependent || control.startsWith('wb.') && !settings.wb.available}
           resetDisabled={actionsLocked || dependent || control.startsWith('wb.') && !settings.wb.available}
-          onChange={value => raw.changeControls({ [control]: value })} onCommit={() => raw.flushControls(control)} /></Fragment>;
+          onChange={value => raw.changeControls({ [control]: control === 'wb.temp' ? nativeTemperature(value, settings.wb.scale) : value })}
+          onCommit={() => raw.flushControls(control)} /></Fragment>;
       })}</div>
       {category === 'detail' && <RawLensCorrections key={raw.assetId} raw={raw} locked={actionsLocked} operate={operate} />}
     </RawCategory>)}

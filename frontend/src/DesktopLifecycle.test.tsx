@@ -139,7 +139,7 @@ it('keeps the application open when the confirmed discard fence fails',async()=>
 it('requests a fresh host close and passes explicit retry to the existing save guard',async()=>{
  prepare.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
  await act(async()=>event('genzoroom:close-request',{requestId:'a'.repeat(64)}));await flush();
- await act(async()=>desktopButton('Retry RAW save').click());await flush();
+ await act(async()=>desktopButton('Retry save').click());await flush();
  expect(respond).toHaveBeenCalledWith({kind:'close'});
  await act(async()=>event('genzoroom:close-request',{requestId:'b'.repeat(64)}));await flush();
  expect(prepare).toHaveBeenLastCalledWith(true);expect(respond).toHaveBeenCalledWith({kind:'closeResult',requestId:'b'.repeat(64),saved:true});

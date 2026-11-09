@@ -102,7 +102,7 @@ describe('RAW History display', () => {
     expect(markup).not.toContain('<time');
     expect(markup).toContain('<li value="2" class="current">');
     expect(markup).toContain('<li value="3" class="undone">');
-    expect(markup).toContain('RAW編集をリセット');
+    expect(markup).toContain('現像編集をリセット');
     expect(raw.jumpHistory).not.toHaveBeenCalled();
   });
 
@@ -135,6 +135,18 @@ describe('RAW History display', () => {
     const markup = renderToStaticMarkup(<RawEditHistory raw={rawHistory([step], 1) as never} disabled={false} onReset={() => {}} />);
     expect(markup).toContain('色温度 11000 K → 4875 K');
     expect(markup).toContain('色かぶり補正 +26 → +13');
+  });
+
+  it('formats legacy Native WB history as relative values and clamps tint only for display', () => {
+    const step: RawHistoryStep = { stepId: 'legacy-wb', kind: 'wbAuto', metadata: {},
+      createdAt: '2026-10-23T11:14:53Z', changes: [
+        { control: 'wb.temp', before: 6500, after: 1e6 / (1e6 / 6500 - 0.8 * 50) },
+        { control: 'wb.tint', before: -140, after: 125 },
+      ] };
+    const raw = { ...rawHistory([step], 1), settings: { wb: { scale: 'legacy' } } };
+    const markup = renderToStaticMarkup(<RawEditHistory raw={raw as never} disabled={false} onReset={() => {}} />);
+    expect(markup).toContain('色温度 0 → 50');
+    expect(markup).toContain('色かぶり補正 -100 → +100');
   });
 });
 

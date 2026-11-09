@@ -38,6 +38,7 @@ import { ExportManagementContent, ExportManagementToolbar, ExportRetryPriorityNo
 import { adjacentCalendarPeriod, HomeCalendar, HomeCalendarNavigation, type CalendarDay } from './HomeCalendar';
 import { RECENT_PHOTO_COUNTS, effectiveAnshitsuSelection, resolveDateLocale, resolveWeekStart, updateSetting, useAppSettings, type RecentPhotoCount } from './appSettings';
 import { useRawCapability } from './useRawCapability';
+import { useDevelopmentEngine } from './useDevelopmentEngine';
 import { filterPhotos, filterPhotosByDevelopStatus, filterPhotosByEditStatus, photoFiltersForMode, readDevelopStatusFilterMode, readEditStatusFilterMode, writeDevelopStatusFilterMode, writeEditStatusFilterMode, type DevelopStatusFilterMode, type EditStatusFilterMode } from './photoFilters';
 import {
   blurPhotoSelectionCheckboxWhenSelectionEnds,
@@ -66,6 +67,8 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
   const recentCountSelectId = useId();
   const shortcut = useShortcutDisplay();
   const settings = useAppSettings();
+  const { engine: developmentEngine } = useDevelopmentEngine();
+  const usesLightcraft = developmentEngine === 'lightcraft';
   const rawAvailable = useRawCapability();
   const effectivePreset = effectiveAnshitsuSelection(settings.anshitsuInitialSelection, rawAvailable);
   const navigate = useNavigate();
@@ -230,15 +233,18 @@ export function GalleryPage({ active = true }: { active?: boolean } = {}) {
           ? { kind: 'calendar', assets: calendarAssets, state: calendarAssetState, selection: calendarSelection }
           : null;
   const editStatusAssets = photoView?.state === 'ready' ? photoView.assets : [];
-  const editStatusIds = active ? stackEditStatusIds(editStatusAssets) : [];
-  const rawEditStatusIds = active ? [...new Set(editStatusAssets.flatMap(asset => [
+  const stackStatusIds = stackEditStatusIds(editStatusAssets);
+  const legacyRawStatusIds = [...new Set(editStatusAssets.flatMap(asset => [
     ...(asset.is_raw ? [asset.id] : []), ...(asset.stackId ? asset.stackMemberIds ?? [] : []),
     ...(asset.stackMembers ?? []).filter(member => member.is_raw).map(member => member.id),
-  ]))] : [];
-  const editStatusSnapshot = useEditStatusesSnapshot(editStatusIds, rawEditStatusIds, 0,
-    editStatusAssets.flatMap(asset => [
+  ]))];
+  const editStatusIds = active && developmentEngine === 'jpeg' ? stackStatusIds : [];
+  const rawEditStatusIds = active && usesLightcraft ? stackStatusIds
+    : active && developmentEngine === 'jpeg' ? legacyRawStatusIds : [];
+  const knownRawStatusIds = usesLightcraft ? rawEditStatusIds : developmentEngine === 'jpeg' ? editStatusAssets.flatMap(asset => [
       ...(asset.is_raw ? [asset.id] : []), ...(asset.stackMembers ?? []).filter(member => member.is_raw).map(member => member.id),
-    ]));
+    ]) : [];
+  const editStatusSnapshot = useEditStatusesSnapshot(editStatusIds, rawEditStatusIds, 0, knownRawStatusIds);
   const editStatuses = editStatusSnapshot.statuses;
   const photoFilters = photoFiltersForMode('both');
   const viewKey = showStacks ? 'stacks' : showExport ? 'export' : homeViewKey(activeTab, selectedAlbum?.id ?? null, calendarYear, calendarMonth, selectedCalendarDate, calendarMode);

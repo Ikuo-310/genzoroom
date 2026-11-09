@@ -2,8 +2,9 @@ import { useTranslation } from 'react-i18next';
 import { HistoryList } from './HistoryList';
 import type { useRawDocument } from './useRawDocument';
 import { formatContrast, formatExposure, formatHighlights, formatShadows, formatWhites,
-  formatBlacks, formatTint, formatTemperature, formatVibrance, formatSaturation } from './editing';
+  formatBlacks, formatTint, formatVibrance, formatSaturation } from './editing';
 import type { RawHistoryControlId, RawOpticsFlagId, RawHistoryStep } from './rawApi';
+import { displayTemperature, displayTint } from './rawWhiteBalance';
 
 const labels: Record<RawHistoryControlId, string> = {
   'grading.shadows.hue': 'rawPreview.grading.shadows.hue',
@@ -76,7 +77,7 @@ const flagResetLabels: Record<RawOpticsFlagId, string> = {
   'optics.lens_profile': 'workspace.rawPreview.enableProfileCorrectionsReset',
 };
 
-function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t']) {
+function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t'], wbScale: string) {
   if (step.kind === 'geometry') return t(`workspace.rawPreview.cropHistory.${step.metadata.action ?? step.metadata.operation}`);
   if (step.kind === 'curve') return t(`workspace.rawPreview.curveHistory.${step.metadata.channel}`);
   if (step.kind === 'curveReset') {
@@ -95,8 +96,15 @@ function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t'
   const control = step.metadata.control as RawHistoryControlId | undefined;
   const reset = step.kind === 'controlReset';
   const name = (id: RawHistoryControlId) => t(`workspace.${labels[id]}`);
-  const pair = (change: NonNullable<RawHistoryStep['changes']>[number]) =>
-    `${formatters[change.control](change.before)} → ${formatters[change.control](change.after)}`;
+  const pair = (change: NonNullable<RawHistoryStep['changes']>[number]) => {
+    if (change.control === 'wb.temp') {
+      const unit = wbScale === 'legacy' ? '' : ' K';
+      return `${Math.round(displayTemperature(change.before, wbScale))}${unit} → ${Math.round(displayTemperature(change.after, wbScale))}${unit}`;
+    }
+    if (change.control === 'wb.tint' && wbScale === 'legacy')
+      return `${formatTint(displayTint(change.before))} → ${formatTint(displayTint(change.after))}`;
+    return `${formatters[change.control](change.before)} → ${formatters[change.control](change.after)}`;
+  };
   if (control) {
     const label = t(`workspace.${labels[control]}${reset ? 'Reset' : ''}`);
     if (reset && step.changes?.length && (step.changes.length > 1 || step.changes[0].control !== control))
@@ -123,7 +131,8 @@ export function RawEditHistory({ raw, disabled, onReset }: { raw: NonNullable<Re
   onReset: (trigger: HTMLElement) => void }) {
   const { t } = useTranslation();
   const steps = raw.historySteps ?? [];
-  const rows = steps.map((step, index) => ({ id: step.stepId, position: index + 1, description: describe(step, t) }));
+  const rows = steps.map((step, index) => ({ id: step.stepId, position: index + 1,
+    description: describe(step, t, raw.settings?.wb.scale ?? 'kelvin') }));
   return <>
     {raw.resetError && <p role="alert">{t(raw.resetError === 'raw_edit_reset_database_failed' ? 'workspace.rawPreview.editResetDatabaseFailed'
       : raw.resetError === 'raw_edit_reset_session_failed' ? 'workspace.rawPreview.editResetSessionFailed'

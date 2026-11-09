@@ -18,6 +18,8 @@ vi.mock('./useDevelopmentExclusions', () => ({ useDevelopmentExclusions: () => (
   stateFor: () => ({ target: null, excluded: false, known: true }), setExcluded: async () => {}, generation: 0, failure: null,
 }) }));
 const api = vi.hoisted(() => ({ recent: vi.fn(), statuses: vi.fn(), rawStatuses: vi.fn(), detail: vi.fn(), editState: vi.fn() }));
+const developmentPolicy = vi.hoisted(() => ({ engine: 'jpeg' as 'lightcraft' | 'jpeg' | null, loading: false }));
+vi.mock('./useDevelopmentEngine', () => ({ useDevelopmentEngine: () => developmentPolicy }));
 vi.mock('./api', async original => ({ ...(await original<typeof import('./api')>()), fetchRecentAssets: api.recent, fetchAssetDetail: api.detail }));
 vi.mock('./editStateApi', async original => ({ ...(await original<typeof import('./editStateApi')>()),
   getAssetEditStatuses: api.statuses, getRawAssetEditStatuses: api.rawStatuses, getAssetEditState: api.editState }));
@@ -83,6 +85,7 @@ function changeEditFilter(value: 'both' | 'edited' | 'unedited') {
   });
 }
 beforeEach(async () => {
+  developmentPolicy.engine = 'jpeg'; developmentPolicy.loading = false;
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   await i18n.changeLanguage('en');
@@ -120,6 +123,14 @@ describe('Home bulk edit status', () => {
     expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
     changeEditFilter('unedited');
     expect(host.querySelectorAll('.photo-card')).toHaveLength(0);
+  });
+
+  it('uses Native saved Recipe statuses for every Gallery asset under the LightCraft policy', async () => {
+    developmentPolicy.engine = 'lightcraft';
+    api.rawStatuses.mockResolvedValue({ [assets[0].id]: true });
+    await mount();
+    expect(api.statuses).not.toHaveBeenCalled();
+    expect(api.rawStatuses).toHaveBeenCalledWith(assets.map(asset => asset.id), expect.any(AbortSignal));
   });
 
   it('keeps RAW status acquisition failures unknown instead of filtering them as unedited', async () => {

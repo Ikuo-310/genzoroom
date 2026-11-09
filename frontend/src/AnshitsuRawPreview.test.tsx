@@ -20,6 +20,8 @@ const base: AssetDetail = { id: '12345678-1234-4234-9234-123456789abc', filename
 const jpeg = { ...base, id: '87654321-4321-4321-8321-cba987654321', filename: 'b.jpg', format: 'JPEG', is_raw: false };
 const rawB = { ...base, id: '22222222-2222-4222-8222-222222222222', filename: 'c.DNG' };
 const adjusted = vi.hoisted(() => vi.fn());
+const developmentPolicy = vi.hoisted(() => ({ engine: 'lightcraft' as 'lightcraft' | 'jpeg' | null, loading: false }));
+vi.mock('./useDevelopmentEngine', () => ({ useDevelopmentEngine: () => developmentPolicy }));
 vi.mock('./api', async original => ({ ...await original<typeof import('./api')>(),
   fetchAssetDetail: vi.fn(async id => [base, jpeg, rawB].find(asset => asset.id === id)) }));
 vi.mock('./editStateApi', async original => ({ ...await original<typeof import('./editStateApi')>(),
@@ -44,15 +46,16 @@ function dispatchPointer(target: Element, type: string, pointerId: number, clien
   Object.assign(event, { pointerId, button: 0, clientX, clientY });
   act(() => target.dispatchEvent(event));
 }
-async function mount() {
-  await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: `/anshitsu/${base.id}`,
-    state: { selectedAssets: [base, jpeg, rawB], activeAssetId: base.id } }]}><DesktopLifecycleProvider><SettingsProvider><Routes>
+async function mount(activeAssetId = base.id) {
+  await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: `/anshitsu/${activeAssetId}`,
+    state: { selectedAssets: [base, jpeg, rawB], activeAssetId } }]}><DesktopLifecycleProvider><SettingsProvider><Routes>
     <Route path="/anshitsu/:assetId" element={<AnshitsuPage />} />
     <Route path="/" element={<div data-gallery />} />
   </Routes></SettingsProvider></DesktopLifecycleProvider></MemoryRouter>));
   await flush();
 }
 beforeEach(async () => {
+  developmentPolicy.engine = 'lightcraft'; developmentPolicy.loading = false;
   vi.mocked(rawApi.readRawHistory).mockReset().mockImplementation(async doc => rawHistoryData(doc));
   vi.clearAllMocks();
   vi.mocked(queueApi.listExportQueue).mockResolvedValue([]);
@@ -99,6 +102,63 @@ function thumbnailPosts() {
   return vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).endsWith('/rendered-thumbnail') && init?.method === 'POST');
 }
 
+it('routes a non-RAW asset through Native without fetching or rendering the legacy JPEG original', async () => {
+  await mount(jpeg.id);
+  expect(vi.mocked(rawApi.openRawDocument)).toHaveBeenCalledWith('workspace', jpeg.id);
+  expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes(`/assets/${jpeg.id}/original`))).toBe(false);
+  expect(host.querySelector('[data-jpeg-renderer]')).toBeNull();
+  expect(host.querySelector('.viewer-panel img')?.getAttribute('src')).toBe('blob:lightcraft');
+});
+
+it('shows clamped relative WB for Native legacy settings without writing until the user changes it', async () => {
+  vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc),
+    wb: { available: true, mode: 'custom', scale: 'legacy' }, values: { ...rawSettings(doc).values,
+      'wb.temp': 50000, 'wb.tint': 140 } }));
+  await mount();
+  const temperature = host.querySelector<HTMLInputElement>('[data-adjustment-id="temperature"]')!;
+  const tint = host.querySelector<HTMLInputElement>('[data-adjustment-id="tint"]')!;
+  expect(temperature.min).toBe('-100'); expect(temperature.max).toBe('100'); expect(temperature.value).toBe('100');
+  expect(tint.min).toBe('-100'); expect(tint.max).toBe('100'); expect(tint.value).toBe('100');
+  expect(rawApi.setRawControls).not.toHaveBeenCalled();
+  const input = temperature.closest('.adjustment-control')!.querySelector<HTMLInputElement>('input[type="number"]')!;
+  act(() => {
+    input.focus(); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '17');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  });
+  await flush();
+  const nativeTemp = 1e6 / (1e6 / 6500 - 0.8 * 17);
+  expect(rawApi.setRawControls).toHaveBeenCalledWith(expect.objectContaining({ assetId: base.id }), { 'wb.temp': nativeTemp });
+});
+
+it('does not start either editor or fall back to Immich preview while development policy is unavailable', async () => {
+  developmentPolicy.engine = null;
+  developmentPolicy.loading = false;
+  await mount(jpeg.id);
+  expect(vi.mocked(rawApi.openRawDocument)).not.toHaveBeenCalled();
+  expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes(`/assets/${jpeg.id}/original`))).toBe(false);
+  expect(host.querySelector('.viewer-panel img')).toBeNull();
+  expect(host.textContent).toContain('Could not get the development policy');
+});
+
+it('keeps the Viewer empty while development policy is still loading', async () => {
+  developmentPolicy.engine = null;
+  developmentPolicy.loading = true;
+  await mount(jpeg.id);
+  expect(vi.mocked(rawApi.openRawDocument)).not.toHaveBeenCalled();
+  expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes(`/assets/${jpeg.id}/original`))).toBe(false);
+  expect(host.querySelector('.viewer-panel img')).toBeNull();
+  expect(host.querySelector('.raw-preview-note')?.textContent).toContain('Checking the development policy');
+});
+
+it('keeps the Docker JPEG path on the legacy edit state and renderer', async () => {
+  developmentPolicy.engine = 'jpeg';
+  await mount(jpeg.id);
+  expect(vi.mocked(rawApi.openRawDocument)).not.toHaveBeenCalled();
+  expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes(`/assets/${jpeg.id}/original`))).toBe(true);
+  expect(host.querySelector('[data-jpeg-renderer]')).not.toBeNull();
+});
+
 it('uses persisted RAW badges and confirms RAW reset independently of JPEG clipboard support', async () => {
   const reset = vi.spyOn(rawApi, 'resetRawEdits').mockResolvedValue(undefined);
   await mount();
@@ -118,7 +178,7 @@ function desktop() {
   return respond;
 }
 
-it('keeps mixed Filmstrip order and separates native RAW Preview from the JPEG renderer', async () => {
+it('keeps mixed Filmstrip order and uses Native Preview for every asset under the LightCraft policy', async () => {
   await mount();
   expect([...host.querySelectorAll('.filmstrip-item')].map(item => item.getAttribute('aria-label'))).toEqual(['a.DNG', 'b.jpg', 'c.DNG']);
   const thumbnailSources = () => [...host.querySelectorAll('.filmstrip-item img')].map(image => image.getAttribute('src'));
@@ -129,18 +189,19 @@ it('keeps mixed Filmstrip order and separates native RAW Preview from the JPEG r
   expect(host.querySelector('.raw-preview-note')).toBeNull();
   expect(adjusted).not.toHaveBeenCalled();
   await act(async () => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[1].click()); await flush();
-  expect(host.querySelector('[data-jpeg-renderer]')).not.toBeNull();
-  expect(adjusted).toHaveBeenCalled();
+  expect(vi.mocked(rawApi.openRawDocument)).toHaveBeenCalledWith('workspace', jpeg.id);
+  expect(host.querySelector('[data-jpeg-renderer]')).toBeNull();
+  expect(host.querySelector('.viewer-panel img')?.getAttribute('src')).toBe('blob:lightcraft');
   await act(async () => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[2].click()); await flush();
   expect(host.querySelector('.viewer-panel img')?.getAttribute('src')).toBe('blob:lightcraft');
-  expect(adjusted.mock.calls.every(([props]) => props.alt === 'b.jpg')).toBe(true);
+  expect(adjusted).not.toHaveBeenCalled();
   expect(thumbnailSources()).toEqual(sources);
 });
-it('shows the viewing Preview only with an explicit unavailable label', async () => {
+it('shows Native unavailability without falling back to the viewing Preview', async () => {
   vi.mocked(rawApi.rawCapability).mockResolvedValue(false);
   await mount();
-  expect(host.querySelector('.viewer-panel img')?.getAttribute('src')).toBe('/immich-viewing');
-  expect(host.textContent).toContain('showing Immich viewing preview');
+  expect(host.querySelector('.viewer-panel img')).toBeNull();
+  expect(host.textContent).toContain('LightCraft Native is unavailable');
   expect(rawApi.openRawDocument).not.toHaveBeenCalled();
 });
 it('wires native Before into the shared Viewer lazily without changing RAW edits or History', async () => {
@@ -157,7 +218,7 @@ it('wires native Before into the shared Viewer lazily without changing RAW edits
   expect(toggle.disabled).toBe(false);
   act(() => toggle.click()); await flush();
   expect(host.querySelector('.viewer-panel img')!.getAttribute('src')).toBe('blob:after');
-  expect(host.textContent).toContain('Preparing RAW Before');
+  expect(host.textContent).toContain('Preparing Before');
   await act(async () => resolveBefore({ blob: new Blob(), width: 16, height: 12, epoch: 1, sequence: 1,
     kind: 'before', key: 'b'.repeat(64) })); await flush();
   expect(host.querySelector('.viewer-panel img')!.getAttribute('src')).toBe('blob:before');
@@ -202,7 +263,7 @@ it('binds engine control specs to shared sliders and commits RAW values without 
   }); await flush();
   expect(rawApi.setRawControls).toHaveBeenCalledWith(expect.objectContaining({ revision: 1 }), { 'light.exposure': 1.25 });
   expect(rawApi.rawPreview).toHaveBeenCalledTimes(2); expect(adjusted).not.toHaveBeenCalled();
-  expect(number.value).toBe('1.25'); expect(host.textContent).toContain('RAW recipes are autosaved');
+  expect(number.value).toBe('1.25'); expect(host.textContent).toContain('Development recipes are autosaved');
 });
 it('places all RAW optics controls after NR, uses readback History flags and preserves independent sections', async () => {
   vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => doc.assetId !== base.id ? rawSettings(doc) : ({ ...rawSettings(doc),
@@ -321,7 +382,7 @@ it('places all RAW optics controls after NR, uses readback History flags and pre
   expect(host.querySelector('[data-adjustment-id="optics.profileDistortion"]')).toBeNull();
   expect(host.querySelector('.raw-optics-fold-header button')?.getAttribute('aria-expanded')).toBe('false');
   act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[1].click()); await flush();
-  expect(host.querySelector('.raw-optics-panel')).toBeNull();
+  expect(host.querySelector('.raw-optics-panel')?.textContent).toContain('Profile information is unavailable');
   act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[0].click()); await flush();
   expect(host.querySelector('.raw-optics-panel')).not.toBeNull();
   expect(host.querySelector('.raw-optics-panel')?.textContent).toContain('Example Lens Profile');
@@ -871,7 +932,7 @@ it('rejects RAW document switching while a curve interaction is unconfirmed, the
   act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[2].click());
   await flush();
   expect(host.querySelector('[role="alertdialog"]')).not.toBeNull();
-  expect(host.querySelector('[role="alertdialog"]')?.textContent).toContain('The RAW recipe could not be saved');
+  expect(host.querySelector('[role="alertdialog"]')?.textContent).toContain('The development recipe could not be saved');
   expect(rawApi.openRawDocument).toHaveBeenLastCalledWith('workspace', base.id);
   expect(rawApi.openRawDocument).not.toHaveBeenCalledWith('workspace', rawB.id);
   expect(vi.mocked(rawApi.saveRawHistory).mock.calls).toHaveLength(historyWrites);
@@ -1153,7 +1214,7 @@ it('does not show an Immich image as the result of failed native rendering', asy
   vi.mocked(rawApi.rawPreview).mockRejectedValue(new rawApi.RawApiError('raw_render_failed'));
   await mount();
   expect(host.querySelector('.viewer-panel img')).toBeNull();
-  expect(host.textContent).toContain('LightCraft RAW Preview failed');
+  expect(host.textContent).toContain('LightCraft Preview development failed');
   expect(adjusted).not.toHaveBeenCalled();
 });
 
@@ -1161,11 +1222,11 @@ it('shows the ordinary RAW open error instead of blocking by engine version', as
   desktop();
   vi.mocked(rawApi.openRawDocument).mockRejectedValue(new rawApi.RawApiError('raw_recipe_engine_incompatible', 409));
   await mount();
-  expect(host.textContent).toContain('LightCraft RAW Preview failed');
+  expect(host.textContent).toContain('LightCraft Preview development failed');
   expect(host.textContent).not.toContain('They are preserved');
-  await clickText('Reset RAW edits');
-  expect(host.textContent).toContain('RAW Recipe and RAW History');
-  expect(host.textContent).toContain('original RAW file and Immich photo will not be deleted');
+  await clickText('Reset development edits');
+  expect(host.textContent).toContain('Recipe and History');
+  expect(host.textContent).toContain('Immich original image will not be deleted');
   expect(vi.mocked(rawApi.rawPreview)).not.toHaveBeenCalled();
   expect(vi.mocked(rawApi.saveRawHistory)).not.toHaveBeenCalled();
 });
@@ -1180,7 +1241,7 @@ it('keeps the RAW edit failure status over the last ready preview', async () => 
   await mount();
   vi.mocked(rawApi.setRawControls).mockRejectedValue(new rawApi.RawApiError('raw_connection_failed'));
   await editRaw();
-  expect(host.querySelector('.raw-preview-note')?.textContent).toContain('RAW settings or Preview could not be confirmed');
+  expect(host.querySelector('.raw-preview-note')?.textContent).toContain('Development settings or Preview could not be confirmed');
   expect(host.querySelector('.viewer-panel img')?.getAttribute('src')).toBe('blob:lightcraft');
 });
 
@@ -1192,9 +1253,9 @@ it('blocks RAW to JPEG on a lost save response and retries the exact saveId befo
   expect(host.querySelector('[role="alertdialog"]')).not.toBeNull(); expect(host.querySelector('[data-jpeg-renderer]')).toBeNull();
   expect(host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')!.disabled).toBe(true);
   const first = commitHistory.mock.calls[0][0];
-  await clickText('Retry RAW save', host.querySelector('[role="alertdialog"]')!);
+  await clickText('Retry save', host.querySelector('[role="alertdialog"]')!);
   expect(commitHistory.mock.calls[1][0]).toEqual(first);
-  expect(host.querySelector('[data-jpeg-renderer]')).not.toBeNull();
+  expect(host.querySelector('[data-jpeg-renderer]')).toBeNull();
   expect(thumbnailPosts().map(([url]) => url)).toEqual([`/api/assets/${base.id}/rendered-thumbnail`]);
 });
 
@@ -1212,7 +1273,7 @@ it('reserves the active RAW after prepareSave and before Filmstrip navigation', 
   expect(sequence.indexOf('save')).toBeGreaterThanOrEqual(0);
   expect(sequence.indexOf(`post:${base.filename}`)).toBeGreaterThan(sequence.indexOf('save'));
   expect(thumbnailPosts().map(([url]) => url)).toEqual([`/api/assets/${base.id}/rendered-thumbnail`]);
-  expect(host.querySelector('[data-jpeg-renderer]')).not.toBeNull();
+  expect(host.querySelector('[data-jpeg-renderer]')).toBeNull();
 });
 
 it('blocks Gallery return on a failed RAW save, preserves editing on cancel, and exits only after retry', async () => {
@@ -1223,7 +1284,7 @@ it('blocks Gallery return on a failed RAW save, preserves editing on cancel, and
   expect(host.querySelector('[data-gallery]')).toBeNull(); expect(host.querySelector('[role="alertdialog"]')).not.toBeNull();
   await clickText(i18n.t('workspace.stayInAnshitsu'));
   expect(host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')!.disabled).toBe(true);
-  await clickText('Retry RAW save');
+  await clickText('Retry save');
   await clickText('Back to Gallery'); expect(host.querySelector('[data-gallery]')).not.toBeNull();
   expect(thumbnailPosts().map(([url]) => url)).toEqual([`/api/assets/${base.id}/rendered-thumbnail`]);
 });
@@ -1236,7 +1297,7 @@ it('reserves the active RAW once after Home save succeeds, and does not reserve 
   expect(host.querySelector('[data-gallery]')).toBeNull();
   expect(thumbnailPosts()).toHaveLength(0);
   await clickText(i18n.t('workspace.stayInAnshitsu'));
-  await clickText('Retry RAW save'); await clickText('Back to Gallery');
+  await clickText('Retry save'); await clickText('Back to Gallery');
   expect(host.querySelector('[data-gallery]')).not.toBeNull();
   expect(thumbnailPosts().map(([url]) => url)).toEqual([`/api/assets/${base.id}/rendered-thumbnail`]);
 });
@@ -1268,7 +1329,7 @@ it('restores the saved RAW readback when returning through JPEG', async () => {
       recipeFingerprint: saved.get(doc.assetId)!.settingsFingerprint, recipeRevision: 1 } : rawSettings(doc));
   await mount(); await editRaw();
   act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[1].click()); await flush();
-  expect(host.querySelector('[data-jpeg-renderer]')).not.toBeNull(); expect(saved.get(base.id)!.values['light.exposure']).toBe(1.25);
+  expect(host.querySelector('[data-jpeg-renderer]')).toBeNull(); expect(saved.get(base.id)!.values['light.exposure']).toBe(1.25);
   act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[0].click()); await flush();
   const exposure = host.querySelector<HTMLElement>('[data-adjustment-id="exposure"]')!.closest('.adjustment-control')!
     .querySelector<HTMLInputElement>('input[type="number"]')!;
@@ -1318,7 +1379,7 @@ it('refuses Windows close after RAW save failure and allows explicit retry', asy
   act(() => window.dispatchEvent(new CustomEvent('genzoroom:close-request', { detail: { requestId: 'b'.repeat(64) } }))); await flush();
   expect(respond).toHaveBeenCalledWith({ kind: 'closeResult', saved: false, requestId: 'b'.repeat(64) });
   act(() => document.querySelector<HTMLButtonElement>('dialog button')!.click()); await flush();
-  await clickText('Retry RAW save');
+  await clickText('Retry save');
   act(() => window.dispatchEvent(new CustomEvent('genzoroom:close-request', { detail: { requestId: 'c'.repeat(64) } }))); await flush();
   expect(respond).toHaveBeenCalledWith({ kind: 'closeResult', saved: true, requestId: 'c'.repeat(64) });
 });
@@ -1512,7 +1573,7 @@ it('keeps sliders disabled after initialization fails and retries without changi
   await mount();
   expect(exposure().disabled).toBe(true); expect(rawApi.setRawControls).not.toHaveBeenCalled();
   const first = vi.mocked(rawApi.saveRawHistory).mock.calls[0][0];
-  await clickText('Retry RAW save');
+  await clickText('Retry save');
   expect(vi.mocked(rawApi.saveRawHistory).mock.calls[1][0]).toEqual(first); expect(exposure().disabled).toBe(false);
 });
 
@@ -1567,7 +1628,7 @@ it('dispatches each RAW shortcut once and leaves native input, IME, repeat and m
   expect(historyKey().defaultPrevented).toBe(false); modal.remove(); await flush();
   expect(rawApi.saveRawHistory).toHaveBeenCalledTimes(count);
   act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[1].click()); await flush();
-  historyKey(); await flush(); expect(rawApi.saveRawHistory).toHaveBeenCalledTimes(count);
+  historyKey(); await flush(); expect(vi.mocked(rawApi.saveRawHistory).mock.calls.at(-1)?.[0].action).toBe('undo');
 });
 
 it('prioritizes Filmstrip exclusion Undo before RAW History Undo', async () => {
@@ -1604,7 +1665,7 @@ it('retains the old cursor on save failure, locks history/editing, and retries e
   historyKey(); await flush(); const request = vi.mocked(rawApi.saveRawHistory).mock.calls[1][0];
   expect(historyButton(2).getAttribute('aria-current')).toBe('step'); expect(exposure().disabled).toBe(true);
   expect([...history().querySelectorAll<HTMLButtonElement>('button')].every(button => button.disabled)).toBe(true);
-  await clickText('Retry RAW save');
+  await clickText('Retry save');
   expect(vi.mocked(rawApi.saveRawHistory).mock.calls[2][0]).toEqual(request);
   expect(historyButton(1).getAttribute('aria-current')).toBe('step'); expect(exposure().disabled).toBe(false);
 });
@@ -1625,11 +1686,11 @@ it('waits for an in-flight History move before approving Windows close', async (
 it('reloads the persisted cursor and Redo range after switching through JPEG', async () => {
   historyBackend(); await mount(); historyKey(); await flush();
   act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[1].click()); await flush();
-  expect(host.querySelector('[data-jpeg-renderer]')).not.toBeNull();
+  expect(host.querySelector('[data-jpeg-renderer]')).toBeNull();
   act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[0].click()); await flush();
   expect(historyButton(1).getAttribute('aria-current')).toBe('step');
   expect(host.querySelectorAll<HTMLButtonElement>('.edit-actions button')[1].disabled).toBe(false);
-  expect(rawApi.readRawHistory).toHaveBeenCalledTimes(2);
+  expect(rawApi.readRawHistory).toHaveBeenCalledTimes(3);
 });
 
 it('labels RAW temperature in Kelvin without inventing unavailable before/after values', async () => {
@@ -1853,6 +1914,20 @@ it('RAW Q drains history save before enqueue and sends only the Asset ID', async
   expect(rawApi.openRawDocument).toHaveBeenCalledTimes(1);
 });
 
+it('admits a non-RAW Native Recipe to Queue only after it becomes non-default and is saved', async () => {
+  vi.mocked(editApi.getRawAssetEditStatuses).mockResolvedValue({ [jpeg.id]: true });
+  vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc),
+    settingsFingerprint: 'b'.repeat(64), importDefaultsFingerprint: 'b'.repeat(64) }));
+  await mount(jpeg.id);
+  act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'q', bubbles: true })));
+  await flush();
+  expect(queueApi.enqueueExportAssets).not.toHaveBeenCalled();
+  await editRaw();
+  act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'q', bubbles: true })));
+  await flush();
+  expect(queueApi.enqueueExportAssets).toHaveBeenCalledWith([jpeg.id], expect.any(AbortSignal));
+});
+
 it.each([false, undefined])('RAW Q revalidates saved eligibility after drain (%s)', async status => {
   vi.mocked(editApi.getRawAssetEditStatuses).mockResolvedValue({ [base.id]: status, [rawB.id]: true });
   await mount();
@@ -2021,7 +2096,7 @@ it('exposes RAW-only categories, switches display contracts without mutation and
  expect(vi.mocked(rawApi.rawPreview).mock.calls.at(-1)![4]?.mode).toBe('crop-edit');expect(rawApi.saveRawHistory).toHaveBeenCalledTimes(saves);
  await act(async()=>host.querySelectorAll<HTMLInputElement>('.raw-edit-categories input')[0].click());await flush();
  expect(host.querySelector('.raw-adjustment-controls')).not.toBeNull();expect(vi.mocked(rawApi.rawPreview).mock.calls.at(-1)![4]?.mode).toBe('whole');
- await act(async()=>host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[1].click());await flush();expect(host.querySelector('.raw-edit-categories')).toBeNull();
+ await act(async()=>host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[1].click());await flush();expect(host.querySelector('.raw-edit-categories')).not.toBeNull();
  await act(async()=>host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[2].click());await flush();
  expect(host.querySelectorAll<HTMLInputElement>('.raw-edit-categories input')[0].checked).toBe(true);
 });
