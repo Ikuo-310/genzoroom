@@ -1,6 +1,6 @@
 # LightCraft v0.20.0 追随・実装分割計画（P0）
 
-作成日：2026-11-09（Asia/Tokyo）。対象：GenzoRoom `main`。状態：**P0の調査・設計のみ完了。P1以降はすべて未着手**。
+作成日：2026-11-09（Asia/Tokyo）。対象：GenzoRoom `main`から作成した`feature/lightcraft-v020-port`。状態：**P0の調査・設計完了。P1は本branchで実装・focused検証済み。P2以降は未着手**。
 
 ## 1. 目的・対象バージョン・確定方針
 
@@ -276,7 +276,7 @@ BM3D、Radius／Detail等の新UI、Process更新操作、カラーミキサー�
 
 ### P9：nr_outliers対応
 
-§8を実装仕様とする。Native patchへ復元都合の現像処理を追加せず、GenzoRoomのsettings復元／比較／Resetを修正する。現行v0.18.1向けfixtureにも回帰がない形で独立Commit可能にする。現行を壊す変更ならmainへCommitせず、P12と同時採用へ保留する。
+§8を実装仕様とする。Native patchへ復元都合の現像処理を追加せず、GenzoRoomのsettings復元／比較／Resetを修正する。現行v0.18.1向けfixtureにも回帰がない形でfeature branch内に独立Commit可能にする。現行を壊す変更なら単独採用せず、P12と同時採用へ保留する。
 
 ### P10：完全patch生成・clean replay
 
@@ -330,17 +330,17 @@ BM3D、Radius／Detail等の新UI、Process更新操作、カラーミキサー�
 
 ### 7.1 途中工程の検証
 
-P1〜P8は、専用source上で直接Cargoを実行する。出力は `--target-dir <専用source>/target-v020-port`、または同sourceのshellに限定した `CARGO_TARGET_DIR`で隔離する。製品環境変数・ユーザー設定は変更しない。責務ごとに対象crateを選び、CLI rootも`--no-default-features`で確認する。
+P1〜P8は、専用source上で直接Cargoを実行する。出力は `--target-dir <専用source>/target-v020-port`、または同sourceのshellに限定した `CARGO_TARGET_DIR`で隔離する。製品環境変数・ユーザー設定は変更しない。責務ごとに対象crateを選び、CLI rootも`--no-default-features`で確認する。sourceの各工程終了時には、その時点の**累積差分**を`native/lightcraft/porting/v0.20.0/`の暫定patchへ反映し、固定commitからの差分と一致することを確認する。暫定patchはレビュー用の未完了成果物であり、active manifestや`native/lightcraft/patches/`に登録せず、`build.py`／managed buildへ渡さない。
 
 MCP e2eが必要になったP4以降は、必要なときだけ同じ隔離targetに開発CLIをbuildする。これは**receiptなし・正式未承認の開発EXE**であり、既存runtimeへ渡さない。直接probeは既存moduleの関数へ明示EXE path／expected versionを渡す。一部probeはCPUとDX12を内部で実行するため、その内訳を記録し、既実行分を別commandで重複させない。
 
-`build.py`の`source_state()`は固定HEAD、空の実stage、管理外untracked、管理patchに等しい全diffを要求する。未完成sourceがこの検査に通らないのは正しい。検証を緩める変更、仮receipt、contract version偽装で途中sourceを通す設計にしない。
+`build.py`の`source_state()`は固定HEAD、空の実stage、管理外untracked、正式managed patchに等しい全diffを要求する。未完成sourceや暫定patchがこの検査に通らないのは正しい。検証を緩める変更、仮receipt、contract version偽装で途中sourceを通す設計にしない。工程Commitへ入れるのはGenzoRoom側の暫定patchと必要な計画文書だけで、LightCraft source、checkpoint、Cargo生成物はGitへ入れない。
 
 ### 7.2 P10／P11の正式候補手順
 
 以下は将来工程の例であり、P0では未実行。作業前に各pathが専用であることを確認する。
 
-1. P10で完全patchと`versions/0.20.0.json`を生成する。
+1. P10で固定sourceとの差分を完全patchへ変換し、P1〜P8の最終累積暫定patchと全source diffが一致することを確認する。正式patch／非activeの`versions/0.20.0.json`を同一候補として生成する。確認後、移行用暫定patchを正式化済みの重複成果物として同じP10変更で削除する。
 2. 別clean sourceを用意し、HEAD＝対象commit、version、statusを確認する。
 3. `build.py --manifest native/lightcraft/versions/0.20.0.json --source <clean-source> --apply`を使う。wrapperが0002→0003のcheck／適用と全diff検証を行う。手動で既に適用したsourceへ再度`--apply`しない。
 4. P11で同じmanifest／sourceを指定して`--build`。成功した場合のみ隣接receiptが発行される。
@@ -390,23 +390,23 @@ v0.20.0の`Detail.nr_outliers`はbool。一般defaultはfalse、`DevelopSettings
 
 ### 9.1 作業用sourceとcheckpoint
 
-- GenzoRoomはmainを継続使用し、新branchを前提にしない。現行v0.18.1のsource／EXE／receiptを変更・削除・上書きしない。
+- P1〜P8および統合準備は`feature/lightcraft-v020-port`で行い、各工程Commitを同branchへPushする。P12で検証済みcandidateを正式採用した後に`main`へ統合する。現行v0.18.1のsource／EXE／receiptを変更・削除・上書きしない。
 - P1で新しいGit管理外directory `.tmp/lightcraft-v020-port/`を用意する。既に存在する場合はHEAD／status／用途を確認し、再利用できなければ別名を使う。新規clean sourceの取得方法はそのタスクで確認し、既存checkoutへのFetch／Pull／Resetは行わない。正式tagのclean sourceが未入手ならそこで止め、取得だけを明確に扱う。
 - 作業NativeのHEADは対象upstream commitに固定し、独自変更はdirty worktreeに保持する。Native側へ独自Commitを作らない。P10で固定upstreamとの差分を生成できる状態を保つ。
-- P1〜P8ではmanaged patchを逐次再生成しない。各工程終了時、Git管理外 `.tmp/lightcraft-v020-state/<工程>/`へ変更／新規sourceファイルのコピーと短い作業記録を保存する。記録はupstream commit、完了責務、残りhunk、全変更pathとSHA、検証command／件数／skip／失敗を含める。EXEや画像をcheckpointへ複製し続けない。
-- 次工程はsource status／記録hashを照合して再開する。記録にない変更や途中失敗があれば先に原因確認し、既存成果物をresetしない。未完成sourceは「移植中」でありmanaged承認済みではない。
+- P1〜P8は工程ごとに作業sourceの累積差分を`native/lightcraft/porting/v0.20.0/0002-v0.20-native-contracts.patch`へ再生成する。新しいupstream pathは`git add --intent-to-add`相当でdiff収録し、実stageは空に保つ。patchはfull-index・LFとし、各工程Commit／Pushへ含める。各工程終了時、Git管理外 `.tmp/lightcraft-v020-state/<工程>/`へ変更／新規sourceファイルのコピーと短い作業記録を保存する。記録はupstream commit、完了責務、後続へ残すhunk、全変更pathとSHA、暫定patch SHA、検証command／件数／skip／失敗を含める。EXEや画像をcheckpointへ複製し続けない。
+- 次工程はsource status・upstream commit・暫定patch SHA・checkpoint記録を照合して再開する。記録にない変更や途中失敗があれば先に原因確認し、既存成果物をresetしない。暫定patchは未完了の後続契約を含まないため、常にレビュー用途のみとし、active manifest／正式patch directory／managed buildへ入れない。
 - P10は別clean `.tmp/lightcraft-0.20.0/`を使用。候補EXEは `target-v020-managed`、初期開発EXEは `target-v020-port`に分ける。この配置は正式manifest更新後の既存runtime自動探索規則に合わせる。既存directoryがあれば上書きせず、別配置と明示EXE指定による採用手順を記録する。active manifest更新前はruntimeが候補を選べない状態を保つ。
 
-### 9.2 mainへCommitできる単位
+### 9.2 Commit・統合できる単位
 
 | 境界 | Commit方針 | active状態 |
 |---|---|---|
 | P0 | 本計画と研究READMEのリンクだけ | v0.18.1 |
-| P1〜P8 | partial Native sourceはGit管理外。GenzoRoomに未完成managed patch／仮manifest／仮receiptをCommitしない | v0.18.1 |
-| P9 | focused testを通り現行動作を保つadapter＋testは独立Commit可。無理ならP12まで保留 | v0.18.1 |
+| P1〜P8 | 工程ごとの累積暫定patchをfeature branchへCommit／Push可。作業source・checkpoint・生成物はGit管理外。暫定patchはactive manifest・正式patch・managed buildから隔離 | v0.18.1 |
+| P9 | focused testを通り保存操作状態を復元するadapter＋testを同branchへCommit／Push可。DB migration／旧画質再現なし。実Native確認前の採用はしない | v0.18.1 |
 | P10 | **完全**な新patch2本＋候補`versions/0.20.0.json`を一体Commit可。非active候補と明記 | v0.18.1 |
 | P11 | binary／receiptはGitへ追加しない。検証結果は後続タスクで認められた記録先へ | v0.18.1 |
-| P12 | 検証済みmanifest・生成identity・必要な履歴manifest／test変更を一体Commit | v0.20.0 |
+| P12 | 検証済みmanifest・生成identity・必要な履歴manifest／test変更を一体Commitし、検証後にfeature branchを`main`へ統合 | v0.20.0 |
 
 上表は将来の整合したCommit単位を定義するもので、**本P0のCommit／Push許可を将来タスクへ拡張しない**。各実装タスクで明示されたGit操作範囲に従う。
 

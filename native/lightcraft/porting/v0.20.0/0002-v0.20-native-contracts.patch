@@ -1,0 +1,493 @@
+diff --git a/crates/engine/src/media/quick.rs b/crates/engine/src/media/quick.rs
+index f7163b069322c239488aca24d1bc09c48f0eb2b9..2d35d99720a1688b914e9f0b4c503ce908434bf3 100644
+--- a/crates/engine/src/media/quick.rs
++++ b/crates/engine/src/media/quick.rs
+@@ -80,7 +80,7 @@ impl QuickJob {
+         };
+         let rendered = |image: Rgba8| {
+             let histogram = Histogram::of_srgb8(&image);
+-            Ok(Rendered { image, histogram, deep: None })
++            Ok(Rendered { execution: None, frame: None, image, histogram, deep: None })
+         };
+         for (cache, k) in &self.cached {
+             if let Some(img) = cache.get(*k) {
+diff --git a/crates/engine/src/media/render.rs b/crates/engine/src/media/render.rs
+index bd8ee5292f08b345aa6386687a9f9b6d28b615af..fc4de0526e42832ee262002f523292a4ad5c446c 100644
+--- a/crates/engine/src/media/render.rs
++++ b/crates/engine/src/media/render.rs
+@@ -285,7 +285,7 @@ impl RenderJob {
+                 photo: self.photo,
+                 level: self.level,
+                 key: self.key,
+-                rendered: Ok(Rendered { image, histogram, deep: None }),
++                rendered: Ok(Rendered { execution: None, frame: None, image, histogram, deep: None }),
+                 gpu_fallback: None,
+                 loaded: None,
+                 quick: Some(QuickSource::Cached),
+@@ -304,7 +304,7 @@ impl RenderJob {
+                 photo: self.photo,
+                 level: self.level,
+                 key: self.key,
+-                rendered: Ok(Rendered { image, histogram, deep: None }),
++                rendered: Ok(Rendered { execution: None, frame: None, image, histogram, deep: None }),
+                 gpu_fallback: None,
+                 loaded: None,
+                 quick: None,
+@@ -325,7 +325,7 @@ impl RenderJob {
+                 photo: self.photo,
+                 level: self.level,
+                 key: self.key,
+-                rendered: Ok(Rendered { image, histogram, deep: None }),
++                rendered: Ok(Rendered { execution: None, frame: None, image, histogram, deep: None }),
+                 gpu_fallback: None,
+                 loaded: None,
+                 quick: None,
+@@ -370,6 +370,8 @@ impl RenderJob {
+                             key: self.key,
+                             rendered: Ok(Rendered {
+                                 image: lightcraft_raster::Rgba8 { width: 0, height: 0, data: Vec::new() },
++                                execution: None,
++                                frame: None,
+                                 histogram,
+                                 deep: None,
+                             }),
+@@ -424,6 +426,8 @@ impl RenderJob {
+                     let (w, h) = (rendered.image.width, rendered.image.height);
+                     if w > fw.max(1) || h > fh.max(1) {
+                         rendered.image = fit_for_display(&rendered.image, fw, fh);
++                        // Display fitting is post-Plan sampling, so the original geometry no longer describes these pixels.
++                        rendered.frame = None;
+                     }
+                 }
+                 RenderResult {
+@@ -534,7 +538,11 @@ fn develop_image(
+     stages: Option<&StageCache>,
+     gpu: bool,
+ ) -> (Rendered, Option<String>) {
+-    // (LUT profiles, Refine Edges and soft proofs render on the GPU too)
++    let effective = s.effective();
++    let settings = &*lightcraft_pipeline::settings_for(&effective, req);
++    let device_proof = req.proof.is_some_and(|p| lightcraft_pipeline::proof_profile(p.profile).is_some());
++    let gpu_supported = lightcraft_gpu::handles(req.depth, device_proof, req.overlay)
++        && !settings.spots.iter().any(|spot| spot.mode == lightcraft_develop::SpotMode::Fill);
+     let fallback = if gpu {
+         match lightcraft_gpu::try_render(src, info, s, req, stages) {
+             Ok(r) => return (r, None),
+@@ -544,10 +552,24 @@ fn develop_image(
+     } else {
+         None
+     };
+-    let rendered = match stages {
++    let mut rendered = match stages {
+         Some(st) => lightcraft_pipeline::render_cached(src, info, s, req, st),
+         None => lightcraft_pipeline::render(src, info, s, req),
+     };
++    let (outcome, reason) = if fallback.is_some() {
++        ("cpu_fallback", "gpu_failed")
++    } else if !gpu {
++        ("cpu_not_tried", "cpu_requested")
++    } else if lightcraft_gpu::shutting_down() {
++        ("cpu_not_tried", "shutdown")
++    } else if !lightcraft_gpu::enabled() {
++        ("cpu_not_tried", "gpu_disabled")
++    } else if !gpu_supported {
++        ("cpu_not_tried", "unsupported")
++    } else {
++        ("cpu_not_tried", "gpu_unavailable")
++    };
++    rendered.execution = Some(lightcraft_pipeline::Execution { outcome, backend: "cpu", reason });
+     (rendered, fallback)
+ }
+ 
+diff --git a/crates/engine/src/media/tests.rs b/crates/engine/src/media/tests.rs
+index 4790a409b093ee67fa2c5ec5b7085b33e10ce87e..eb997fe74a3b9420cebce363a7a97a1ccdf77857 100644
+--- a/crates/engine/src/media/tests.rs
++++ b/crates/engine/src/media/tests.rs
+@@ -6,10 +6,14 @@ use super::*;
+ fn a_display_fit_shrinks_the_loupe_render_to_the_drawn_size() {
+     let mut s = crate::Session::with_demo();
+     let id = s.active().unwrap();
+-    let plain = s.loupe_job(id, 1024, 1024, true).unwrap().run().rendered.unwrap().image;
++    let plain_result = s.loupe_job(id, 1024, 1024, true).unwrap().run().rendered.unwrap();
++    assert!(plain_result.frame.is_some(), "rendered pixels retain their pipeline geometry");
++    let plain = plain_result.image;
+     let long = plain.width.max(plain.height);
+     assert!(long >= 600, "the demo renders at least 600 px at 1024: {long}");
+-    let fitted = s.loupe_job(id, 1024, 1024, true).unwrap().with_display_fit(400, 400).run().rendered.unwrap().image;
++    let fitted_result = s.loupe_job(id, 1024, 1024, true).unwrap().with_display_fit(400, 400).run().rendered.unwrap();
++    assert!(fitted_result.frame.is_none(), "post-render fitting invalidates the original plan's pixel association");
++    let fitted = fitted_result.image;
+     assert_eq!(fitted.width.max(fitted.height), 400, "{}x{}", fitted.width, fitted.height);
+     let aspect = |i: &Rgba8| i.width as f32 / i.height as f32;
+     assert!((aspect(&fitted) - aspect(&plain)).abs() < 0.02, "aspect kept");
+@@ -22,6 +26,53 @@ fn a_display_fit_shrinks_the_loupe_render_to_the_drawn_size() {
+     assert_ne!(a.key, b.key, "the fit is part of the result key");
+ }
+ 
++#[test]
++fn develop_execution_distinguishes_cpu_request_and_gpu_fallback() {
++    let src = Arc::new(lightcraft_scenes::demo_library()[0].render(64, 48));
++    let info = SourceInfo::default();
++    let settings = DevelopSettings::default();
++    let req = RenderRequest::fit(64, 48);
++    let (cpu, fallback) = develop_reporting(&src, &info, &settings, &req, None, false);
++    assert!(fallback.is_none());
++    assert!(cpu.frame.is_some());
++    let cpu_execution = cpu.execution.unwrap();
++    assert_eq!((cpu_execution.outcome, cpu_execution.backend, cpu_execution.reason), ("cpu_not_tried", "cpu", "cpu_requested"));
++
++    if !lightcraft_gpu::available() {
++        lightcraft_testkit::skip!(Gpu, "no GPU adapter ({})", lightcraft_gpu::unavailable_reason().unwrap_or_default());
++        return;
++    }
++    lightcraft_gpu::inject_fault(lightcraft_gpu::Fault::Limit(1));
++    let (fallback_image, why) = develop_reporting(&src, &info, &settings, &req, None, true);
++    assert!(why.as_deref().is_some_and(|reason| reason.contains("limit")));
++    assert!(fallback_image.frame.is_some(), "fallback geometry comes from the CPU Plan that rendered the result");
++    let execution = fallback_image.execution.unwrap();
++    assert_eq!((execution.outcome, execution.backend, execution.reason), ("cpu_fallback", "cpu", "gpu_failed"));
++    lightcraft_gpu::reset_failures();
++}
++
++#[test]
++fn quick_standin_does_not_claim_pipeline_geometry_or_execution() {
++    let image = Rgba8::new(8, 6);
++    let loader = Arc::new(move |_: &str, _: usize| Some(image.clone()));
++    let job = QuickJob {
++        request_id: 1,
++        photo: PhotoId(1),
++        key: 1,
++        cached: Vec::new(),
++        embedded: Some(("embedded.jpg".into(), loader, 8)),
++        embedded_cache: None,
++        embedded_on_disk: false,
++        minimum_embedded_edge: None,
++        small: None,
++    };
++    let result = job.run();
++    assert_eq!(result.quick, Some(QuickSource::Embedded));
++    let rendered = result.rendered.unwrap();
++    assert!(rendered.frame.is_none());
++    assert!(rendered.execution.is_none());
++}
++
+ #[test]
+ fn renders_know_the_original_size_whichever_level_they_come_from() {
+     // issue #960: noise reduction works in the original's pixels, so a grid cell drawn from the
+diff --git a/crates/engine/src/slide_title.rs b/crates/engine/src/slide_title.rs
+index 0acda876d12743f07c6028586373a9fadcc99d53..ea74a5f5a9546577dc8b8f24f31634c9daf21051 100644
+--- a/crates/engine/src/slide_title.rs
++++ b/crates/engine/src/slide_title.rs
+@@ -358,7 +358,7 @@ impl TitleCompose {
+             photo: lightcraft_catalog::PhotoId(0),
+             level: crate::media::SourceLevel::Preview,
+             key: self.key(),
+-            rendered: Ok(lightcraft_pipeline::Rendered { image, histogram, deep: None }),
++            rendered: Ok(lightcraft_pipeline::Rendered { execution: None, frame: None, image, histogram, deep: None }),
+             loaded: None,
+             quick: None,
+             display: None,
+diff --git a/crates/gpu/src/lib.rs b/crates/gpu/src/lib.rs
+index 1e06e9f1ad9dfbef85b9de8e30a24d49827d3bc4..7d8a9386faad812e0d8a47287fb6596cfbe74d1c 100644
+--- a/crates/gpu/src/lib.rs
++++ b/crates/gpu/src/lib.rs
+@@ -150,6 +150,10 @@ impl Fallback {
+ pub enum Fault {
+     /// A command the device rejects (validation error).
+     Validation,
++    /// Exercise allocation-failure recovery without exhausting device memory.
++    OutOfMemory,
++    /// Exercise device-loss recovery without resetting the user's driver.
++    DeviceLost,
+     /// The per-pixel stage's work never runs (what a driver that silently drops or resets a
+     /// submission looks like: the readback holds no image).
+     DropWork,
+@@ -529,7 +533,7 @@ pub fn try_render(
+ ) -> Result<Rendered, Fallback> {
+     #[cfg(not(target_arch = "wasm32"))]
+     {
+-        match run(src, info, s, req, stages, false)? {
++        match try_render_mode(src, info, s, req, stages, false)? {
+             render::Output::Image(r) => Ok(r),
+             // (not asked for)
+             render::Output::Display { .. } => Err(Fallback::NotTried),
+@@ -542,12 +546,25 @@ pub fn try_render(
+     }
+ }
+ 
++/// Render in the requested output mode; image and on-screen texture results remain distinct.
++#[cfg(not(target_arch = "wasm32"))]
++fn try_render_mode(
++    src: &Arc<Rgb32f>,
++    info: &SourceInfo,
++    s: &DevelopSettings,
++    req: &RenderRequest,
++    stages: Option<&StageCache>,
++    display: bool,
++) -> Result<render::Output, Fallback> {
++    run(src, info, s, req, stages, display)
++}
++
+ /// [`render`] for the window: when the device is the window's ([`adopt_window_device`]) and the
+ /// render allows it, the result stays on the device as a texture to draw ([`Output::Display`]);
+ /// otherwise pixels as from [`render`]. `None`: render on the CPU instead.
+ #[cfg(not(target_arch = "wasm32"))]
+ pub fn render_display(src: &Arc<Rgb32f>, info: &SourceInfo, s: &DevelopSettings, req: &RenderRequest, stages: Option<&StageCache>) -> Option<Output> {
+-    run(src, info, s, req, stages, true).ok()
++    try_render_mode(src, info, s, req, stages, true).ok()
+ }
+ 
+ /// Whether renders run on the window's device (and so can be handed over as textures).
+@@ -709,7 +726,12 @@ fn run(
+             (Ok(Some(_)), None) if BROKEN.load(Ordering::Relaxed) => {
+                 format!("device failure during the render: {}", unavailable_reason().unwrap_or_default())
+             }
+-            (Ok(Some(r)), None) => return Ok(r),
++            (Ok(Some(mut r)), None) => {
++                if let Output::Image(image) = &mut r {
++                    image.execution = Some(lightcraft_pipeline::Execution { outcome: "gpu_success", backend: "gpu", reason: "none" });
++                }
++                return Ok(r);
++            }
+             // every path of `render::render` that gives up records a failure first; should one
+             // not, the CPU renders it rather than nothing
+             (Ok(None), None) => "GPU render: no image came back".to_string(),
+diff --git a/crates/gpu/src/render.rs b/crates/gpu/src/render.rs
+index 4d658c3ca076c2bddf1c9413baf0ec337d771267..61f53ffe8888584a7ec27d9a660d65ce7ececf1c 100644
+--- a/crates/gpu/src/render.rs
++++ b/crates/gpu/src/render.rs
+@@ -684,6 +684,14 @@ pub fn render(
+         None => cx.flush(),
+     };
+     let plan = lightcraft_pipeline::plan(src, info, s, req);
++    if fault == Some(crate::Fault::OutOfMemory) {
++        fail(FailKind::OutOfMemory, "simulated out of device memory".into());
++        return None;
++    }
++    if fault == Some(crate::Fault::DeviceLost) {
++        fail(FailKind::Fatal, "simulated device lost".into());
++        return None;
++    }
+     let (w, h) = (plan.w, plan.h);
+     let Some(n) = w.checked_mul(h).filter(|n| n.checked_mul(12).is_some()) else {
+         fail(FailKind::Limit, format!("{w}×{h} output is too large"));
+@@ -917,7 +925,7 @@ pub fn render(
+     if let Some(k) = plan.keep {
+         image = image.crop(k.x, k.y, k.w, k.h);
+     }
+-    Some(Output::Image(Rendered { image, histogram, deep: None }))
++    Some(Output::Image(Rendered { execution: None, frame: Some(plan.frame.clone()), image, histogram, deep: None }))
+ }
+ 
+ /// The finished float output `out` (three words per pixel) read back as the CPU's float render
+@@ -947,7 +955,7 @@ fn read_deep(cx: &mut Cx<'_>, out: &Buf, plan: &Plan<'_>, req: &RenderRequest) -
+         fail(FailKind::Blank, "the GPU result is entirely black; rendering it on the CPU to be sure".into());
+         return None;
+     }
+-    Some(Rendered { image, histogram, deep: Some(deep) })
++    Some(Rendered { execution: None, frame: Some(plan.frame.clone()), image, histogram, deep: Some(deep) })
+ }
+ 
+ /// The finished output `out` (`w × h` packed RGBA8) as a texture on the device, with its
+diff --git a/crates/gpu/tests/display.rs b/crates/gpu/tests/display.rs
+index 525743b9fbbb98b5d1e8839fc7fe68529f037170..0fbd1026fb973190dcf94f9b042ee81de5892073 100644
+--- a/crates/gpu/tests/display.rs
++++ b/crates/gpu/tests/display.rs
+@@ -57,6 +57,8 @@ fn display_renders_match_readback_renders() {
+         let req = RenderRequest { quality, ..RenderRequest::fit(w, h) };
+         let stages = StageCache::default();
+         let pixels = lightcraft_gpu::render(&src, &raw, &s, &req, Some(&stages)).expect("gpu render");
++        assert!(pixels.frame.is_some(), "readback image carries the executed geometry plan");
++        assert_eq!(pixels.execution.as_ref().map(|e| e.outcome), Some("gpu_success"));
+         match lightcraft_gpu::render_display(&src, &raw, &s, &req, Some(&stages)).expect("display render") {
+             Output::Display { frame, histogram } => {
+                 assert_eq!((frame.width, frame.height), (pixels.image.width, pixels.image.height));
+@@ -70,11 +72,21 @@ fn display_renders_match_readback_renders() {
+     // overlays are drawn on the CPU, and a window that spots grew is cut there: pixels
+     let src = Arc::new(lightcraft_scenes::demo_library()[0].render(3000, 2000));
+     let req = RenderRequest { overlay: Overlay::Spots(50), ..RenderRequest::fit(800, 800) };
+-    assert!(matches!(lightcraft_gpu::render_display(&src, &raw, &s, &req, None), Some(Output::Image(_))), "overlay");
++    match lightcraft_gpu::render_display(&src, &raw, &s, &req, None) {
++        Some(Output::Image(r)) => {
++            assert!(r.frame.is_some());
++            assert_eq!(r.execution.as_ref().map(|e| e.outcome), Some("gpu_success"));
++        }
++        _ => panic!("overlay is returned as image pixels"),
++    }
+     s.spots = vec![Spot { points: vec![Point::new(0.5, 0.5)], size: 0.02, source_offset: Some(Point::new(0.15, 0.0)), ..Default::default() }];
+     let req = RenderRequest { window: Some(PixelWindow { x: 1200, y: 800, w: 500, h: 400 }), ..RenderRequest::fit(3000, 2000) };
+     match lightcraft_gpu::render_display(&src, &raw, &s, &req, None) {
+-        Some(Output::Image(r)) => assert_eq!((r.image.width, r.image.height), (500, 400)),
++        Some(Output::Image(r)) => {
++            assert_eq!((r.image.width, r.image.height), (500, 400));
++            assert!(r.frame.is_some());
++            assert_eq!(r.execution.as_ref().map(|e| e.outcome), Some("gpu_success"));
++        }
+         _ => panic!("a grown window comes back as pixels"),
+     }
+ }
+diff --git a/crates/gpu/tests/it/fallback.rs b/crates/gpu/tests/it/fallback.rs
+index ee917570680e21c82128b65d6d271970f6e293c9..c84b03feaeaac16efca2bc318120254691c37ba0 100644
+--- a/crates/gpu/tests/it/fallback.rs
++++ b/crates/gpu/tests/it/fallback.rs
+@@ -51,13 +51,24 @@ fn failed_gpu_renders_fall_back_with_a_reason() {
+     masked(&mut s, 4);
+     let req = RenderRequest::fit(w, h);
+     let cpu = render(&src, &info, &s, &req).image;
++    let plan = lightcraft_pipeline::plan(&src, &info, &s, &req);
+     let ok = |what: &str| {
+-        let g = lightcraft_gpu::render(&src, &info, &s, &req, None)
+-            .unwrap_or_else(|| panic!("{what}: gpu render ({:?})", lightcraft_gpu::last_fallback()));
++        let g = lightcraft_gpu::try_render(&src, &info, &s, &req, None)
++            .unwrap_or_else(|e| panic!("{what}: gpu render ({e:?}; {:?})", lightcraft_gpu::last_fallback()));
++        assert_eq!(g.frame.as_ref(), Some(&plan.frame), "{what}: the GPU image carries the plan used to render it");
++        assert_eq!((g.image.width, g.image.height), (plan.w, plan.h));
++        let execution = g.execution.expect("a successful GPU render records its backend");
++        assert_eq!((execution.outcome, execution.backend, execution.reason), ("gpu_success", "gpu", "none"));
+         let d = mean_abs_diff(&cpu, &g.image);
+         assert!(d < 0.5, "{what}: GPU differs from the CPU by {d:.3} LSB");
+     };
+     ok("healthy");
++    let deep_req = RenderRequest { depth: lightcraft_pipeline::OutputDepth::F32Hdr, ..req };
++    let deep_plan = lightcraft_pipeline::plan(&src, &info, &s, &deep_req);
++    let deep = lightcraft_gpu::try_render(&src, &info, &s, &deep_req, None).expect("deep GPU render");
++    assert_eq!(deep.frame.as_ref(), Some(&deep_plan.frame), "deep GPU output retains its actual Plan");
++    assert_eq!((deep.image.width, deep.image.height), (deep_plan.w, deep_plan.h));
++    assert_eq!(deep.execution.as_ref().map(|e| e.outcome), Some("gpu_success"));
+     // the render that fell back says why itself; the process-wide diagnostic agrees
+     let failed = |what: &str| -> String {
+         match lightcraft_gpu::try_render(&src, &info, &s, &req, None) {
+@@ -84,6 +95,13 @@ fn failed_gpu_renders_fall_back_with_a_reason() {
+     assert!(lightcraft_gpu::available(), "{:?}", lightcraft_gpu::unavailable_reason());
+     ok("after the limit faults");
+ 
++    // Simulated memory exhaustion exercises the recovery branch without allocating until failure.
++    lightcraft_gpu::inject_fault(Fault::OutOfMemory);
++    let why = failed("out of memory");
++    assert!(why.contains("out of device memory"), "{why}");
++    assert!(lightcraft_gpu::available(), "out of memory does not mark the device lost");
++    ok("after simulated memory exhaustion");
++
+     // a device (validation) error: captured by the render's error scope; the GPU is not used again
+     // on this thread — other threads keep it (a simulated failure, not a real one)
+     lightcraft_gpu::inject_fault(Fault::Validation);
+@@ -98,6 +116,14 @@ fn failed_gpu_renders_fall_back_with_a_reason() {
+     assert_eq!(lightcraft_gpu::unavailable_reason(), None);
+     ok("after a device error");
+ 
++    // Device-loss recovery is injected; the user's actual GPU device is never reset.
++    lightcraft_gpu::inject_fault(Fault::DeviceLost);
++    let why = failed("device lost");
++    assert!(why.contains("device lost"), "{why}");
++    assert!(!lightcraft_gpu::available());
++    lightcraft_gpu::reset_failures();
++    ok("after simulated device loss");
++
+     // the per-pixel work never runs (a driver dropping a submission without an error): before
+     // the fix this came back as a fully black image
+     lightcraft_gpu::inject_fault(Fault::DropWork);
+diff --git a/crates/pipeline/src/lib.rs b/crates/pipeline/src/lib.rs
+index 34bd402336fe6682be52a254fda253611ce9cfd2..d41a8ca84ffa9aee27350a50f6a814edf76f6bcf 100644
+--- a/crates/pipeline/src/lib.rs
++++ b/crates/pipeline/src/lib.rs
+@@ -233,7 +233,18 @@ impl RenderRequest {
+     }
+ }
+ 
++#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
++pub struct Execution {
++    pub outcome: &'static str,
++    pub backend: &'static str,
++    pub reason: &'static str,
++}
++
+ pub struct Rendered {
++    /// Render-local execution evidence; stand-ins without a new render leave it absent.
++    pub execution: Option<Execution>,
++    /// The geometry used by the successful image render, not a display texture or cache entry.
++    pub frame: Option<geometry::Frame>,
+     /// The result, 8-bit (for deep renders: `deep` reduced to 8 bits, display-encoded).
+     pub image: Rgba8,
+     pub histogram: Histogram,
+@@ -752,7 +763,7 @@ fn render_impl(src: Src<'_>, info: &SourceInfo, s: &DevelopSettings, req: &Rende
+         let image = deep.to_rgba8();
+         let histogram = Histogram::of_srgb8(&image);
+         lap("finish (deep)", &mut t);
+-        return Rendered { image, histogram, deep: Some(deep) };
++        return Rendered { execution: None, frame: Some(frame.clone()), image, histogram, deep: Some(deep) };
+     }
+     let image = finish::finish(&prep, s, frame, info, req);
+     lap("finish", &mut t);
+@@ -778,7 +789,7 @@ fn render_impl(src: Src<'_>, info: &SourceInfo, s: &DevelopSettings, req: &Rende
+         }
+         lap("visualize hdr", &mut t);
+     }
+-    Rendered { image, histogram, deep: None }
++    Rendered { execution: None, frame: Some(frame.clone()), image, histogram, deep: None }
+ }
+ 
+ /// The colour a colour-range mask would sample at normalized image point `p` (OkLab of the
+diff --git a/crates/pipeline/src/tests.rs b/crates/pipeline/src/tests.rs
+index f1229bd5690a6a163a60db82624358f31a973e2b..e16e5e0b8e0b2f142fcf127af77c9738f3356356 100644
+--- a/crates/pipeline/src/tests.rs
++++ b/crates/pipeline/src/tests.rs
+@@ -14,12 +14,43 @@ fn scene() -> Rgb32f {
+ #[test]
+ fn default_render_is_sane() {
+     let r = render(&scene(), &SourceInfo::default(), &DevelopSettings::default(), &RenderRequest::fit(240, 240));
++    assert!(r.frame.is_some(), "a CPU image render carries the geometry plan it used");
++    assert!(r.execution.is_none(), "the shared pipeline does not claim a selected backend");
+     assert_eq!((r.image.width, r.image.height), (240, 160));
+     let m = mean_luma(&r.image);
+     assert!((40.0..220.0).contains(&m), "{m}");
+     assert!(r.histogram.total > 0);
+ }
+ 
++#[test]
++fn cpu_deep_render_carries_the_geometry_plan() {
++    let src = scene();
++    let req = RenderRequest { depth: crate::OutputDepth::F32Hdr, ..RenderRequest::fit(96, 64) };
++    let info = SourceInfo::default();
++    let settings = DevelopSettings::default();
++    let expected = crate::plan(&src, &info, &settings, &req);
++    let r = render(&src, &info, &settings, &req);
++    assert!(r.deep.is_some());
++    assert_eq!(r.frame.as_ref(), Some(&expected.frame), "deep output retains the plan used before conversion to RGBA8");
++    assert_eq!((r.image.width, r.image.height), (expected.w, expected.h));
++}
++
++#[test]
++fn cpu_u8_render_carries_the_exact_geometry_plan() {
++    use lightcraft_geom::{Orientation, Rect};
++    let src = scene();
++    let info = SourceInfo::default();
++    let mut settings = DevelopSettings::default();
++    settings.crop.geometry.rect = Rect { x0: 0.1, y0: 0.2, x1: 0.9, y1: 0.8 };
++    settings.orientation = Orientation::Rotate90;
++    settings.crop.flip_h = true;
++    let req = RenderRequest::fit(96, 64);
++    let expected = crate::plan(&src, &info, &settings, &req);
++    let r = render(&src, &info, &settings, &req);
++    assert_eq!(r.frame.as_ref(), Some(&expected.frame));
++    assert_eq!((r.image.width, r.image.height), (expected.w, expected.h));
++}
++
+ #[test]
+ fn grey_ramp_stays_neutral() {
+     let src = Rgb32f::from_fn(64, 8, |x, _| [0.002 * 1.12f32.powi(x as i32); 3]);
+diff --git a/crates/ui-egui/src/render.rs b/crates/ui-egui/src/render.rs
+index e8c3a9078864408d008bd13374af4142c1113096..29037c5142ee6485aac85603cec1d5e8b6d1ee41 100644
+--- a/crates/ui-egui/src/render.rs
++++ b/crates/ui-egui/src/render.rs
+@@ -1958,7 +1958,10 @@ mod color_image_tests {
+             frame: None,
+         };
+         let histogram = Histogram::of_srgb8(&image);
+-        let ok = Renderer::run_for(|| result(Ok(lightcraft_pipeline::Rendered { image: image.clone(), histogram, deep: None })), &None);
++        let ok = Renderer::run_for(
++            || result(Ok(lightcraft_pipeline::Rendered { execution: None, frame: None, image: image.clone(), histogram, deep: None })),
++            &None,
++        );
+         assert_eq!(ok.color.map(|c| c.pixels.clone()), Some(color_image(&image).pixels));
+         let failed = Renderer::run_for(|| result(Err("unreadable".into())), &None);
+         assert!(failed.color.is_none());
