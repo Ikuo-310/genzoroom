@@ -131,6 +131,20 @@ it('shows clamped relative WB for Native legacy settings without writing until t
   expect(rawApi.setRawControls).toHaveBeenCalledWith(expect.objectContaining({ assetId: base.id }), { 'wb.temp': nativeTemp });
 });
 
+it.each([
+  { scale: 'kelvin', assetId: base.id, native: 150, displayed: '150', min: '-150', max: '150' },
+  { scale: 'legacy', assetId: jpeg.id, native: 150, displayed: '100', min: '-100', max: '100' },
+])('uses the $scale tint range for the Slider display without changing Native state', async ({ scale, assetId, native, displayed, min, max }) => {
+  vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc),
+    wb: { available: true, mode: 'custom', scale }, values: { ...rawSettings(doc).values, 'wb.tint': native } }));
+  await mount(assetId);
+  const slider = host.querySelector<HTMLInputElement>('[data-adjustment-id="tint"]')!;
+  const number = slider.closest('.adjustment-control')!.querySelector<HTMLInputElement>('input[type="number"]')!;
+  expect(slider.min).toBe(min); expect(slider.max).toBe(max); expect(slider.value).toBe(displayed);
+  expect(number.min).toBe(min); expect(number.max).toBe(max); expect(number.value).toBe(displayed);
+  expect(rawApi.setRawControls).not.toHaveBeenCalled();
+});
+
 it('does not start either editor or fall back to Immich preview while development policy is unavailable', async () => {
   developmentPolicy.engine = null;
   developmentPolicy.loading = false;

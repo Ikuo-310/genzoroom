@@ -119,7 +119,7 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
         const relativeWb = settings.wb.scale === 'legacy';
         const relativeWbControl = relativeWb && control.startsWith('wb.');
         const value = control === 'wb.temp' ? displayTemperature(nativeValue, settings.wb.scale)
-          : control === 'wb.tint' ? displayTint(nativeValue) : nativeValue;
+          : control === 'wb.tint' && relativeWb ? displayTint(nativeValue) : nativeValue;
         const min = relativeWbControl ? -100 : spec.min;
         const max = relativeWbControl ? 100 : spec.max;
         const trackGradient = control.startsWith('grading.') && control.endsWith('.hue') ? 'linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)' : control === 'wb.temp' ? TEMPERATURE_TRACK_GRADIENT : control === 'wb.tint' ? TINT_TRACK_GRADIENT : undefined;
