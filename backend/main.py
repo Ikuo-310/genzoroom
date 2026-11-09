@@ -656,10 +656,9 @@ async def asset_thumbnail(asset_id: UUID) -> Response:
 
 async def generate_saved_thumbnail(asset_id, *, immich_url, api_key):
     detail = await get_asset_detail(immich_url, api_key, asset_id)
-    if development_engine() == "lightcraft" or detail.is_raw:
+    if development_engine() == "lightcraft":
         return await generate_thumbnail(asset_id, immich_url=immich_url, api_key=api_key, input_kind="raw")
-    return await generate_thumbnail(asset_id, immich_url=immich_url, api_key=api_key,
-                                    input_kind="raw" if detail.is_raw else "jpeg")
+    return await generate_thumbnail(asset_id, immich_url=immich_url, api_key=api_key, input_kind="jpeg")
 
 
 async def thumbnail_recipe_reason(asset_id):
@@ -667,8 +666,7 @@ async def thumbnail_recipe_reason(asset_id):
         detail = await get_asset_detail(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"), asset_id)
     except ImmichRequestError as error:
         raise _upstream_error(error) from error
-    if development_engine() == "lightcraft" or detail.is_raw:
-        # Windows cache eligibility follows Native state regardless of Immich classification.
+    if development_engine() == "lightcraft":
         state = await run_in_threadpool(get_raw_saved_state, asset_id)
         if state is None:
             return "recipe_missing"

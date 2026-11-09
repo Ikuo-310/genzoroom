@@ -13,9 +13,15 @@ from export_artifact import ExportArtifact
 from export_runtime import ExportRuntime, RegistrationResult
 from export_runtime_store import (create_export_run, get_export_run, fail_export_item,
     retry_export_assets, begin_export_item, transition_export_item, request_export_stop)
-from tests.test_export_queue import A, B, C, db, save as save_jpeg
+from tests.test_export_queue import A, B, C, db as queue_db, save as save_jpeg
 from tests.test_raw_recipe_store import identity, settings
 from tests.test_export_runtime import Source, Family
+
+
+@pytest.fixture
+def db(queue_db, monkeypatch):
+    monkeypatch.setattr(storage, "WINDOWS_STORAGE", True)
+    return queue_db
 
 
 def save_raw(asset=A, exposure=.7, revision=0, engine=None):
@@ -34,7 +40,7 @@ def save_raw(asset=A, exposure=.7, revision=0, engine=None):
 class MixedSource(Source):
     async def detail(self, asset_id):
         detail = await super().detail(asset_id)
-        return detail.model_copy(update={'format':'PEF', 'is_raw':True, 'filename':'IMG.PEF'}) if asset_id in (A,C) else detail
+        return detail.model_copy(update={'format':'PEF', 'is_raw':asset_id != B, 'filename':'IMG.PEF'})
 
 
 class Recorder:
@@ -101,6 +107,7 @@ def test_windows_native_export_accepts_non_raw_immich_asset(db, monkeypatch):
 
 
 def test_windows_recovery_fails_old_jpeg_processing_version_without_fallback(db, monkeypatch):
+    monkeypatch.setattr(storage, "WINDOWS_STORAGE", False)
     save_jpeg(A)
     enqueue_export_assets([A])
     previous = create_export_run([A], worker_id=uuid4())
@@ -117,6 +124,57 @@ def test_windows_recovery_fails_old_jpeg_processing_version_without_fallback(db,
     result = asyncio.run(run())
     assert result.items[0].status == "failed"
     assert result.items[0].error_code == "unsupported_processing_version"
+
+
+def test_docker_recovery_fails_native_processing_version_without_fallback(db, monkeypatch):
+    monkeypatch.setattr(storage, "WINDOWS_STORAGE", True)
+    save_raw()
+    enqueue_export_assets([A])
+    previous = create_export_run([A], worker_id=uuid4())
+    monkeypatch.setattr(storage, "WINDOWS_STORAGE", False)
+    source = Source()
+    async def unexpected_detail(asset_id):
+        raise AssertionError("Docker must reject Native run before source acquisition")
+    source.detail = unexpected_detail
+    async def artifact(request):
+        raise AssertionError("Docker must not invoke Native artifact generation")
+    async def run():
+        runtime = ExportRuntime(source=source, family=Family(), registrar=Recorder(), raw_artifact=artifact)
+        assert await runtime.recover() == previous.run_id
+        await runtime.wait()
+        return get_export_run(previous.run_id)
+    result = asyncio.run(run())
+    assert result.items[0].status == "failed"
+    assert result.items[0].error_code == "unsupported_processing_version"
+
+
+def test_export_saved_state_follows_engine_when_both_recipes_exist(db, monkeypatch):
+    from raw_recipe_store import RAW_EXPORT_PROCESSING_VERSION
+    save_jpeg(A)
+    monkeypatch.setattr(storage, "WINDOWS_STORAGE", True)
+    save_raw()
+    with edit_store._connection() as connection:
+        native = edit_store._export_saved_state(connection, A)
+        monkeypatch.setattr(storage, "WINDOWS_STORAGE", False)
+        jpeg = edit_store._export_saved_state(connection, A)
+    assert native["processingVersion"] == RAW_EXPORT_PROCESSING_VERSION
+    assert jpeg["processingVersion"] != RAW_EXPORT_PROCESSING_VERSION
+
+
+@pytest.mark.parametrize("windows,save_native,save_legacy,expected", [
+    (False, False, True, "jpeg"), (False, True, False, None),
+    (True, True, False, "native"), (True, False, True, None),
+])
+def test_export_saved_state_selects_only_platform_recipe(db, monkeypatch, windows, save_native, save_legacy, expected):
+    if save_legacy:
+        save_jpeg(A)
+    if save_native:
+        monkeypatch.setattr(storage, "WINDOWS_STORAGE", True)
+        save_raw()
+    monkeypatch.setattr(storage, "WINDOWS_STORAGE", windows)
+    with edit_store._connection() as connection:
+        state = edit_store._export_saved_state(connection, A)
+    assert (None if state is None else "native" if state["processingVersion"].startswith("raw-") else "jpeg") == expected
 
 
 def test_raw_eligibility_and_start_freeze(db):
@@ -137,13 +195,13 @@ def test_raw_eligibility_and_start_freeze(db):
 
 @pytest.mark.parametrize('fail_raw',[False,True])
 def test_mixed_serial_pipeline_and_snapshot(db,monkeypatch,fail_raw):
-    save_raw();save_jpeg(B);save_raw(C)
+    save_raw();save_raw(B);save_raw(C)
     enqueue_export_assets([A,B,C])
     calls=[];registrar=Recorder();source=MixedSource()
     async def artifact(request):
         calls.append(copy.deepcopy(request.settings))
         assert request.source and request.source_filename=='IMG.PEF'
-        assert request.expected_content_hash==identity()['sourceContentHash']
+        assert request.expected_content_hash in {identity(assetId=str(asset))['sourceContentHash'] for asset in (A,B,C)}
         assert request.family_filenames==('IMG-Genzo03.jpg',)
         if len(calls)==1:
             save_raw(exposure=3,revision=1)
@@ -160,7 +218,7 @@ def test_mixed_serial_pipeline_and_snapshot(db,monkeypatch,fail_raw):
     assert [r[0].id for r in registrar.calls]==([B,C] if fail_raw else [A,B,C])
     assert result.items[0].status==('failed' if fail_raw else 'succeeded')
     assert result.items[0].error_code==('encoding_failed' if fail_raw else None)
-    assert result.items[1].kind=='jpeg' and result.items[1].status=='succeeded'
+    assert result.items[1].kind=='raw' and result.items[1].status=='succeeded'
     assert result.items[2].status=='succeeded'
     assert all(o.closed==1 for o in source.originals)
 
@@ -179,7 +237,7 @@ def test_raw_retry_uses_current_recipe_without_jpeg_identity(db):
 
 
 def test_raw_recovery_keeps_frozen_recipe_after_reset(db):
-    save_raw();save_jpeg(B);enqueue_export_assets([A,B])
+    save_raw();save_raw(B);enqueue_export_assets([A,B])
     run=create_export_run([A,B],worker_id=uuid4())
     begin_export_item(run.run_id,run.worker_id)
     transition_export_item(run.run_id,A,run.worker_id,'waiting','encoding')
@@ -200,7 +258,7 @@ def test_raw_recovery_keeps_frozen_recipe_after_reset(db):
 
 
 def test_raw_stop_finishes_current_releases_suffix(db):
-    save_raw();save_jpeg(B);enqueue_export_assets([A,B])
+    save_raw();save_raw(B);enqueue_export_assets([A,B])
     async def artifact(request):
         active=__import__('export_runtime_store').recoverable_export_run()
         request_export_stop(active.run_id)
@@ -348,7 +406,7 @@ def test_raw_source_mismatch_does_not_encode(db):
     async def run():
         runtime=ExportRuntime(source=Source(),family=Family(),registrar=Recorder(),raw_artifact=artifact)
         run_id=await runtime.start([A]);await runtime.wait();return get_export_run(run_id)
-    assert asyncio.run(run()).items[0].error_code=='source_kind_mismatch'
+    assert asyncio.run(run()).items[0].error_code=='encoding_failed'
 
 
 def test_raw_retry_can_produce_different_bytes_and_use_new_snapshot(db):
@@ -372,12 +430,13 @@ def test_raw_retry_can_produce_different_bytes_and_use_new_snapshot(db):
     assert registrar.calls[0][1].jpeg!=registrar.calls[1][1].jpeg
 
 
-def test_mixed_enqueue_rejection_is_atomic_and_raw_api_accepts_saved_recipe(db):
+def test_mixed_enqueue_rejection_is_atomic_and_raw_api_accepts_saved_recipe(db, monkeypatch):
     from tests.test_export_queue import request
     save_raw(exposure=0);save_jpeg(B)
     with pytest.raises(edit_store.QueueRejected):enqueue_export_assets([B,A])
     assert not list_export_queue()
     save_raw(revision=1)
-    response=request('POST','/export/queue',{'assetIds':[str(A),str(B)]})
+    monkeypatch.setattr(storage, "WINDOWS_STORAGE", True)
+    response=request('POST','/export/queue',{'assetIds':[str(A)]})
     assert response.status_code==200
-    assert {i['assetId'] for i in response.json()['items']}=={str(A),str(B)}
+    assert response.json()['items'][0]['assetId']==str(A)

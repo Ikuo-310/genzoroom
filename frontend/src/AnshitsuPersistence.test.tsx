@@ -43,7 +43,9 @@ describe('immediate thumbnail reservation after saved navigation', () => {
   const requests = () => vi.mocked(fetch).mock.calls.filter(([url, init]) =>
     String(url).endsWith('/rendered-thumbnail') && init?.method === 'POST');
   function network() {
-    const fetchMock = vi.fn().mockResolvedValue(new Response('{}'));
+    const fetchMock = vi.fn((input: RequestInfo | URL) => String(input).endsWith('/development-policy')
+      ? new Response(JSON.stringify({ engine: 'jpeg' }), { headers: { 'content-type': 'application/json' } })
+      : Promise.resolve(new Response('{}')));
     vi.stubGlobal('fetch', fetchMock);
     return fetchMock;
   }
@@ -186,6 +188,9 @@ async function editWithUndoAndRedoAvailable() {
 beforeEach(async () => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input).endsWith('/development-policy')
+    ? new Response(JSON.stringify({ engine: 'jpeg' }), { headers: { 'content-type': 'application/json' } })
+    : new Response('{}')));
   await i18n.changeLanguage('en');
   clearWorkspaceSession();
   sessionStorage.clear(); restoreGalleryStackSelectionsFromSession();
@@ -611,7 +616,9 @@ describe('Anshitsu Filmstrip exclusion', () => {
 
   it('resumes the original selection after Gallery return and reentry without exclusion Undo', async () => {
     mocked.recent.mockResolvedValue([]);
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'ok', configured: true, connected: true }))));
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => String(input).endsWith('/development-policy')
+      ? new Response(JSON.stringify({ engine: 'jpeg' }), { headers: { 'content-type': 'application/json' } })
+      : new Response(JSON.stringify({ status: 'ok', configured: true, connected: true }))));
     await mount(); await filmstripKey('x'); await filmstripKey('g');
     expect(readWorkspaceSession()?.selectedAssets.map(asset => asset.id)).toEqual([first.id, second.id]);
     expect(readWorkspaceSession()?.activeAssetId).toBe(second.id);
@@ -660,7 +667,9 @@ describe('Anshitsu Filmstrip persistence', () => {
     setManualGalleryStackSelection(stack, new Set(members.map(asset => asset.id)));
     mocked.recent.mockResolvedValue([stack]);
     mocked.detail.mockImplementation(async (id: string) => ({ ...members.find(asset => asset.id === id)!, preview_url: '/preview', exif: {} }));
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'ok', configured: true, connected: true }))));
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => String(input).endsWith('/development-policy')
+      ? new Response(JSON.stringify({ engine: 'jpeg' }), { headers: { 'content-type': 'application/json' } })
+      : new Response(JSON.stringify({ status: 'ok', configured: true, connected: true }))));
     await act(async () => root.render(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>));
     await flush();
     await click('.photo-selection-input');
@@ -675,7 +684,7 @@ describe('Anshitsu Filmstrip persistence', () => {
     expect(currentPhoto()).toBe(members[2].filename);
     const ranges = [...container.querySelectorAll<HTMLInputElement>('.develop-panel input[type="range"]')];
     expect(ranges).toHaveLength(0);
-      expect(container.querySelector('.develop-panel')?.textContent).toContain(i18n.t('workspace.rawPreview.temporary'));
+    expect(container.querySelector('.develop-panel')?.textContent).toContain(i18n.t('workspace.jpegOnly'));
     await click(`.filmstrip-item[aria-label="${members[3].filename}"]`);
     expect(currentPhoto()).toBe(members[3].filename);
     expect(container.querySelector('.develop-panel')?.textContent).toContain(i18n.t('workspace.jpegOnly'));
@@ -714,7 +723,9 @@ describe('Anshitsu Filmstrip persistence', () => {
     Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function () { this.open = true; } });
     Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: function () { this.open = false; } });
     onTestFinished(() => { Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal'); Reflect.deleteProperty(HTMLDialogElement.prototype, 'close'); });
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false })));
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => String(input).endsWith('/development-policy')
+      ? new Response(JSON.stringify({ engine: 'jpeg' }), { headers: { 'content-type': 'application/json' } })
+      : Promise.resolve({ ok: false } as Response)));
     vi.useFakeTimers(); await mount();
     await click('button[aria-label="Disable Basic"]');
     const history = container.querySelector('.edit-history')!.innerHTML;

@@ -231,7 +231,8 @@ class ExportRuntime:
         runtime_log("item.started", runId=str(run_id), assetId=str(item.asset_id),
                     position=item.position, frozenRevision=item.frozen_revision)
         try:
-            if development_engine() == "lightcraft" and item.kind != "raw":
+            native_policy = development_engine() == "lightcraft"
+            if native_policy != (item.kind == "raw"):
                 await _persist(fail_export_item, run_id, item.asset_id, worker_id, status,
                                "unsupported_processing_version")
                 return

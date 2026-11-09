@@ -436,13 +436,10 @@ def list_export_queue() -> list[dict]:
 
 
 def _export_saved_state(connection, asset_id):
-    from raw_recipe_store import select_raw_export_state
-    raw = select_raw_export_state(connection, asset_id)
-    if raw is not None:
-        return raw
     from storage import development_engine
     if development_engine() == "lightcraft":
-        return None
+        from raw_recipe_store import select_raw_export_state
+        return select_raw_export_state(connection, asset_id)
     saved = connection.execute("SELECT * FROM asset_edit_states WHERE asset_id=?", (str(asset_id),)).fetchone()
     return None if saved is None else _snapshot(saved, asset_id) | {"revision": saved["revision"]}
 

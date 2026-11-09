@@ -27,7 +27,7 @@ from tests.test_raw_controls import identity as document_identity
 
 @pytest.fixture
 def lifecycle(tmp_path, monkeypatch):
-    monkeypatch.setattr(storage, "WINDOWS_STORAGE", False)
+    monkeypatch.setattr(storage, "WINDOWS_STORAGE", True)
     monkeypatch.setattr(edit_store, "DB_PATH", tmp_path / "edits.db")
     edit_store.initialize_database()
     cache = ThumbnailCache(tmp_path / "thumbnails")
@@ -101,6 +101,17 @@ def test_windows_thumbnail_dispatch_ignores_asset_raw_classification(lifecycle, 
     result = asyncio.run(main.generate_saved_thumbnail(ASSET, immich_url=None, api_key=None))
     assert result == b"native-thumbnail"
     assert rendered.await_args.kwargs["input_kind"] == "raw"
+
+
+def test_docker_thumbnail_dispatch_ignores_asset_raw_classification(lifecycle, monkeypatch):
+    _, _, _, _ = lifecycle
+    monkeypatch.setattr(storage, "WINDOWS_STORAGE", False)
+    monkeypatch.setattr(main, "get_asset_detail", AsyncMock(return_value=SimpleNamespace(is_raw=True)))
+    rendered = AsyncMock(return_value=b"jpeg-thumbnail")
+    monkeypatch.setattr(main, "generate_thumbnail", rendered)
+    result = asyncio.run(main.generate_saved_thumbnail(ASSET, immich_url=None, api_key=None))
+    assert result == b"jpeg-thumbnail"
+    assert rendered.await_args.kwargs["input_kind"] == "jpeg"
 
 
 def test_mutation_commit_debounce_replay_failure_default_unknown_delete(lifecycle):
@@ -234,11 +245,12 @@ def test_raw_mutation_during_generation_discards_old_result(lifecycle, mutation)
 @pytest.mark.parametrize("failing_raw", [False, True, None])
 def test_mixed_queue_dispatch_failure_continuation_and_shutdown(lifecycle, monkeypatch, failing_raw):
     cache, _, _, _ = lifecycle
+    monkeypatch.setattr(storage, "WINDOWS_STORAGE", False)
     raw_id, jpeg_id = UUID(int=2), ASSET
     calls = []
     async def detail(url, key, asset): return SimpleNamespace(is_raw=asset == raw_id)
     async def generate(asset, **kwargs):
-        assert kwargs["input_kind"] == ("raw" if asset == raw_id else "jpeg")
+        assert kwargs["input_kind"] == "jpeg"
         calls.append(asset)
         if failing_raw is not None and (asset == raw_id) == failing_raw: raise ValueError("failure")
         return b"updated"
