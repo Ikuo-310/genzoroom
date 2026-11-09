@@ -1512,3 +1512,17 @@ it('uses the Backend discard barrier without waiting for a lost Drop response an
  await act(async()=>{reply.resolve({...saved,revision:saved.revision+1,settingsFingerprint:'f'.repeat(64),gestureId:'g',sequence:0});await end;});await flush();
  expect(vi.mocked(api.saveRawHistory).mock.calls.filter(([r])=>r.action==='commit')).toHaveLength(0);
 });
+
+
+it('displays Full Whole Frame without diagnostics and releases its URL on departure', async () => {
+  const frame = { geometryId: 'a'.repeat(64), nativeWidth: 6000, nativeHeight: 4500, aspect: 4 / 3,
+    fullWidth: 16, fullHeight: 12, window: null };
+  vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(['png']), width: 16, height: 12,
+    epoch: 1, sequence: 1, kind: 'after', quality: 'full', frame });
+  await render('a'); await flush();
+  expect(current).toMatchObject({ status: 'ready', width: 16, height: 12, quality: 'full', frame });
+  const url = current!.url!;
+  expect(host.textContent).toContain(url);
+  await render(null); await flush();
+  expect(revokeURL).toHaveBeenCalledWith(url);
+});

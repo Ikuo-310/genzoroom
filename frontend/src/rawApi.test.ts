@@ -510,3 +510,21 @@ it('detaches lost workspace HTTP replies while leaving the discard fence on an i
  abortRawWorkspaceRequests(workspaceId);expect(pendingSignal!.aborted).toBe(true);await caught;
  await expect(discardRawWorkspace({workspaceId})).resolves.toBeUndefined();
 });
+
+
+it('accepts Full Whole Frame without execution or cache diagnostics', async () => {
+  const target = { ...adaptiveTarget, quality: 'full' as const };
+  vi.stubGlobal('fetch', vi.fn(async () => response({ ...adaptiveHeaders(), 'X-Raw-Quality': 'full' })));
+  const result = await rawPreview(doc, 3, new AbortController().signal, 'after', target);
+  expect(result).toMatchObject({ width: 16, height: 12, kind: 'after', quality: 'full', frame: geometry });
+  expect(result.blob.type).toBe('image/png');
+});
+
+it.each<Record<string, string>>([
+  { 'X-Raw-Frame': JSON.stringify({ ...geometry, fullWidth: 17 }) },
+  { 'X-Raw-Frame': JSON.stringify({ ...geometry, geometryId: 'bad' }) },
+  { 'X-Raw-Revision': '1' }, { 'X-Raw-Serial': '2' },
+])('rejects invalid Full Whole metadata or stale receipt: %j', async patch => {
+  vi.stubGlobal('fetch', vi.fn(async () => response({ ...adaptiveHeaders(), 'X-Raw-Quality': 'full', ...patch })));
+  await expect(rawPreview(doc, 3, new AbortController().signal, 'after', { ...adaptiveTarget, quality: 'full' })).rejects.toThrow();
+});

@@ -552,3 +552,38 @@ def test_native_release_failure_cannot_start_cache_cleanup_or_reopen(local, tmp_
                 assert children[0].returncode is not None and not source.exists()
         finally: await api.close()
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("frame_supported", [False, True])
+def test_whole_full_frame_response_and_legacy_fallback(local, tmp_path, monkeypatch, frame_supported):
+    async def run():
+        import json
+        api, manager, children, _ = await setup(tmp_path, local, monkeypatch)
+        child = children[0]
+        child.frame_supported = frame_supported
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                _, doc = await open_document(http)
+                url = f'/api/raw/documents/{doc["handle"]}/preview'
+                body = preview_body(doc) | {"quality": "full", "mode": "whole", "maxSide": 1024,
+                    "viewGeneration": 1, "geometryId": None}
+                result = await http.post(url, json=body)
+                assert result.status_code == 200, result.text
+                assert result.content.startswith(b"\x89PNG\r\n\x1a\n")
+                assert result.headers["x-raw-quality"] == "full"
+                assert result.headers["x-raw-preview-contract"] == ("1" if frame_supported else "0")
+                assert not await manager._raw_preview_supported(doc["generation"])
+                if frame_supported:
+                    frame = json.loads(result.headers["x-raw-frame"])
+                    assert (frame["fullWidth"], frame["fullHeight"], frame["window"]) == (16, 12, None)
+                    assert len(frame["geometryId"]) == 64
+                    assert child.preview_arguments[-1]["include_frame"] is True
+                else:
+                    assert "x-raw-frame" not in result.headers
+                    assert "include_frame" not in child.preview_arguments[-1]
+                assert (await http.post(url, json=body)).status_code == 204
+                assert (await http.post(url, json=body | {"serial": 2, "revision": doc["revision"] + 1})).status_code == 409
+        finally:
+            await api.close()
+    asyncio.run(run())
