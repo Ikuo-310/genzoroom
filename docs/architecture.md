@@ -1,5 +1,13 @@
 # Provisional Architecture
 
+## Windows common LightCraft development policy (decided 2026-11-09; not implemented)
+
+Windows Desktop will use the existing LightCraft Native pipeline as its only development engine for all image originals retrieved from Immich. Native decides whether it can read an original and which frame to process; GenzoRoom adds no extension/MIME format allowlist, animation rejection, per-format enablement, conversion rescue, or fallback to the legacy JPEG WebGPU/CPU engine. Native unavailability does not change this policy. Preserve `is_raw` for photo classification, STACK management and Trash protection, independently of development-engine selection. Docker retains its existing JPEG engine, supported inputs and behavior, without requiring Native.
+
+Separate the startup-owned engine policy from current Native capability before shared lifespan/Export recovery. Reuse existing Native Session, Preview/Before/Region/Geometry, History/Recipe, thumbnail and Export paths, including the existing Registrar and `raw-lightcraft-v1` identifier. Windows does not migrate or fall back to legacy JPEG Recipe/History. RAW keeps its existing Native Kelvin WB behavior; rendered images use the official Desktop relative temperature/tint display (−100…+100, neutral 0), with only the official UI-boundary conversion and Native-unit snapshots throughout History/Recipe/Export. Display Native rejection in the PV area; report unsupported format only when established, and distinguish startup, acquisition and other known failures. Retain authentication, original protection, resource limits and persistence integrity.
+
+Implementation is planned in four phases: policy separation, Backend common path, Frontend common path, then JPEG-representative end-to-end acceptance through Immich registration plus existing RAW and Docker JPEG regression. Per-format real-file testing is not a completion prerequisite. This is a design decision, not a completed feature; existing RAW/JPEG implementation descriptions below remain the current behavior or historical evidence. See the [common-pipeline design and implementation plan](research/lightcraft/WINDOWS_COMMON_DEVELOPMENT_PIPELINE_DESIGN.md) for source findings, WB mapping, state ownership, error/session handling and acceptance criteria.
+
 RAW Whole Before switching validates Asset, generation, token, Before key and decoded-image ownership independently of After geometry. Its cache owner excludes After Geometry ID. Viewer uses the selected Before frame dimensions for fit/zoom. Region overlays retain shared-geometry checks, and Crop editing still disables comparison.
 
 ## RAW Development: LightCraft Boundary
