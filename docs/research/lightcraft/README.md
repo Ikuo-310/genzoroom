@@ -7,6 +7,7 @@ GenzoRoomのLightCraft統合を判断するための研究記録。個々の設�
 
 | 文書 | 内容 |
 |---|---|
+| [LIGHTCRAFT_V020_UPGRADE_PLAN.md](LIGHTCRAFT_V020_UPGRADE_PLAN.md) | v0.20.0追随P0：managed patch全hunkの割当、責務別P1〜P12、nr_outliers対応、検証・Commit・正式採用の境界。実装は未着手 |
 | [WINDOWS_COMMON_DEVELOPMENT_PIPELINE_DESIGN.md](WINDOWS_COMMON_DEVELOPMENT_PIPELINE_DESIGN.md) | 2026-11-09設計・Phase 1〜4完了記録：Windows Native共通現像、Docker JPEG維持、相対WB、Recipe／History／サムネイル／Export、実装前調査・実装結果・検証根拠 |
 | [RAW_ADAPTIVE_PREVIEW_DESIGN.md](RAW_ADAPTIVE_PREVIEW_DESIGN.md) | A〜B1の適応型Preview契約、B1 Windows受入完了と未確認項目 |
 | [RAW_REGION_PREVIEW_DESIGN.md](RAW_REGION_PREVIEW_DESIGN.md) | 工程C：C0〜C2実装・Windows受入、RAW Preview機能完了、C3性能調査と非blockingな将来候補 |
