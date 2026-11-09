@@ -111,6 +111,7 @@ class RawProcess(FakeProcess):
         self.before_wrong_kind = False
         self.adaptive_supported = False
         self.frame_supported = False
+        self.simple_cache_supported = False
         self.frame_fault = None
         self.execution = None
         self.preview_arguments = []
@@ -129,8 +130,10 @@ class RawProcess(FakeProcess):
     def respond(self, message):
         if message["method"] == "tools/list":
             if self.frame_supported:
-                return reply(self.stdout, message, {"tools": [{"name": "render_preview", "inputSchema": {
-                    "properties": {"include_frame": {"type": "boolean"}}}}]})
+                props = {"include_frame": {"type": "boolean"}}
+                if self.simple_cache_supported:
+                    props["stage_cache"] = {"type": "string", "enum": ["on", "off"]}
+                return reply(self.stdout, message, {"tools": [{"name": "render_preview", "inputSchema": {"properties": props}}]})
             if self.adaptive_supported:
                 return reply(self.stdout, message, {"tools": [{"name": "render_preview", "inputSchema": {"properties": {
                     "before": {"type": "boolean"}, "quality": {"type": "string", "enum": ["draft", "full"]},
@@ -174,6 +177,8 @@ class RawProcess(FakeProcess):
                                     "nativeHeight": 4500, "aspect": 4 / 3,
                                     "fullWidth": 15 if self.frame_fault == "size" else 16,
                                     "fullHeight": 12, "window": None}
+                            if self.execution is not None:
+                                metadata["execution"] = self.execution
                             result["content"][1]["text"] = json.dumps(metadata)
                         if self.bad_image:
                             result["content"][0]["data"] = "broken"
@@ -371,7 +376,7 @@ class RawProcess(FakeProcess):
         super().exit(code)
 
 
-async def create(tmp_path, *, timeouts=QUICK, adaptive=False):
+async def create(tmp_path, *, timeouts=QUICK, adaptive=False, stage_cache=None, stage_cache_budget_bytes=None):
     exe = tmp_path / "engine.exe"
     exe.write_bytes(b"fake")
     # RAW fixtures attest their exact synthetic executable, like a managed production process.
@@ -393,7 +398,7 @@ async def create(tmp_path, *, timeouts=QUICK, adaptive=False):
                                 spawn=spawn, timeouts=FAST)
     await manager.start()
     await until(lambda: manager.status().state == "ready")
-    service = LightCraftRawSession(manager, timeouts=timeouts)
+    service = LightCraftRawSession(manager, timeouts=timeouts, stage_cache=stage_cache, stage_cache_budget_bytes=stage_cache_budget_bytes)
     files = [tmp_path / f"{n}.DNG" for n in range(3)]
     for n, file in enumerate(files):
         file.write_bytes(f"fake-raw-{n}".encode())
@@ -1406,12 +1411,14 @@ def test_frame_only_whole_preview_uses_native_frame_without_adaptive_contract(tm
     asyncio.run(run())
 
 
-def test_frame_only_preview_discards_stale_response(tmp_path):
+@pytest.mark.parametrize("simple_cache", [False, True])
+def test_frame_only_preview_discards_stale_response(tmp_path, simple_cache):
     async def run():
         raw, manager, children, files = await create(tmp_path)
         try:
             child = children[0]
             child.frame_supported = True
+            child.simple_cache_supported = simple_cache
             handle, settings = await raw.open_raw("pixel", files[0])
             child.gate = asyncio.Event()
             old = raw.request_preview(handle, settings.revision, quality="full")
@@ -1423,6 +1430,101 @@ def test_frame_only_preview_discards_stale_response(tmp_path):
             assert frame.sequence == latest.sequence
             assert frame.frame["geometryId"] == "a" * 64
             assert child.max_inflight == 1
+        finally:
+            await raw.close()
+            await manager.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("mode", ["on", "off"])
+@pytest.mark.parametrize("execution", [None, {"outcome": "cpu_not_tried", "backend": "cpu", "reason": "gpu_disabled"}])
+def test_simple_stage_cache_whole_sends_mode_without_budget(tmp_path, mode, execution):
+    async def run():
+        raw, manager, children, files = await create(tmp_path, stage_cache=mode)
+        try:
+            child = children[0]
+            child.frame_supported = child.simple_cache_supported = True
+            child.execution = execution
+            handle, initial = await raw.open_raw("pixel", files[0])
+            assert await manager._raw_frame_supported(handle.generation)
+            assert not await manager._raw_preview_supported(handle.generation)
+            result = await raw.request_preview(handle, initial.revision, quality="full")
+            assert result.frame["geometryId"] == "a" * 64
+            assert result.data.startswith(b"\x89PNG\r\n\x1a\n")
+            assert child.preview_arguments[-1] == {"id": 1, "max_side": 1024, "format": "png",
+                "include_frame": True, "stage_cache": mode}
+            assert "stage_cache_budget_bytes" not in child.preview_arguments[-1]
+        finally:
+            await raw.close()
+            await manager.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("quality", [None, "full"])
+def test_legacy_stage_cache_without_budget_is_rejected_before_native_render(tmp_path, quality):
+    async def run():
+        raw, manager, children, files = await create(tmp_path, adaptive=True, stage_cache="on")
+        try:
+            handle, initial = await raw.open_raw("pixel", files[0])
+            with pytest.raises(LightCraftError, match="raw_invalid_preview_request"):
+                await raw.request_preview(handle, initial.revision, quality=quality)
+            assert not children[0].preview_arguments
+        finally:
+            await raw.close()
+            await manager.close()
+    asyncio.run(run())
+
+
+def test_simple_stage_cache_fallback_never_sends_new_argument_to_unsupported_native(tmp_path):
+    async def run():
+        raw, manager, children, files = await create(tmp_path, stage_cache="on")
+        try:
+            child = children[0]
+            child.frame_supported = True
+            handle, initial = await raw.open_raw("pixel", files[0])
+            result = await raw.request_preview(handle, initial.revision, quality="full")
+            assert result.frame["geometryId"] == "a" * 64
+            assert child.preview_arguments[-1]["include_frame"] is True
+            assert "stage_cache" not in child.preview_arguments[-1]
+            assert "stage_cache_budget_bytes" not in child.preview_arguments[-1]
+        finally:
+            await raw.close()
+            await manager.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("fault", ["size", "missing"])
+def test_simple_stage_cache_rejects_invalid_frame(tmp_path, fault):
+    async def run():
+        raw, manager, children, files = await create(tmp_path, stage_cache="on")
+        try:
+            child = children[0]
+            child.frame_supported = child.simple_cache_supported = True
+            child.frame_fault = fault
+            handle, initial = await raw.open_raw("pixel", files[0])
+            with pytest.raises(LightCraftError, match="lightcraft_invalid_preview"):
+                await raw.request_preview(handle, initial.revision, quality="full")
+            assert child.preview_arguments[-1]["stage_cache"] == "on"
+            assert "stage_cache_budget_bytes" not in child.preview_arguments[-1]
+        finally:
+            await raw.close()
+            await manager.close()
+    asyncio.run(run())
+
+
+def test_simple_stage_cache_switches_on_to_off_without_budget(tmp_path):
+    async def run():
+        raw, manager, children, files = await create(tmp_path, stage_cache="on")
+        try:
+            child = children[0]
+            child.frame_supported = child.simple_cache_supported = True
+            handle, initial = await raw.open_raw("pixel", files[0])
+            on = await raw.request_preview(handle, initial.revision, quality="full")
+            raw._stage_mode = "off"
+            off = await raw.request_preview(handle, initial.revision, quality="full")
+            assert on.frame["geometryId"] == off.frame["geometryId"]
+            assert [args["stage_cache"] for args in child.preview_arguments[-2:]] == ["on", "off"]
+            assert all("stage_cache_budget_bytes" not in args for args in child.preview_arguments[-2:])
         finally:
             await raw.close()
             await manager.close()
