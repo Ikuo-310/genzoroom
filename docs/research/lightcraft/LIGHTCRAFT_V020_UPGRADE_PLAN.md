@@ -93,6 +93,22 @@ P3は完了していない。Native patch・manifest・receipt・実EXE、既存
 - Native managed patchの累計は17ファイル、追加626行・削除35行、SHA-256 `ca30ff958ff5fbbd04e8e50b31c7c01a6319b7864b49ef8e506c3f20acc5f2ab`。固定upstream `192ff72923c39e6623f2c7ff67ab3a119deb8071`のclean checkoutへ再適用できた。開発targetは`target-p3-wb`で、EXE SHA-256 `30fa30913ceca0f3083ea05d0ebce27fb5668c00b1e78f9d6c2365e43686aa04`。隣接receiptは`wbContract:1`を含み、`build.py --binary`によりmanifest／patch／EXE SHAとschema・settings不変・不正座標応答を再確認した。詳細は[更新ガイド](UPDATE_GUIDE.md)。
 - **P3実装・自動検証完了。** Windows実機のRAW／JPEG表示品質、Crop／回転後のスポイト・ターゲット操作、応答性、GPU動作はユーザー確認待ちであり、CodexはGUI操作を行っていない。Recipe／History全体の復元整合性と旧Recipeの`raw_restore_mismatch`はP4で扱う。既存DB／Recipe実データは変更していない。
 
+### P3後の実機回帰：allReset保存失敗（2026-11-10）
+
+実機ログ`genzoroom-all-logs-20261110T112335Z.json`の11:23:19 UTCでは、History operate → allReset → Native readback検証失敗 → compound操作rollback → Recipe／History失敗の順であり、DB書込みより前に停止している。ログ自体には不一致settingsが含まれていない。固定v0.20.0実EXEと既存Pixel DNG素材で同じHTTP 502／`raw_operation_readback_mismatch`を修正前に再現し、不一致を`optics.lens_profile`（GenzoRoom期待false／Native実際true）に特定した。
+
+LightCraft `develop.reset`は写真のimport lookへ戻す。`Photo::camera_defaults`はembedded lensを持つ写真の`lens_profile`をtrueにするため、全写真にfalseを要求する旧検証が誤りだった。実Native段階probeでは次の結果を確認した（写真・Recipe本文は記録しない）。
+
+| 素材 | Reset前編集後 | develop.reset直後 | WB As Shot後 | disabled_sections再適用後 |
+|---|---|---|---|---|
+| Pixel DNG optics.lens_profile | true | true | true | true |
+| JPEG／Pentax DNG optics.lens_profile | false | false | false | false |
+| disabled_sections（全素材） | effects | 空 | 空 | effects |
+
+WBはPixel DNGでasShot／5336／14／kelvin、Pentax DNGでasShot／4923／1／kelvin、JPEGでasShot／6500／0／legacy（Native wireはscale省略）。各段階で一致し、他のOptics値は既存期待値と一致した。GenzoRoomはNative import時のOptics全体を写真単位で保持し、allResetの完全一致検証に使用する。保持はRecipe／resident編集状態の復元前に行い、DBやRecipeへ新しいmetadataは書かない。個別・カテゴリReset、WB As Shot検証、disabled_sections保持、rollback／retryは維持する。Native patch／manifest／EXE／receiptの変更は不要。
+
+実Native CPU設定でJPEG・Pixel DNG・Pentax DNGのHTTP回帰3件が成功。Optics flag／distortion、露出、RAW WBを変更した状態からのallReset、Native Optics／WB／disabled_sections、History確定、Recipe保存、同一saveId再実行、再open復元、再編集後の保存・復元を確認した。個別／カテゴリResetとrollback／retryを含む既存category回帰48件、Native接続／import・再選択／Optics History回帰93件も成功。Windows GUIの「すべてリセット」操作による再確認はユーザー確認待ち。旧Recipeの復元不一致やRecipe／History全体の監査はP4へ残す。
+
 ## 既存成果とpatchの扱い
 
 N1-1a〜cのFrame取得・受信・表示経路とN1-2のStageCache所有簡素化は再利用候補であり、そのままの採用を要求しない。N1-3はRevert済みであり、StageCache ON／OFFを公開接続契約として再導入しない。累積暫定patchとcheckpointは開発中の成果・履歴として保持し、正式採用時に必要な接続だけをmanaged patchへ整理する。旧成果の検証はその時点の範囲に限り、v0.20.0の完成を意味しない。

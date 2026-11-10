@@ -215,6 +215,7 @@ class _Photo:
     as_shot_wb: tuple[float, float] | None = field(default=None, repr=False)
     before_fingerprint: str | None = None
     source_size: tuple[int, int] | None = None
+    import_optics_json: str = field(default="{}", repr=False)
     lens_profile_info_json: str = field(default_factory=lambda: _lens_profile_info_json(None), repr=False)
 
 
@@ -891,6 +892,9 @@ class LightCraftRawSession:
                     raise
                 lightcraft_log("before.unavailable", level="warn", generation=self._generation, errorCode=error.code)
             settings = await self._read_settings(photo, deadline)
+            # Native allReset restores the photo's import look, including embedded lens defaults.
+            # Capture it before restoring a persisted After recipe or a resident edit snapshot.
+            photo.import_optics_json = json.dumps(json.loads(settings)['optics'], sort_keys=True)
             # Only expose Kelvin editing when the engine supplies a measured as-shot white.
             photo.wb_auto = await self.manager._raw_wb_supported(self._generation)
             white = info.get("as_shot_wb")
@@ -1733,9 +1737,7 @@ class LightCraftRawSession:
                        (("mode", "asShot"), ("temp", temp), ("tint", tint), ("scale", "kelvin"))):
                     raise LightCraftError("raw_as_shot_mismatch")
             if kind == "allReset":
-                expected_optics = {CONTROL_PATHS[control][1]: spec[3] for control, spec in CONTROLS.items()
-                                   if control.startswith("optics.")}
-                expected_optics.update(remove_ca=False, lens_profile=False)
+                expected_optics = json.loads(photo.import_optics_json)
                 if actual.get("optics") != expected_optics:
                     raise LightCraftError("raw_operation_readback_mismatch")
             if kind in ("sectionToggle", "controlReset", "opticsFlag", "opticsFlagReset", "vignetteStyle"):
