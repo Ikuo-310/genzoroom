@@ -111,9 +111,11 @@ WBはPixel DNGでasShot／5336／14／kelvin、Pentax DNGでasShot／4923／1／
 
 ### P4-A：Recipe／History経路・互換性の監査（2026-11-11）
 
-**P4-A調査完了。P4-B／P4-Cは未実装・未完了。** この節は現行実装の保証と次工程の設計を分けて記録する。製品コード、Native patch／manifest／receipt／EXE、DB schemaとユーザーデータは変更していない。旧Recipeの一括移行は採用しない。
+**P4-A時点（2026-11-11）の状態記録。** P4-Aでは調査のみで製品コード、Native patch／manifest／receipt／EXE、DB schemaとユーザーデータは変更していなかった。以下の監査結果と当時の設計を保持し、P4-Bの現行実装は後段へ分けて記録する。旧Recipeの一括移行は採用しない。
 
 #### 現行経路と保証
+
+以下はP4-A監査時点の状態記録であり、現行動作は後述のP4-B実装結果を参照する。
 
 | 段階 | 現行経路・保証・制約 |
 |---|---|
@@ -147,7 +149,7 @@ Frontendは通常のopen errorを表示する。`RawDocument`に非互換Recipe�
 
 実機で過去に失敗したRecipe本文・対応readbackは未採取なので、その失敗フィールドがnr_outliersだったとは断定しない。既存fixtureと実RAWで再現できた具体的原因として記録する。WB scale／mode、Crop／Orientation、Opticsなどにはこの6ケースで追加差分がなかった。先行allResetの`optics.lens_profile`問題とは区別し、43a5085の写真別Optics・WB As Shot・disabled_sections保持を維持する。P4-Aでは旧settingsへのfield追加や比較条件の緩和を行わない。
 
-#### P4-Bの互換性・復旧設計（次工程の実装指示）
+#### P4-Bの互換性・復旧設計（実装基準）
 
 1. Native適用前の明示条件をengine名／version／固定upstream commit／settings schemaの現行tuple一致とする。別tupleは自動移行せず「互換性未承認」としてImport初期値で開く。将来、別tupleの互換性を承認する場合は実検証に基づく明示的な対応表に限定し、version文字列の大小やschema番号だけで推定しない。managed patch digestは現在Recipe identityに含まれないため、同tuple内の未知の失敗をエンジン更新扱いにして救済しない。
 2. 互換性判定はSource一致・row／receipt整合の検証後に行う。source mismatch、識別不一致、破損settings、通信切断、timeout、revision競合、同tupleの未知readback mismatchは初期値fallbackへ変換しない。既存owner／generation／tokenフェンスとエラー／pending復旧を維持する。
@@ -169,6 +171,16 @@ Frontendは通常のopen errorを表示する。`RawDocument`に非互換Recipe�
 | P4-B Frontend | `rawApi`の通知／復旧状態の型と検証、`useRawDocument`の表示／ownerリセット、`rawRecipeSave`の初期化とfirst edit保存境界。編集開始前の自動保存防止、cancel／no-op／切替／再open、最初の操作がWB／Curve／Geometry／Resetの場合を検証する。 |
 | P4-C | current tupleでJPEG／Pixel／Pentaxの保存・再Open、連続編集、Undo／Redo／Jump、個別／カテゴリ／allReset、WB候補・cancel、Curve、Crop／Straighten／Rotate／Flip、Before／After、Asset切替／Workspace再生成を実Native＋HTTP・Frontend focused testで確認。通信・timeout・stale owner／revision、SQLite failure、同saveId retry、未知readback不一致を非互換へ変換しないことを確認する。 |
 | 保持の受入 | 新規編集前の旧Recipe／History／receipt全rowが不変、current tupleが未作成であることを一時DBで確認。最初の保存失敗時も旧row不変、保存成功後はcurrentだけ追加し、次回Openが通常復元となることを確認する。 |
+
+#### P4-B実装結果（2026-11-11）
+
+- 完全なcurrent identityが存在する場合だけ保存RecipeをNativeへ渡す。Sourceが一致する別tupleはRecipe／Historyの整合を検証した後`engine_incompatible`として扱い、NativeへmergeせずImport初期値でDocumentを公開する。source mismatch、壊れたrow／receipt、同tupleのrestore failureは従来どおりopen errorとなる。Native restore adapter自身もengine名／version／commit／schemaを再確認する。
+- Backend DTOの`recipeRecoveryPending`をFrontendまで伝え、暗室Viewerへ旧設定を適用していない旨を表示する。復旧中はFrontend saverに空Historyの一時baselineを持たせ、open／Preview／表示切替／無変更saveでは永続化しない。
+- 最初の変更確定は既存のHistory append transactionにImport baselineを渡す。Recipe、baseline、最初のstep、両receiptは既存CAS／SQLite transactionで一括作成し、成功後に通知を解除する。初期値のままのcommitはackなしの一時no-opとして返し、DB行を作らない。保存失敗では保留中の同一request／saveIdとImport baselineを保持して再試行し、receipt replayは二重確定しない。
+- Gallery編集状態、Thumbnail、Export Queueはcurrent engine tupleだけを参照する。旧tupleだけが残っている間は未編集扱いとし、旧settingsをcurrent Export recipeとして公開しない。
+- 旧tupleのRecipe、History、receiptは読み取り以外の変更をしない。schema・Native patch・manifest・実DBは変更していない。現行tupleのRecipe／Historyは初回の変更確定時だけ追加する。
+- focused自動検証：Backend Recipe store／restore／Windows open／History API／Thumbnail lifecycle **252 passed**。旧Recipe非適用、Import初期値公開、初期値no-opで未作成、旧Recipe／History保持、初回保存失敗後の再Open、再試行、transaction後の応答不明からreceipt replay、current tuple再Openを一時SQLiteとfake Nativeで確認。Frontend rawApi／RawHistorySave／暗室Preview関連 **397 passed**。Frontend TypeScriptとproduction build成功（既存chunk size／`use client` warningsあり）。実Native・ユーザーWindows GUIによるP4-B受入は未実施。
+- P4-CではJPEG／RAW実素材、WB／Curve／Geometryを含む全初回操作種別、通信切断・応答消失後のretry、保存cancel／再Open／Undo境界を引き続き確認する。P4-BはP4-Cを完了扱いにせず、P4全体も未完了。
 
 #### P4-Aの実施結果・未確認
 

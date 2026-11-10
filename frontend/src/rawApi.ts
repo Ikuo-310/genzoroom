@@ -9,6 +9,7 @@ export type RawDocument = {
   workspaceId: string; handle: string; assetId: string; generation: number; documentToken: string; revision: number;
   sourceWidth?: number; sourceHeight?: number;
   recipeRevision?: number; recipeFingerprint?: string | null; settingsFingerprint?: string; importDefaultsFingerprint?: string;
+  recipeRecoveryPending?: boolean;
   beforeKey?: string | null;
 };
 export type RawGeometry = { geometryId: string; nativeWidth: number; nativeHeight: number; aspect: number;
@@ -79,6 +80,7 @@ export type RawSettings = RawDocument & { settingsFingerprint: string; recipeRev
   curve: Record<RawCurveChannel, RawCurvePoint[]>;
   crop?: RawCrop; orientation?: string;
   importDefaultsFingerprint: string;
+  recipeRecoveryPending?: boolean;
   sections: Record<RawSettingsSectionId, boolean>;
   mutationAttempts: number; mutationLimit: number; regenerationThreshold: number;
   values: RawValues; opticsFlags: { remove_ca: boolean; lens_profile: boolean }; lensProfileInfo: RawLensProfileInfo;
@@ -125,7 +127,7 @@ export type RawHistoryResult = RawSettings & {
   history: { initialized: boolean; cursor: number; length: number; selectedStepId: string | null };
   historyPending: boolean; nativeState: string; nativeMatchesRecipe: boolean; replayed: boolean;
   ack: { saveId: string; revision: number; settingsFingerprint: string; updatedAt: string;
-    historyCursor: number; historyLength: number; stepId: string | null };
+    historyCursor: number; historyLength: number; stepId: string | null } | null;
 };
 export type RawHistoryData = RawDocument & Pick<RawHistoryResult, 'history' | 'historyPending' | 'nativeState' | 'nativeMatchesRecipe'> & {
   recipeRevision: number; recipeFingerprint: string | null; steps: RawHistoryStep[] };
@@ -311,7 +313,8 @@ export async function createRawWorkspace() {
 function document(value: RawDocument, workspaceId: string, assetId?: string) {
   if (!value || value.workspaceId !== workspaceId || !opaque(value.handle) || !opaque(value.documentToken)
     || !integer(value.generation) || !integer(value.revision) || typeof value.assetId !== 'string'
-    || assetId !== undefined && value.assetId !== assetId) throw new RawApiError('raw_invalid_response');
+    || assetId !== undefined && value.assetId !== assetId
+    || value.recipeRecoveryPending !== undefined && typeof value.recipeRecoveryPending !== 'boolean') throw new RawApiError('raw_invalid_response');
   return value;
 }
 export async function openRawDocument(workspaceId: string, assetId: string) {
@@ -341,6 +344,7 @@ function settings(value: RawSettings, doc: RawDocument): RawSettings {
   if (value.crop !== undefined || value.orientation !== undefined) validateCropSettings(value);
   if (value.handle !== doc.handle || value.generation !== doc.generation || value.documentToken !== doc.documentToken
     || !fingerprint(value.settingsFingerprint) || !fingerprint(value.importDefaultsFingerprint)
+    || value.recipeRecoveryPending !== undefined && typeof value.recipeRecoveryPending !== 'boolean'
     || value.beforeKey != null && !fingerprint(value.beforeKey) || !integer(value.recipeRevision)
     || value.recipeFingerprint !== null && !fingerprint(value.recipeFingerprint)
     || !integer(value.mutationAttempts) || value.mutationLimit !== 256 || value.regenerationThreshold !== 200
@@ -479,6 +483,14 @@ export async function saveRawHistory(request: RawHistoryRequest): Promise<RawHis
     accepted = true;
     settings(value, doc);
     const h = value.history, ack = value.ack;
+    if (value.recipeRecoveryPending === true && ack === null) {
+      if (!h || h.initialized !== false || h.cursor !== 0 || h.length !== 0 || h.selectedStepId !== null
+        || value.recipeRevision !== expectedRecipeRevision || value.recipeFingerprint !== null
+        || value.historyPending || value.nativeState !== 'synced' || !value.nativeMatchesRecipe
+        || value.settingsFingerprint !== doc.settingsFingerprint || value.revision < doc.revision || value.replayed !== false)
+        throw new RawApiError('raw_invalid_response');
+      return value as RawHistoryResult;
+    }
     if (!h || h.initialized !== true || !integer(h.cursor) || !integer(h.length) || h.cursor > h.length
       || h.length > 200 || (h.cursor === 0 ? h.selectedStepId !== null : !uuid(h.selectedStepId))
       || typeof value.historyPending !== 'boolean' || typeof value.nativeMatchesRecipe !== 'boolean'

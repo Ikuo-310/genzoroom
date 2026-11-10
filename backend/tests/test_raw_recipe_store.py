@@ -13,14 +13,15 @@ import pytest
 import edit_store
 import raw_recipe_store as raw
 import storage
+from lightcraft_artifact import ENGINE_VERSION, ENGINE_COMMIT
 from tests.test_export_queue import A, db, snapshot
 from tests.test_lightcraft_raw import DEFAULT
 
 
 def identity(**changes):
     return {"assetId": str(A), "sourceContentHash": "abcdef0123456789",
-            "engineName": "lightcraft", "engineVersion": "0.10.0",
-            "engineCommit": "a2a41383c4fd62fa85a46ccd00998639221f2d3c",
+            "engineName": "lightcraft", "engineVersion": ENGINE_VERSION,
+            "engineCommit": ENGINE_COMMIT,
             "settingsSchemaVersion": 1, **changes}
 
 
@@ -135,7 +136,7 @@ def test_lookup_distinguishes_absence_source_and_engine_without_mutation(db):
     before = {table: rows(db, table) for table in ("asset_raw_recipes", "raw_recipe_saves")}
     assert raw.lookup_raw_recipe(identity()) == {"status": "matched", **saved}
     assert raw.lookup_raw_recipe(identity(sourceContentHash="c" * 16)) == {"status": "source_mismatch"}
-    assert raw.lookup_raw_recipe(identity(engineCommit="b" * 40)) == {"status": "matched", **saved}
+    assert raw.lookup_raw_recipe(identity(engineCommit="b" * 40)) == {"status": "engine_incompatible"}
     assert raw.lookup_raw_recipe(identity(assetId=str(uuid4()))) == {"status": "none"}
     assert {table: rows(db, table) for table in before} == before
 
@@ -402,6 +403,16 @@ def test_raw_edit_status_uses_import_baseline_and_current_complete_settings(db):
 
     raw.delete_raw_edits(str(asset_id))
     assert raw.get_raw_edit_statuses([asset_id]) == {str(asset_id): False}
+
+
+def test_incompatible_tuple_is_not_exposed_as_current_export_or_edit_state(db):
+    asset_id = UUID(identity()["assetId"])
+    old = identity(engineVersion="0.18.1", engineCommit="a" * 40)
+    old_saved = raw.put_raw_recipe(old, 0, uuid4(), settings())
+    state = raw.get_raw_saved_state(asset_id)
+    assert state["currentRecipe"] is None and state["exportEligible"] is False
+    assert raw.get_raw_edit_statuses([asset_id]) == {str(asset_id): False}
+    assert raw.get_raw_recipe(old)["recipe"] == old_saved["recipe"]
 
 
 def test_legacy_import_fingerprint_without_optics_does_not_make_neutral_recipe_exportable(db):

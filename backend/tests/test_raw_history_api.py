@@ -87,6 +87,110 @@ def test_metadata_is_lazy_bounded_and_does_not_expose_settings(local, tmp_path, 
     asyncio.run(run())
 
 
+def test_incompatible_recipe_stays_untouched_until_first_changed_history_append(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        original_append = store.append_raw_history
+        fail_once = True
+        ambiguous_once = True
+        try:
+            asset_id = uuid4()
+            old = seed(asset_id, engineVersion="0.18.1", engineCommit="a" * 40)
+            old_identity = {key: old["recipe"][key] for key in store.IDENTITY_FIELDS}
+            store.initialize_raw_history(old_identity, old["revision"], uuid4(), old["recipe"]["settings"])
+            old_recipe = store.get_raw_recipe(old_identity)["recipe"]
+            old_history = store.get_raw_history(old_identity)["history"]
+            before = rows()
+            async with client(local) as http:
+                await authenticate(http, local)
+                _, response = await open_asset(http, asset_id)
+                assert response.status_code == 200, response.text
+                doc = response.json()
+                assert doc["recipeRecoveryPending"] is True and doc["recipeStatus"] == "incompatible"
+                assert doc["recipeRevision"] == 0
+                assert not any(name == "develop.merge" for name, _ in children[0].commands)
+                assert store.get_raw_recipe(api.raw.recipe_identity(api._raw_handle))["recipe"] is None
+                assert (await http.get(url(doc), headers=headers(doc))).json()["history"]["initialized"] is False
+                assert rows() == before
+                blocked_initialize = await http.post(url(doc, "initialize"), json=body(doc))
+                assert blocked_initialize.status_code == 409
+                assert blocked_initialize.json()["code"] == "raw_history_requires_operation"
+                blocked_recipe = await http.put(f'/api/raw/documents/{doc["handle"]}/recipe', json={
+                    **{key: doc[key] for key in ("workspaceId", "generation", "documentToken")},
+                    "documentRevision": doc["revision"], "expectedRecipeRevision": 0, "saveId": str(uuid4())})
+                assert blocked_recipe.status_code == 409
+                assert blocked_recipe.json()["code"] == "raw_history_requires_operation"
+                assert rows() == before
+
+                noop = await operation(http, doc, "commit", body(doc) | {
+                    "kind": "control", "metadata": {"control": "light.exposure"}})
+                assert noop["recipeRecoveryPending"] is True and noop["ack"] is None
+                assert rows() == before
+
+                doc = await change(http, noop, .75)
+                request = body(doc) | {"kind": "control", "metadata": {"control": "light.exposure"}}
+                def fail_first(*args, **kwargs):
+                    nonlocal fail_once, ambiguous_once
+                    if fail_once:
+                        fail_once = False
+                        raise store.StoreUnavailable()
+                    result = original_append(*args, **kwargs)
+                    if ambiguous_once:
+                        ambiguous_once = False
+                        raise store.StoreUnavailable()
+                    return result
+                monkeypatch.setattr(store, "append_raw_history", fail_first)
+                endpoint = url(doc, "commit")
+                failed = await http.post(endpoint, json=request)
+                assert failed.status_code == 503 and failed.json()["code"] == "raw_history_save_failed"
+                assert rows() == before
+                await http.delete(f'/api/raw/workspaces/{doc["workspaceId"]}')
+                _, reopened = await open_asset(http, asset_id)
+                assert reopened.status_code == 200 and reopened.json()["recipeRecoveryPending"] is True
+                assert reopened.json()["recipeRevision"] == 0 and rows() == before
+                doc = reopened.json()
+                doc = await change(http, doc, .75)
+                request = body(doc) | {"kind": "control", "metadata": {"control": "light.exposure"}}
+                endpoint = url(doc, "commit")
+                fail_once = True
+                retryable = await http.post(endpoint, json=request)
+                assert retryable.status_code == 503 and retryable.json()["code"] == "raw_history_save_failed"
+                assert rows() == before
+                ambiguous = await http.post(endpoint, json=request)
+                assert ambiguous.status_code == 503 and ambiguous.json()["code"] == "raw_history_save_failed"
+                assert len(rows()["asset_raw_recipes"]) == len(before["asset_raw_recipes"]) + 1
+                saved = await http.post(endpoint, json=request)
+                assert saved.status_code == 200 and saved.json()["replayed"] is True, saved.text
+                current = saved.json()
+                current_identity = api.raw.recipe_identity(api._raw_handle)
+                assert current["recipeRecoveryPending"] is False and current["recipeRevision"] == 1
+                assert current["history"]["length"] == current["history"]["cursor"] == 1
+                current_recipe = store.get_raw_recipe(current_identity)["recipe"]["settings"]
+                assert current_recipe["light"]["exposure"] == .75
+                assert store.get_raw_recipe(old_identity)["recipe"] == old_recipe
+                assert rows()["asset_raw_recipes"] != before["asset_raw_recipes"]
+                assert rows()["raw_history_saves"] != before["raw_history_saves"]
+                assert {row[0] for row in before["raw_recipe_saves"]} <= {row[0] for row in rows()["raw_recipe_saves"]}
+                assert len(rows()["raw_recipe_saves"]) == len(before["raw_recipe_saves"]) + 1
+                assert len(rows()["asset_raw_histories"]) == len(before["asset_raw_histories"]) + 1
+                assert store.get_raw_history(old_identity)["history"] == old_history
+                after_save = rows()
+                replay = await http.post(endpoint, json=request)
+                assert replay.status_code == 200 and replay.json()["replayed"] is True
+                assert replay.json()["recipeRevision"] == 1 and replay.json()["history"]["length"] == 1
+                assert api._history_save is None or api._history_save["stage"] == "complete"
+                assert rows() == after_save
+                await http.delete(f'/api/raw/workspaces/{doc["workspaceId"]}')
+                _, reopened = await open_asset(http, asset_id)
+                assert reopened.status_code == 200 and reopened.json()["recipeRecoveryPending"] is False
+                assert reopened.json()["recipeStatus"] == "restored"
+                assert reopened.json()["recipeRevision"] == 1
+        finally:
+            monkeypatch.setattr(store, "append_raw_history", original_append)
+            await api.close()
+    asyncio.run(run())
+
+
 def test_confirmed_gesture_undo_redo_jump_noop_and_replay(local, tmp_path, monkeypatch):
     async def run():
         api, _, children, _ = await setup(tmp_path, local, monkeypatch)

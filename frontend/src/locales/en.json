@@ -309,6 +309,7 @@
       "transitionFailed": "The category could not be switched. Resolve the pending edit or recovery first."
     },
     "rawPreview": {
+      "incompatibleRecipe": "The previous development settings are incompatible with the current engine and were not applied. You can start a new edit.",
       "gradingCategory": "Color Grading",
       "gradingBand": "Tonal range",
       "gradingBands": {

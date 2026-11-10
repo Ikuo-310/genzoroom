@@ -58,6 +58,11 @@ export class RawRecipeSave {
   }) {
     this.revision = confirmed.recipeRevision;
     this.savedFingerprint = confirmed.recipeFingerprint ?? confirmed.settingsFingerprint;
+    if (confirmed.recipeRecoveryPending) {
+      // The empty history is an in-memory editing baseline; the first confirmed change creates durable History.
+      this.initialized = true;
+      this.history = { initialized: true, cursor: 0, length: 0, selectedStepId: null };
+    }
   }
   beginCurveInteraction(channel: RawCurveChannel, mode: 'points' | 'targeted' = 'points') {
     if (!this.active || this.locked || this.paused || this.historyLoading || this.historyError || !this.history) return false;
@@ -599,6 +604,17 @@ export class RawRecipeSave {
       if (!('action' in request)) throw new RawApiError('raw_save_unconfirmed');
       const result = await saveRawHistory(request);
       if (!this.active) throw new RawApiError('raw_document_closed');
+      if (result.recipeRecoveryPending && result.ack === null) {
+        this.confirmed = controls.confirmed = result;
+        this.initialized = true;
+        this.retryRequest = undefined;
+        this.history = { initialized: true, cursor: 0, length: 0, selectedStepId: null };
+        this.steps = [];
+        if (this.gesture) controls.endPreview();
+        this.gesture = undefined;
+        return;
+      }
+      if (!result.ack) throw new RawApiError('raw_invalid_response');
       const moving = request.action === 'undo' || request.action === 'redo' || request.action === 'jump' || request.action === 'operate';
       // A valid old receipt does not certify the current native or SQLite checkpoint.
       if (result.generation !== this.confirmed.generation || result.documentToken !== this.confirmed.documentToken

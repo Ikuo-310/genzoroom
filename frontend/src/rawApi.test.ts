@@ -310,7 +310,19 @@ describe('RAW History transport', () => {
       nativeState: 'desynchronized', replayed: true });
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(result), { headers: { 'Content-Type': 'application/json' } })));
     const response = await saveRawHistory(request);
-    expect(response.recipeRevision).toBe(9); expect(response.ack.revision).toBe(5); expect(response.historyPending).toBe(true);
+    expect(response.recipeRevision).toBe(9); expect(response.ack!.revision).toBe(5); expect(response.historyPending).toBe(true);
+  });
+  it('accepts an unpersisted no-op only while the incompatible Recipe recovery is pending', async () => {
+    const request = historyRequest('commit');
+    request.expectedRecipeRevision = 0;
+    request.doc.recipeRevision = 0;
+    request.doc.recipeFingerprint = null;
+    request.doc.recipeRecoveryPending = true;
+    const result = { ...request.doc, history: { initialized: false, cursor: 0, length: 0, selectedStepId: null },
+      recipeRevision: 0, recipeFingerprint: null, historyPending: false, nativeState: 'synced',
+      nativeMatchesRecipe: true, replayed: false, ack: null };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(result), { headers: { 'Content-Type': 'application/json' } })));
+    expect(await saveRawHistory(request)).toMatchObject({ recipeRecoveryPending: true, ack: null, recipeRevision: 0 });
   });
   it.each([409, 503])('classifies HTTP %i without silently rebasing the request', async status => {
     const request = historyRequest('commit');

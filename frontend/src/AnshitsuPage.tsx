@@ -823,9 +823,11 @@ export function AnshitsuPage() {
           previewStatus={!developmentEngine ? developmentEngineLoading ? 'loading' : 'error'
             : usesLightcraft ? rawDocument?.status === 'loading' ? 'loading' : rawDocument?.status === 'error' || rawDocument?.status === 'unavailable' || rawDocument?.displayError && !rawDocument.url ? 'error' : undefined : undefined}
           statusNote={!developmentEngine ? t(developmentEngineLoading ? 'workspace.developmentPolicy.loading' : 'workspace.developmentPolicy.error')
-            : rawDocument ? rawDocument.status === 'unavailable' ? t('workspace.rawPreview.nativeUnavailable') : (rawDocument.pending && !rawDocument.editError)
-            || (rawDocument.status === 'ready' && !rawDocument.editError && !rawDocument.displayError) ? undefined
-            : t(`workspace.rawPreview.${rawDocument.editError ? 'editFailed' : rawDocument.displayError ? rawPreviewMessage(rawDocument.displayError)
+            : rawDocument ? rawDocument.status === 'unavailable' ? t('workspace.rawPreview.nativeUnavailable')
+            : rawDocument.editError ? t('workspace.rawPreview.editFailed')
+            : rawDocument.status === 'ready' && rawDocument.settings?.recipeRecoveryPending ? t('workspace.rawPreview.incompatibleRecipe')
+            : (rawDocument.pending || rawDocument.status === 'ready' && !rawDocument.displayError) ? undefined
+            : t(`workspace.rawPreview.${rawDocument.displayError ? rawPreviewMessage(rawDocument.displayError)
               : rawDocument.status === 'error' ? rawPreviewMessage(rawDocument.code) : rawDocument.status}`) : undefined}
           previewPixels={!!rawDocument}
           rawPickActive={rawDocument?.pickActive}

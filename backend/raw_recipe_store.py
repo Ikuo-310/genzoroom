@@ -215,11 +215,21 @@ RAW_EXPORT_PROCESSING_VERSION = "raw-lightcraft-v1"
 
 
 def select_raw_export_state(connection, asset_id):
-    """Share the badge's latest saved row and verified-default meaning under the caller's transaction."""
-    row = connection.execute("""SELECT * FROM asset_raw_recipes WHERE asset_id=?
-        ORDER BY updated_at DESC, recipe_revision DESC LIMIT 1""", (str(asset_id),)).fetchone()
-    if row is None:
+    """Expose only the current engine tuple to Export, thumbnails and edit badges."""
+    from lightcraft_artifact import ENGINE_VERSION, ENGINE_COMMIT
+    if not ENGINE_VERSION or not ENGINE_COMMIT:
         return None
+    row = connection.execute("""SELECT * FROM asset_raw_recipes WHERE asset_id=? AND engine_name=?
+        AND engine_version=? AND engine_commit=? AND settings_schema_version=1
+        ORDER BY updated_at DESC, recipe_revision DESC LIMIT 1""",
+        (str(asset_id), "lightcraft", ENGINE_VERSION, ENGINE_COMMIT)).fetchone()
+    if row is None:
+        has_rows = connection.execute("SELECT 1 FROM asset_raw_recipes WHERE asset_id=? LIMIT 1",
+                                      (str(asset_id),)).fetchone()
+        if not has_rows:
+            return None
+        return {"currentRecipe": None, "revision": 0, "recipeVersion": 1,
+                "processingVersion": RAW_EXPORT_PROCESSING_VERSION, "exportEligible": False}
     identity = dict(zip(IDENTITY_FIELDS, (row[column] for column in IDENTITY_COLUMNS)))
     current = _read_row(connection, identity)
     history = _read_history(connection, identity, current)
@@ -298,15 +308,17 @@ def lookup_raw_recipe(identity: dict) -> dict:
             else:
                 candidates = connection.execute("""SELECT asset_id, source_content_hash, engine_name,
                     engine_version, engine_commit, settings_schema_version FROM asset_raw_recipes
-                    WHERE asset_id=? AND source_content_hash=? AND engine_name=? AND settings_schema_version=?
+                    WHERE asset_id=? AND source_content_hash=?
                     ORDER BY updated_at DESC, recipe_revision DESC""",
-                    (identity["assetId"], identity["sourceContentHash"], identity["engineName"],
-                     identity["settingsSchemaVersion"])).fetchall()
+                    (identity["assetId"], identity["sourceContentHash"])).fetchall()
                 for row in candidates:
                     candidate_identity = dict(zip(IDENTITY_FIELDS, row))
                     candidate = _read_row(connection, candidate_identity)
                     if candidate is not None:
-                        outcome = {"status": "matched", **candidate}
+                        # A same-source row from another engine tuple is retained for recovery,
+                        # but must never cross the Native restore boundary implicitly.
+                        _read_history(connection, candidate_identity, candidate)
+                        outcome = {"status": "engine_incompatible"}
                         break
                 else:
                     if connection.execute("""SELECT 1 FROM asset_raw_recipes

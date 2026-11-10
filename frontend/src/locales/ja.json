@@ -300,6 +300,7 @@
       "transitionFailed": "カテゴリを切り替えられませんでした。未確定の編集や回復を先に解決してください。"
     },
     "rawPreview": {
+      "incompatibleRecipe": "以前の現像設定は現行エンジンと互換性がないため適用していません。新しい編集を開始できます。",
       "gradingCategory": "カラーグレーディング",
       "gradingBand": "明度帯",
       "gradingBands": {

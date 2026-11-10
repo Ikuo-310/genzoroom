@@ -64,6 +64,39 @@ it('shares one targeted Cancel when Escape aborts an in-flight update before Nat
   expect(vi.mocked(api.saveRawHistory).mock.calls).toHaveLength(writesBefore);
 });
 
+it('keeps an incompatible Recipe at import defaults without creating baseline Recipe or History rows', async () => {
+  const recovered = initial();
+  recovered.recipeRecoveryPending = true;
+  recovered.recipeFingerprint = null;
+  recovered.recipeRevision = 0;
+  const { saver } = owner(recovered);
+  expect(saver.initialized).toBe(true);
+  expect(saver.history).toEqual({ initialized: true, cursor: 0, length: 0, selectedStepId: null });
+  expect(saver.dirty).toBe(false);
+  await saver.save();
+  expect(api.saveRawHistory).not.toHaveBeenCalled();
+  expect(api.saveRawRecipe).not.toHaveBeenCalled();
+  expect(saver.locked).toBe(false);
+});
+
+it('accepts an unpersisted no-op and keeps recovery pending for the next real edit', async () => {
+  const recovered = initial();
+  recovered.recipeRecoveryPending = true;
+  recovered.recipeFingerprint = null;
+  recovered.recipeRevision = 0;
+  const { saver } = owner(recovered);
+  vi.mocked(api.saveRawHistory).mockImplementationOnce(async request => ({ ...request.doc,
+    recipeRecoveryPending: true, recipeRevision: 0, recipeFingerprint: null,
+    history: { initialized: false, cursor: 0, length: 0, selectedStepId: null }, historyPending: false,
+    nativeState: 'synced', nativeMatchesRecipe: true, replayed: false, ack: null }));
+  await saver.operate({ kind: 'controlReset', metadata: { control: 'light.exposure' } });
+  expect(saver.initialized).toBe(true);
+  expect(saver.confirmed.recipeRecoveryPending).toBe(true);
+  expect(saver.revision).toBe(0);
+  expect(saver.dirty).toBe(false);
+  expect(vi.mocked(api.saveRawHistory)).toHaveBeenCalledOnce();
+});
+
 it('cancels a genuine targeted Native update failure without committing History', async () => {
   const { saver, curveRecovery } = owner(); await saver.save();
   expect(saver.beginTargetedCurveInteraction('red', { x: .5, y: .4 })).toBe(true); await drain();
@@ -352,7 +385,7 @@ it('rejects an operation ack whose settings fingerprint does not certify the res
   const { saver } = owner(); await saver.save();
   vi.mocked(api.saveRawHistory).mockImplementationOnce(async request => {
     const result = rawHistoryResult(request);
-    return { ...result, ack: { ...result.ack, settingsFingerprint: 'f'.repeat(64) } };
+    return { ...result, ack: { ...result.ack!, settingsFingerprint: 'f'.repeat(64) } };
   });
   await expect(saver.operate({ kind: 'allReset', metadata: {} })).rejects.toThrow('raw_save_unconfirmed');
   expect(saver.dirty).toBe(true); expect(saver.locked).toBe(true); expect(saver.revision).toBe(1);

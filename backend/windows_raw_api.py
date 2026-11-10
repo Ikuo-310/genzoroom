@@ -88,6 +88,7 @@ class RawPreviewApi:
         self._history_save = None
         self._geometry_gesture = None
         self._history_identity = None
+        self._recipe_recovery_baseline = None
         self._history_initialized = self._history_enabled = self._history_draining = False
         # A reset can outlive document release; retain its owner so the same request can retry safely.
         self._reset_asset_id = None
@@ -611,7 +612,7 @@ class RawPreviewApi:
                     source = await self.cache.download(asset_id)
                     handle, snapshot = await self.raw.open_raw(str(asset_id), str(source))
                     import_defaults_fingerprint = self._fingerprint(snapshot.settings)
-                    snapshot, recipe_status, recipe_revision = await self._restore_document(handle, snapshot)
+                    snapshot, recipe_status, recipe_revision, recovery_pending = await self._restore_document(handle, snapshot)
                 except BaseException:
                     # Import may have partially registered the source; reap before deleting it.
                     await self._release()
@@ -626,7 +627,8 @@ class RawPreviewApi:
                                  "sourceWidth": self.raw._photo(handle, active=True).source_size[0],
                                  "sourceHeight": self.raw._photo(handle, active=True).source_size[1],
                                  "recipeStatus": recipe_status, "recipeRevision": recipe_revision,
-                                 "importDefaultsFingerprint": import_defaults_fingerprint}
+                                 "importDefaultsFingerprint": import_defaults_fingerprint,
+                                 "recipeRecoveryPending": recovery_pending}
                 self.document.update(self._edit_budget())
                 self.document["settingsFingerprint"] = self._fingerprint(snapshot.settings)
                 self.document["recipeFingerprint"] = self.document["settingsFingerprint"]
@@ -968,6 +970,8 @@ class RawPreviewApi:
             return JSONResponse({**doc, "recipeRevision": saved["revision"] if present else 0,
                 "recipeFingerprint": fingerprint, "lastSaveId": saved.get("lastSaveId"), "updatedAt": saved.get("updatedAt")})
 
+        if doc.get("recipeRecoveryPending"):
+            raise LightCraftError("raw_history_requires_operation")
         self._history_unsettled()
         if set(body) != {"workspaceId", "generation", "documentToken", "documentRevision", "expectedRecipeRevision", "saveId"} \
                 or any(type(body.get(key)) is not int or not 0 <= body[key] < 2**53
@@ -1254,6 +1258,8 @@ class RawPreviewApi:
             return self._history_json({**doc, **self._history_public(doc, state), "steps": public_steps}, MAX_HISTORY_RESPONSE_BYTES)
         action = request.url.path.rsplit("/", 1)[1]
         body = self._history_body(body, doc, action)
+        if doc.get("recipeRecoveryPending") and action == "initialize":
+            raise LightCraftError("raw_history_requires_operation")
         geometry_commit = action == 'commit' and body.get('kind') == 'geometry'
         curve_interaction = action == 'operate' and body.get('kind') == 'curve' and 'curveInteractionId' in body
         if self._geometry_gesture is not None and action != 'recover' and not geometry_commit:
@@ -1274,6 +1280,10 @@ class RawPreviewApi:
                 if replay is not None:
                     if pending and pending["request"].get("saveId") == body["saveId"]:
                         pending["stage"] = "complete"
+                        if pending.get("recovering"):
+                            doc["recipeRecoveryPending"] = False
+                            self._recipe_recovery_baseline = None
+                            self._history_initialized = self._history_enabled = True
                     if curve_interaction:
                         snapshot = self.raw.confirm_curve_interaction(self._raw_handle,
                             body["curveInteractionId"], body["documentRevision"])
@@ -1296,7 +1306,11 @@ class RawPreviewApi:
                 state = await self._history_load(doc)
                 if state["revision"] != body["expectedRecipeRevision"]:
                     raise LightCraftError("raw_history_revision_conflict")
-                if action != "initialize" and not state["initialized"]:
+                recovering = bool(doc.get("recipeRecoveryPending") and self._recipe_recovery_baseline is not None
+                                  and not state["initialized"] and state["recipe"] is None
+                                  and state["revision"] == 0)
+                if action != "initialize" and not state["initialized"] and not (
+                        recovering and action in ("commit", "operate")):
                     raise LightCraftError("raw_history_not_initialized")
                 if (action == "initialize" and state["recipe"]
                         and self._fingerprint(state["recipe"]["settings"]) != doc["settingsFingerprint"]):
@@ -1308,7 +1322,8 @@ class RawPreviewApi:
                     history = state["history"]
                     cursor = history["cursor"]
                     if action == "operate":
-                        selected = state["recipe"]["settings"]
+                        selected = state["recipe"]["settings"] if state["recipe"] else (
+                            self._recipe_recovery_baseline if recovering else None)
                     elif action == "undo":
                         cursor = max(0, cursor - 1)
                         target = history["steps"][cursor - 1]["stepId"] if cursor else None
@@ -1327,10 +1342,12 @@ class RawPreviewApi:
                     selected = state["recipe"]["settings"] if action == "initialize" and state["recipe"] else None
                 pending = {"request": body, "action": action, "stage": "readback", "settings": None,
                            "fingerprint": fingerprint, "identity": dict(self._history_identity),
-                           "target": target, "selected": selected}
+                           "target": target, "selected": selected, "recovering": recovering}
                 self._history_save = pending
                 lightcraft_log("raw.history.started", level="debug", assetId=doc["assetId"], saveId=body["saveId"],
                                generation=doc["generation"], revision=doc["revision"], phase=action)
+            if pending.get("noOp"):
+                return await self._history_response(doc, None)
             state = await self._history_load(doc)
             if state["revision"] != body["expectedRecipeRevision"]:
                 raise LightCraftError("raw_history_revision_conflict")
@@ -1396,6 +1413,14 @@ class RawPreviewApi:
             self._history_verify(doc)
             if not curve_interaction and self._fingerprint(pending["settings"]) != doc["settingsFingerprint"]:
                 raise LightCraftError("raw_history_readback_mismatch")
+            if pending.get("recovering") and self._fingerprint(pending["settings"]) == self._fingerprint(self._recipe_recovery_baseline):
+                # The initial Import state is only a transient History baseline; a no-op must not create rows.
+                pending["stage"] = "complete"
+                pending["noOp"] = True
+                self._history_initialized = self._history_enabled = False
+                lightcraft_log("raw.history.noop", level="debug", assetId=doc["assetId"], saveId=body["saveId"],
+                               generation=doc["generation"], revision=doc["revision"])
+                return await self._history_response(doc, None)
             kwargs = {"request_fingerprint": pending["fingerprint"],
                       "import_defaults_fingerprint": doc["importDefaultsFingerprint"]}
             args = (pending["identity"], body["expectedRecipeRevision"], body["saveId"], pending["settings"])
@@ -1403,7 +1428,9 @@ class RawPreviewApi:
                 result = await mutate_raw_edits(self.thumbnail_scheduler(), doc["assetId"], initialize_raw_history, *args, **kwargs)
             elif action in ("commit", "operate"):
                 result = await mutate_raw_edits(self.thumbnail_scheduler(), doc["assetId"], append_raw_history, *args,
-                                               kind=body["kind"], metadata=body["metadata"], **kwargs)
+                                               kind=body["kind"], metadata=body["metadata"],
+                                               baseline_settings=self._recipe_recovery_baseline if pending.get("recovering") else None,
+                                               **kwargs)
             else:
                 result = await mutate_raw_edits(self.thumbnail_scheduler(), doc["assetId"], move_raw_history_cursor, *args,
                                                target_step_id=pending["target"], **kwargs)
@@ -1420,6 +1447,9 @@ class RawPreviewApi:
             if geometry_commit:
                 self._geometry_gesture = None
             self._history_initialized = self._history_enabled = True
+            if pending.get("recovering"):
+                doc["recipeRecoveryPending"] = False
+                self._recipe_recovery_baseline = None
             lightcraft_log("raw.history.saved", level="debug", assetId=doc["assetId"], saveId=body["saveId"],
                            generation=doc["generation"], documentRevision=doc["revision"],
                            mutationAttempts=self.raw.status().edits, revision=result["current"]["revision"],
@@ -1538,6 +1568,9 @@ class RawPreviewApi:
             self.raw.release_control()
 
     async def _history_checkpoint_reserved(self):
+        if self.document and self.document.get("recipeRecoveryPending") and not self._history_initialized:
+            # No current History exists yet; releasing this Import session cannot alter the retained old tuple.
+            return
         self._history_unsettled()
         if self.document is None or not self._history_initialized:
             return
@@ -1571,8 +1604,20 @@ class RawPreviewApi:
         except (StoreUnavailable, InvalidRawRecipe):
             raise LightCraftError("raw_recipe_unavailable") from None
         verify()
-        if saved["status"] in {"source_mismatch", "engine_incompatible"}:
+        self._recipe_recovery_baseline = None
+        if saved["status"] == "source_mismatch":
             raise LightCraftError(f'raw_recipe_{saved["status"]}')
+        if saved["status"] == "engine_incompatible":
+            self._recipe_recovery_baseline = json.loads(_settings_json(snapshot.settings))
+            lightcraft_log("raw.recipe.incompatible", level="warn", assetId=identity["assetId"],
+                           generation=handle.generation, engineVersion=identity["engineVersion"])
+            history = await run_in_threadpool(get_raw_history, identity)
+            verify()
+            self._history_identity = identity
+            self._history_initialized = history["initialized"]
+            if history["revision"] != 0 or history["initialized"]:
+                raise LightCraftError("raw_history_revision_conflict")
+            return snapshot, "incompatible", 0, True
         recipe_revision = saved.get("revision", 0) if saved["status"] == "matched" and all(
             saved["recipe"][key] == identity[key] for key in ("engineVersion", "engineCommit")) else 0
         try:
@@ -1586,12 +1631,12 @@ class RawPreviewApi:
         self._history_initialized = history["initialized"]
         if saved["status"] == "none":
             lightcraft_log("raw.recipe.none", level="debug", assetId=identity["assetId"])
-            return snapshot, "none", 0
+            return snapshot, "none", 0, False
         snapshot = await self.raw.restore_persisted_settings(handle, saved["recipe"], snapshot.revision)
         verify()
         lightcraft_log("raw.recipe.restored", assetId=identity["assetId"],
                        generation=handle.generation, revision=snapshot.revision)
-        return snapshot, "restored", recipe_revision
+        return snapshot, "restored", recipe_revision, False
 
     async def _release(self, *, checkpoint_history=True):
         if self.workspace is None:
@@ -1603,6 +1648,7 @@ class RawPreviewApi:
         self._wb_frames.clear()
         self._recipe_save = None
         self._history_save = self._history_identity = None
+        self._recipe_recovery_baseline = None
         self._geometry_gesture = None
         self._history_initialized = self._history_enabled = False
         self._workspace_state = "releasing"

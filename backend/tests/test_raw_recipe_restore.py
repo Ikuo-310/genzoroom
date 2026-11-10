@@ -221,7 +221,7 @@ def test_content_hash_case_uses_c3a_normalization(tmp_path, monkeypatch):
     ("0.10.0", "a2a41383c4fd62fa85a46ccd00998639221f2d3c"),
     ("0.14.0", "03c88c166c054c009db2a47187d59991f6232b85"),
 ])
-def test_older_recipe_restores_on_current_engine_and_next_save_uses_current_tuple(tmp_path, monkeypatch, saved_version, saved_commit):
+def test_older_recipe_is_classified_incompatible_and_never_applied_by_restore(tmp_path, monkeypatch, saved_version, saved_commit):
     monkeypatch.setattr(edit_store, "DB_PATH", tmp_path / "recipes.db")
     async def run():
         raw, _, children, files = await create(tmp_path)
@@ -233,17 +233,12 @@ def test_older_recipe_restores_on_current_engine_and_next_save_uses_current_tupl
             old_saved = store.put_raw_recipe(old, 0, uuid4(), changed_settings())
 
             matched = store.lookup_raw_recipe(current)
-            assert matched["status"] == "matched"
-            assert matched["recipe"] == old_saved["recipe"]
-            restored = await raw.restore_persisted_settings(handle, matched["recipe"], initial.revision)
-            assert restored.settings == changed_settings()
-            assert children[-1].photos[1]["settings"] == changed_settings()
-
-            saved = store.put_raw_recipe(current, 0, uuid4(), restored.settings)
-            assert saved["recipe"]["engineVersion"] == current["engineVersion"] == ENGINE_VERSION
-            assert saved["recipe"]["engineCommit"] == current["engineCommit"] == ENGINE_COMMIT
-            assert saved["recipe"]["settings"] == changed_settings()
-            assert store.get_raw_recipe(current)["recipe"] == saved["recipe"]
+            assert matched == {"status": "engine_incompatible"}
+            commands = list(children[0].commands)
+            with pytest.raises(LightCraftError, match="^raw_recipe_engine_incompatible$"):
+                await raw.restore_persisted_settings(handle, old_saved["recipe"], initial.revision)
+            assert children[0].commands == commands
+            assert (await raw.get_settings(handle)).settings == initial.settings
             assert store.get_raw_recipe(old)["recipe"] == old_saved["recipe"]
         finally:
             await raw.close()
@@ -280,6 +275,8 @@ def test_persisted_payload_reuses_c3a_validation_before_native_calls(tmp_path, i
     ({"sourceContentHash": "b" * 16}, "raw_recipe_source_mismatch"),
     ({"engineName": "other"}, "raw_recipe_engine_incompatible"),
     ({"settingsSchemaVersion": 2}, "raw_recipe_engine_incompatible"),
+    ({"engineVersion": "0.18.1"}, "raw_recipe_engine_incompatible"),
+    ({"engineCommit": "a" * 40}, "raw_recipe_engine_incompatible"),
 ])
 def test_native_restore_rechecks_identity_before_sending(tmp_path, monkeypatch, change, code):
     monkeypatch.setattr(edit_store, "DB_PATH", tmp_path / "recipes.db")
@@ -341,28 +338,19 @@ def test_native_restore_failure_never_confirms_settings(tmp_path, monkeypatch, f
     asyncio.run(run())
 
 
-def test_v010_settings_rejection_is_reported_as_native_restore_failure(tmp_path, monkeypatch):
+def test_v010_settings_are_rejected_before_native_restore(tmp_path, monkeypatch):
     monkeypatch.setattr(edit_store, "DB_PATH", tmp_path / "recipes.db")
     async def run():
-        raw, manager, children, files = await create(tmp_path)
+        raw, _, children, files = await create(tmp_path)
         try:
             handle, initial = await raw.open_raw(str(uuid4()), files[0])
             old_identity = raw.recipe_identity(handle) | {
                 "engineVersion": "0.10.0", "engineCommit": "a2a41383c4fd62fa85a46ccd00998639221f2d3c"}
             saved = store.put_raw_recipe(old_identity, 0, uuid4(), changed_settings())
             commands = list(children[0].commands)
-            attempted = []
-            command = manager._raw_command
-            async def reject_settings(generation, name, params, **kwargs):
-                attempted.append(name)
-                if name == "develop.merge":
-                    raise LightCraftError("lightcraft_tool_error")
-                return await command(generation, name, params, **kwargs)
-            monkeypatch.setattr(manager, "_raw_command", reject_settings)
-            with pytest.raises(LightCraftError, match="^raw_recipe_restore_failed$"):
+            with pytest.raises(LightCraftError, match="^raw_recipe_engine_incompatible$"):
                 await raw.restore_persisted_settings(handle, saved["recipe"], initial.revision)
-            assert attempted[-1] == "develop.merge"
-            assert "develop.reset" in [name for name, _ in children[0].commands[len(commands):]]
+            assert children[0].commands == commands
             photo = raw._photos[handle.source_key]
             assert photo.applied_revision == initial.revision and photo.settings_json == initial._json
         finally:
@@ -475,7 +463,7 @@ def test_no_recipe_for_current_asset_opens_initial_settings(local, tmp_path, mon
     asyncio.run(run())
 
 
-def test_windows_opens_v010_recipe_then_saves_current_tuple(local, tmp_path, monkeypatch):
+def test_windows_skips_v010_recipe_and_first_history_save_uses_current_tuple(local, tmp_path, monkeypatch):
     async def run():
         api, _, children, _ = await setup(tmp_path, local, monkeypatch)
         try:
@@ -489,21 +477,21 @@ def test_windows_opens_v010_recipe_then_saves_current_tuple(local, tmp_path, mon
                 workspace, response = await open_asset(http, asset_id)
                 assert response.status_code == 200, response.text
                 doc = response.json()
-                assert doc["recipeStatus"] == "restored" and doc["recipeRevision"] == 0
+                assert doc["recipeStatus"] == "incompatible" and doc["recipeRevision"] == 0
+                assert doc["recipeRecoveryPending"] is True
                 settings = await http.post(f'/api/raw/documents/{doc["handle"]}/settings', json=document_identity(doc))
-                assert settings.status_code == 200
-                assert settings.json()["values"]["light.exposure"] == 1.25
-                assert children[0].photos[1]["settings"] == old_saved["recipe"]["settings"]
-
-                save_body = {key: doc[key] for key in ("workspaceId", "generation", "documentToken")}
-                save_body.update(documentRevision=doc["revision"], expectedRecipeRevision=0, saveId=str(uuid4()))
-                saved_response = await http.put(f'/api/raw/documents/{doc["handle"]}/recipe', json=save_body)
-                assert saved_response.status_code == 200, saved_response.text
-                assert saved_response.json()["recipeRevision"] == 1
+                assert settings.status_code == 200 and settings.json()["values"]["light.exposure"] == 0
+                assert children[0].photos[1]["settings"] != old_saved["recipe"]["settings"]
+                from tests.test_raw_history_api import body as history_body, operation
+                from tests.test_raw_recipe_api import change
+                doc = await change(http, doc, 1.25)
+                save_body = history_body(doc) | {"kind": "control", "metadata": {"control": "light.exposure"}}
+                saved = await operation(http, doc, "commit", save_body)
+                assert saved["recipeRecoveryPending"] is False and saved["recipeRevision"] == 1
                 current_saved = store.get_raw_recipe(current_identity)["recipe"]
                 assert current_saved["engineVersion"] == ENGINE_VERSION
                 assert current_saved["engineCommit"] == ENGINE_COMMIT
-                assert current_saved["settings"] == old_saved["recipe"]["settings"]
+                assert current_saved["settings"]["light"]["exposure"] == 1.25
                 assert store.get_raw_recipe(old_identity)["recipe"] == old_saved["recipe"]
                 assert (await http.delete(f"/api/raw/workspaces/{workspace}")).status_code == 204
         finally:
@@ -568,6 +556,8 @@ def test_generation_change_during_sqlite_lookup_never_publishes_old_import(local
     ({"sourceContentHash": "b" * 16}, "raw_recipe_source_mismatch"),
     ({"engineName": "other"}, "raw_recipe_engine_incompatible"),
     ({"settingsSchemaVersion": 2}, "raw_recipe_engine_incompatible"),
+    ({"engineVersion": "0.18.1"}, "raw_recipe_engine_incompatible"),
+    ({"engineCommit": "a" * 40}, "raw_recipe_engine_incompatible"),
 ])
 def test_windows_incompatible_recipe_fails_open_and_keeps_db(local, tmp_path, monkeypatch, change, code):
     async def run():
@@ -579,8 +569,15 @@ def test_windows_incompatible_recipe_fails_open_and_keeps_db(local, tmp_path, mo
             async with client(local) as http:
                 await authenticate(http, local)
                 _, response = await open_asset(http, asset_id)
-                assert response.status_code == 409 and response.json() == {"code": code}
-                assert api.document is None and not list(root.iterdir())
+                if code == "raw_recipe_source_mismatch":
+                    assert response.status_code == 409 and response.json() == {"code": code}
+                    assert api.document is None and not list(root.iterdir())
+                else:
+                    assert response.status_code == 200, response.text
+                    assert response.json()["recipeRecoveryPending"] is True
+                    assert response.json()["recipeStatus"] == "incompatible"
+                    assert response.json()["recipeRevision"] == 0
+                    assert api.document is not None
                 assert children[0].render_count == 0
                 assert not any(name == "develop.merge" for name, _ in children[0].commands)
                 assert database_rows() == before
@@ -701,7 +698,7 @@ def test_raw_reset_clears_recipe_history_reopens_defaults_and_saves_current_tupl
                 saved = await http.put(f'/api/raw/documents/{current["handle"]}/recipe', json=save_request)
                 assert saved.status_code == 200
                 current_identity = api._recipe_save["identity"]
-                assert current_identity["engineVersion"] == ENGINE_VERSION == "0.18.1"
+                assert current_identity["engineVersion"] == ENGINE_VERSION == "0.20.0"
                 assert current_identity["engineCommit"] == ENGINE_COMMIT
                 assert children[-1].photos[1]["settings"]["light"]["exposure"] == 1.25
         finally:
