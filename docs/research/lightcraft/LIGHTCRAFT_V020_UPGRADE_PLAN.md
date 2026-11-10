@@ -109,6 +109,75 @@ WBはPixel DNGでasShot／5336／14／kelvin、Pentax DNGでasShot／4923／1／
 
 実Native CPU設定でJPEG・Pixel DNG・Pentax DNGのHTTP回帰3件が成功。Optics flag／distortion、露出、RAW WBを変更した状態からのallReset、Native Optics／WB／disabled_sections、History確定、Recipe保存、同一saveId再実行、再open復元、再編集後の保存・復元を確認した。個別／カテゴリResetとrollback／retryを含む既存category回帰48件、Native接続／import・再選択／Optics History回帰93件も成功。Windows GUIの「すべてリセット」操作による再確認はユーザー確認待ち。旧Recipeの復元不一致やRecipe／History全体の監査はP4へ残す。
 
+### P4-A：Recipe／History経路・互換性の監査（2026-11-11）
+
+**P4-A調査完了。P4-B／P4-Cは未実装・未完了。** この節は現行実装の保証と次工程の設計を分けて記録する。製品コード、Native patch／manifest／receipt／EXE、DB schemaとユーザーデータは変更していない。旧Recipeの一括移行は採用しない。
+
+#### 現行経路と保証
+
+| 段階 | 現行経路・保証・制約 |
+|---|---|
+| Asset Open／Import | `windows_raw_api`のPOST documentsで認証・workspace／Assetを確認し、SourceCacheから原本コピーを取得。`LightCraftRawSession.open_raw`がNative Import／select／photo.inspect／settings readbackを行う。写真別Optics snapshotをRecipe復元前に確保する（43a5085）。Document公開前のsettings fingerprintをimport defaultsとして取得する。 |
+| DB lookup | `raw_recipe_store.lookup_raw_recipe`はSQLite read transactionで現在の完全identityを優先し、なければ同Asset／content hash／engine名／settings schemaの旧version・commit行を新しい順に候補化する。現行版だけへの制限はない。破損したrow／receiptはabsence扱いにせずStoreUnavailableとする。 |
+| 互換性・Native復元 | `restore_persisted_settings`はRecipeの型・サイズ・settings.version／process／WB等と、Asset／Source hash／engine名／schema=1を検証する。version・commitの一致は要求しない。`_restore`はdevelop.reset→develop.merge→getを既存operation lock内で実行し、`_settings_json`で正規化した完全settings文字列の一致を要求する。WB legacy省略、既存Grading／Optics／Curve defaults補完はあるが、nr_outliers省略は補完しない。 |
+| Document公開／History読込 | `_restore_document`はlookupとhistory readの間もworkspace／cache／selection epoch／identityを確認する。旧tupleを復元しても現在tupleのRecipe revisionは0、Historyは現在tupleから読む。成功後だけDocument handle／token／generation／revisionを公開する。保存済み旧tupleのHistoryを現在tupleへ移行する処理はない。 |
+| 編集・操作確定 | Frontend `useRawDocument`→controls／`RawRecipeSaveCoordinator`→HTTP controls／history。Nativeの設定解釈はLightCraft所有。Backend `_mutate`のrevision・owner確認とreadback成功後のみconfirmed settingsを更新する。Curve／Geometry／WBは既存のinteraction・sequence・候補／確定境界を利用する。Preview表示は保存成功の証明ではない。 |
+| History／Recipe保存 | HTTP `_history`はDocument revision／settings fingerprint／expectedRecipeRevisionとsaveIdを検証。operateはNative操作→readback、Undo／Redo／Jumpは保存された選択snapshotのNative復元→readbackを経てsaveへ進む。SQLite `_save_history`のBEGIN IMMEDIATE内でRecipe、History baseline／steps／cursor、receiptを同時確定する。CAS競合・書込み失敗はrollback。NativeとSQLiteを跨ぐ単一transactionではない。 |
+| 保存失敗／retry | Native失敗はDB saveへ進まない。compound Resetは復元readbackに成功した場合だけrollback済みとする。DB保存失敗ではNativeの変更が残る場合があり、pending saveと凍結したsettings／同saveIdの再試行で整合させる。既存receiptはimmutable ackとcurrentを区別し二重History確定を防ぐ。Frontendはowner、revision、fingerprint、nativeMatchesRecipe、ack／History cursorを検証する。未知の成否を成功扱いにしない。 |
+| 閉じる／再Open | 保存フェンスを通してWorkspaceを破棄し、次回ImportからDB復元を繰り返す。Frontend regenerationは旧generationと異なること、保存fingerprint／Recipe revisionの一致を要求する。離脱時の未確定操作は既存guardの対象。 |
+
+監査で既存保証を確認したが、全操作・全組合せを実Nativeで検証し終えたという意味ではない。WB候補確認／cancel、Curve／Geometryのoperation境界、Before／Afterと保存状態の独立性などの網羅的P4回帰はP4-Cで行う。
+
+#### 暗室が開けなくなる位置と通知
+
+`lookup_raw_recipe`の`engine_incompatible`／`source_mismatch`は`_restore_document`で例外となる。旧version／commitでもschemaが同じならNativeへ適用され、readback不一致は`raw_restore_mismatch`→`raw_recipe_restore_mismatch`となる。通信・timeout等はrestore_unknown／restore_failed等に分類される（元のdetailをすべてHTTP codeへ保持する実装ではない）。Document openのexceptで`_release()`し、Documentを公開しないため、初期値の編集・Previewも開始できない。
+
+Frontendは通常のopen errorを表示する。`RawDocument`に非互換Recipe通知の型はなく、専用通知もない。既存の「Reset development edits」は`delete_raw_edits`でそのAssetの全tupleのRecipe／Historyとreceiptを削除する明示操作であり、旧Recipeを保持するP4復旧には流用できない。既存テストも「非互換でopen失敗」「旧versionでも復元」「旧Recipeを削除して復旧」を期待するため、P4-Bで期待を更新する必要がある。
+
+#### 旧raw_restore_mismatchの実Native再現
+
+固定v0.20.0 EXE（SHA-256 `30fa30913ceca0f3083ea05d0ebce27fb5668c00b1e78f9d6c2365e43686aa04`）をCPU設定で使用。既存fixture `develop-v0.18.json`は**v0.18.0**、`develop-v0.14.json`はv0.14.0のsettingsであり、当時の実機Recipeそのものではない。各fixtureを現行adapterの`_settings_json`で正規化し、原本コピーをImport→select→reset→merge→getして差分だけを調べた。
+
+| 旧fixture | JPEG | Pixel DNG | Pentax DNG |
+|---|---|---|---|
+| v0.18.0 | 正規化後の差分なし | detail.nr_outliers：期待は省略／実際true | 同左 |
+| v0.14.0 | 正規化後の差分なし | detail.nr_outliers：期待は省略／実際true | 同左 |
+
+全6ケースでmerge自体は成功した。v0.20.0 `DevelopSettings::for_raw`はRemove Hot Pixels（`detail.nr_outliers`）をtrueにする。reset後のRAW設定へ旧settingsをpartial mergeすると、省略fieldはそのtrueを保持し、get_developもtrueを返す。旧snapshotにはfieldがないため完全一致比較に失敗する。JPEGのfalseはNativeの通常JSONで省略され、この差分がない。ここはLightCraftの公開settings表現・merge契約との不一致であり、WB計算や保存DBの失敗ではない。
+
+実機で過去に失敗したRecipe本文・対応readbackは未採取なので、その失敗フィールドがnr_outliersだったとは断定しない。既存fixtureと実RAWで再現できた具体的原因として記録する。WB scale／mode、Crop／Orientation、Opticsなどにはこの6ケースで追加差分がなかった。先行allResetの`optics.lens_profile`問題とは区別し、43a5085の写真別Optics・WB As Shot・disabled_sections保持を維持する。P4-Aでは旧settingsへのfield追加や比較条件の緩和を行わない。
+
+#### P4-Bの互換性・復旧設計（次工程の実装指示）
+
+1. Native適用前の明示条件をengine名／version／固定upstream commit／settings schemaの現行tuple一致とする。別tupleは自動移行せず「互換性未承認」としてImport初期値で開く。将来、別tupleの互換性を承認する場合は実検証に基づく明示的な対応表に限定し、version文字列の大小やschema番号だけで推定しない。managed patch digestは現在Recipe identityに含まれないため、同tuple内の未知の失敗をエンジン更新扱いにして救済しない。
+2. 互換性判定はSource一致・row／receipt整合の検証後に行う。source mismatch、識別不一致、破損settings、通信切断、timeout、revision競合、同tupleの未知readback mismatchは初期値fallbackへ変換しない。既存owner／generation／tokenフェンスとエラー／pending復旧を維持する。
+3. 旧tupleをNativeへ適用せず、正常なImport snapshotでDocumentを公開し、簡潔な「以前の現像設定は現行エンジンと互換性がないため適用していません。新しい編集を開始できます」という通知状態をBackend DTO→rawApi→useRawDocument／暗室表示へ渡す。復元成功を意味する`restored`状態を使用しない。通知はstale Documentに持ち越さない。
+4. 現在のFrontend saverは初期化時にsaveを呼び、Backend initializeは`_write_recipe`を実行する。このまま流用すると編集前のbaselineを新しい現行Recipeとして永続化してしまう。復旧Documentでは**一時History baselineと永続Historyの存在を区別**し、初期化／Preview／表示切替／無変更離脱でRecipeを書かない。既存`initialized`の意味を黙って変更せず、復旧中の明示状態と保存境界を両側へ接続する。
+5. 最初の変更を含む確定時だけ、Import baselineとconfirmed Native settingsを既存append transactionへ渡して現在tupleのRecipe／Historyを作る。storeは`baseline_settings`付きの新規appendを既に扱えるが、HTTPは非initializeを未初期化状態で拒否するため、この復旧Documentに限るadmissionとFrontend saverの対応が必要。wbPick／Reset／Curve／Geometry等が最初の操作でも同じ境界を通す。無変更操作と未確定／cancelは保存理由にしない。保存完了まで通知・未保存状態を保持し、retryで二重確定しない。保存後の次回Openはcurrent tupleを通常復元する。
+
+#### DB保持方法と影響範囲
+
+`asset_raw_recipes`の主キーはAsset／Source hash／engine名／version／commit／schemaの6項目。History baseline／steps、Recipe／History receiptもこのidentityへ結び付く。**別tupleの旧Recipe／Historyをそのまま残し、現在tupleは新しい編集確定時のみ追加**する方法を採用候補とする。既存schemaで実現可能で、アーカイブtable・無制限のRecipe複製・openごとの世代生成は不要。Historyは既存200step上限を維持する。既存row／receiptの自動削除、DB schema変更、旧Historyの現在Historyへのコピーは行わない。
+
+同一tuple内で未知の復元失敗を自動的に別世代へ退避する設計は採用しない。旧tupleが複数ある場合はcurrent優先、旧通知対象の選択は既存の更新日時・revision順と整合させる。Export／thumbnail／Galleryの最新row選択は現在`updated_at DESC, recipe_revision DESC`であるため、編集前にcurrent baselineを保存しないことも重要。P4-Bではこれらが旧設定の適用成功を誤表示しないか境界を確認するが、Export本体の統合はP5へ残す。将来の保存世代整理はユーザー明示操作の別課題とし、今回の復旧で増やすのは固定current tupleの1行だけにする。
+
+#### P4-B／P4-Cの変更箇所・検証計画
+
+| 工程 | 必要な変更／検証 |
+|---|---|
+| P4-B Backend | `raw_recipe_store.lookup_raw_recipe`の互換候補分類、`windows_raw_api._restore_document`の非互換初期値open・通知・一時baseline、History admission／first changed append、`restore_persisted_settings`の同じ互換条件。既存CAS／receipt／unknown recoveryを再利用する。 |
+| P4-B Frontend | `rawApi`の通知／復旧状態の型と検証、`useRawDocument`の表示／ownerリセット、`rawRecipeSave`の初期化とfirst edit保存境界。編集開始前の自動保存防止、cancel／no-op／切替／再open、最初の操作がWB／Curve／Geometry／Resetの場合を検証する。 |
+| P4-C | current tupleでJPEG／Pixel／Pentaxの保存・再Open、連続編集、Undo／Redo／Jump、個別／カテゴリ／allReset、WB候補・cancel、Curve、Crop／Straighten／Rotate／Flip、Before／After、Asset切替／Workspace再生成を実Native＋HTTP・Frontend focused testで確認。通信・timeout・stale owner／revision、SQLite failure、同saveId retry、未知readback不一致を非互換へ変換しないことを確認する。 |
+| 保持の受入 | 新規編集前の旧Recipe／History／receipt全rowが不変、current tupleが未作成であることを一時DBで確認。最初の保存失敗時も旧row不変、保存成功後はcurrentだけ追加し、次回Openが通常復元となることを確認する。 |
+
+#### P4-Aの実施結果・未確認
+
+- ソース監査に加え、上記旧fixture×素材6ケースを実Native MCPで実行した。結果はsettings差分だけを出力し、ユーザーRecipe全文や写真情報を診断ログへ追加していない。
+- 既存Backend `test_raw_recipe_restore.py`／`test_raw_recipe_store.py`／`test_raw_history_store.py`は**251成功・1失敗**。失敗は`test_raw_reset_clears_recipe_history_reopens_defaults_and_saves_current_tuple`の704行目がversionを`0.18.1`に固定していることによる。単独でも同じassertで失敗し、現行値は`0.20.0`。P4-Aではテストを改変せず、P4-Cでこの旧期待値を更新する残件とする。成功テストには旧version許可、非互換open失敗、通信／timeout／readbackエラー、generation切替、CAS、SQLite rollback、receipt replay、History cursorと保存の整合を含む。
+- 既存実Native HTTP `test_raw_reset_live.py`はJPEG／Pixel DNG／Pentax DNGの**3件成功**。43a5085のReset、WB／Optics／disabled_sections、History／Recipe保存、再open復元、再編集保存を再確認した。Frontend `rawRecipeSave.test.ts`は7件成功、暗室の既存open-error表示testは1件成功（関連外124件skip）。これは現行の非互換時error表示を確認したもので、新しい復旧UIの実装成功ではない。
+- DBはpytest fixtureで隔離、実素材は取得fixture／一時コピーを使用。ユーザーの既存DB／Recipe、Immich資産への変更はない。GUI／Computer Use／ブラウザ操作、実機画質・応答性の確認は行っていない。文書のみの変更のため製品build／型チェックは再実行していない。
+- 当時の実機Recipeそのものの原因確定、同tupleの全settings差分、非互換復旧と全操作の組合せは未確認。P4-B／P4-Cの実装・検証とユーザーWindows実機確認は後続であり、P4全体の完了とは扱わない。
+
 ## 既存成果とpatchの扱い
 
 N1-1a〜cのFrame取得・受信・表示経路とN1-2のStageCache所有簡素化は再利用候補であり、そのままの採用を要求しない。N1-3はRevert済みであり、StageCache ON／OFFを公開接続契約として再導入しない。累積暫定patchとcheckpointは開発中の成果・履歴として保持し、正式採用時に必要な接続だけをmanaged patchへ整理する。旧成果の検証はその時点の範囲に限り、v0.20.0の完成を意味しない。
