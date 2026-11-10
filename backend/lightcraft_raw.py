@@ -498,6 +498,23 @@ def _validate_crop_png(result, photo_id, max_side, quality, expected):
         raise LightCraftError('lightcraft_invalid_preview') from None
 
 
+def _validate_simple_crop_png(result, photo_id, max_side, expected):
+    try:
+        text = next(c for c in result['content'] if c.get('type') == 'text')
+        if not isinstance(text.get('text'), str) or len(text['text'].encode('utf-8')) > MAX_METADATA_BYTES:
+            raise ValueError()
+        meta = _decode(text['text'].encode('utf-8'))
+        if meta.pop('cropEdit', None) is not True:
+            raise ValueError()
+        replacement = {'type': 'text', 'text': json.dumps(meta)}
+        validated = _validate_png({**result, 'content': [replacement if c is text else c for c in result['content']]},
+                                  photo_id, max_side, frame_only=True)
+        meta.update(canonicalGeometry=expected['canonicalGeometry'], bitmapSpace='oriented-warped-unstraightened-flipped')
+        return (*validated[:3], meta)
+    except Exception:
+        raise LightCraftError('lightcraft_invalid_preview') from None
+
+
 def _thread_job(function, *args):
     loop = asyncio.get_running_loop()
     future = loop.create_future()
@@ -2080,6 +2097,7 @@ class LightCraftRawSession:
                             args.update(quality=ticket.quality, stage_cache=self._stage_mode,
                                         stage_cache_budget_bytes=self._stage_budget)
                         crop_expected = None
+                        simple_crop = False
                         if getattr(ticket, 'mode', 'whole') == 'crop-edit':
                             from raw_white_balance import result_fingerprint
                             native = await self.manager._raw_native_settings(self._generation, photo.photo_id, timeout=self._timeouts.preview)
@@ -2087,9 +2105,13 @@ class LightCraftRawSession:
                                 raise LightCraftError('raw_revision_conflict')
                             fingerprint = result_fingerprint(native)
                             request_id = uuid.uuid4().hex
-                            args['crop_edit'] = {'settings_fingerprint':fingerprint, 'request_id':request_id}
                             crop_expected = {'requestId':request_id,'settingsFingerprint':fingerprint,
                                              'canonicalGeometry':self._before_geometry(photo)}
+                            simple_crop = await self.manager._raw_crop_edit_supported(self._generation)
+                            if simple_crop:
+                                args = {'include_frame': True, 'simple_crop': True}
+                            else:
+                                args['crop_edit'] = {'settings_fingerprint':fingerprint, 'request_id':request_id}
                         # The frame-only contract is independent of the older Adaptive capability.
                         # Curve gestures can request Draft even when Native only exposes Whole Full.
                         frame_only = (ticket.region_operation is None and crop_expected is None
@@ -2149,7 +2171,8 @@ class LightCraftRawSession:
                         continue
                     if crop_expected is not None:
                         image = await self._image(result, photo.photo_id, ticket.max_side,
-                            _validation_job=(_validate_crop_png, (result,photo.photo_id,ticket.max_side,ticket.quality,crop_expected)))
+                            _validation_job=(_validate_simple_crop_png, (result,photo.photo_id,ticket.max_side,crop_expected)) if simple_crop
+                            else (_validate_crop_png, (result,photo.photo_id,ticket.max_side,ticket.quality,crop_expected)))
                     else:
                         image = await self._image(result, photo.photo_id, ticket.max_side, ticket.kind,
                                               photo.before_fingerprint, geometry,
@@ -2158,10 +2181,10 @@ class LightCraftRawSession:
                     del result
                     data, w, h = image[:3]
                     metadata = image[3] if ticket.adaptive or frame_only else None
-                    if metadata and not frame_only and (metadata["stageCache"]["mode"] != self._stage_mode or
+                    if metadata and not frame_only and not simple_crop and (metadata["stageCache"]["mode"] != self._stage_mode or
                             self._stage_mode == "on" and metadata["stageCache"]["budgetBytes"] != self._stage_budget):
                         raise LightCraftError("lightcraft_invalid_preview")
-                    actual_quality = "full" if frame_only else ticket.quality
+                    actual_quality = "full" if frame_only or simple_crop else ticket.quality
                     self._preview_trials += 1
                     digest = None
                     try:

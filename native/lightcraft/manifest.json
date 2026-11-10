@@ -18,12 +18,13 @@
         "crates/ui-egui/src/render.rs"
       ],
       "file": "patches/0001-v0.20.0-whole-frame.patch",
-      "purpose": "Return geometry from the Whole image render",
-      "sha256": "2e99310e237a9a9b94e0fb85f6f64ef24492401dc05eb7d9f44fe1c5fe31f9bd"
+      "purpose": "Return Whole and uncropped Crop editing geometry from rendered images",
+      "sha256": "ed202b5e817610c0c4b530767266dce89aa87de82f82a1c519d9175afe98d8be"
     }
   ],
   "commit": "192ff72923c39e6623f2c7ff67ab3a119deb8071",
   "version": "0.20.0",
   "wholeFrameContract": 1,
-  "developmentTargetDir": "target-p1-baseline"
+  "developmentTargetDir": "target-p3",
+  "cropEditContract": 1
 }

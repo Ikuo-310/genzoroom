@@ -108,10 +108,10 @@ index b05dae56ff5fccab298fc6dee10239ddd47ed4b9..2de01852f042f6d57040223c2e9764fd
 +sha2 = { workspace = true }
  log = { workspace = true }
 diff --git a/crates/mcp/src/headless.rs b/crates/mcp/src/headless.rs
-index 11de914173043a86ea701ee0f9d55a89e92f2add..3cdc3f4753c1ec07911c3a1b89f60698d267a72c 100644
+index 11de914173043a86ea701ee0f9d55a89e92f2add..cb281c90dda76d0310d96ef1adf2510b93b8ee09 100644
 --- a/crates/mcp/src/headless.rs
 +++ b/crates/mcp/src/headless.rs
-@@ -139,15 +139,26 @@ impl Backend for Headless {
+@@ -139,15 +139,39 @@ impl Backend for Headless {
                  Ok(Value::Array(v))
              }
              "ui.render" => {
@@ -126,13 +126,26 @@ index 11de914173043a86ea701ee0f9d55a89e92f2add..3cdc3f4753c1ec07911c3a1b89f60698
 +                if p.get("include_frame").is_some_and(|v| !v.is_boolean()) {
 +                    return Err("invalid include_frame".into());
                  }
++                if p.get("crop_edit").is_some_and(|v| !v.is_boolean()) {
++                    return Err("invalid crop_edit".into());
++                }
 +                let id = self.photo_or_active(&p)?;
 +                let photo = self.session.catalog.photo(id).ok_or("no such photo")?;
 +                let original = (photo.width as usize, photo.height as usize);
 +                let size = p.get("size").or(p.get("longEdge")).and_then(Value::as_u64).unwrap_or(1600).clamp(16, 16384) as usize;
-+                let rendered = self.session.render_now(id, size, size)?;
++                let rendered = if p.get("crop_edit") == Some(&json!(true)) {
++                    let job = self.session.render_job(id, size, size, false, false).ok_or("no such photo")?;
++                    let result = job.run();
++                    self.session.accept(&result);
++                    result.rendered?
++                } else {
++                    self.session.render_now(id, size, size)?
++                };
 +                let img = rendered.image;
 +                let mut result = json!({"width": img.width, "height": img.height});
++                if p.get("crop_edit") == Some(&json!(true)) {
++                    result["cropEdit"] = json!(true);
++                }
 +                if p.get("include_frame") == Some(&json!(true)) {
 +                    let frame = rendered.frame.as_ref().ok_or("preview_geometry_unavailable")?;
 +                    result["frame"] = crate::preview::frame_metadata(frame, original, &id.0.to_string(), img.width, img.height)?;
@@ -266,10 +279,10 @@ index 0000000000000000000000000000000000000000..89d6d8b87d87bd80a979421bbb2f3736
 +    }))
 +}
 diff --git a/crates/mcp/src/tests.rs b/crates/mcp/src/tests.rs
-index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..e43518d4fe6b47c35d4038842480a1fda7c937fd 100644
+index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..1e75466ce43ffbefc80e2f00e9f3135da8287b2b 100644
 --- a/crates/mcp/src/tests.rs
 +++ b/crates/mcp/src/tests.rs
-@@ -602,3 +602,32 @@ fn render_and_screenshot_pngs_go_through_a_private_folder() {
+@@ -602,3 +602,51 @@ fn render_and_screenshot_pngs_go_through_a_private_folder() {
          folders.push(dir);
      }
  }
@@ -302,27 +315,48 @@ index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..e43518d4fe6b47c35d4038842480a1fd
 +    let preview_meta: Value = serde_json::from_str(preview.content[1]["text"].as_str().unwrap()).unwrap();
 +    assert_eq!(preview_meta["frame"]["geometryId"], meta["frame"]["geometryId"]);
 +}
++
++#[test]
++fn crop_edit_returns_uncropped_frame_without_changing_settings() {
++    let mut h = Headless::demo();
++    let id = h.session.active().unwrap().0;
++    h.session.execute("crop.set", &json!({"rect": [0.2, 0.2, 0.8, 0.8]})).unwrap();
++    let before = h.session.execute("develop.get", &json!({"id": id})).unwrap();
++    let whole = call_tool(&mut h, "render_preview", &json!({"id": id, "max_side": 64, "include_frame": true}));
++    assert!(!whole.is_error, "{whole:?}");
++    let whole_meta: Value = serde_json::from_str(whole.content[1]["text"].as_str().unwrap()).unwrap();
++    let edit = call_tool(&mut h, "render_preview", &json!({"id": id, "max_side": 64, "include_frame": true, "crop_edit": true}));
++    assert!(!edit.is_error, "{edit:?}");
++    let meta: Value = serde_json::from_str(edit.content[1]["text"].as_str().unwrap()).unwrap();
++    assert_eq!(meta["cropEdit"], true);
++    assert_ne!(meta["frame"]["geometryId"], whole_meta["frame"]["geometryId"]);
++    assert_eq!(meta["frame"]["fullWidth"], meta["width"]);
++    assert_eq!(meta["frame"]["fullHeight"], meta["height"]);
++    assert_eq!(h.session.execute("develop.get", &json!({"id": id})).unwrap(), before);
++}
 diff --git a/crates/mcp/src/tools.rs b/crates/mcp/src/tools.rs
-index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..a25a389966c7433c3bf36a6027351fdbebeb71d5 100644
+index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..89f22dd1b308ee1dee1a96d94c61b363ff4f8063 100644
 --- a/crates/mcp/src/tools.rs
 +++ b/crates/mcp/src/tools.rs
-@@ -120,6 +120,7 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
+@@ -120,6 +120,8 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
              json!({
                  "id": {"type": "integer", "description": "Photo id (default: the active photo); selection is unchanged"},
                  "max_side": {"type": "integer", "description": "Long edge in pixels (default 1024, max 4096)"},
 +                "include_frame": {"type": "boolean", "description": "Include rendered image geometry"},
++                "crop_edit": {"type": "boolean", "description": "Render the uncropped image for crop editing"},
                  "format": {"type": "string", "enum": ["png", "jpeg"], "description": "Image encoding (default png; jpeg is smaller)"},
              }),
              &[],
-@@ -219,6 +220,7 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
+@@ -219,6 +221,8 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
              json!({
                  "id": {"type": "integer", "description": "Photo id (default: the active photo); selection is unchanged"},
                  "size": {"type": "integer", "description": "Long edge in pixels (default 1024, max 4096)"},
 +                "include_frame": {"type": "boolean", "description": "Include rendered image geometry"},
++                "crop_edit": {"type": "boolean", "description": "Render the uncropped image for crop editing"},
                  "format": {"type": "string", "enum": ["png", "jpeg"], "description": "Image encoding (default png; jpeg is smaller)"},
                  "path": {"type": "string", "description": "Also save the rendered file here"}
              }),
-@@ -557,11 +559,18 @@ fn render_photo(b: &mut dyn Backend, args: &Value) -> ToolResult {
+@@ -557,11 +561,24 @@ fn render_photo(b: &mut dyn Backend, args: &Value) -> ToolResult {
          Err(e) => return ToolResult::error(e),
      };
      let path = tmp.file.to_string_lossy().to_string();
@@ -330,6 +364,9 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..a25a389966c7433c3bf36a6027351fdb
 +    let mut request = json!({"id": id, "size": size, "path": path});
 +    if let Some(include) = args.get("include_frame") {
 +        request["include_frame"] = include.clone();
++    }
++    if let Some(crop_edit) = args.get("crop_edit") {
++        request["crop_edit"] = crop_edit.clone();
 +    }
 +    let meta = match b.call("ui.render", request) {
          Ok(m) => m,
@@ -339,15 +376,18 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..a25a389966c7433c3bf36a6027351fdb
 +    if args.get("include_frame") == Some(&json!(true)) && !meta.get("frame").is_some_and(Value::is_object) {
 +        return ToolResult::error("preview_geometry_unavailable");
 +    }
++    if args.get("crop_edit") == Some(&json!(true)) && meta.get("cropEdit") != Some(&json!(true)) {
++        return ToolResult::error("crop_edit_unavailable");
++    }
      meta["id"] = json!(id);
      image_result(&tmp.file, None, args.get("format").and_then(Value::as_str).unwrap_or("png"), args.get("path").and_then(Value::as_str), meta)
  }
-@@ -664,7 +673,7 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
+@@ -664,7 +681,7 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
          }
          "doc_inspect" => ToolResult::from(doc_inspect(b)),
          "render_preview" => {
 -            let mut a = obj(args, &["id", "format"]);
-+            let mut a = obj(args, &["id", "format", "include_frame"]);
++            let mut a = obj(args, &["id", "format", "include_frame", "crop_edit"]);
              if let Some(m) = args.get("max_side") {
                  a["size"] = m.clone();
              }

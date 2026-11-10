@@ -777,12 +777,14 @@ class RawPreviewApi:
             if adaptive:
                 supported = await self.manager._raw_preview_supported(doc["generation"])
                 if body.get("mode") == "crop-edit":
-                    if not supported: raise LightCraftError("raw_preview_unsupported")
+                    if not supported and not await self.manager._raw_crop_edit_supported(doc["generation"]):
+                        raise LightCraftError("raw_preview_unsupported")
                     options["mode"] = "crop-edit"
                     self._region_geometry.clear()
                     self._wb_frames.clear()
                 options.update(max_side=body["maxSide"], serial=body["serial"], view_generation=body["viewGeneration"],
-                               geometry_id=body["geometryId"], quality=body["quality"] if supported else None)
+                               geometry_id=body["geometryId"], quality=body["quality"] if supported else
+                               "full" if body.get("mode") == "crop-edit" else None)
             latest_key = (doc["handle"], kind)
             latest = self._preview_latest.get(latest_key, -1)
             if adaptive and body["serial"] <= latest:

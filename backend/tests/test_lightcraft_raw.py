@@ -111,6 +111,7 @@ class RawProcess(FakeProcess):
         self.before_wrong_kind = False
         self.adaptive_supported = False
         self.frame_supported = False
+        self.simple_crop_supported = False
         self.frame_fault = None
         self.execution = None
         self.preview_arguments = []
@@ -128,6 +129,9 @@ class RawProcess(FakeProcess):
 
     def respond(self, message):
         if message["method"] == "tools/list":
+            if self.simple_crop_supported:
+                return reply(self.stdout, message, {"tools": [{"name": "render_preview", "inputSchema": {
+                    "properties": {"include_frame": {"type": "boolean"}, "crop_edit": {"type": "boolean"}}}}]})
             if self.frame_supported:
                 return reply(self.stdout, message, {"tools": [{"name": "render_preview", "inputSchema": {
                     "properties": {"include_frame": {"type": "boolean"}}}}]})
@@ -142,6 +146,10 @@ class RawProcess(FakeProcess):
         if message["method"] != "tools/call":
             return super().respond(message)
         args = message["params"]["arguments"]
+        if message["params"]["name"] == "get_develop":
+            settings = self.photos[args['id']]['settings']
+            return reply(self.stdout, message, {'isError': False, 'content': [{'type': 'text', 'text': json.dumps(settings, sort_keys=True)}],
+                'structuredContent': copy.deepcopy(settings)})
         if message["params"]["name"] == "render_preview":
             self.preview_arguments.append(copy.deepcopy(args))
             self.render_count += 1
@@ -174,6 +182,10 @@ class RawProcess(FakeProcess):
                                     "nativeHeight": 4500, "aspect": 4 / 3,
                                     "fullWidth": 15 if self.frame_fault == "size" else 16,
                                     "fullHeight": 12, "window": None}
+                            result["content"][1]["text"] = json.dumps(metadata)
+                        if args.get("crop_edit"):
+                            metadata = json.loads(result["content"][1]["text"])
+                            metadata["cropEdit"] = True
                             result["content"][1]["text"] = json.dumps(metadata)
                         if self.bad_image:
                             result["content"][0]["data"] = "broken"
@@ -378,7 +390,8 @@ async def create(tmp_path, *, timeouts=QUICK, adaptive=False):
     exe.with_suffix('.genzoroom.json').write_text(json.dumps({
         **{key: MANAGED[key] for key in ('version', 'commit', 'patches')},
         'binarySha256': hashlib.sha256(b'fake').hexdigest(),
-        'wholeFrameContract': 1}), encoding='utf-8')
+        'wholeFrameContract': 1,
+        **({'cropEditContract': 1} if MANAGED.get('cropEditContract') == 1 else {})}), encoding='utf-8')
     children = []
 
     async def spawn(*args, **kwargs):

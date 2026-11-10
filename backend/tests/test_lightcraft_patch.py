@@ -27,6 +27,7 @@ def test_manifest_patch_digest_and_targets():
 @pytest.mark.parametrize('changes', [
     {'wholeFrameContract': True}, {'wholeFrameContract': 2},
     {'developmentTargetDir': None}, {'developmentTargetDir': '../target'},
+    {'cropEditContract': True}, {'cropEditContract': 2},
 ])
 def test_whole_frame_manifest_rejects_invalid_contract_or_target(tmp_path, changes):
     path = tmp_path / 'manifest.json'
@@ -40,6 +41,7 @@ def test_whole_frame_receipt_does_not_claim_unimplemented_contracts(tmp_path):
     binary.write_bytes(b'fixture executable')
     receipt = build.receipt(binary, build.manifest())
     assert receipt['wholeFrameContract'] == 1
+    assert receipt['cropEditContract'] == 1
     assert receipt['binarySha256'] == hashlib.sha256(binary.read_bytes()).hexdigest()
     assert not {'beforeContract', 'previewContract', 'regionContract', 'wbContract'} & receipt.keys()
 

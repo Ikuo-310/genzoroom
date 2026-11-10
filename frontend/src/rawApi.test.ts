@@ -488,16 +488,17 @@ it('permits release-ack recovery only for an observed empty workspace with no cl
   }
 });
 
-it.each(['valid','normalContract','wrongFingerprint','wrongGeometry','missingCrop'])('validates crop-edit transport independently: %s',async(mode)=>{
+it.each(['valid','fullFallback','normalContract','wrongFingerprint','wrongGeometry','missingCrop'])('validates crop-edit transport independently: %s',async(mode)=>{
   const editingDoc={...doc,settingsFingerprint:'f'.repeat(64)};
   const headers:Record<string,string>=adaptiveHeaders();delete headers['X-Raw-Preview-Contract'];
   const crop={geometry:{rect:{x0:.1,y0:.2,x1:.9,y1:.8},angle:12},aspect:null,flip_h:false,flip_v:true};
   Object.assign(headers,{'X-Raw-Crop-Edit-Contract':'1','X-Raw-Mode':'crop-edit','X-Raw-Crop':JSON.stringify({canonicalGeometry:mode==='missingCrop'?{}:{crop,orientation:'Rotate90'},bitmapSpace:'oriented-warped-unstraightened-flipped',settingsFingerprint:mode==='wrongFingerprint'?'e'.repeat(64):editingDoc.settingsFingerprint})});
+  if(mode==='fullFallback') headers['X-Raw-Quality']='full';
   if(mode==='normalContract')headers['X-Raw-Preview-Contract']='1';
   if(mode==='wrongGeometry')headers['X-Raw-Frame']=JSON.stringify({...geometry,geometryId:'e'.repeat(64)});
   vi.stubGlobal('fetch',vi.fn(async()=>response(headers)));
   const result=rawPreview(editingDoc,3,new AbortController().signal,'after',{...adaptiveTarget,mode:'crop-edit',geometryId:geometry.geometryId});
-  if(mode==='valid')expect((await result).cropDisplay?.canonicalGeometry.crop).toEqual(crop);
+  if(mode==='valid'||mode==='fullFallback')expect((await result).cropDisplay?.canonicalGeometry.crop).toEqual(crop);
   else await expect(result).rejects.toThrow();
 });
 

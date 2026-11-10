@@ -13,7 +13,8 @@ from tests.test_lightcraft_mcp import until
 def write_receipt(executable, **changes):
     digest = hashlib.sha256(executable.read_bytes()).hexdigest()
     value = {**{key: MANAGED[key] for key in ('version', 'commit', 'patches')},
-             'binarySha256': digest, 'wholeFrameContract': 1, **changes}
+             'binarySha256': digest, 'wholeFrameContract': 1,
+             **({'cropEditContract': 1} if MANAGED.get('cropEditContract') == 1 else {}), **changes}
     executable.with_suffix('.genzoroom.json').write_text(json.dumps(value), encoding='utf-8')
     return digest
 
@@ -21,6 +22,7 @@ def write_receipt(executable, **changes):
 @pytest.mark.parametrize('changes', [
     {'version': '0.10.0'}, {'commit': 'a' * 40}, {'binarySha256': 'b' * 64},
     {'patches': []}, {'wholeFrameContract': True}, {'wholeFrameContract': 2}, {'wholeFrameContract': None},
+    {'cropEditContract': True}, {'cropEditContract': 2}, {'cropEditContract': None},
     {'beforeContract': 1}, {'regionContract': 1},
 ])
 def test_receipt_mismatch_never_claims_a_managed_version(tmp_path, changes):
@@ -49,6 +51,17 @@ def test_receipt_without_whole_frame_contract_is_not_managed(tmp_path):
     path = executable.with_suffix('.genzoroom.json')
     receipt = json.loads(path.read_text(encoding='utf-8'))
     del receipt['wholeFrameContract']
+    path.write_text(json.dumps(receipt), encoding='utf-8')
+    assert verified_artifact(executable, digest, ENGINE_VERSION) is None
+
+
+def test_receipt_without_crop_edit_contract_is_not_managed(tmp_path):
+    executable = tmp_path / 'engine.exe'
+    executable.write_bytes(b'actual engine')
+    digest = write_receipt(executable)
+    path = executable.with_suffix('.genzoroom.json')
+    receipt = json.loads(path.read_text(encoding='utf-8'))
+    del receipt['cropEditContract']
     path.write_text(json.dumps(receipt), encoding='utf-8')
     assert verified_artifact(executable, digest, ENGINE_VERSION) is None
 
@@ -116,6 +129,11 @@ def test_managed_executable_discovery_is_dev_only_and_manifest_bound(tmp_path):
     p1.parent.mkdir(parents=True)
     p1.write_bytes(b'p1 executable')
     assert resolve_managed_executable({}, 'win32', project_root=root, frozen=False) == str(p1)
+    p3 = root / '.tmp' / f"lightcraft-{MANAGED['version']}-p3" / MANAGED['developmentTargetDir'] / 'release' / 'lightcraft-cli.exe'
+    p3.parent.mkdir(parents=True)
+    p3.write_bytes(b'p3 executable')
+    assert resolve_managed_executable({}, 'win32', project_root=root, frozen=False) == str(p3)
+    p3.unlink()
     p1.unlink()
     assert verified_artifact(exact, hashlib.sha256(exact.read_bytes()).hexdigest(), ENGINE_VERSION) is None
     exact.unlink()

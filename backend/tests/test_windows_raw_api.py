@@ -588,3 +588,29 @@ def test_whole_full_frame_response_and_legacy_fallback(local, tmp_path, monkeypa
         finally:
             await api.close()
     asyncio.run(run())
+
+
+@pytest.mark.parametrize('quality', ['draft', 'full'])
+def test_crop_edit_uses_uncropped_native_frame_without_adaptive_contract(local, tmp_path, monkeypatch, quality):
+    async def run():
+        import json
+        api, manager, children, _ = await setup(tmp_path, local, monkeypatch)
+        children[0].simple_crop_supported = True
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                _, doc = await open_document(http)
+                body = preview_body(doc) | {'quality': quality, 'mode': 'crop-edit', 'maxSide': 1024,
+                    'viewGeneration': 1, 'geometryId': None}
+                response = await http.post(f'/api/raw/documents/{doc["handle"]}/preview', json=body)
+                assert response.status_code == 200, response.text
+                assert response.headers['x-raw-quality'] == 'full'
+                assert response.headers['x-raw-crop-edit-contract'] == '1'
+                from raw_geometry import geometry_state
+                expected = geometry_state(api.raw.confirmed_settings(api._raw_handle, doc['revision']).settings)
+                assert json.loads(response.headers['x-raw-crop'])['canonicalGeometry'] == expected
+                assert children[0].preview_arguments[-1]['crop_edit'] is True
+                assert not await manager._raw_preview_supported(doc['generation'])
+        finally:
+            await api.close()
+    asyncio.run(run())

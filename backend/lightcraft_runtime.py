@@ -60,6 +60,7 @@ class _Session:
     before_preview: bool | None = None
     adaptive_preview: bool | None = None
     whole_frame: bool | None = None
+    crop_edit: bool | None = None
     region_preview: bool | None = None
     white_balance: bool | None = None
 
@@ -661,6 +662,21 @@ class LightCraftManager:
                 geometryDescriptorContract=descriptor if type(descriptor) is int and descriptor in (1, 2) else None)
         return session.region_preview
 
+    async def _raw_crop_edit_supported(self, generation):
+        session = self._raw_session(generation)
+        if session.crop_edit is None:
+            result = await session.client.request('tools/list', timeout=self._timeouts.request)
+            self._check_raw_session(session)
+            items = result.get('tools', []) if isinstance(result, dict) else []
+            session.crop_edit = any(
+                isinstance(tool, dict) and tool.get('name') == 'render_preview'
+                and isinstance(tool.get('inputSchema'), dict)
+                and isinstance(tool['inputSchema'].get('properties'), dict)
+                and isinstance(tool['inputSchema']['properties'].get('crop_edit'), dict)
+                and tool['inputSchema']['properties'].get('crop_edit', {}).get('type') == 'boolean'
+                for tool in (items if isinstance(items, list) else []))
+        return session.crop_edit
+
     async def _raw_region(self, generation, photo_id, operation, target, *, timeout, stage_cache='off', stage_cache_budget_bytes=None):
         from raw_region import validate_target
         validate_target(target, operation)
@@ -682,7 +698,8 @@ class LightCraftManager:
                     lightcraft_log('region.tempCleanupFailed', level='warn', generation=generation, errorCode=error.code)
 
     async def _raw_preview(self, generation, photo_id, max_side, *, timeout, before=False,
-                           quality=None, stage_cache="off", stage_cache_budget_bytes=None, crop_edit=None, include_frame=False):
+                           quality=None, stage_cache="off", stage_cache_budget_bytes=None, crop_edit=None, include_frame=False,
+                           simple_crop=False):
         session = self._raw_session(generation)
         if before and not await self._raw_before_supported(generation):
             raise LightCraftError("raw_before_unsupported")
@@ -703,6 +720,10 @@ class LightCraftManager:
                 raise LightCraftError('raw_preview_unsupported')
             options.pop('preview_contract', None)
             options.update(display_mode='crop-edit', crop_edit_contract=1, **crop_edit)
+        if simple_crop:
+            if not include_frame or not await self._raw_crop_edit_supported(generation):
+                raise LightCraftError('raw_preview_unsupported')
+            options['crop_edit'] = True
         try:
             result = await session.client.call_tool_result("render_preview", {
                 "id": photo_id, "max_side": max_side, "format": "png", **options,

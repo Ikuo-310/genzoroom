@@ -72,6 +72,27 @@ def op(kind, **params):
     return {'type': kind, 'params': params}
 
 
+@pytest.mark.parametrize('fault', [None, 'marker', 'frame', 'id'])
+def test_simple_crop_frame_is_bound_to_verified_request(fault):
+    from lightcraft_raw import _validate_simple_crop_png
+    result = native.image_result()
+    meta = json.loads(result['content'][1]['text'])
+    meta.update(cropEdit=True, frame={'geometryId': 'a' * 64, 'nativeWidth': 4000, 'nativeHeight': 3000,
+        'aspect': 4 / 3, 'fullWidth': 16, 'fullHeight': 12, 'window': None})
+    if fault == 'marker': meta['cropEdit'] = False
+    if fault == 'frame': meta['frame']['fullWidth'] = 15
+    if fault == 'id': meta['id'] = 2
+    result['content'][1]['text'] = json.dumps(meta)
+    expected = {'canonicalGeometry': {'crop': copy.deepcopy(DEFAULT_CROP), 'orientation': 'Normal'}}
+    if fault:
+        with pytest.raises(LightCraftError, match='lightcraft_invalid_preview'):
+            _validate_simple_crop_png(result, 1, 1024, expected)
+    else:
+        _, width, height, response = _validate_simple_crop_png(result, 1, 1024, expected)
+        assert (width, height) == (16, 12)
+        assert response['canonicalGeometry'] == expected['canonicalGeometry']
+
+
 async def opened(tmp_path, local, monkeypatch, http):
     monkeypatch.setattr(native, 'RawProcess', GeometryProcess)
     api, manager, children, _ = await setup(tmp_path, local, monkeypatch)

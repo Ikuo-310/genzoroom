@@ -638,10 +638,10 @@ export async function rawPreview(doc: RawDocument, serial: number, signal: Abort
       if (editing && (kind !== 'after' || contract !== '1' || response.headers.has('x-raw-preview-contract'))
         || !editing && response.headers.has('x-raw-crop-edit-contract')) throw new RawApiError('raw_invalid_response');
       const actual = response.headers.get('x-raw-quality');
-      // Whole Full remains usable during a gesture when the engine has no Draft capability.
+      // Full remains usable during a gesture when the engine has no Draft capability.
       if (response.headers.get('x-raw-mode') !== target.mode || response.headers.get('x-raw-view-generation') !== String(target.viewGeneration)
         || contract !== '0' && contract !== '1' || actual !== 'full' && actual !== 'draft'
-        || (contract === '1' ? actual !== target.quality && !(kind === 'after' && !editing && target.quality === 'draft' && actual === 'full') : actual !== 'full')) throw new RawApiError('raw_invalid_response');
+        || (contract === '1' ? actual !== target.quality && !(kind === 'after' && target.quality === 'draft' && actual === 'full') : actual !== 'full')) throw new RawApiError('raw_invalid_response');
       quality = actual;
       if (contract === '1') {
         const encoded = response.headers.get('x-raw-frame');

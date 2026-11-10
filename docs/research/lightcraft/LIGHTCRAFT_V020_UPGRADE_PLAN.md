@@ -42,7 +42,7 @@ feature側でv0.18.1の実行契約や旧Nativeとの互換性を維持する必
 - Backendのコントロール・カーブ・カテゴリ操作86件、カーブ／Frame管理14件、カーブHTTP 2件、Whole HTTP 4件、Frontend関連326件が成功。Frontend型チェック・production build、実EXE／receipt／manifestの再検証も成功した。Frontend buildには大きなbundleと依存モジュールのdirectiveに関する警告がある。ブラウザ・実機操作は未実施。
 - DB・Recipe形式・既存データおよびNative patch／manifest／receiptは変更していない。Before／Draft／Region、Crop／Straighten、WBスポイト、保存・History全体、Export／Immich、実RAW・DX12統合はP3以降の対象。
 
-### P3 調査・部分検証（未完了）
+### P3 調査・部分検証（Crop接続前の記録）
 
 P1のv0.20.0実EXEについて、Backendを経由したMCP能力確認ではWhole Frameのみ対応し、Before、Draft、Region、WB候補APIは未対応だった。現在の接続と必要な作業は以下のとおり。
 
@@ -59,6 +59,13 @@ P1のv0.20.0実EXEについて、Backendを経由したMCP能力確認ではWhol
 実Nativeを用いる追加のopt-in回帰では、JPEGのコピーでCrop設定、8ハンドル、アスペクト比、Straighten、Rotate、Flip、Reset、Whole Frame、古いrevisionの拒否、カーブターゲットのinteraction ID・sequenceとFull画像を確認した。Backendの関連実行は67件成功・1件失敗。既存の実Native／合成DNG統合テストはCrop編集中のPreviewで`raw_preview_unsupported`（HTTP 503）となり、単独実行でも再現した。FrontendのCrop関連80件、Region関連151件と型チェック・production buildは成功したが、これらは実NativeによるRegion接続やブラウザ操作の検証ではない。buildにはbundleサイズ等の警告がある。
 
 P3は完了していない。Native patch・manifest・receipt・実EXE、既存データは変更していない。上記の未接続機能と、実RAW／JPEGのWindows画面操作、GPU動作・品質の目視確認が残る。利用者による実機確認は自動検証と別に行う。
+
+### P3 Crop編集Previewの接続（2026-11-10、P3継続中）
+
+- LightCraft標準の`render_job(..., apply_crop=false)`を呼ぶ最小の`crop_edit`指定を既存Whole APIへ追加し、描画結果と同じFrameを返す。GenzoRoomは現在revisionのNative settingsを確認し、未Crop画像・Frameを検証してCrop編集座標へ接続する。描画前後のsettings readbackと既存の要求世代・revision管理により、古い画像を採用しない。Draft非対応時はFullをFullとして返す。
+- 既存managed patchを必要な接続だけ更新した。14ファイル、追加227行・削除20行、patch SHA-256 `ed202b5e817610c0c4b530767266dce89aa87de82f82a1c519d9175afe98d8be`。cleanな固定upstreamへの適用を確認し、実EXEを再buildした。EXE SHA-256は`9fa5280c8e30f41dd59f07ae3c078ff7c61a59395ecf480dd901d9511109a906`、receiptはWhole FrameとCrop編集契約を記録する。手順は[更新ガイド](UPDATE_GUIDE.md)を参照。
+- Native focused test 2件、実Native／合成DNGのHTTP・一時DB統合を含むBackend関連121件、HTTP focused 6件、既存Whole／カーブ回帰14件、実Native／JPEG幾何回帰1件、Frontend関連276件とproduction buildが成功。以前のCrop編集PreviewのHTTP 503は同じ実Native統合テストで解消を確認した。実EXE／receipt／manifestおよび`git apply --check`も成功。Native buildにはCJK font未同梱等、Frontend buildにはbundleサイズ等の警告がある。
+- P3全体は未完了。Before、Native Draft、Region、WBスポイトと、Crop／回転後のポイントカーブターゲット座標の統合は残る。実RAWとWindows画面での操作・GPU目視は未実施。既存データは変更していない。
 
 ## 既存成果とpatchの扱い
 
