@@ -26,7 +26,7 @@ def manifest(path=None):
     value = json.loads((path or ROOT / "manifest.json").read_text(encoding="utf-8"))
     managed_targets = set()
     for patch in value["patches"]:
-        if 'geometryDescriptorContract' in value and (not isinstance(patch.get('targets'), list) or not patch['targets']):
+        if ('geometryDescriptorContract' in value or 'wholeFrameContract' in value) and (not isinstance(patch.get('targets'), list) or not patch['targets']):
             raise ValueError('managed patch targets are required')
         if hashlib.sha256((ROOT / patch["file"]).read_bytes()).hexdigest() != patch["sha256"]:
             raise ValueError("patch digest mismatch")
@@ -38,6 +38,11 @@ def manifest(path=None):
             if managed_targets.intersection(targets):
                 raise ValueError('duplicate managed patch target')
             managed_targets.update(targets)
+    if 'wholeFrameContract' in value:
+        if type(value['wholeFrameContract']) is not int or value['wholeFrameContract'] != 1 or \
+                not isinstance(value.get('developmentTargetDir'), str) or \
+                not re.fullmatch(r'target(?:-[a-z0-9]+)+', value['developmentTargetDir']):
+            raise ValueError('invalid Whole Frame contract')
     if 'geometryDescriptorContract' in value:
         if 'cropEditContract' in value and (type(value['cropEditContract']) is not int or value['cropEditContract'] != 1):
             raise ValueError('unsupported crop editing contract')
@@ -60,7 +65,7 @@ def source_state(source, spec):
         return subprocess.check_output(["git", "-C", str(source), *args])
     if git("rev-parse", "HEAD").decode().strip() != spec["commit"]:
         raise ValueError("LightCraft HEAD differs from the manifest; review UPDATE_GUIDE.md")
-    if 'geometryDescriptorContract' in spec:
+    if 'geometryDescriptorContract' in spec or 'wholeFrameContract' in spec:
         upstream = tomllib.loads(git('show', 'HEAD:Cargo.toml').decode())
         if upstream['workspace']['package']['version'] != spec['version']:
             raise ValueError('upstream version differs from the manifest')
@@ -109,9 +114,69 @@ def prepare(source, spec, apply=False):
     return state
 
 
+def probe_whole_frame(binary, spec):
+    """Verify the P1 binary's actual MCP schema, settings and Whole response."""
+    with tempfile.TemporaryDirectory(prefix='genzoroom-whole-') as folder:
+        source = Path(folder) / 'probe.png'
+        def chunk(kind, data):
+            return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data))
+        source.write_bytes(b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 32, 24, 8, 2, 0, 0, 0))
+                           + chunk(b'IDAT', zlib.compress((b'\0' + bytes([64, 96, 128]) * 32) * 24)) + chunk(b'IEND', b''))
+        def tool(index, name, arguments):
+            return {'jsonrpc': '2.0', 'id': index, 'method': 'tools/call', 'params': {'name': name, 'arguments': arguments}}
+        messages = [
+            {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'protocolVersion': '2025-06-18',
+             'capabilities': {}, 'clientInfo': {'name': 'genzoroom-build', 'version': '1'}}},
+            {'jsonrpc': '2.0', 'method': 'notifications/initialized'},
+            {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/list'},
+            tool(3, 'command_run', {'id': 'library.import', 'params': {'paths': [str(source)], 'mode': 'add'}}),
+            tool(4, 'command_run', {'id': 'library.select', 'params': {'ids': [1], 'active': 1, 'mode': 'replace'}}),
+            tool(5, 'get_develop', {'id': 1}),
+            tool(6, 'command_run', {'id': 'develop.set', 'params': {'values': {'light.exposure': 0.5}}}),
+            tool(7, 'get_develop', {'id': 1}),
+            tool(8, 'render_preview', {'id': 1, 'max_side': 32, 'format': 'png', 'include_frame': True}),
+            tool(9, 'render_preview', {'id': 999999, 'max_side': 32, 'include_frame': True}),
+        ]
+        process = subprocess.run([str(binary), 'mcp', '--headless', '--compact'],
+            input=''.join(json.dumps(item) + '\n' for item in messages).encode(), stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, timeout=120, check=True, env={**os.environ, 'TEMP': folder, 'TMP': folder},
+            creationflags=0x08000000 if os.name == 'nt' else 0)
+        if len(process.stdout) > 8 * 1024 * 1024:
+            raise ValueError('probe response too large')
+        replies = {item['id']: item for line in process.stdout.splitlines() if (item := json.loads(line)).get('id') is not None}
+        server = replies[1]['result']['serverInfo']
+        if server.get('name') != 'lightcraft' or server.get('version') != spec['version']:
+            raise ValueError('binary version mismatch')
+        preview = next(t for t in replies[2]['result']['tools'] if t['name'] == 'render_preview')
+        properties = preview['inputSchema']['properties']
+        if properties.get('include_frame', {}).get('type') != 'boolean' or \
+                any(key in properties for key in ('stage_cache', 'stage_cache_budget_bytes', 'preview_contract')):
+            raise ValueError('binary Whole schema mismatch')
+        if any(replies[i]['result'].get('isError') is not False for i in (3, 4, 5, 6, 7, 8)) \
+                or replies[9]['result'].get('isError') is not True:
+            raise ValueError('binary operation failed')
+        if replies[7]['result']['structuredContent']['light']['exposure'] != 0.5:
+            raise ValueError('binary settings readback mismatch')
+        result = replies[8]['result']
+        meta = json.loads(next(c['text'] for c in result['content'] if c['type'] == 'text'))
+        image = next(c for c in result['content'] if c['type'] == 'image')
+        png = base64.b64decode(image['data'], validate=True)
+        frame = meta['frame']
+        if set(meta) != {'id', 'width', 'height', 'frame'} or meta['id'] != 1 or image['mimeType'] != 'image/png' \
+                or png[:8] != b'\x89PNG\r\n\x1a\n' or struct.unpack('>II', png[16:24]) != (meta['width'], meta['height']) \
+                or set(frame) != {'geometryId', 'nativeWidth', 'nativeHeight', 'aspect', 'fullWidth', 'fullHeight', 'window'} \
+                or (frame['fullWidth'], frame['fullHeight']) != (meta['width'], meta['height']) \
+                or (frame['nativeWidth'], frame['nativeHeight']) != (32, 24) or frame['window'] is not None \
+                or not re.fullmatch(r'[a-f0-9]{64}', frame['geometryId']) or not math.isfinite(frame['aspect']) or frame['aspect'] <= 0:
+            raise ValueError('binary Whole image/frame mismatch')
+    print('Whole Frame binary schema, settings, PNG and error response verified')
+
+
 def probe(binary, spec=None):
     """Probe the actual binary with a synthetic file; never infer capabilities from its version."""
     spec = spec or manifest()
+    if spec.get('wholeFrameContract') == 1:
+        return probe_whole_frame(binary, spec)
     with tempfile.TemporaryDirectory(prefix="genzoroom-before-") as folder:
         source = Path(folder) / "probe.png"
         def chunk(kind, data):
@@ -409,6 +474,9 @@ def probe_gpu(binary):
 
 
 def receipt(binary, spec):
+    if spec.get('wholeFrameContract') == 1:
+        return {'version': spec['version'], 'commit': spec['commit'], 'patches': spec['patches'],
+                'binarySha256': hashlib.sha256(binary.read_bytes()).hexdigest(), 'wholeFrameContract': 1}
     return {"version": spec["version"], "commit": spec["commit"], "patches": spec["patches"],
             "binarySha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "beforeContract": 1, "previewContract": 1, "regionContract": 1,
             "geometryDescriptorContract": spec['geometryDescriptorContract'],
@@ -432,12 +500,16 @@ def main():
         if args.build:
             if state != "patched" and spec["patches"]:
                 raise ValueError("Before patches must be verified before building")
-            run(["cargo", "test", "--locked", "-p", "lightcraft-mcp", "--", "--test-threads=1"], cwd=args.source)
+            target = args.source.resolve() / spec.get('developmentTargetDir', 'target')
+            if spec.get('wholeFrameContract') == 1:
+                run(['cargo', 'test', '--release', '--locked', '-p', 'lightcraft-mcp', '--target-dir', str(target),
+                     'whole_frame_metadata_matches_png_and_legacy_render', '--', '--test-threads=1'], cwd=args.source)
+            else:
+                run(["cargo", "test", "--locked", "-p", "lightcraft-mcp", "--", "--test-threads=1"], cwd=args.source)
             if spec.get('contracts', {}).get('wb') == 1:
                 run(["cargo", "test", "--locked", "-p", "lightcraft-pipeline", "wb", "--", "--test-threads=1"], cwd=args.source)
                 run(["cargo", "test", "--locked", "-p", "lightcraft-pipeline", "custom_white_balance_redevelops_in_camera_space",
                      "--", "--test-threads=1"], cwd=args.source)
-            target = args.source.resolve() / spec.get('developmentTargetDir', 'target')
             run(["cargo", "build", "--release", "--locked", "--no-default-features", "-p", "lightcraft-cli",
                  "--target-dir", str(target)], cwd=args.source)
             if prepare(args.source, spec) != state:
@@ -448,7 +520,7 @@ def main():
             if receipt(binary, spec) != verified:
                 raise ValueError("binary changed during probe")
             binary.with_suffix(".genzoroom.json").write_text(json.dumps(verified, indent=2) + "\n", encoding="utf-8")
-            print("Adaptive Before/After binary verified; SHA-256 receipt written")
+            print("Binary capability verified; SHA-256 receipt written")
     elif args.apply or args.build:
         parser.error("--source is required")
     if args.binary:
@@ -460,7 +532,7 @@ def main():
         probe(args.binary, spec)
         if receipt(args.binary, spec) != actual:
             raise ValueError("binary changed during probe")
-        print("Adaptive Before/After binary capability and SHA-256 verified")
+        print("Binary capability and SHA-256 verified")
     if not args.source and not args.binary:
         parser.error("provide --source or --binary")
 

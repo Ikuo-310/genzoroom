@@ -181,7 +181,7 @@ function LightCraftInformation({ attempt }: { attempt: number }) {
       const valid = value?.state === 'ready' && artifact && typeof artifact.version === 'string'
         && /^\d+\.\d+\.\d+$/.test(artifact.version) && artifact.version === value.version
         && typeof artifact.upstreamCommit === 'string' && /^[a-f0-9]{40}$/.test(artifact.upstreamCommit)
-        && artifact.managedPatch === true && artifact.geometryDescriptorContract === 2;
+        && artifact.managedPatch === true && artifact.wholeFrameContract === 1;
       setLabel(valid ? artifact.version as string : null);
     }).catch(() => { if (active) setLabel(null); }).finally(() => window.clearTimeout(timeout));
     return () => { active = false; controller.abort(); window.clearTimeout(timeout); };

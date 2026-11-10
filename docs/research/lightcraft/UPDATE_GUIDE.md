@@ -2,7 +2,24 @@
 
 > **更新方針:** 恒久的な責務・最小API・patch管理は[統合契約](LIGHTCRAFT_INTEGRATION_CONTRACT.md)を正本とする。v0.20.0移植は[移植計画](LIGHTCRAFT_V020_UPGRADE_PLAN.md)の正式改訂に従う。以下のv0.18.1固有の契約・互換性・probeは現行構成の記録であり、次版への機械的な移植要件ではない。固定commit、patch、build、実binaryとreceiptの再現性確認は引き続き必要である。
 
-この手順は開発用・配布用のどちらのLightCraftにも適用する。現在の管理基準は **v0.18.1 / `57024f072c234e0c6c850e0940a261790f976575`**（自動検証結果と実機未確認事項は[追随記録](LIGHTCRAFT_0_18_1_UPGRADE_REVIEW.md)を参照）。固定値とパッチdigestの正本は [`native/lightcraft/manifest.json`](../../../native/lightcraft/manifest.json)。独自変更は本家commitに含めず、同directoryのGit patchとして保存する。patchはfull-index形式とし、`.gitattributes`でLFを固定してWindows checkoutでもdigestを維持する。以下のA2〜C2記録は当時のv0.10基準の履歴であり、U3の結果は[追随調査§15](LIGHTCRAFT_0_14_UPGRADE_REVIEW.md#15-u3実装検証結果2026-10-26)を参照する。
+この手順は開発用・配布用のどちらにも適用する。featureブランチのP1管理基準は **v0.20.0 / `192ff72923c39e6623f2c7ff67ab3a119deb8071`**。固定値とpatch digest・targetsの正本は [`native/lightcraft/manifest.json`](../../../native/lightcraft/manifest.json)。独自変更は本家commitに含めずGit patchとして保存する。patchはfull-index形式とし、`.gitattributes`でLFを固定する。
+
+## v0.20.0 P1の再現手順
+
+固定commitのcleanな専用checkoutを用意し、既存のsourceやcheckpointを上書きしない。次の`$source`はそのcheckoutを指す。Windows開発時の自動探索は `.tmp/lightcraft-0.20.0-p1/target-p1-baseline/release/lightcraft-cli.exe` を優先する。
+
+```powershell
+$source = Join-Path $PWD '.tmp/lightcraft-0.20.0-p1'
+.\.venv\Scripts\python.exe native/lightcraft/build.py --source $source --apply
+.\.venv\Scripts\python.exe native/lightcraft/build.py --source $source --build
+.\.venv\Scripts\python.exe native/lightcraft/build.py --binary "$source\target-p1-baseline\release\lightcraft-cli.exe"
+```
+
+`--apply`は固定HEAD・upstream version・patch digestとtargetsを検査し、cleanな状態に順に適用する。部分・重複適用や未知のsource差分は拒否する。`--build`はfocused Native testと `cargo build --release --locked --no-default-features -p lightcraft-cli` を実行し、実EXEのMCP schema・settings・Whole PNG／Frame・異常応答を確認してから隣接receiptを発行する。`--binary`は実EXEのSHA-256とmanifest／receiptの一致、および実応答を再検査する。manifest変更時は `sync_identity.py` でFrontend identityを生成する。P1 receiptは`wholeFrameContract: 1`のみを証明し、旧Before／Region等の契約を証明しない。
+
+## 以下のv0.18.1以前の記録
+
+以下の標準受入・手順・契約番号・実行例は旧managed構成の記録であり、v0.20.0 P1の手順や完了条件ではない。変更する機能に必要な検証は[移植計画](LIGHTCRAFT_V020_UPGRADE_PLAN.md)に従う。v0.18.1の検証と未確認事項は[追随記録](LIGHTCRAFT_0_18_1_UPGRADE_REVIEW.md)、U3は[追随調査§15](LIGHTCRAFT_0_14_UPGRADE_REVIEW.md#15-u3実装検証結果2026-10-26)を参照する。
 
 RAW Preview統合はLightCraft v0.14.0で機能完了している。Whole Draft/Full、Native geometry/DPR、Region/Pan/Zoom、Before/After、stale result handling、Recipe restore/RAW Reset、Smoke、Developer Diagnostics RAW Benchmarkを含む。初回RAW open約2秒、cold first Region Plan約660ms（約99.96%がFull source初回生成）、同一document再Plan約0.25msはblocking issueではなく将来の性能最適化候補。条件付きmetadata-only Plan、Full source prewarm、source生成内部最適化は未実装の将来検討であり、[Region設計§18](RAW_REGION_PREVIEW_DESIGN.md#18-raw-preview機能完了と性能課題の扱い2026-10-26)に判断根拠を記録する。
 

@@ -4,12 +4,12 @@
 
 ## 目的とバージョン方針
 
-既存の編集、Preview、保存、Export、Immich登録をv0.20.0で成立させる。旧Native内部契約の全面移植は廃止し、標準APIで足りない接続だけを最小限のpatchで補う。`main`は変更せず、このfeatureブランチをv0.20.0専用構成へ移す。現時点のmanifestはv0.18.1であり、本書の改訂は実装や切替を意味しない。
+既存の編集、Preview、保存、Export、Immich登録をv0.20.0で成立させる。旧Native内部契約の全面移植は廃止し、標準APIで足りない接続だけを最小限のpatchで補う。`main`は変更せず、このfeatureブランチをv0.20.0専用構成へ移す。P1でmanifestと基本Native接続をv0.20.0へ切替えた。後続機能は各工程で接続する。
 
 | 基準 | 正式tag | 固定upstream commit |
 |---|---|---|
-| 現在のmanaged構成 | v0.18.1 | `57024f072c234e0c6c850e0940a261790f976575` |
-| 移植対象 | v0.20.0 | `192ff72923c39e6623f2c7ff67ab3a119deb8071` |
+| P1以前のmanaged構成 | v0.18.1 | `57024f072c234e0c6c850e0940a261790f976575` |
+| P1のmanaged構成 | v0.20.0 | `192ff72923c39e6623f2c7ff67ab3a119deb8071` |
 
 feature側でv0.18.1の実行契約や旧Nativeとの互換性を維持する必要はない。旧DB・Recipe・Historyとの後方互換性が複雑化の原因となる場合は破壊的変更を許容する。変更前に対象・影響・復旧方法を確認し文書化し、無関係なデータを削除しない。v0.20.0で新規作成した保存データの正常な保存・復元は必須とする。旧版との画質一致は要求しない。
 
@@ -25,6 +25,14 @@ feature側でv0.18.1の実行契約や旧Nativeとの互換性を維持する必
 | P6 | 実RAW／JPEG、CPU／DX12で統合確認し、不要patchを整理する。cleanな固定upstreamへの適用・buildと実binaryのschema、応答種別、SHA-256、manifest／receiptの整合を確認して正式採用する。 |
 
 完了は機能と影響範囲に応じた検証を基準とし、旧patchのhunk単位移植を要件としない。工程ごとのfocused testと必要なbuild・型チェックを行い、実機確認は自動テストと区別する。性能やメモリに具体的な異常があれば対象を絞って調査する。
+
+### P1 実施記録（2026-11-10）
+
+- manifestをv0.20.0／固定commitへ切替え、標準Whole描画の実結果からUIに必要なFrameを取得する [`0001-v0.20.0-whole-frame.patch`](../../../native/lightcraft/patches/0001-v0.20.0-whole-frame.patch) のみを適用する。14ファイル、追加187行・削除20行、SHA-256 `2e99310e237a9a9b94e0fb85f6f64ef24492401dc05eb7d9f44fe1c5fe31f9bd`。対象と順序はmanifestが正本。内部キャッシュ・実行詳細の公開は追加しない。
+- `build.py`の固定commit・version・patch digest／targets・全source差分検証、部分・重複適用拒否、実binary probeとreceiptを維持し、P1の`wholeFrameContract: 1`を検査する。Backendのartifact認証とFrontendの表示identityも同じmanifestに揃えた。旧Before／Region等の能力はreceiptに記載しない。
+- clean固定sourceへの適用と独立した`git apply --check`、Native focused test 1件、`cargo build --release --locked --no-default-features -p lightcraft-cli`を確認。生成EXEは `.tmp/lightcraft-0.20.0-p1/target-p1-baseline/release/lightcraft-cli.exe`、SHA-256 `c3a1b9eeb43894072e933399a7afeb23975708decd8115cf740697723e3db7cd`。隣接receiptとmanifest・patch・実binaryを`build.py --binary`で再検証した。
+- 合成PNGを用いた実Native MCP検証で初期化、schema、写真読込、settings取得・変更、Whole After／Full PNG・photo ID・Frame寸法、存在しない写真へのエラーと正常終了を確認。実receiptで認証したBackend経由でも読込、露出変更、revision更新、Whole取得と終了を確認した。Backendのmanifest・receipt test 44件、Frame・HTTP test 9件、起動・通信test 82件、設定画面test 28件とFrontend production buildが成功。ビルド時には未使用upstream patch、CJK font未同梱およびFrontend bundleに関する警告が出た。
+- DBや既存データは変更していない。実RAW／JPEG、UI実機操作、Before／Draft／Region、Crop／Straighten、WB、Recipe／History、Export／Immich、実DX12は未検証でありP2以降に残す。既存の旧patch・累積暫定patch・checkpointは保持した。
 
 ## 既存成果とpatchの扱い
 

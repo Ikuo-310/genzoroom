@@ -14,19 +14,34 @@ spec.loader.exec_module(build)
 
 def test_manifest_patch_digest_and_targets():
     value = build.manifest()
-    assert value["version"] == "0.18.1"
-    assert value["commit"] == "57024f072c234e0c6c850e0940a261790f976575"
-    assert value['geometryDescriptorContract'] == 2
-    assert value['contracts'] == {'before': 1, 'preview': 1, 'region': 1, 'wb': 1}
-    assert len(value["patches"]) == 2
+    assert value["version"] == "0.20.0"
+    assert value["commit"] == "192ff72923c39e6623f2c7ff67ab3a119deb8071"
+    assert value['wholeFrameContract'] == 1
+    assert len(value["patches"]) == 1
     patch = (build.ROOT / value["patches"][0]["file"]).read_text(encoding="utf-8")
-    assert '"before"' in patch and 'render_job(id, size, size, true, true)' in patch
+    assert '"include_frame"' in patch
     assert all(f"a/{target}" in patch for target in value["patches"][0]["targets"])
-    assert 'GEOMETRY_DESCRIPTOR_CONTRACT: u64 = 2' in patch and '"nativeAspect":native_aspect' in patch
-    lens_patch = (build.ROOT / value['patches'][1]['file']).read_text(encoding='utf-8')
-    assert value['lensProfileInfoContract'] == 1
-    assert value['patches'][1]['targets'] == ['crates/engine/src/cmd/query.rs']
-    assert 'photo.lensProfileInfo' in lens_patch
+    assert 'GEOMETRY_DESCRIPTOR_CONTRACT: u64 = 2' in patch
+
+
+@pytest.mark.parametrize('changes', [
+    {'wholeFrameContract': True}, {'wholeFrameContract': 2},
+    {'developmentTargetDir': None}, {'developmentTargetDir': '../target'},
+])
+def test_whole_frame_manifest_rejects_invalid_contract_or_target(tmp_path, changes):
+    path = tmp_path / 'manifest.json'
+    path.write_text(json.dumps({**build.manifest(), **changes}), encoding='utf-8')
+    with pytest.raises(ValueError, match='invalid Whole Frame contract'):
+        build.manifest(path)
+
+
+def test_whole_frame_receipt_does_not_claim_unimplemented_contracts(tmp_path):
+    binary = tmp_path / 'engine.exe'
+    binary.write_bytes(b'fixture executable')
+    receipt = build.receipt(binary, build.manifest())
+    assert receipt['wholeFrameContract'] == 1
+    assert receipt['binarySha256'] == hashlib.sha256(binary.read_bytes()).hexdigest()
+    assert not {'beforeContract', 'previewContract', 'regionContract', 'wbContract'} & receipt.keys()
 
 
 def test_archived_010_manifest_and_patch_remain_reproducible():
@@ -62,7 +77,7 @@ def test_archived_018_manifest_preserves_the_crop_managed_tuple():
     {'lensProfileInfoContract': True}, {'lensProfileInfoContract': 2},
 ])
 def test_wb_manifest_requires_a_supported_contract_and_independent_target(tmp_path, changes):
-    value = {**build.manifest(), **changes}
+    value = {**build.manifest(build.ROOT / 'versions/0.18.0.json'), **changes}
     path = tmp_path / 'manifest.json'
     path.write_text(json.dumps(value), encoding='utf-8')
     with pytest.raises(ValueError, match='unsupported managed contracts|invalid managed development target|unsupported crop editing contract|unsupported lens profile information contract'):
@@ -72,11 +87,10 @@ def test_wb_manifest_requires_a_supported_contract_and_independent_target(tmp_pa
 def test_wb_receipt_adds_only_the_independent_wb_contract(tmp_path):
     binary = tmp_path / 'engine.exe'
     binary.write_bytes(b'fixture executable')
-    value = build.manifest()
+    value = build.manifest(build.ROOT / 'versions/0.18.0.json')
     actual = build.receipt(binary, value)
     assert actual['wbContract'] == 1
     assert actual['cropEditContract'] == 1
-    assert actual['lensProfileInfoContract'] == 1
     assert all(actual[key] == 1 for key in ('beforeContract', 'previewContract', 'regionContract'))
     assert actual['geometryDescriptorContract'] == 2
     assert actual['binarySha256'] == hashlib.sha256(binary.read_bytes()).hexdigest()

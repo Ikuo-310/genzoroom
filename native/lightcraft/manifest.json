@@ -3,58 +3,27 @@
     {
       "targets": [
         "Cargo.lock",
-        "crates/engine/src/cmd/develop.rs",
         "crates/engine/src/media/quick.rs",
         "crates/engine/src/media/render.rs",
-        "crates/engine/src/media/session.rs",
-        "crates/engine/src/media/tests.rs",
         "crates/engine/src/slide_title.rs",
-        "crates/gpu/src/lib.rs",
         "crates/gpu/src/render.rs",
-        "crates/gpu/tests/it/equivalence.rs",
         "crates/mcp/Cargo.toml",
-        "crates/mcp/src/backend.rs",
         "crates/mcp/src/headless.rs",
         "crates/mcp/src/lib.rs",
         "crates/mcp/src/preview.rs",
-        "crates/mcp/src/region.rs",
-        "crates/mcp/src/region/tests.rs",
-        "crates/mcp/src/region_contract.json",
-        "crates/mcp/src/region_fixtures.json",
-        "crates/mcp/src/region_schema.json",
+        "crates/mcp/src/tests.rs",
         "crates/mcp/src/tools.rs",
-        "crates/mcp/src/wb.rs",
-        "crates/mcp/src/wb/tests.rs",
-        "crates/mcp/tests/it/e2e.rs",
-        "crates/pipeline/src/auto.rs",
         "crates/pipeline/src/geometry.rs",
         "crates/pipeline/src/lib.rs",
-        "crates/pipeline/src/tests.rs",
         "crates/ui-egui/src/render.rs"
       ],
-      "file": "patches/0002-v0.18.1-native-contracts.patch",
-      "purpose": "Native Before, adaptive Whole and Region contract 1, geometry descriptor 2 and read-only WB estimation contract 1, read-only Crop editing display contract 1",
-      "sha256": "b2ce1c237f45adee62d09757d1ef544880f13f8a14114858b065f1ffa9dd2976"
-    },
-    {
-      "targets": [
-        "crates/engine/src/cmd/query.rs"
-      ],
-      "file": "patches/0003-v0.18.1-lens-profile-info.patch",
-      "purpose": "Read-only photo-specific lens profile information contract 1",
-      "sha256": "61dc7e48a297bd3b8d7fd24873e692c5579d399bcc1cac1d6ba93f8b9fe5de0b"
+      "file": "patches/0001-v0.20.0-whole-frame.patch",
+      "purpose": "Return geometry from the Whole image render",
+      "sha256": "2e99310e237a9a9b94e0fb85f6f64ef24492401dc05eb7d9f44fe1c5fe31f9bd"
     }
   ],
-  "commit": "57024f072c234e0c6c850e0940a261790f976575",
-  "version": "0.18.1",
-  "geometryDescriptorContract": 2,
-  "contracts": {
-    "before": 1,
-    "preview": 1,
-    "region": 1,
-    "wb": 1
-  },
-  "developmentTargetDir": "target-lens-profile-info",
-  "cropEditContract": 1,
-  "lensProfileInfoContract": 1
+  "commit": "192ff72923c39e6623f2c7ff67ab3a119deb8071",
+  "version": "0.20.0",
+  "wholeFrameContract": 1,
+  "developmentTargetDir": "target-p1-baseline"
 }

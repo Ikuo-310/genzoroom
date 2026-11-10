@@ -12,20 +12,16 @@ from tests.test_lightcraft_mcp import until
 
 def write_receipt(executable, **changes):
     digest = hashlib.sha256(executable.read_bytes()).hexdigest()
-    value = {**{key: MANAGED[key] for key in ('version', 'commit', 'patches', 'geometryDescriptorContract')},
-             'binarySha256': digest, 'beforeContract': 1, 'previewContract': 1, 'regionContract': 1, 'wbContract': 1,
-             **({'cropEditContract': 1} if MANAGED.get('cropEditContract') == 1 else {}),
-             **({'lensProfileInfoContract': 1} if MANAGED.get('lensProfileInfoContract') == 1 else {}), **changes}
+    value = {**{key: MANAGED[key] for key in ('version', 'commit', 'patches')},
+             'binarySha256': digest, 'wholeFrameContract': 1, **changes}
     executable.with_suffix('.genzoroom.json').write_text(json.dumps(value), encoding='utf-8')
     return digest
 
 
 @pytest.mark.parametrize('changes', [
     {'version': '0.10.0'}, {'commit': 'a' * 40}, {'binarySha256': 'b' * 64},
-    {'patches': []}, {'beforeContract': 2}, {'regionContract': True}, {'geometryDescriptorContract': 1},
-    {'wbContract': True}, {'wbContract': 2}, {'wbContract': None},
-    {'cropEditContract': True}, {'cropEditContract': 2}, {'cropEditContract': None},
-    {'lensProfileInfoContract': True}, {'lensProfileInfoContract': 2}, {'lensProfileInfoContract': None},
+    {'patches': []}, {'wholeFrameContract': True}, {'wholeFrameContract': 2}, {'wholeFrameContract': None},
+    {'beforeContract': 1}, {'regionContract': 1},
 ])
 def test_receipt_mismatch_never_claims_a_managed_version(tmp_path, changes):
     executable = tmp_path / 'engine.exe'
@@ -46,24 +42,13 @@ def test_missing_malformed_and_replaced_binary_receipts(tmp_path):
     assert verified_artifact(executable, 'c' * 64, ENGINE_VERSION) is None
 
 
-def test_receipt_without_wb_contract_is_not_a_phase_one_artifact(tmp_path):
+def test_receipt_without_whole_frame_contract_is_not_managed(tmp_path):
     executable = tmp_path / 'engine.exe'
     executable.write_bytes(b'actual engine')
     digest = write_receipt(executable)
     path = executable.with_suffix('.genzoroom.json')
     receipt = json.loads(path.read_text(encoding='utf-8'))
-    del receipt['wbContract']
-    path.write_text(json.dumps(receipt), encoding='utf-8')
-    assert verified_artifact(executable, digest, ENGINE_VERSION) is None
-
-
-def test_receipt_without_lens_profile_info_contract_is_not_managed(tmp_path):
-    executable = tmp_path / 'engine.exe'
-    executable.write_bytes(b'actual engine')
-    digest = write_receipt(executable)
-    path = executable.with_suffix('.genzoroom.json')
-    receipt = json.loads(path.read_text(encoding='utf-8'))
-    del receipt['lensProfileInfoContract']
+    del receipt['wholeFrameContract']
     path.write_text(json.dumps(receipt), encoding='utf-8')
     assert verified_artifact(executable, digest, ENGINE_VERSION) is None
 
@@ -127,6 +112,11 @@ def test_managed_executable_discovery_is_dev_only_and_manifest_bound(tmp_path):
     exact.parent.mkdir(parents=True)
     exact.write_bytes(b'patch-version executable')
     assert resolve_managed_executable({}, 'win32', project_root=root, frozen=False) == str(exact)
+    p1 = root / '.tmp' / f"lightcraft-{MANAGED['version']}-p1" / MANAGED['developmentTargetDir'] / 'release' / 'lightcraft-cli.exe'
+    p1.parent.mkdir(parents=True)
+    p1.write_bytes(b'p1 executable')
+    assert resolve_managed_executable({}, 'win32', project_root=root, frozen=False) == str(p1)
+    p1.unlink()
     assert verified_artifact(exact, hashlib.sha256(exact.read_bytes()).hexdigest(), ENGINE_VERSION) is None
     exact.unlink()
     assert resolve_managed_executable({}, 'win32', project_root=root, frozen=False) == str(executable)

@@ -376,11 +376,9 @@ async def create(tmp_path, *, timeouts=QUICK, adaptive=False):
     exe.write_bytes(b"fake")
     # RAW fixtures attest their exact synthetic executable, like a managed production process.
     exe.with_suffix('.genzoroom.json').write_text(json.dumps({
-        **{key: MANAGED[key] for key in ('version', 'commit', 'patches', 'geometryDescriptorContract')},
+        **{key: MANAGED[key] for key in ('version', 'commit', 'patches')},
         'binarySha256': hashlib.sha256(b'fake').hexdigest(),
-        'beforeContract': 1, 'previewContract': 1, 'regionContract': 1, 'wbContract': 1,
-        **({'cropEditContract': 1} if MANAGED.get('cropEditContract') == 1 else {}),
-        **({'lensProfileInfoContract': 1} if MANAGED.get('lensProfileInfoContract') == 1 else {})}), encoding='utf-8')
+        'wholeFrameContract': 1}), encoding='utf-8')
     children = []
 
     async def spawn(*args, **kwargs):

@@ -303,7 +303,7 @@ describe('shared Settings modal', () => {
   it.each([
     { state: 'disabled', artifact: null },
     { state: 'ready', version: '0.14.0', artifact: { version: '0.14.0' } },
-    { state: 'ready', version: '0.14.0', artifact: { version: '9.9.9', upstreamCommit: 'a'.repeat(40), managedPatch: true, geometryDescriptorContract: 2 } },
+    { state: 'ready', version: '0.14.0', artifact: { version: '9.9.9', upstreamCommit: 'a'.repeat(40), managedPatch: true, wholeFrameContract: 1 } },
     null,
   ])('does not claim a LightCraft version from unavailable or malformed metadata %#', async metadata => {
     const fallback = fetchMock.getMockImplementation()!;
@@ -318,7 +318,7 @@ describe('shared Settings modal', () => {
     const fallback = fetchMock.getMockImplementation()!;
     const waiting: ((value: unknown) => void)[] = [];
     const metadata = (version: string) => ({ state: 'ready', available: true, version,
-      artifact: { version, upstreamCommit: 'a'.repeat(40), managedPatch: true, geometryDescriptorContract: 2 } });
+      artifact: { version, upstreamCommit: 'a'.repeat(40), managedPatch: true, wholeFrameContract: 1 } });
     fetchMock.mockImplementation(async (url: string) => url === '/api/raw/capabilities'
       ? { ok: true, json: () => new Promise(resolve => waiting.push(resolve)) } : fallback(url));
     await click(host.querySelector('button')!);

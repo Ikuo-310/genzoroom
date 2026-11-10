@@ -37,4 +37,4 @@ GenzoRoomは通信・session・操作エラーを扱い、原本の意図しな�
 4. Native build成果物の実binary、manifest、receipt、patch、固定commitの整合を確認する。versionだけでなく実binaryのschema・応答種別とSHA-256 receiptを検証する。
 5. 次回更新では旧patchを機械的に全面移植せず、上流標準APIと必要なアプリケーション機能を再評価する。上流標準で実現可能になった独自APIのpatchは削除候補とし、同等機能の確認後に廃止する。
 
-現在のmanifestはv0.18.1の固定commitと有効な `0002`／`0003` patchのdigest・targets・目的を管理し、旧版patchも履歴として存在する。開発中の累積暫定patchは成果として保持し、正式採用時には必要な接続のみのmanaged patchに整理する。実際の手順は [更新ガイド](UPDATE_GUIDE.md) を参照し、過去の契約固有の記述は現行実装や履歴として扱う。
+featureブランチのP1 manifestはv0.20.0の固定commitとWhole Frame patchのdigest・targets・目的を管理し、v0.18.1の `0002`／`0003` を含む旧版patchは履歴として保持する。開発中の累積暫定patchは成果として保持し、正式採用時には必要な接続のみのmanaged patchに整理する。実際の手順は [更新ガイド](UPDATE_GUIDE.md) を参照し、過去の契約固有の記述は現行実装や履歴として扱う。
