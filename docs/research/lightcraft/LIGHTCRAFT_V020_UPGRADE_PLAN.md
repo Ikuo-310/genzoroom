@@ -42,6 +42,24 @@ feature側でv0.18.1の実行契約や旧Nativeとの互換性を維持する必
 - Backendのコントロール・カーブ・カテゴリ操作86件、カーブ／Frame管理14件、カーブHTTP 2件、Whole HTTP 4件、Frontend関連326件が成功。Frontend型チェック・production build、実EXE／receipt／manifestの再検証も成功した。Frontend buildには大きなbundleと依存モジュールのdirectiveに関する警告がある。ブラウザ・実機操作は未実施。
 - DB・Recipe形式・既存データおよびNative patch／manifest／receiptは変更していない。Before／Draft／Region、Crop／Straighten、WBスポイト、保存・History全体、Export／Immich、実RAW・DX12統合はP3以降の対象。
 
+### P3 調査・部分検証（未完了）
+
+P1のv0.20.0実EXEについて、Backendを経由したMCP能力確認ではWhole Frameのみ対応し、Before、Draft、Region、WB候補APIは未対応だった。現在の接続と必要な作業は以下のとおり。
+
+| 機能・GenzoRoomの要求 | v0.20.0側の機能と必要な接続 | 現状 |
+|---|---|---|
+| Whole After／Full：画像・Frameとrevision | 標準`render_preview`とP1のFrame公開を使用 | 接続済み。JPEGで実Native経由の幾何操作後のWholeを確認 |
+| Before：import基準と現在のCrop／orientation | Engineの`before_settings`／`render_job(..., before=true, ...)`は存在するが、現在のMCP描画にはBefore引数がない。画像種別と要求の対応を含む最小公開とBackend接続が必要 | 未接続 |
+| Draft／Full：操作中と確定時の品質 | Engineの`RenderJob::draft()`は存在するがMCP描画に品質指定がない。実品質を明示する公開と旧Adaptive依存の整理が必要 | Draft未接続。P2のWhole Full fallbackは維持 |
+| Region／Zoom／Pan：Full上のwindowと配置Geometry | Engineの`region_job`／`region_job_before`は存在するが、現MCPにはRegionの要求・応答がない。必要なwindow・Geometryのみを公開し、Backend／Frontendの旧診断必須条件を整理する必要がある | 未接続 |
+| Crop／Straighten／Rotate／Flip：操作とCrop編集画像 | 標準の`crop.*`／`photo.*`はsettingsを変更できる。Engineは`apply_crop=false`を指定できるが現MCPにはCrop編集画像の公開がなく、画像と編集対象Geometryの対応を接続する必要がある | 操作と通常Wholeを実Nativeで確認。Crop編集Previewは未接続 |
+| WBスポイト：表示位置から候補を取得して適用 | 標準`develop.wbPick`は設定を直接変更する。既存UIの候補取得・確認境界と座標対応に必要な接続を検討する必要がある | 未接続 |
+| ポイントカーブターゲット：画像上の位置とinteraction | 標準`develop.targeted`と既存interaction経路を使用 | JPEGで値の更新とWhole Fullを確認。Crop／回転後の表示座標との対応は未検証 |
+
+実Nativeを用いる追加のopt-in回帰では、JPEGのコピーでCrop設定、8ハンドル、アスペクト比、Straighten、Rotate、Flip、Reset、Whole Frame、古いrevisionの拒否、カーブターゲットのinteraction ID・sequenceとFull画像を確認した。Backendの関連実行は67件成功・1件失敗。既存の実Native／合成DNG統合テストはCrop編集中のPreviewで`raw_preview_unsupported`（HTTP 503）となり、単独実行でも再現した。FrontendのCrop関連80件、Region関連151件と型チェック・production buildは成功したが、これらは実NativeによるRegion接続やブラウザ操作の検証ではない。buildにはbundleサイズ等の警告がある。
+
+P3は完了していない。Native patch・manifest・receipt・実EXE、既存データは変更していない。上記の未接続機能と、実RAW／JPEGのWindows画面操作、GPU動作・品質の目視確認が残る。利用者による実機確認は自動検証と別に行う。
+
 ## 既存成果とpatchの扱い
 
 N1-1a〜cのFrame取得・受信・表示経路とN1-2のStageCache所有簡素化は再利用候補であり、そのままの採用を要求しない。N1-3はRevert済みであり、StageCache ON／OFFを公開接続契約として再導入しない。累積暫定patchとcheckpointは開発中の成果・履歴として保持し、正式採用時に必要な接続だけをmanaged patchへ整理する。旧成果の検証はその時点の範囲に限り、v0.20.0の完成を意味しない。
