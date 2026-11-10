@@ -1,5 +1,7 @@
 # LightCraft 更新・GenzoRoomパッチ管理
 
+> **更新方針:** 恒久的な責務・最小API・patch管理は[統合契約](LIGHTCRAFT_INTEGRATION_CONTRACT.md)を正本とする。v0.20.0移植は[移植計画](LIGHTCRAFT_V020_UPGRADE_PLAN.md)の正式改訂に従う。以下のv0.18.1固有の契約・互換性・probeは現行構成の記録であり、次版への機械的な移植要件ではない。固定commit、patch、build、実binaryとreceiptの再現性確認は引き続き必要である。
+
 この手順は開発用・配布用のどちらのLightCraftにも適用する。現在の管理基準は **v0.18.1 / `57024f072c234e0c6c850e0940a261790f976575`**（自動検証結果と実機未確認事項は[追随記録](LIGHTCRAFT_0_18_1_UPGRADE_REVIEW.md)を参照）。固定値とパッチdigestの正本は [`native/lightcraft/manifest.json`](../../../native/lightcraft/manifest.json)。独自変更は本家commitに含めず、同directoryのGit patchとして保存する。patchはfull-index形式とし、`.gitattributes`でLFを固定してWindows checkoutでもdigestを維持する。以下のA2〜C2記録は当時のv0.10基準の履歴であり、U3の結果は[追随調査§15](LIGHTCRAFT_0_14_UPGRADE_REVIEW.md#15-u3実装検証結果2026-10-26)を参照する。
 
 RAW Preview統合はLightCraft v0.14.0で機能完了している。Whole Draft/Full、Native geometry/DPR、Region/Pan/Zoom、Before/After、stale result handling、Recipe restore/RAW Reset、Smoke、Developer Diagnostics RAW Benchmarkを含む。初回RAW open約2秒、cold first Region Plan約660ms（約99.96%がFull source初回生成）、同一document再Plan約0.25msはblocking issueではなく将来の性能最適化候補。条件付きmetadata-only Plan、Full source prewarm、source生成内部最適化は未実装の将来検討であり、[Region設計§18](RAW_REGION_PREVIEW_DESIGN.md#18-raw-preview機能完了と性能課題の扱い2026-10-26)に判断根拠を記録する。

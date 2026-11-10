@@ -1,8 +1,48 @@
-# LightCraft v0.20.0 統合計画 — 最小公開APIへの移行
+# LightCraft v0.20.0 エンジン載せ換え計画
+
+正式改訂：2026-11-10（Asia/Tokyo）。対象は `feature/lightcraft-v020-port`。恒久的な責務・接続原則は [統合契約](LIGHTCRAFT_INTEGRATION_CONTRACT.md) を正本とする。本節のみを今後のv0.20.0移植計画とし、以下の旧N1〜N6および旧P0・P1〜P12は実施当時の計画・検証履歴として保持する。それらの工程、必須metadata、hunk移植、v0.18.1環境維持の指示は新計画に適用しない。
+
+## 目的とバージョン方針
+
+既存の編集、Preview、保存、Export、Immich登録をv0.20.0で成立させる。旧Native内部契約の全面移植は廃止し、標準APIで足りない接続だけを最小限のpatchで補う。`main`は変更せず、このfeatureブランチをv0.20.0専用構成へ移す。現時点のmanifestはv0.18.1であり、本書の改訂は実装や切替を意味しない。
+
+| 基準 | 正式tag | 固定upstream commit |
+|---|---|---|
+| 現在のmanaged構成 | v0.18.1 | `57024f072c234e0c6c850e0940a261790f976575` |
+| 移植対象 | v0.20.0 | `192ff72923c39e6623f2c7ff67ab3a119deb8071` |
+
+feature側でv0.18.1の実行契約や旧Nativeとの互換性を維持する必要はない。旧DB・Recipe・Historyとの後方互換性が複雑化の原因となる場合は破壊的変更を許容する。変更前に対象・影響・復旧方法を確認し文書化し、無関係なデータを削除しない。v0.20.0で新規作成した保存データの正常な保存・復元は必須とする。旧版との画質一致は要求しない。
+
+## 工程と機能単位の完了条件
+
+| 工程 | 対象と完了条件 |
+|---|---|
+| P1 | featureブランチをv0.20.0専用構成へ切替え、固定sourceからNative build・起動・基本接続を成立させる。 |
+| P2 | 編集パラメーターをv0.20.0に送信し、操作結果をUIへ反映する。解釈はLightCraftに委ねる。 |
+| P3 | Whole／Region／Before／After／Draft／Full、Crop／Straighten、スポイト等を接続し、必要なGeometryと要求世代・revisionに基づく表示・stale応答処理を確認する。 |
+| P4 | v0.20.0で新規作成したRecipe／Historyの保存・復元、Undo／Redo／Jump／Resetと保存失敗時の扱いを確認する。 |
+| P5 | 標準Export、Queue、Thumbnail、Immich登録とSTACK連携を確認し、原本保護と生成物の管理を維持する。 |
+| P6 | 実RAW／JPEG、CPU／DX12で統合確認し、不要patchを整理する。cleanな固定upstreamへの適用・buildと実binaryのschema、応答種別、SHA-256、manifest／receiptの整合を確認して正式採用する。 |
+
+完了は機能と影響範囲に応じた検証を基準とし、旧patchのhunk単位移植を要件としない。工程ごとのfocused testと必要なbuild・型チェックを行い、実機確認は自動テストと区別する。性能やメモリに具体的な異常があれば対象を絞って調査する。
+
+## 既存成果とpatchの扱い
+
+N1-1a〜cのFrame取得・受信・表示経路とN1-2のStageCache所有簡素化は再利用候補であり、そのままの採用を要求しない。N1-3はRevert済みであり、StageCache ON／OFFを公開接続契約として再導入しない。累積暫定patchとcheckpointは開発中の成果・履歴として保持し、正式採用時に必要な接続だけをmanaged patchへ整理する。旧成果の検証はその時点の範囲に限り、v0.20.0の完成を意味しない。
+
+patchの目的、変更箇所、公開API、必要性、ファイル数と追加・削除行数を記録し、固定commitへの再現可能な適用とartifactの整合を確認する。次の更新では上流標準APIとの差分を再評価し、標準で実現可能になった独自APIのpatchは削除候補とする。既存の `build.py`、manifest、receipt方式は再現性のため維持する。詳細は[統合契約](LIGHTCRAFT_INTEGRATION_CONTRACT.md#native-patchと成果物の管理)と[更新ガイド](UPDATE_GUIDE.md)を参照する。
+
+---
+
+# 履歴：旧N1〜N6計画と実施記録
+
+**以下は当時の記録であり、現在の実装指示ではない。** 後続の旧P0・P1〜P12も同様である。v0.18.1環境維持、旧契約やStageCache操作、metadata、工程順、完了条件に関する記述は当時の方針を示す。上記の正式改訂が優先する。
+
+# LightCraft v0.20.0 統合計画 — 最小公開APIへの移行（旧版）
 
 正式改訂：2026-11-10（Asia/Tokyo）。対象ブランチ：`feature/lightcraft-v020-port`。
 
-**本書前半の改訂計画を今後の実装方針とする。旧方針「Native内部契約の全面移植」は廃止し、既存Engineを利用する最小公開APIへの移行を採用する。** 後半の旧P0計画・技術調査・P1〜P4-A1の検証記録は履歴として保持する。旧P1〜P12の工程順・完了条件・必須metadata・全hunk移植を、新計画の完了条件へ引き継がない。
+**当時の改訂方針：** 旧方針「Native内部契約の全面移植」は廃止し、既存Engineを利用する最小公開APIへの移行を採用した。後半の旧P0計画・技術調査・P1〜P4-A1の検証記録は履歴として保持する。旧P1〜P12の工程順・完了条件・必須metadata・全hunk移植は引き継がなかった。
 
 本改訂は計画書のみの変更であり、Native／Backend／Frontendの実装、patch、manifest、EXE、receiptを変更した記録ではない。N1の途中段階としてN1-1a／N1-1b／N1-1c／N1-2を実施。N1全体とN2以降は未完了。
 
