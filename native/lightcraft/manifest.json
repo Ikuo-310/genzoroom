@@ -1,11 +1,15 @@
 {
   "patches": [
     {
+      "file": "patches/0001-v0.20.0-whole-frame.patch",
+      "purpose": "Expose Whole/Crop Frame, Before/After, Draft/Full, standard Engine Region rendering and read-only WB candidate estimation",
       "targets": [
         "Cargo.lock",
+        "crates/engine/src/cmd/develop.rs",
         "crates/engine/src/media/quick.rs",
         "crates/engine/src/media/render.rs",
         "crates/engine/src/slide_title.rs",
+        "crates/engine/src/tests.rs",
         "crates/gpu/src/render.rs",
         "crates/mcp/Cargo.toml",
         "crates/mcp/src/headless.rs",
@@ -18,18 +22,20 @@
         "crates/pipeline/src/lib.rs",
         "crates/ui-egui/src/render.rs"
       ],
-      "file": "patches/0001-v0.20.0-whole-frame.patch",
-      "purpose": "Expose rendered Whole/Crop Frame, Before/After, Draft/Full and minimal Engine Region rendering",
-      "sha256": "cd256727bd9f40661f2e066e1db37fa47ed2c26ccc4ead083bb46b0b6fd3dde8"
+      "sha256": "ca30ff958ff5fbbd04e8e50b31c7c01a6319b7864b49ef8e506c3f20acc5f2ab",
+      "files": 17,
+      "insertions": 626,
+      "deletions": 35
     }
   ],
   "commit": "192ff72923c39e6623f2c7ff67ab3a119deb8071",
   "version": "0.20.0",
   "wholeFrameContract": 1,
-  "developmentTargetDir": "target-p3-region",
+  "developmentTargetDir": "target-p3-wb",
   "cropEditContract": 1,
   "beforeAfterContract": 1,
   "draftContract": 1,
   "regionContract": 1,
-  "geometryDescriptorContract": 2
+  "geometryDescriptorContract": 2,
+  "wbContract": 1
 }

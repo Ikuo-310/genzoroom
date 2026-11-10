@@ -36,11 +36,20 @@ class WBProcess(native.RawProcess):
                      'wb_contract': {'type': 'integer', 'enum': [1]},
                      'operation': {'type': 'string', 'enum': ['auto', 'pick']},
                      'settingsFingerprint': {'type': 'string', 'pattern': '^[a-f0-9]{64}$'},
-                     'requestId': {'type': 'string', 'pattern': '^[a-f0-9]{32}$'}}
+                     'requestId': {'type': 'string', 'pattern': '^[a-f0-9]{32}$'},
+                     'frame': {'type': 'object', 'properties': {
+                         'kind': {'type': 'string', 'enum': ['before', 'after']},
+                         'geometryId': {'type': 'string', 'pattern': '^[a-f0-9]{64}$'},
+                         'maxSide': {'type': 'integer', 'minimum': 16, 'maximum': 2048},
+                         'quality': {'type': 'string', 'enum': ['draft', 'full']},
+                         'x': {'type': 'number', 'minimum': 0, 'maximum': 1},
+                         'y': {'type': 'number', 'minimum': 0, 'maximum': 1}},
+                         'required': ['kind', 'geometryId', 'maxSide', 'quality', 'x', 'y'], 'additionalProperties': False}}
             return reply(self.stdout, message, {'tools': [
                 {'name': 'estimate_white_balance', 'inputSchema': {'type': 'object', 'additionalProperties': False,
                     'required': list(props), 'properties': props}},
                 {'name': 'render_preview', 'inputSchema': {'properties': {'before': {'type': 'boolean'},
+                    'include_frame': {'type': 'boolean'},
                     **({'quality': {'type': 'string', 'enum': ['draft', 'full']},
                         'preview_contract': {'type': 'integer', 'enum': [1]},
                         'stage_cache': {'type': 'string', 'enum': ['off', 'on']},

@@ -332,7 +332,8 @@ describe('Viewer edit settings context menu', () => {
       ...regionLayerPlacement(metadata, geometry) }, wholeAfter: whole, wholeBefore: { ...whole, url: 'blob:retained-before' },
       before: { url: 'blob:before-region', metadata, planGeneration: 1, ...regionLayerPlacement(metadata, geometry) } };
     const render = (before = false, active = true, documentKey = 'raw', previewStatus?: 'loading' | 'error') => act(() => root.render(<ImageViewer src="blob:new-whole" documentKey={documentKey}
-      rawFrame={geometry} rawRegionDisplay={display} previewPixels rawPickActive={active} onRawPick={picked} onRawPickCancel={cancel}
+      rawFrame={geometry} rawRegionDisplay={display} previewPixels rawPickActive={active} rawTargetSourceSize={{x:4000,y:3000}}
+      onRawPick={picked} onRawPickCancel={cancel}
       beforeSrc="blob:before-whole" persistentBeforeAdjustments={before} previewStatus={previewStatus}
       alt="raw" leftOpen rightOpen onToggleLeft={() => {}} onToggleRight={() => {}} />));
     render();
@@ -399,6 +400,38 @@ describe('Viewer edit settings context menu', () => {
     expect(position.style.cursor).toBe('');
     picked.mockClear(); pointer('pointerdown', 500, 350); pointer('pointerup', 500, 350);
     expect(picked).not.toHaveBeenCalled();
+  });
+
+  it('maps picker clicks from displayed Whole/Region coordinates through Crop, straighten and orientation', () => {
+    let resize = () => {};
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resize = callback; } observe() {} disconnect() {} });
+    const picked = vi.fn(), metadata = regionResponse();
+    const geometry = { nativeWidth: 4000, nativeHeight: 3000, geometryId: metadata.geometryId };
+    const whole = { url: 'blob:whole', doc: { workspaceId: 'w', handle: 'h', ...metadata.identity, revision: 2 },
+      frame: { ...geometry, fullWidth: 4000, fullHeight: 3000, aspect: 4/3, window: null }, quality: 'full' as const, maxSide: 1472 };
+    const display: RawRegionDisplay = { after: { url: 'blob:region', metadata, planGeneration: 1,
+      ...regionLayerPlacement(metadata, geometry) }, wholeAfter: whole };
+    act(() => root.render(<ImageViewer src="blob:whole" documentKey="picker-coordinate" rawFrame={geometry}
+      rawRegionDisplay={display} previewPixels rawPickActive rawTargetSourceSize={{x:4000,y:3000}}
+      rawTargetOrientation="Rotate90" rawTargetCrop={{geometry:{rect:{x0:.2,y0:.1,x1:.8,y1:.9},angle:0},aspect:null,flip_h:true,flip_v:false}}
+      onRawPick={picked} alt="raw" leftOpen rightOpen onToggleLeft={() => {}} onToggleRight={() => {}} />));
+    const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+    vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue({left:0,top:0,width:800,height:600} as DOMRect);
+    act(() => resize());
+    Object.defineProperty(viewport, 'setPointerCapture', {value:vi.fn()});
+    const image = host.querySelector<HTMLElement>('.viewer-image-position')!;
+    vi.spyOn(image, 'getBoundingClientRect').mockReturnValue({left:0,top:0,width:800,height:600} as DOMRect);
+    const base = host.querySelector<HTMLImageElement>('.raw-whole-base')!;
+    Object.defineProperty(base, 'naturalWidth', {value:1472}); Object.defineProperty(base, 'naturalHeight', {value:1104});
+    act(() => base.dispatchEvent(new Event('load')));
+    act(() => {
+      viewport.dispatchEvent(new MouseEvent('pointerdown',{bubbles:true,button:0,clientX:200,clientY:150}));
+      viewport.dispatchEvent(new MouseEvent('pointerup',{bubbles:true,button:0,clientX:200,clientY:150}));
+    });
+    expect(picked).toHaveBeenCalledOnce();
+    expect(picked.mock.calls[0][0].frame).toMatchObject({kind:'after',geometryId:metadata.geometryId});
+    expect(picked.mock.calls[0][1].x).toBeCloseTo(.65);
+    expect(picked.mock.calls[0][1].y).toBeCloseTo(.3);
   });
   it.each([1, 1.25, 1.5, 2])('shares Native scale, pan and comparison placement at DPR %s', dpr => {
     Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: dpr });

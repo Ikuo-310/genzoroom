@@ -83,6 +83,16 @@ P3は完了していない。Native patch・manifest・receipt・実EXE、既存
 - Backendから実Nativeへ接続するopt-in統合testでは、リポジトリ内JPEGを使いBefore Full、After Draft／Full、Region PNG／window・寸法、Crop／Rotate／Flip後のGeometry整合を確認した（1件成功、他のopt-inケース2件は今回未選択）。HTTP Region経路はfocused Backend testで別途確認した。実RAW/DNGのRegionは未検証。実機のZoom／Pan品質・応答性・GPU動作はユーザー確認待ちであり、CodexはGUI操作を行っていない。
 - この工程でRegion／Zoom／Pan接続は完了。P3全体はWBスポイト接続とポイントカーブターゲットのGeometry組合せ確認が残る。Crop編集中の未Crop表示を保持し、UI操作・表示領域計算は変更しない。DB／Recipe／Historyデータ、旧patch、checkpointは変更・削除しない。
 
+### P3最終工程：WBスポイト・ポイントカーブ座標統合（2026-11-10）
+
+上記の「P3継続中」「未接続」「残る」は各工程時点の記録であり、本節の完了記録で置き換える。P3の統合対象は既存Whole／Crop編集／Before／Draft／Region接続に限る。
+
+- Native標準`develop.wbPick`は設定を即時変更するため、Engine内の同じLightCraft `auto_wb` 計算を呼ぶ読み取り専用`develop.wbCandidate`とMCP `estimate_white_balance`（`wbContract:1`）を追加した。candidate取得はPhoto ID・active photo・入力座標を検証し、settingsを変更しない。応答は要求identityをechoし、既存Backendがsettings fingerprint、Photo、revision、Preview geometryとgenerationを再検証した後にのみ候補をHistory操作で適用する。キャンセルは候補適用を行わない。WB計算・画像処理はLightCraft所有。
+- WBクリック点と`develop.targeted`の点は、Whole表示上の正規化座標から既存`rawTargetPoint`でCrop／Flip／Straightenを逆変換し、向きを反映したsource座標でLightCraftへ渡す。表示CSS座標からWhole bitmap座標への既存変換によりRegion overlay、DPR、Zoom／Pan位置を扱う。点ターゲットは従来どおり標準`develop.targeted`と既存interaction ID／sequence／Draft／History経路を使用する。曲線演算・WB推定をGenzoRoomへ追加していない。
+- 自動検証は成功。Native Engine／MCP focused test 5件、receipt-verified実Nativeを使うJPEG統合4件、WB／artifact／patch／geometry focused Backend 100件、picker／Native Preview回帰106件が成功した。JPEG統合ではsettings不変の候補取得、既存History所有経路による確定適用、Whole／Crop／回転／反転、Before／After、Draft／Full、Region windowと応答整合を確認した。Frontend focused test 4件が成功（関連外217件をskip）し、TypeScript／production buildも成功した。実Native対象はリポジトリ内JPEGであり、RAWは未確認。Windows GUI操作・表示品質・応答性・GPU実行はユーザー確認待ち。
+- Native managed patchの累計は17ファイル、追加626行・削除35行、SHA-256 `ca30ff958ff5fbbd04e8e50b31c7c01a6319b7864b49ef8e506c3f20acc5f2ab`。固定upstream `192ff72923c39e6623f2c7ff67ab3a119deb8071`のclean checkoutへ再適用できた。開発targetは`target-p3-wb`で、EXE SHA-256 `30fa30913ceca0f3083ea05d0ebce27fb5668c00b1e78f9d6c2365e43686aa04`。隣接receiptは`wbContract:1`を含み、`build.py --binary`によりmanifest／patch／EXE SHAとschema・settings不変・不正座標応答を再確認した。詳細は[更新ガイド](UPDATE_GUIDE.md)。
+- **P3実装・自動検証完了。** Windows実機のRAW／JPEG表示品質、Crop／回転後のスポイト・ターゲット操作、応答性、GPU動作はユーザー確認待ちであり、CodexはGUI操作を行っていない。Recipe／History全体の復元整合性と旧Recipeの`raw_restore_mismatch`はP4で扱う。既存DB／Recipe実データは変更していない。
+
 ## 既存成果とpatchの扱い
 
 N1-1a〜cのFrame取得・受信・表示経路とN1-2のStageCache所有簡素化は再利用候補であり、そのままの採用を要求しない。N1-3はRevert済みであり、StageCache ON／OFFを公開接続契約として再導入しない。累積暫定patchとcheckpointは開発中の成果・履歴として保持し、正式採用時に必要な接続だけをmanaged patchへ整理する。旧成果の検証はその時点の範囲に限り、v0.20.0の完成を意味しない。

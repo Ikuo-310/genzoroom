@@ -4,18 +4,18 @@
 
 この手順は開発用・配布用のどちらにも適用する。featureブランチの管理基準は **v0.20.0 / `192ff72923c39e6623f2c7ff67ab3a119deb8071`**。固定値とpatch digest・targetsの正本は [`native/lightcraft/manifest.json`](../../../native/lightcraft/manifest.json)。独自変更は本家commitに含めずGit patchとして保存する。patchはfull-index形式とし、`.gitattributes`でLFを固定する。
 
-## v0.20.0 Whole／Crop／Before／Draft／Region Previewの再現手順
+## v0.20.0 Preview／WB candidateの再現手順
 
-固定commitのcleanな専用checkoutを用意し、既存のsourceやcheckpointを上書きしない。次の`$source`はそのcheckoutを指す。現行Region candidateはmanifestの`developmentTargetDir`で分離し、P1／以前のP3 EXEとreceiptを上書きしない。
+固定commitのcleanな専用checkoutを用意し、既存のsourceやcheckpointを上書きしない。次の`$source`はそのcheckoutを指す。現行WB candidateはmanifestの`developmentTargetDir`で分離し、P1／以前のP3 Region EXEとreceiptを上書きしない。
 
 ```powershell
 $source = Join-Path $PWD '.tmp/lightcraft-0.20.0-p3'
 .\.venv\Scripts\python.exe native/lightcraft/build.py --source $source --apply
 .\.venv\Scripts\python.exe native/lightcraft/build.py --source $source --build
-.\.venv\Scripts\python.exe native/lightcraft/build.py --binary "$source\target-p3-region\release\lightcraft-cli.exe"
+.\.venv\Scripts\python.exe native/lightcraft/build.py --binary "$source\target-p3-wb\release\lightcraft-cli.exe"
 ```
 
-`--apply`は固定HEAD・upstream version・patch digestとtargetsを検査し、cleanな状態に順に適用する。部分・重複適用や未知のsource差分は拒否する。`--build`はfocused Native testと `cargo build --release --locked --no-default-features -p lightcraft-cli` を実行し、実EXEのMCP schema・settings・Whole／Crop／Before／Draft／Full／RegionのPNG・Frame・window・応答種別・実品質・異常応答を確認してから隣接receiptを発行する。Regionは標準Engineの`region_job`／`region_job_before`を呼び、Backend入力は表示対象windowと出力寸法までに限定する。内部Render Plan、StageCache、GPU execution、allocation情報は公開契約にしない。現在のmanifest／receiptは`wholeFrameContract`、`cropEditContract`、`beforeAfterContract`、`draftContract`、`regionContract`、`geometryDescriptorContract`を管理する。`--binary`は実EXEのSHA-256とmanifest／receiptの一致、および実応答を再検査する。manifest変更時は `sync_identity.py` でFrontend identityを生成する。
+`--apply`は固定HEAD・upstream version・patch digestとtargetsを検査し、cleanな状態に順に適用する。部分・重複適用や未知のsource差分は拒否する。`--build`はfocused Native testと `cargo build --release --locked --no-default-features -p lightcraft-cli` を実行し、実EXEのMCP schema・settings・Whole／Crop／Before／Draft／Full／RegionのPNG・Frame・window・応答種別・実品質・異常応答を確認する。さらに`estimate_white_balance`のreadOnly schema、candidate identity echo、candidate取得前後のsettings不変、範囲外座標の拒否を確認してから隣接receiptを発行する。WB候補は標準LightCraft計算を使い、settings適用はGenzoRoomの既存History操作が担う。Regionは標準Engineの`region_job`／`region_job_before`を呼ぶ。StageCache、GPU execution、allocation情報は公開契約にしない。現在のmanifest／receiptは`wholeFrameContract`、`cropEditContract`、`beforeAfterContract`、`draftContract`、`regionContract`、`geometryDescriptorContract`、`wbContract`を管理する。`--binary`は実EXEのSHA-256とmanifest／receiptの一致、および実応答を再検査する。manifest変更時は `sync_identity.py` でFrontend identityを生成する。
 
 ## 以下のv0.18.1以前の記録
 
@@ -23,7 +23,9 @@ $source = Join-Path $PWD '.tmp/lightcraft-0.20.0-p3'
 
 RAW Preview統合はLightCraft v0.14.0で機能完了している。Whole Draft/Full、Native geometry/DPR、Region/Pan/Zoom、Before/After、stale result handling、Recipe restore/RAW Reset、Smoke、Developer Diagnostics RAW Benchmarkを含む。初回RAW open約2秒、cold first Region Plan約660ms（約99.96%がFull source初回生成）、同一document再Plan約0.25msはblocking issueではなく将来の性能最適化候補。条件付きmetadata-only Plan、Full source prewarm、source生成内部最適化は未実装の将来検討であり、[Region設計§18](RAW_REGION_PREVIEW_DESIGN.md#18-raw-preview機能完了と性能課題の扱い2026-10-26)に判断根拠を記録する。
 
-WB Phase 1では独立した読み取り専用`estimate_white_balance`（`wb_contract:1`）を追加する。契約・座標・settings不変条件は[WB Native契約](WB_NATIVE_CONTRACT.md)を参照する。既存Before/Preview/Region各1、geometry descriptor 2は維持し、manifestの`contracts.wb`とreceiptの`wbContract`を追加する。開発build先はmanifestの`developmentTargetDir`（現在`target-wb-phase1`）を使用し、従来の`target/release`の検証済みEXE/receiptを上書きしない。全Native probe成功後だけ新候補のreceiptを発行する。Frontend/History/RecipeへのWB操作接続はPhase 1に含まない。
+### 履歴：WB Native API Phase 1
+
+このPhase 1記録は読み取り専用Native candidateの導入時点を示し、Frontend／History接続が未実装という当時の記述は現行状態ではない。P3最終工程で既存UI・History経路へ接続済み。現行契約、座標変換、自動検証、patch digest、EXE SHA／receiptは[移植計画のP3最終記録](LIGHTCRAFT_V020_UPGRADE_PLAN.md#p3最終工程wbスポイトポイントカーブ座標統合2026-11-10)と上記v0.20.0再現手順を参照する。[WB Native契約](WB_NATIVE_CONTRACT.md)はAPI設計の履歴・根拠として保持する。
 
 ## 標準更新方針
 

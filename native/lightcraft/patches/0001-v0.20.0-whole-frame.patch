@@ -10,6 +10,90 @@ index fd19f6812655726ab8f6f32d8eee1778d9b0ba92..5e28fc471f1430d4b0b8faae6d613ea4
  ]
  
  [[package]]
+diff --git a/crates/engine/src/cmd/develop.rs b/crates/engine/src/cmd/develop.rs
+index 5403ad6eb21555be07ce72fbdf4b2aa9f733e2eb..45bb9fe5ae1cb122cee88638c26392c7d8006f5b 100644
+--- a/crates/engine/src/cmd/develop.rs
++++ b/crates/engine/src/cmd/develop.rs
+@@ -112,6 +112,34 @@ fn wb_mode_ignores_its_numbers(mode: WbMode, info: &lightcraft_pipeline::SourceI
+     mode == WbMode::AsShot || (info.raw && !info.relative_wb && mode.preset().is_some())
+ }
+ 
++fn wb_candidate(s: &mut Session, id: PhotoId, point: Option<(f64, f64)>) -> std::result::Result<(f64, f64), String> {
++    let info = s.source_info(id);
++    let src = s.source_now(id, SourceLevel::Thumb).map_err(|e| e.to_string())?;
++    let (temp, tint) = if let Some((x, y)) = point {
++        if !x.is_finite() || !y.is_finite() || !(0.0..=1.0).contains(&x) || !(0.0..=1.0).contains(&y) {
++            return Err("invalid white balance point".into());
++        }
++        let settings = s.develop_of(id).unwrap_or_default();
++        // The picker samples the oriented source; the caller maps displayed coordinates into this space.
++        let oriented = src.oriented(settings.orientation);
++        let (cx, cy) = ((x * oriented.width as f64) as isize, (y * oriented.height as f64) as isize);
++        let mut average = [0.0f32; 3];
++        for dy in -2..=2 {
++            for dx in -2..=2 {
++                let color = oriented.get_clamped(cx + dx, cy + dy);
++                for channel in 0..3 {
++                    average[channel] += color[channel] / 25.0;
++                }
++            }
++        }
++        let patch = lightcraft_raster::Rgb32f::filled(4, 4, average);
++        lightcraft_pipeline::auto::auto_wb(&patch, &info)
++    } else {
++        lightcraft_pipeline::auto::auto_wb(&src, &info)
++    };
++    Ok((temp, tint))
++}
++
+ /// Bring a photo's settings onto the scale and mode a white balance partial names, so a one-field partial means
+ /// what it says (issue #2910, and its review). `None` when the partial needs no such preparation: it names both
+ /// numbers, neither, or a mode of its own. [`merge_settings_for_photo`] and `preset.apply` both start here, and
+@@ -598,26 +626,28 @@ pub fn specs() -> Vec<CommandSpec> {
+                 Ok(json!({"temp": t, "tint": tint}))
+             }
+         ),
++        cmd!("develop.wbCandidate", "Estimate White Balance", [], None, "{id, x?, y?} read-only candidate for the selected photo", has_active, |s, p| {
++            let id = p.get("id").and_then(Value::as_u64).map(PhotoId).ok_or_else(|| bad("develop.wbCandidate", "invalid photo id"))?;
++            if active(s, "develop.wbCandidate")? != id {
++                return Err(bad("develop.wbCandidate", "photo is not active"));
++            }
++            let point = match (p.get("x"), p.get("y")) {
++                (None, None) => None,
++                (Some(_), Some(_)) => Some((f64_req(p, "x", "develop.wbCandidate")?, f64_req(p, "y", "develop.wbCandidate")?)),
++                _ => return Err(bad("develop.wbCandidate", "both x and y are required")),
++            };
++            let (temp, tint) = wb_candidate(s, id, point).map_err(|e| bad("develop.wbCandidate", e))?;
++            let info = s.source_info(id);
++            Ok(json!({"mode": if point.is_some() { "custom" } else { "auto" },
++                "scale": if info.raw && !info.relative_wb { "kelvin" } else { "legacy" },
++                "temp": temp, "tint": tint}))
++        }),
+         cmd!("develop.wbPick", "White Balance Selector", [], Some("W"), "{x, y} normalized image coords of a neutral point", has_active, |s, p| {
+             let (x, y) = (f64_req(p, "x", "develop.wbPick")?, f64_req(p, "y", "develop.wbPick")?);
+             let id = active(s, "develop.wbPick")?;
+-            let src = s.source_now(id, SourceLevel::Thumb).map_err(|e| bad("develop.wbPick", e))?;
+             let info = s.source_info(id);
+-            let d = s.develop_of(id).unwrap_or_default();
+-            // Sample a small neighbourhood in the oriented source.
+-            let o = src.oriented(d.orientation);
+-            let (cx, cy) = ((x.clamp(0.0, 1.0) * o.width as f64) as isize, (y.clamp(0.0, 1.0) * o.height as f64) as isize);
+-            let mut acc = [0.0f32; 3];
+-            for dy in -2..=2 {
+-                for dx in -2..=2 {
+-                    let c = o.get_clamped(cx + dx, cy + dy);
+-                    for i in 0..3 {
+-                        acc[i] += c[i] / 25.0;
+-                    }
+-                }
+-            }
+-            let patch = lightcraft_raster::Rgb32f::filled(4, 4, acc);
+-            let (t, tint) = lightcraft_pipeline::auto::auto_wb(&patch, &info);
++            let (t, tint) = wb_candidate(s, id, Some((x.clamp(0.0, 1.0), y.clamp(0.0, 1.0))))
++                .map_err(|e| bad("develop.wbPick", e))?;
+             edit(s, "develop.wbPick", "White Balance", |d| {
+                 lightcraft_pipeline::local::normalize_wb(d, &info);
+                 d.wb.mode = WbMode::Custom;
 diff --git a/crates/engine/src/media/quick.rs b/crates/engine/src/media/quick.rs
 index f7163b069322c239488aca24d1bc09c48f0eb2b9..768e2b49b2c3e260cafc751826af5cac1f4b39df 100644
 --- a/crates/engine/src/media/quick.rs
@@ -75,6 +159,30 @@ index 0acda876d12743f07c6028586373a9fadcc99d53..68e18236fb4cecb8f92e3d325b3bfa2c
              loaded: None,
              quick: None,
              display: None,
+diff --git a/crates/engine/src/tests.rs b/crates/engine/src/tests.rs
+index 632814334d82d4f0af3600d6c792c0d75ee7e7c6..e40dd5ff580dbab8a7a116ef46dc216d0067b328 100644
+--- a/crates/engine/src/tests.rs
++++ b/crates/engine/src/tests.rs
+@@ -499,6 +499,19 @@ fn masks_crop_and_render() {
+     s.execute("develop.wbPick", &json!({"x": 0.5, "y": 0.5})).unwrap();
+ }
+ 
++#[test]
++fn white_balance_candidate_is_read_only_and_bound_to_the_active_photo() {
++    let mut s = demo();
++    let id = s.active().unwrap();
++    let before = serde_json::to_value(s.develop_of(id).unwrap()).unwrap();
++    let candidate = s.execute("develop.wbCandidate", &json!({"id": id.0, "x": 0.5, "y": 0.5})).unwrap();
++    assert_eq!(candidate["mode"], "custom");
++    assert!(candidate["temp"].as_f64().is_some_and(|v| v.is_finite()));
++    assert!(candidate["tint"].as_f64().is_some_and(|v| v.is_finite()));
++    assert_eq!(serde_json::to_value(s.develop_of(id).unwrap()).unwrap(), before);
++    assert!(s.execute("develop.wbCandidate", &json!({"id": id.0, "x": 1.1, "y": 0.5})).is_err());
++}
++
+ /// Auto applies to every selected photo, not only the highlighted one (#2184).
+ #[test]
+ fn auto_applies_to_every_selected_photo() {
 diff --git a/crates/gpu/src/render.rs b/crates/gpu/src/render.rs
 index 4d658c3ca076c2bddf1c9413baf0ec337d771267..3aaa37a3a5f1716c6281d2e582678ff1635780bd 100644
 --- a/crates/gpu/src/render.rs
@@ -430,10 +538,38 @@ index 0000000000000000000000000000000000000000..6b3a5371dfef3a3337a7fbe2afc68414
 +  }
 +}
 diff --git a/crates/mcp/src/tests.rs b/crates/mcp/src/tests.rs
-index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..5c2258ebe39265a91f9c4ca70c1e1e3b8a1e8a00 100644
+index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..87bfa7f32454d9bb13133e167743a420d21d171c 100644
 --- a/crates/mcp/src/tests.rs
 +++ b/crates/mcp/src/tests.rs
-@@ -602,3 +602,108 @@ fn render_and_screenshot_pngs_go_through_a_private_folder() {
+@@ -79,6 +79,27 @@ fn tools_list_has_helpers_and_every_command() {
+     assert!(r["result"]["tools"].as_array().unwrap().iter().all(|t| !t["name"].as_str().unwrap().starts_with("cmd_")));
+ }
+ 
++#[test]
++fn wb_candidate_tool_is_read_only_and_echoes_the_pick_identity() {
++    let mut b = Headless::demo();
++    let photo = b.session.active().unwrap();
++    let before = serde_json::to_value(b.session.develop_of(photo).unwrap()).unwrap();
++    let id = photo.0;
++    let request = json!({"id":id.to_string(),"wb_contract":1,"operation":"pick",
++        "settingsFingerprint":"a".repeat(64),"requestId":"b".repeat(32),
++        "frame":{"kind":"after","geometryId":"c".repeat(64),"maxSide":512,"quality":"full","x":0.5,"y":0.5}});
++    let result = call_tool(&mut b, "estimate_white_balance", &request);
++    assert!(!result.is_error, "{result:?}");
++    let value = result.structured.unwrap();
++    assert_eq!(value["identity"], request);
++    assert_eq!(value["candidate"]["mode"], "custom");
++    assert_eq!(serde_json::to_value(b.session.develop_of(photo).unwrap()).unwrap(), before);
++    let invalid = json!({"id":id.to_string(),"wb_contract":1,"operation":"pick",
++        "settingsFingerprint":"a".repeat(64),"requestId":"b".repeat(32),
++        "frame":{"kind":"after","geometryId":"c".repeat(64),"maxSide":512,"quality":"full","x":1.1,"y":0.5}});
++    assert!(call_tool(&mut b, "estimate_white_balance", &invalid).is_error);
++}
++
+ /// The `import` helper passes the copy options through: a folder template files the copy.
+ #[test]
+ fn import_tool_copies_with_a_folder_template() {
+@@ -602,3 +623,108 @@ fn render_and_screenshot_pngs_go_through_a_private_folder() {
          folders.push(dir);
      }
  }
@@ -543,10 +679,40 @@ index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..5c2258ebe39265a91f9c4ca70c1e1e3b
 +    assert_eq!(h.session.execute("develop.get", &json!({"id": id})).unwrap(), before);
 +}
 diff --git a/crates/mcp/src/tools.rs b/crates/mcp/src/tools.rs
-index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..335a723ff5e3c62d98445f23db045d1870308b53 100644
+index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..f83c3091f24a803327943f2429cd58b6427aacce 100644
 --- a/crates/mcp/src/tools.rs
 +++ b/crates/mcp/src/tools.rs
-@@ -120,6 +120,10 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
+@@ -78,7 +78,29 @@ fn ids_schema(what: &str) -> Value {
+ /// The hand-written helper tools. UI tools are included only when a desktop app is attached.
+ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
+     let photo_id = json!({"type": "integer", "description": "Photo id (default: the active photo). Makes that photo active first."});
++    let wb = tool(
++        "estimate_white_balance",
++        "Estimate White Balance",
++        "Return a LightCraft white-balance candidate without changing photo settings. For `pick`, frame coordinates are normalized in the oriented source image.",
++        json!({
++            "id": {"type": "string", "pattern": "^[1-9][0-9]*$"},
++            "wb_contract": {"type": "integer", "enum": [1]},
++            "operation": {"type": "string", "enum": ["auto", "pick"]},
++            "settingsFingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
++            "requestId": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
++            "frame": {"type": "object", "properties": {
++                "kind": {"type": "string", "enum": ["before", "after"]},
++                "geometryId": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
++                "maxSide": {"type": "integer", "minimum": 16, "maximum": 2048},
++                "quality": {"type": "string", "enum": ["draft", "full"]},
++                "x": {"type": "number", "minimum": 0, "maximum": 1},
++                "y": {"type": "number", "minimum": 0, "maximum": 1}
++            }, "required": ["kind", "geometryId", "maxSide", "quality", "x", "y"], "additionalProperties": false}
++        }),
++        &["id", "wb_contract", "operation", "settingsFingerprint", "requestId"],
++    );
+     let mut v = vec![
++        wb,
+         tool(
+             "command_list",
+             "List commands",
+@@ -120,6 +142,10 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
              json!({
                  "id": {"type": "integer", "description": "Photo id (default: the active photo); selection is unchanged"},
                  "max_side": {"type": "integer", "description": "Long edge in pixels (default 1024, max 4096)"},
@@ -557,7 +723,7 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..335a723ff5e3c62d98445f23db045d18
                  "format": {"type": "string", "enum": ["png", "jpeg"], "description": "Image encoding (default png; jpeg is smaller)"},
              }),
              &[],
-@@ -219,6 +223,10 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
+@@ -219,6 +245,10 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
              json!({
                  "id": {"type": "integer", "description": "Photo id (default: the active photo); selection is unchanged"},
                  "size": {"type": "integer", "description": "Long edge in pixels (default 1024, max 4096)"},
@@ -568,7 +734,7 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..335a723ff5e3c62d98445f23db045d18
                  "format": {"type": "string", "enum": ["png", "jpeg"], "description": "Image encoding (default png; jpeg is smaller)"},
                  "path": {"type": "string", "description": "Also save the rendered file here"}
              }),
-@@ -334,6 +342,21 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
+@@ -334,6 +364,21 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
              ),
          ]);
      }
@@ -590,7 +756,15 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..335a723ff5e3c62d98445f23db045d18
      v
  }
  
-@@ -557,11 +580,29 @@ fn render_photo(b: &mut dyn Backend, args: &Value) -> ToolResult {
+@@ -378,6 +423,7 @@ fn annotations(name: &str, title: &str) -> Value {
+             | "list_commands"
+             | "doc_inspect"
+             | "render_preview"
++            | "estimate_white_balance"
+             | "query_photos"
+             | "list_controls"
+             | "get_develop"
+@@ -557,11 +603,29 @@ fn render_photo(b: &mut dyn Backend, args: &Value) -> ToolResult {
          Err(e) => return ToolResult::error(e),
      };
      let path = tmp.file.to_string_lossy().to_string();
@@ -621,10 +795,51 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..335a723ff5e3c62d98445f23db045d18
      meta["id"] = json!(id);
      image_result(&tmp.file, None, args.get("format").and_then(Value::as_str).unwrap_or("png"), args.get("path").and_then(Value::as_str), meta)
  }
-@@ -609,6 +650,35 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
+@@ -609,6 +673,76 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
          return ToolResult::from(exec(b, &rest.replace('_', "."), args.clone()));
      }
      match name {
++        "estimate_white_balance" => {
++            let id = match s("id").and_then(|id| id.parse::<u64>().ok()).filter(|id| *id > 0) {
++                Some(id) => id,
++                None => return ToolResult::error("invalid photo id"),
++            };
++            if args["wb_contract"] != json!(1)
++                || !matches!(s("operation"), Some("auto" | "pick"))
++                || !s("settingsFingerprint").is_some_and(|value| value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()))
++                || !s("requestId").is_some_and(|value| value.len() == 32 && value.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()))
++            {
++                return ToolResult::error("invalid white balance request");
++            }
++            let frame = args.get("frame");
++            if (s("operation") == Some("pick")) != frame.is_some() {
++                return ToolResult::error("white balance frame does not match operation");
++            }
++            let point = if let Some(frame) = frame {
++                let valid = frame.is_object()
++                    && matches!(frame["kind"].as_str(), Some("before" | "after"))
++                    && frame["geometryId"].as_str().is_some_and(|value| value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()))
++                    && frame["maxSide"].as_u64().is_some_and(|value| (16..=2048).contains(&value))
++                    && matches!(frame["quality"].as_str(), Some("draft" | "full"))
++                    && ["x", "y"].iter().all(|key| frame[*key].as_f64().is_some_and(|value| value.is_finite() && (0.0..=1.0).contains(&value)));
++                if !valid { return ToolResult::error("invalid white balance frame"); }
++                Some((frame["x"].as_f64().unwrap(), frame["y"].as_f64().unwrap()))
++            } else { None };
++            let mut params = json!({"id": id});
++            if let Some((x, y)) = point { params["x"] = json!(x); params["y"] = json!(y); }
++            let candidate = match b.call("engine.execute", json!({"command":"develop.wbCandidate","params":params})) {
++                Ok(value) => value,
++                Err(error) => return ToolResult::error(error),
++            };
++            if !matches!(candidate["mode"].as_str(), Some("auto" | "custom"))
++                || !matches!(candidate["scale"].as_str(), Some("kelvin" | "legacy"))
++                || !["temp", "tint"].iter().all(|key| candidate[*key].as_f64().is_some_and(f64::is_finite))
++            {
++                return ToolResult::error("invalid white balance candidate");
++            }
++            let candidate = json!({"mode":candidate["mode"],"scale":candidate["scale"],"temp":candidate["temp"],"tint":candidate["tint"]});
++            ToolResult::json(json!({"wbContract":1,"identity":args,"candidate":candidate}))
++        }
 +        "render_region_preview" => {
 +            let id = match args.get("id").and_then(Value::as_str).and_then(|id| id.parse::<u64>().ok()) {
 +                Some(id) => id,
@@ -657,7 +872,7 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..335a723ff5e3c62d98445f23db045d18
          "list_commands" | "command_list" => {
              let filter = s("filter").unwrap_or("").to_lowercase();
              let enabled_only = args.get("enabled_only").and_then(Value::as_bool).unwrap_or(false);
-@@ -664,7 +734,7 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
+@@ -664,7 +798,7 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
          }
          "doc_inspect" => ToolResult::from(doc_inspect(b)),
          "render_preview" => {

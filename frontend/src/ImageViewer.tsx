@@ -1,6 +1,6 @@
 import { RawCropSurface, type RawCropBinding } from './RawCropSurface';
 import { cropFitScale } from './rawCropMath';
-import { rawTargetPoint } from './rawTargetCoordinates';
+import { rawTargetOrientedSize, rawTargetPoint } from './rawTargetCoordinates';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { wholeImagePoint, calculateFitScale, clampViewerPan, clampZoom, panForCenteredZoom, zoomAroundPoint, type Point } from './viewerMath';
@@ -215,7 +215,8 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
   } : baseTarget;
   const displayedUrl = regionBase?.url ?? (showBeforeAdjustments && beforeSrc ? beforeSrc : src);
   const pickReady = rawPickActive && !keyboardBlocked && !previewStatus && imageState === 'ready'
-    && !!displayedPickTarget && displayedPickTarget.url === displayedUrl;
+    && !!displayedPickTarget && displayedPickTarget.url === displayedUrl
+    && (!!rawTargetSourceSize || !rawTargetCrop?.geometry.angle);
   const publishTargetLoupe = (point?: ViewerLoupePoint) => {
     targetLoupeRef.current = point;
     setTargetLoupe(point);
@@ -228,9 +229,7 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
     const viewportBounds = viewport.getBoundingClientRect(), imageBounds = image.getBoundingClientRect();
     const imagePoint = wholeImagePoint(client, imageBounds);
     if (!imagePoint) return;
-    const swap = ['Transpose','Rotate90','Transverse','Rotate270'].includes(rawTargetOrientation);
-    const oriented = { x: swap ? rawTargetSourceSize.y : rawTargetSourceSize.x,
-      y: swap ? rawTargetSourceSize.x : rawTargetSourceSize.y };
+    const oriented = rawTargetOrientedSize(rawTargetSourceSize, rawTargetOrientation);
     const nativePoint = rawTargetPoint(imagePoint, rawTargetCrop, oriented);
     if (!nativePoint) return;
     return { anchor: { x: client.x - viewportBounds.left, y: client.y - viewportBounds.top },
@@ -586,7 +585,9 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
     if (pick && pick.id === event.pointerId) {
       pickPointer.current = null;
       const bounds = imagePositionRef.current?.getBoundingClientRect();
-      const point = bounds && wholeImagePoint({ x: event.clientX, y: event.clientY }, bounds);
+      const displayPoint = bounds && wholeImagePoint({ x: event.clientX, y: event.clientY }, bounds);
+      const oriented = rawTargetOrientedSize(rawTargetSourceSize ?? { x: 1, y: 1 }, rawTargetOrientation);
+      const point = displayPoint && pickReady ? rawTargetPoint(displayPoint, rawTargetCrop, oriented) : null;
       const stable = bounds && (['left', 'top', 'width', 'height'] as const).every(key => bounds[key] === pick.bounds[key]);
       refreshTargetLoupe({ x: event.clientX, y: event.clientY });
       if (event.type !== 'pointercancel' && !pick.moved && Math.hypot(event.clientX - pick.origin.x, event.clientY - pick.origin.y) < 4

@@ -52,6 +52,8 @@ def manifest(path=None):
         if 'regionContract' in value and (type(value['regionContract']) is not int or value['regionContract'] != 1
                 or type(value.get('geometryDescriptorContract')) is not int or value['geometryDescriptorContract'] != 2):
             raise ValueError('invalid Region contract')
+        if 'wbContract' in value and (type(value['wbContract']) is not int or value['wbContract'] != 1):
+            raise ValueError('invalid WB contract')
     if 'geometryDescriptorContract' in value and 'wholeFrameContract' not in value:
         if 'cropEditContract' in value and (type(value['cropEditContract']) is not int or value['cropEditContract'] != 1):
             raise ValueError('unsupported crop editing contract')
@@ -151,6 +153,13 @@ def probe_whole_frame(binary, spec):
             tool(7, 'get_develop', {'id': 1}),
             tool(8, 'render_preview', {'id': 1, 'max_side': 32, 'format': 'png', 'include_frame': True}),
             tool(9, 'render_preview', {'id': 999999, 'max_side': 32, 'include_frame': True}),
+            tool(15, 'estimate_white_balance', {'id': '1', 'wb_contract': 1, 'operation': 'pick',
+                 'settingsFingerprint': 'a' * 64, 'requestId': 'b' * 32,
+                 'frame': {'kind': 'after', 'geometryId': 'c' * 64, 'maxSide': 32, 'quality': 'full', 'x': 0.5, 'y': 0.5}}),
+            tool(16, 'get_develop', {'id': 1}),
+            tool(17, 'estimate_white_balance', {'id': '1', 'wb_contract': 1, 'operation': 'pick',
+                 'settingsFingerprint': 'a' * 64, 'requestId': 'd' * 32,
+                 'frame': {'kind': 'after', 'geometryId': 'c' * 64, 'maxSide': 32, 'quality': 'full', 'x': -0.1, 'y': 0.5}}),
         ]
         if spec.get('cropEditContract') == 1:
             messages += [tool(10, 'command_run', {'id': 'crop.set', 'params': {'rect': [0.2, 0.2, 0.8, 0.8]}}),
@@ -177,11 +186,24 @@ def probe_whole_frame(binary, spec):
             raise ValueError('binary Draft schema mismatch')
         if spec.get('cropEditContract') == 1 and properties.get('crop_edit', {}).get('type') != 'boolean':
             raise ValueError('binary crop-edit schema mismatch')
+        if spec.get('wbContract') == 1:
+            wb = next((t for t in replies[2]['result']['tools'] if t.get('name') == 'estimate_white_balance'), None)
+            if not wb or wb.get('annotations', {}).get('readOnlyHint') is not True \
+                    or set(wb.get('inputSchema', {}).get('properties', {})) != {'id', 'wb_contract', 'operation', 'settingsFingerprint', 'requestId', 'frame'}:
+                raise ValueError('binary WB schema mismatch')
         if any(replies[i]['result'].get('isError') is not False for i in (3, 4, 5, 6, 7, 8)) \
                 or replies[9]['result'].get('isError') is not True:
             raise ValueError('binary operation failed')
         if replies[7]['result']['structuredContent']['light']['exposure'] != 0.5:
             raise ValueError('binary settings readback mismatch')
+        if spec.get('wbContract') == 1:
+            wb = replies[15]['result'].get('structuredContent', {})
+            if replies[15]['result'].get('isError') is not False or set(wb) != {'wbContract', 'identity', 'candidate'} \
+                    or wb['wbContract'] != 1 or wb['identity'] != messages[10]['params']['arguments'] \
+                    or wb['candidate'].get('mode') != 'custom' or wb['candidate'].get('scale') not in ('kelvin', 'legacy') \
+                    or replies[16]['result'].get('structuredContent') != replies[7]['result'].get('structuredContent') \
+                    or replies[17]['result'].get('isError') is not True:
+                raise ValueError('binary read-only WB candidate or error response mismatch')
         result = replies[8]['result']
         meta = json.loads(next(c['text'] for c in result['content'] if c['type'] == 'text'))
         image = next(c for c in result['content'] if c['type'] == 'image')
@@ -622,7 +644,8 @@ def receipt(binary, spec):
                 **({'beforeAfterContract': 1} if spec.get('beforeAfterContract') == 1 else {}),
                 **({'draftContract': 1} if spec.get('draftContract') == 1 else {}),
                 **({'regionContract': 1, 'geometryDescriptorContract': spec['geometryDescriptorContract']}
-                   if spec.get('regionContract') == 1 else {})}
+                   if spec.get('regionContract') == 1 else {}),
+                **({'wbContract': 1} if spec.get('wbContract') == 1 else {})}
     return {"version": spec["version"], "commit": spec["commit"], "patches": spec["patches"],
             "binarySha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "beforeContract": 1, "previewContract": 1, "regionContract": 1,
             "geometryDescriptorContract": spec['geometryDescriptorContract'],
@@ -656,6 +679,9 @@ def main():
                 if spec.get('regionContract') == 1:
                     run(['cargo', 'test', '--release', '--locked', '-p', 'lightcraft-mcp', '--target-dir', str(target),
                          'region_plan_and_render_use_engine_frame_and_standard_region_jobs', '--', '--test-threads=1'], cwd=args.source)
+                if spec.get('wbContract') == 1:
+                    run(['cargo', 'test', '--release', '--locked', '-p', 'lightcraft-mcp', '--target-dir', str(target),
+                         'wb_candidate_tool_is_read_only_and_echoes_the_pick_identity', '--', '--test-threads=1'], cwd=args.source)
             else:
                 run(["cargo", "test", "--locked", "-p", "lightcraft-mcp", "--", "--test-threads=1"], cwd=args.source)
             if spec.get('contracts', {}).get('wb') == 1:

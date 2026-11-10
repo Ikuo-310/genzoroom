@@ -17,7 +17,8 @@ def write_receipt(executable, **changes):
              **{key: 1 for key in ('cropEditContract', 'beforeAfterContract', 'draftContract')
                 if MANAGED.get(key) == 1},
              **({'regionContract': 1, 'geometryDescriptorContract': MANAGED['geometryDescriptorContract']}
-                if MANAGED.get('regionContract') == 1 else {}), **changes}
+                if MANAGED.get('regionContract') == 1 else {}),
+             **({'wbContract': 1} if MANAGED.get('wbContract') == 1 else {}), **changes}
     executable.with_suffix('.genzoroom.json').write_text(json.dumps(value), encoding='utf-8')
     return digest
 
@@ -29,6 +30,7 @@ def write_receipt(executable, **changes):
     {'beforeAfterContract': True}, {'beforeAfterContract': 2}, {'beforeAfterContract': None},
     {'draftContract': True}, {'draftContract': 2}, {'draftContract': None},
     {'beforeContract': 1}, {'regionContract': 2}, {'geometryDescriptorContract': 1},
+    {'wbContract': True}, {'wbContract': 2}, {'wbContract': None},
 ])
 def test_receipt_mismatch_never_claims_a_managed_version(tmp_path, changes):
     executable = tmp_path / 'engine.exe'

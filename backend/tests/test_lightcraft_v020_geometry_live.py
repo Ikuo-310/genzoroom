@@ -11,6 +11,7 @@ import pytest
 from lightcraft_mcp import LightCraftError
 from lightcraft_raw import LightCraftRawSession
 from lightcraft_runtime import LightCraftManager
+from raw_white_balance import result_fingerprint
 
 
 def region_target(raw, handle, frame, revision, *, kind, quality, operation, view=1):
@@ -185,6 +186,49 @@ def test_real_native_region_before_after_draft_and_rotated_geometry(tmp_path):
             assert region.data.startswith(b'\x89PNG\r\n\x1a\n')
             assert region.metadata['response']['geometryId'] == whole.frame['geometryId']
             assert region.metadata['response']['window'] == window
+        finally:
+            await raw.close()
+            await manager.close()
+
+    asyncio.run(run())
+
+
+@pytest.mark.skipif(not os.environ.get('GENZOROOM_TEST_LIGHTCRAFT_EXE'), reason='real Native executable not requested')
+def test_real_native_wb_pick_candidate_is_read_only_until_confirmed(tmp_path):
+    async def run():
+        source = tmp_path / 'sample.jpg'
+        shutil.copyfile(Path(__file__).resolve().parents[2] / 'docs/images/Anshitsu_Sakura.jpg', source)
+        manager = LightCraftManager(environment={**os.environ,
+            'GENZOROOM_LIGHTCRAFT_EXE': os.environ['GENZOROOM_TEST_LIGHTCRAFT_EXE']}, platform='win32', gpu_backend='off')
+        raw = LightCraftRawSession(manager)
+        try:
+            await manager.start()
+            async with asyncio.timeout(30):
+                while manager.status().state in ('starting', 'initializing'):
+                    await asyncio.sleep(.05)
+            handle, state = await raw.open_raw('wb-picker-live', str(source))
+            photo = raw._photos[handle.source_key]
+            generation = manager.status().generation
+            preview = await raw.request_preview(handle, state.revision, max_side=512, quality='full')
+            native_settings = await manager._raw_native_settings(generation, photo.photo_id, timeout=30)
+            identity = {'id': str(photo.photo_id), 'wb_contract': 1, 'operation': 'pick',
+                'settingsFingerprint': result_fingerprint(native_settings), 'requestId': uuid4().hex,
+                'frame': {'kind': 'after', 'geometryId': preview.frame['geometryId'], 'maxSide': 512,
+                    'quality': 'full', 'x': .5, 'y': .5}}
+            result = await manager._raw_estimate_wb(generation, identity, timeout=60)
+            candidate = result['candidate']
+            assert candidate['mode'] == 'custom' and candidate['scale'] == 'legacy'
+            assert result['identity'] == identity
+            unchanged = await manager._raw_native_settings(generation, photo.photo_id, timeout=30)
+            assert result_fingerprint(unchanged) == result_fingerprint(native_settings)
+
+            # The existing history owner applies only the frozen candidate after confirmation.
+            expected = state.settings
+            expected['wb'].update(candidate)
+            applied = await raw.apply_wb_candidate(handle, state.settings, expected, state.revision, verify=lambda: None)
+            assert applied.revision == state.revision + 1
+            assert applied.settings['wb']['mode'] == 'custom'
+            assert applied.settings['wb']['temp'] == candidate['temp']
         finally:
             await raw.close()
             await manager.close()

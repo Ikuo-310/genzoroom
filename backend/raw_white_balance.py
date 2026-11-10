@@ -93,7 +93,15 @@ def supports_wb(tools):
             and props.get('operation') == {'type': 'string', 'enum': ['auto', 'pick']}
             and props.get('id') == {'type': 'string', 'pattern': '^[1-9][0-9]*$'}
             and props.get('settingsFingerprint') == {'type': 'string', 'pattern': '^[a-f0-9]{64}$'}
-            and props.get('requestId') == {'type': 'string', 'pattern': '^[a-f0-9]{32}$'})
+            and props.get('requestId') == {'type': 'string', 'pattern': '^[a-f0-9]{32}$'}
+            and props.get('frame') == {'type': 'object', 'properties': {
+                'kind': {'type': 'string', 'enum': ['before', 'after']},
+                'geometryId': {'type': 'string', 'pattern': '^[a-f0-9]{64}$'},
+                'maxSide': {'type': 'integer', 'minimum': 16, 'maximum': 2048},
+                'quality': {'type': 'string', 'enum': ['draft', 'full']},
+                'x': {'type': 'number', 'minimum': 0, 'maximum': 1},
+                'y': {'type': 'number', 'minimum': 0, 'maximum': 1}},
+                'required': ['kind', 'geometryId', 'maxSide', 'quality', 'x', 'y'], 'additionalProperties': False})
 
 
 def validate_candidate(result, identity):

@@ -45,7 +45,8 @@ def test_whole_frame_receipt_claims_only_managed_preview_contracts(tmp_path):
     assert receipt['binarySha256'] == hashlib.sha256(binary.read_bytes()).hexdigest()
     assert receipt['beforeAfterContract'] == receipt['draftContract'] == receipt['regionContract'] == 1
     assert receipt['geometryDescriptorContract'] == 2
-    assert not {'beforeContract', 'previewContract', 'wbContract'} & receipt.keys()
+    assert not {'beforeContract', 'previewContract'} & receipt.keys()
+    assert receipt['wbContract'] == 1
 
 
 def test_archived_010_manifest_and_patch_remain_reproducible():

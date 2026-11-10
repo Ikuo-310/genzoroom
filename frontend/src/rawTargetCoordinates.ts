@@ -1,6 +1,11 @@
 import type { RawCrop } from './rawApi';
 import type { Point } from './viewerMath';
 
+export function rawTargetOrientedSize(source: Point, orientation: string): Point {
+  const swapsAxes = ['Transpose', 'Rotate90', 'Transverse', 'Rotate270'].includes(orientation);
+  return swapsAxes ? { x: source.y, y: source.x } : source;
+}
+
 /** Maps a whole output point through LightCraft's crop output-to-oriented-source transform. */
 export function rawTargetPoint(point: Point, crop: RawCrop | undefined, oriented: Point): Point | null {
   if (![point.x, point.y, oriented.x, oriented.y].every(Number.isFinite)
