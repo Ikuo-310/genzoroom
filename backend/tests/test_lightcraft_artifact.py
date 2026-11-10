@@ -14,7 +14,8 @@ def write_receipt(executable, **changes):
     digest = hashlib.sha256(executable.read_bytes()).hexdigest()
     value = {**{key: MANAGED[key] for key in ('version', 'commit', 'patches')},
              'binarySha256': digest, 'wholeFrameContract': 1,
-             **({'cropEditContract': 1} if MANAGED.get('cropEditContract') == 1 else {}), **changes}
+             **{key: 1 for key in ('cropEditContract', 'beforeAfterContract', 'draftContract')
+                if MANAGED.get(key) == 1}, **changes}
     executable.with_suffix('.genzoroom.json').write_text(json.dumps(value), encoding='utf-8')
     return digest
 
@@ -23,6 +24,8 @@ def write_receipt(executable, **changes):
     {'version': '0.10.0'}, {'commit': 'a' * 40}, {'binarySha256': 'b' * 64},
     {'patches': []}, {'wholeFrameContract': True}, {'wholeFrameContract': 2}, {'wholeFrameContract': None},
     {'cropEditContract': True}, {'cropEditContract': 2}, {'cropEditContract': None},
+    {'beforeAfterContract': True}, {'beforeAfterContract': 2}, {'beforeAfterContract': None},
+    {'draftContract': True}, {'draftContract': 2}, {'draftContract': None},
     {'beforeContract': 1}, {'regionContract': 1},
 ])
 def test_receipt_mismatch_never_claims_a_managed_version(tmp_path, changes):
@@ -62,6 +65,18 @@ def test_receipt_without_crop_edit_contract_is_not_managed(tmp_path):
     path = executable.with_suffix('.genzoroom.json')
     receipt = json.loads(path.read_text(encoding='utf-8'))
     del receipt['cropEditContract']
+    path.write_text(json.dumps(receipt), encoding='utf-8')
+    assert verified_artifact(executable, digest, ENGINE_VERSION) is None
+
+
+@pytest.mark.parametrize('contract', ['beforeAfterContract', 'draftContract'])
+def test_receipt_without_preview_contract_is_not_managed(tmp_path, contract):
+    executable = tmp_path / 'engine.exe'
+    executable.write_bytes(b'actual engine')
+    digest = write_receipt(executable)
+    path = executable.with_suffix('.genzoroom.json')
+    receipt = json.loads(path.read_text(encoding='utf-8'))
+    del receipt[contract]
     path.write_text(json.dumps(receipt), encoding='utf-8')
     assert verified_artifact(executable, digest, ENGINE_VERSION) is None
 

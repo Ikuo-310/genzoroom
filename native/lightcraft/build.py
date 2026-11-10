@@ -44,6 +44,9 @@ def manifest(path=None):
                 not re.fullmatch(r'target(?:-[a-z0-9]+)+', value['developmentTargetDir']) or \
                 ('cropEditContract' in value and (type(value['cropEditContract']) is not int or value['cropEditContract'] != 1)):
             raise ValueError('invalid Whole Frame contract')
+        for key in ('beforeAfterContract', 'draftContract'):
+            if key in value and (type(value[key]) is not int or value[key] != 1):
+                raise ValueError('invalid Whole Preview contract')
     if 'geometryDescriptorContract' in value:
         if 'cropEditContract' in value and (type(value['cropEditContract']) is not int or value['cropEditContract'] != 1):
             raise ValueError('unsupported crop editing contract')
@@ -157,6 +160,10 @@ def probe_whole_frame(binary, spec):
         if properties.get('include_frame', {}).get('type') != 'boolean' or \
                 any(key in properties for key in ('stage_cache', 'stage_cache_budget_bytes', 'preview_contract')):
             raise ValueError('binary Whole schema mismatch')
+        if spec.get('beforeAfterContract') == 1 and properties.get('before', {}).get('type') != 'boolean':
+            raise ValueError('binary Before schema mismatch')
+        if spec.get('draftContract') == 1 and properties.get('quality', {}).get('enum') != ['draft', 'full']:
+            raise ValueError('binary Draft schema mismatch')
         if spec.get('cropEditContract') == 1 and properties.get('crop_edit', {}).get('type') != 'boolean':
             raise ValueError('binary crop-edit schema mismatch')
         if any(replies[i]['result'].get('isError') is not False for i in (3, 4, 5, 6, 7, 8)) \
@@ -169,13 +176,17 @@ def probe_whole_frame(binary, spec):
         image = next(c for c in result['content'] if c['type'] == 'image')
         png = base64.b64decode(image['data'], validate=True)
         frame = meta['frame']
-        if set(meta) != {'id', 'width', 'height', 'frame'} or meta['id'] != 1 or image['mimeType'] != 'image/png' \
+        expected_meta = {'id', 'width', 'height', 'frame'}
+        if spec.get('beforeAfterContract') == 1:
+            expected_meta |= {'kind', 'quality'}
+        if set(meta) != expected_meta or meta['id'] != 1 or image['mimeType'] != 'image/png' \
                 or png[:8] != b'\x89PNG\r\n\x1a\n' or struct.unpack('>II', png[16:24]) != (meta['width'], meta['height']) \
                 or set(frame) != {'geometryId', 'nativeWidth', 'nativeHeight', 'aspect', 'fullWidth', 'fullHeight', 'window'} \
                 or (frame['fullWidth'], frame['fullHeight']) != (meta['width'], meta['height']) \
                 or (frame['nativeWidth'], frame['nativeHeight']) != (32, 24) or frame['window'] is not None \
-                or not re.fullmatch(r'[a-f0-9]{64}', frame['geometryId']) or not math.isfinite(frame['aspect']) or frame['aspect'] <= 0:
-            raise ValueError('binary Whole image/frame mismatch')
+                or not re.fullmatch(r'[a-f0-9]{64}', frame['geometryId']) or not math.isfinite(frame['aspect']) or frame['aspect'] <= 0 \
+                or spec.get('beforeAfterContract') == 1 and (meta['kind'] != 'after' or meta['quality'] != 'full'):
+            raise ValueError(f"binary Whole image/frame mismatch: image={(meta.get('width'), meta.get('height'))}, frame={(frame.get('fullWidth'), frame.get('fullHeight'), frame.get('nativeWidth'), frame.get('nativeHeight'), frame.get('window'))}")
         if spec.get('cropEditContract') == 1:
             if any(replies[i]['result'].get('isError') is not False for i in (10, 11)):
                 raise ValueError('binary crop-edit operation failed')
@@ -187,6 +198,26 @@ def probe_whole_frame(binary, spec):
                     or png[:8] != b'\x89PNG\r\n\x1a\n' or struct.unpack('>II', png[16:24]) != (meta['width'], meta['height']) \
                     or (meta['frame']['fullWidth'], meta['frame']['fullHeight']) != (meta['width'], meta['height']):
                 raise ValueError('binary crop-edit image/frame mismatch')
+        if spec.get('beforeAfterContract') == 1 and spec.get('draftContract') == 1:
+            messages.extend([
+                tool(12, 'command_run', {'id': 'beforeAfter.setBefore', 'params': {'source': 'import'}}),
+                tool(13, 'render_preview', {'id': 1, 'max_side': 32, 'include_frame': True, 'before': True, 'quality': 'draft'}),
+                tool(14, 'render_preview', {'id': 1, 'max_side': 32, 'include_frame': True, 'quality': 'full'}),
+            ])
+            verify = subprocess.run([str(binary), 'mcp', '--headless', '--compact'], input=''.join(
+                json.dumps(item) + '\n' for item in messages).encode(), stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL, timeout=120, check=True,
+                env={**os.environ, 'TEMP': folder, 'TMP': folder}, creationflags=0x08000000 if os.name == 'nt' else 0)
+            replies2 = {item['id']: item for line in verify.stdout.splitlines() if (item := json.loads(line)).get('id') is not None}
+            before_meta = json.loads(next(c['text'] for c in replies2[13]['result']['content'] if c['type'] == 'text'))
+            if 13 not in replies2 or 14 not in replies2:
+                raise ValueError(f"binary Before/Draft/Full probe missing replies: {sorted(replies2)}")
+            full_meta = json.loads(next(c['text'] for c in replies2[14]['result']['content'] if c['type'] == 'text'))
+            if replies2[13]['result'].get('isError') is not False or replies2[14]['result'].get('isError') is not False \
+                    or before_meta.get('kind') != 'before' or before_meta.get('quality') != 'draft' \
+                    or not re.fullmatch(r'[0-9a-f]{16}', before_meta.get('beforeFingerprint', '')) \
+                    or full_meta.get('kind') != 'after' or full_meta.get('quality') != 'full':
+                raise ValueError('binary Before/Draft/Full response mismatch')
     print('Whole Frame binary schema, settings, PNG and error response verified')
 
 
@@ -495,7 +526,9 @@ def receipt(binary, spec):
     if spec.get('wholeFrameContract') == 1:
         return {'version': spec['version'], 'commit': spec['commit'], 'patches': spec['patches'],
                 'binarySha256': hashlib.sha256(binary.read_bytes()).hexdigest(), 'wholeFrameContract': 1,
-                **({'cropEditContract': 1} if spec.get('cropEditContract') == 1 else {})}
+                **({'cropEditContract': 1} if spec.get('cropEditContract') == 1 else {}),
+                **({'beforeAfterContract': 1} if spec.get('beforeAfterContract') == 1 else {}),
+                **({'draftContract': 1} if spec.get('draftContract') == 1 else {})}
     return {"version": spec["version"], "commit": spec["commit"], "patches": spec["patches"],
             "binarySha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "beforeContract": 1, "previewContract": 1, "regionContract": 1,
             "geometryDescriptorContract": spec['geometryDescriptorContract'],

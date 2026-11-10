@@ -135,12 +135,10 @@ class RawProcess(FakeProcess):
             if self.frame_supported:
                 return reply(self.stdout, message, {"tools": [{"name": "render_preview", "inputSchema": {
                     "properties": {"include_frame": {"type": "boolean"}}}}]})
-            if self.adaptive_supported:
+            if self.adaptive_supported or self.before_supported:
                 return reply(self.stdout, message, {"tools": [{"name": "render_preview", "inputSchema": {"properties": {
                     "before": {"type": "boolean"}, "quality": {"type": "string", "enum": ["draft", "full"]},
-                    "preview_contract": {"type": "integer", "enum": [1]},
-                    "stage_cache": {"type": "string", "enum": ["off", "on"]},
-                    "stage_cache_budget_bytes": {"type": "integer"}}}}]})
+                    "include_frame": {"type": "boolean"}}}}]})
             return reply(self.stdout, message, {"tools": [{"name": "render_preview", "inputSchema": {
                 "properties": {"before": {"type": "boolean"}} if self.before_supported else {}}}]})
         if message["method"] != "tools/call":
@@ -168,11 +166,15 @@ class RawProcess(FakeProcess):
                         self.tool(message, error=True)
                     else:
                         result = image_result(args["id"])
+                        metadata = json.loads(result["content"][1]["text"])
+                        metadata.update(kind="before" if args.get("before") else "after",
+                                        quality=args.get("quality", "full"))
+                        result["content"][1]["text"] = json.dumps(metadata)
                         if args.get("before"):
                             settings = self.photos[args["id"]]["settings"]
                             metadata = {"id": args["id"], "width": 16, "height": 12,
                                         "kind": "after" if self.before_wrong_kind else "before",
-                                        "beforeFingerprint": "b" * 16, "effectiveBeforeFingerprint": "e" * 16,
+                                        "quality": args.get("quality", "full"), "beforeFingerprint": "b" * 16,
                                         "geometry": {name: settings.get(name) for name in ("crop", "orientation")}}
                             result["content"][1]["text"] = json.dumps(metadata)
                         if args.get("include_frame"):
@@ -189,18 +191,6 @@ class RawProcess(FakeProcess):
                             result["content"][1]["text"] = json.dumps(metadata)
                         if self.bad_image:
                             result["content"][0]["data"] = "broken"
-                        if "preview_contract" in args:
-                            metadata = json.loads(result["content"][1]["text"])
-                            metadata.update(kind="before" if args.get("before") else "after", previewContract=1,
-                                quality=args["quality"], mode="whole", frame={"geometryId": "a" * 64,
-                                "nativeWidth": 6000, "nativeHeight": 4500, "aspect": 4 / 3,
-                                "fullWidth": 16, "fullHeight": 12, "window": None},
-                                stageCache={"mode": args["stage_cache"], "applied": args["stage_cache"] == "on",
-                                "reason": "none", "cpuBytes": 0, "gpuBytes": 0, "retainedBytes": 0,
-                                "budgetBytes": args.get("stage_cache_budget_bytes", 0)})
-                            if self.execution is not None:
-                                metadata["execution"] = self.execution
-                            result["content"][1]["text"] = json.dumps(metadata)
                         reply(self.stdout, message, result)
                 finally:
                     self.inflight -= 1
@@ -391,7 +381,8 @@ async def create(tmp_path, *, timeouts=QUICK, adaptive=False):
         **{key: MANAGED[key] for key in ('version', 'commit', 'patches')},
         'binarySha256': hashlib.sha256(b'fake').hexdigest(),
         'wholeFrameContract': 1,
-        **({'cropEditContract': 1} if MANAGED.get('cropEditContract') == 1 else {})}), encoding='utf-8')
+        **{key: 1 for key in ('cropEditContract', 'beforeAfterContract', 'draftContract')
+           if MANAGED.get(key) == 1}}), encoding='utf-8')
     children = []
 
     async def spawn(*args, **kwargs):

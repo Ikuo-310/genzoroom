@@ -390,33 +390,27 @@ def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=N
         metadata = _decode(text.encode("utf-8"))
         allowed = {"id", "width", "height"}
         if kind == "before":
-            allowed |= {"kind", "beforeFingerprint", "effectiveBeforeFingerprint", "geometry"}
-        elif isinstance(metadata, dict) and "kind" in metadata:
+            allowed |= {"kind", "beforeFingerprint", "geometry"}
+        if isinstance(metadata, dict) and "kind" in metadata:
             allowed.add("kind")
+        if isinstance(metadata, dict) and "quality" in metadata:
+            allowed.add("quality")
         if frame_only:
             allowed.add("frame")
         elif quality is not None:
-            allowed |= {"kind", "previewContract", "quality", "mode", "frame", "stageCache"}
-        if not frame_only and quality is not None and isinstance(metadata, dict) and "execution" in metadata:
-            allowed.add("execution")
-            execution = metadata["execution"]
-            if not isinstance(execution, dict) or set(execution) != {"outcome", "backend", "reason"} or not (
-                execution == {"outcome": "gpu_success", "backend": "gpu", "reason": "none"}
-                or execution == {"outcome": "cpu_fallback", "backend": "cpu", "reason": "gpu_failed"}
-                or execution.get("outcome") == "cpu_not_tried" and execution.get("backend") == "cpu"
-                and execution.get("reason") in ("cpu_requested", "shutdown", "gpu_disabled", "unsupported", "gpu_unavailable")
-            ):
-                raise ValueError()
+            allowed.add("frame")
         if not isinstance(metadata, dict) or set(metadata) != allowed or \
                 type(metadata["id"]) is not int or metadata["id"] != photo_id:
             raise ValueError()
         if metadata.get("kind", "after") != kind:
             raise ValueError()
-        if kind == "before" and (metadata["beforeFingerprint"] != before_fingerprint
-                or not isinstance(metadata["effectiveBeforeFingerprint"], str)
-                or not re.fullmatch(r"[0-9a-f]{16}", metadata["effectiveBeforeFingerprint"])
-                or _object_json(metadata["geometry"], MAX_METADATA_BYTES) != _object_json(geometry, MAX_METADATA_BYTES)):
-            raise ValueError()
+        if kind == "before":
+            if not isinstance(metadata.get("beforeFingerprint"), str) or not re.fullmatch(r"[0-9a-f]{16}", metadata["beforeFingerprint"]):
+                raise ValueError()
+            if before_fingerprint and metadata["beforeFingerprint"] != before_fingerprint:
+                raise ValueError()
+            if _object_json(metadata["geometry"], MAX_METADATA_BYTES) != _object_json(geometry, MAX_METADATA_BYTES):
+                raise ValueError()
         w, h = metadata["width"], metadata["height"]
         if frame_only or quality is not None:
             frame = metadata["frame"]
@@ -426,16 +420,9 @@ def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=N
                     type(frame["aspect"]) not in (int, float) or not math.isfinite(frame["aspect"]) or frame["aspect"] <= 0 or \
                     (frame["fullWidth"], frame["fullHeight"]) != (w, h) or frame["window"] is not None:
                 raise ValueError()
-        if not frame_only and quality is not None:
-            cache = metadata["stageCache"]
-            if type(metadata["previewContract"]) is not int or metadata["previewContract"] != 1 or \
-                    metadata["quality"] != quality or metadata["mode"] != "whole" or \
-                    not isinstance(cache, dict) or set(cache) != {"mode", "applied", "reason", "cpuBytes", "gpuBytes", "retainedBytes", "budgetBytes"} or \
-                    cache["mode"] not in ("off", "on") or type(cache["applied"]) is not bool or cache["reason"] not in ("none", "budget") or \
-                    any(type(cache[k]) is not int or not 0 <= cache[k] <= 2**53 - 1 for k in ("cpuBytes", "gpuBytes", "retainedBytes", "budgetBytes")) or \
-                    cache["retainedBytes"] > cache["budgetBytes"] or \
-                    cache["mode"] == "off" and (cache["applied"] or cache["retainedBytes"] or cache["reason"] != "none") or \
-                    cache["mode"] == "on" and (cache["budgetBytes"] == 0 or cache["applied"] != (cache["reason"] == "none")):
+        if quality is not None and (metadata.get("quality") != quality or metadata.get("kind", "after") != kind):
+            raise ValueError()
+        if frame_only and (metadata.get("quality") != "full" or metadata.get("kind", "after") != "after"):
                 raise ValueError()
         if type(w) is not int or type(h) is not int or min(w, h) <= 0 or \
                 max(w, h) > max_side or w * h > MAX_PREVIEW_SIDE * MAX_PREVIEW_SIDE:
@@ -896,6 +883,9 @@ class LightCraftRawSession:
                 if supported and isinstance(before, dict) and isinstance(before.get("beforeFingerprint"), str) \
                         and re.fullmatch(r"[0-9a-f]{16}", before["beforeFingerprint"]):
                     photo.before_fingerprint = before["beforeFingerprint"]
+                elif supported:
+                    # v0.20 returns this identity with the rendered Before image, not setBefore.
+                    photo.before_fingerprint = ""
             except LightCraftError as error:
                 if isinstance(error, MCPTransportError):
                     raise
@@ -1902,11 +1892,10 @@ class LightCraftRawSession:
         photo = self._photo(handle, active=True)
         if photo.before_fingerprint is None:
             return None
-        # The native import fingerprint and current geometry describe the effective Before;
-        # After exposure/WB/lens edits must not invalidate this read-only comparison image.
+        # Source identity and geometry define the immutable import render; After edits must not invalidate it.
         value = {"source": [photo.content_hash, list(photo.fingerprint)], "document": [handle.source_key,
                  handle.document_token, handle.generation], "engine": [ENGINE_VERSION, ENGINE_COMMIT, "before-v1"],
-                 "import": photo.before_fingerprint, "process": json.loads(photo.settings_json).get("process"),
+                 "process": json.loads(photo.settings_json).get("process"),
                  "geometry": self._before_geometry(photo), "maxSide": max_side}
         return hashlib.sha256(_object_json(value, MAX_SETTINGS_BYTES).encode()).hexdigest()
 
@@ -1937,8 +1926,6 @@ class LightCraftRawSession:
             raise LightCraftError("raw_revision_conflict")
         if kind == "before":
             key = self.before_key(handle, max_side)
-            if quality is not None and key is not None:
-                key = hashlib.sha256(f"{key}:{quality}".encode()).hexdigest()
             if key is None:
                 raise LightCraftError("raw_before_unsupported")
             for pending in (self._before_pending, self._running):
@@ -1959,6 +1946,9 @@ class LightCraftRawSession:
             ticket.interaction_id = interaction_id
             ticket.interaction_sequence = interaction_sequence
             self._pending = ticket
+        if kind == "before" and quality is None:
+            # v0.20 reports its immutable import fingerprint with the rendered Before metadata.
+            quality = "full"
         ticket.mode = mode
         ticket.quality, ticket.adaptive = quality or "full", quality is not None
         ticket.serial, ticket.view_generation, ticket.geometry_id = serial, view_generation, geometry_id
@@ -2022,8 +2012,6 @@ class LightCraftRawSession:
                                                                                 document_token=ticket.region_document_token)
             if ticket.kind == "before":
                 key = self.before_key(ticket.handle, ticket.max_side)
-                if ticket.adaptive and key is not None:
-                    key = hashlib.sha256(f"{key}:{ticket.quality}".encode()).hexdigest()
                 return not ticket.abandoned and ticket.epoch == self._epoch and ticket.key == key
             return not ticket.abandoned and ticket.epoch == self._epoch and ticket.sequence == self._sequence and \
                 ticket.revision == photo.applied_revision == photo.requested_revision
@@ -2094,8 +2082,7 @@ class LightCraftRawSession:
                         photo = self._photo(ticket.handle, active=True)
                         args = {"before": True} if ticket.kind == "before" else {}
                         if ticket.adaptive:
-                            args.update(quality=ticket.quality, stage_cache=self._stage_mode,
-                                        stage_cache_budget_bytes=self._stage_budget)
+                            args.update(quality=ticket.quality, include_frame=True)
                         crop_expected = None
                         simple_crop = False
                         if getattr(ticket, 'mode', 'whole') == 'crop-edit':
@@ -2147,9 +2134,6 @@ class LightCraftRawSession:
                             _validation_job=(validate_result, (result,ticket.region_target,ticket.region_operation,photo.photo_id,fingerprint)))
                         del result
                         diagnostics = metadata['diagnostics']
-                        if ticket.region_operation == 'render' and (diagnostics['stageCache']['mode'] != self._stage_mode
-                                or self._stage_mode == 'on' and diagnostics['stageCache']['budgetBytes'] != self._stage_budget):
-                            raise LightCraftError('raw_invalid_region_response')
                         t = ticket.region_target
                         lightcraft_log('region.completed', level='debug', operation=ticket.region_operation, generation=self._generation,
                             revision=ticket.revision, quality=t['quality'], kind=t['identity']['kind'], geometryId=t['geometryId'],
@@ -2158,11 +2142,7 @@ class LightCraftRawSession:
                             nativeMs=native_ms, validationMs=(monotonic()-validation_started)*1000,
                             renderMs=diagnostics['nativeMs'], workWindow=diagnostics.get('workWindow'),
                             sourceLevel=diagnostics['sourceLevel'], sourceHostBytes=diagnostics['sourceHostBytes'],
-                            sourceCacheBytes=diagnostics['sourceCacheBytes'], payloadBytes=len(data),
-                            execution=diagnostics.get('execution'),stageCache=diagnostics.get('stageCache'))
-                        if diagnostics.get('execution',{}).get('outcome') == 'cpu_fallback':
-                            lightcraft_log('region.gpuFallback', level='warn', generation=self._generation,
-                                revision=ticket.revision, requestId=t['requestId'], execution=diagnostics['execution'])
+                            sourceCacheBytes=diagnostics['sourceCacheBytes'], payloadBytes=len(data))
                         if self._ticket_current(ticket):
                             ticket._finish(RegionResult(ticket.handle, data, json.dumps(metadata)))
                         else:
@@ -2181,9 +2161,8 @@ class LightCraftRawSession:
                     del result
                     data, w, h = image[:3]
                     metadata = image[3] if ticket.adaptive or frame_only else None
-                    if metadata and not frame_only and not simple_crop and (metadata["stageCache"]["mode"] != self._stage_mode or
-                            self._stage_mode == "on" and metadata["stageCache"]["budgetBytes"] != self._stage_budget):
-                        raise LightCraftError("lightcraft_invalid_preview")
+                    if ticket.kind == "before" and metadata is not None:
+                        photo.before_fingerprint = metadata["beforeFingerprint"]
                     actual_quality = "full" if frame_only or simple_crop else ticket.quality
                     self._preview_trials += 1
                     digest = None
@@ -2195,14 +2174,9 @@ class LightCraftRawSession:
                     lightcraft_log("preview.measured", level="debug", generation=self._generation,
                         revision=ticket.revision, sequence=ticket.sequence, quality=actual_quality, kind=ticket.kind,
                         trialIndex=self._preview_trials, configuredBackend=self.manager._gpu_backend, maxSide=ticket.max_side,
-                        execution=metadata.get("execution") if metadata else None,
                         pngSha256=digest,
                         nativeMs=native_ms, validationMs=validation_ms,
-                        width=w, height=h, payloadBytes=len(data), stageCache=metadata.get("stageCache") if metadata else None)
-                    if metadata and metadata.get("execution", {}).get("outcome") == "cpu_fallback":
-                        lightcraft_log("preview.gpuFallback", level="warn", generation=self._generation,
-                            revision=ticket.revision, sequence=ticket.sequence, configuredBackend=self.manager._gpu_backend,
-                            execution=metadata["execution"])
+                        width=w, height=h, payloadBytes=len(data))
                     if self._ticket_current(ticket):
                         frame = PreviewFrame(ticket.handle, ticket.revision, ticket.epoch,
                                              ticket.sequence, w, h, data, kind=ticket.kind, key=ticket.key,
@@ -2211,8 +2185,7 @@ class LightCraftRawSession:
                                              _frame_json=json.dumps(metadata["frame"]) if metadata else None,
                                              _metrics_json=json.dumps({"nativeMs": native_ms,
                                                  "validationMs": validation_ms,
-                                                 "pngSha256": digest, **({"stageCache": metadata["stageCache"]} if "stageCache" in metadata else {}),
-                                                 **({"execution": metadata["execution"]} if "execution" in metadata else {})})
+                                                 "pngSha256": digest})
                                                  if self._diagnostics and metadata else None,
                                              interaction_id=ticket.interaction_id,
                                              interaction_sequence=ticket.interaction_sequence)

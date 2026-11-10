@@ -42,11 +42,11 @@ feature側でv0.18.1の実行契約や旧Nativeとの互換性を維持する必
 - Backendのコントロール・カーブ・カテゴリ操作86件、カーブ／Frame管理14件、カーブHTTP 2件、Whole HTTP 4件、Frontend関連326件が成功。Frontend型チェック・production build、実EXE／receipt／manifestの再検証も成功した。Frontend buildには大きなbundleと依存モジュールのdirectiveに関する警告がある。ブラウザ・実機操作は未実施。
 - DB・Recipe形式・既存データおよびNative patch／manifest／receiptは変更していない。Before／Draft／Region、Crop／Straighten、WBスポイト、保存・History全体、Export／Immich、実RAW・DX12統合はP3以降の対象。
 
-### P3 調査・部分検証（Crop接続前の記録）
+### P3 調査・部分検証（Crop接続前の履歴。現状は後続記録を参照）
 
-P1のv0.20.0実EXEについて、Backendを経由したMCP能力確認ではWhole Frameのみ対応し、Before、Draft、Region、WB候補APIは未対応だった。現在の接続と必要な作業は以下のとおり。
+P1のv0.20.0実EXEについて、Backendを経由したMCP能力確認ではWhole Frameのみ対応し、Before、Draft、Region、WB候補APIは未対応だった。以下の表・結果はCrop／Before／Draft実装前の記録であり、現在の状態は後続P3記録を参照する。
 
-| 機能・GenzoRoomの要求 | v0.20.0側の機能と必要な接続 | 現状 |
+| 機能・GenzoRoomの要求 | v0.20.0側の機能と必要な接続 | 当時の状態 |
 |---|---|---|
 | Whole After／Full：画像・Frameとrevision | 標準`render_preview`とP1のFrame公開を使用 | 接続済み。JPEGで実Native経由の幾何操作後のWholeを確認 |
 | Before：import基準と現在のCrop／orientation | Engineの`before_settings`／`render_job(..., before=true, ...)`は存在するが、現在のMCP描画にはBefore引数がない。画像種別と要求の対応を含む最小公開とBackend接続が必要 | 未接続 |
@@ -66,6 +66,13 @@ P3は完了していない。Native patch・manifest・receipt・実EXE、既存
 - 既存managed patchを必要な接続だけ更新した。14ファイル、追加227行・削除20行、patch SHA-256 `ed202b5e817610c0c4b530767266dce89aa87de82f82a1c519d9175afe98d8be`。cleanな固定upstreamへの適用を確認し、実EXEを再buildした。EXE SHA-256は`9fa5280c8e30f41dd59f07ae3c078ff7c61a59395ecf480dd901d9511109a906`、receiptはWhole FrameとCrop編集契約を記録する。手順は[更新ガイド](UPDATE_GUIDE.md)を参照。
 - Native focused test 2件、実Native／合成DNGのHTTP・一時DB統合を含むBackend関連121件、HTTP focused 6件、既存Whole／カーブ回帰14件、実Native／JPEG幾何回帰1件、Frontend関連276件とproduction buildが成功。以前のCrop編集PreviewのHTTP 503は同じ実Native統合テストで解消を確認した。実EXE／receipt／manifestおよび`git apply --check`も成功。Native buildにはCJK font未同梱等、Frontend buildにはbundleサイズ等の警告がある。
 - P3全体は未完了。Before、Native Draft、Region、WBスポイトと、Crop／回転後のポイントカーブターゲット座標の統合は残る。実RAWとWindows画面での操作・GPU目視は未実施。既存データは変更していない。
+
+### P3 Before／Draft 接続（2026-11-10、P3継続中）
+
+- `render_preview`／`render_photo`にBeforeと品質指定を加え、標準`Session::render_job`／`RenderJob::draft()`へ渡す。Frameは同じ描画結果から取得し、応答に`kind`・実際の`quality`を付ける。v0.20.0の標準`beforeAfter.setBefore`はfingerprintを返さないため、BackendはBefore画像応答のfingerprintを検証して保存する。GenzoRoomのrevision・要求世代・interaction ID／sequence管理を維持し、MCP公開schemaにStageCache・GPU execution・内部allocation情報を含めない。
+- managed patchは14ファイル、追加278行・削除20行。目的はWhole／Crop Frame、Before／After、Draft／Fullの最小接続。patch SHA-256は`63662dd63537f22e9fefb6d80adc5ebfcaf64cff592959a687ff27863e366813`。正式tag／commitはv0.20.0／`192ff72923c39e6623f2c7ff67ab3a119deb8071`を維持する。manifestのreceipt契約をWhole Frame、Crop編集、Before／After、Draft／Fullへ更新し、開発targetは`target-p3-preview`として既存P1／Crop EXEを保持する。実EXE SHA-256は`67736b54c357572831017a04ce69bf047f9d201c0f7b774f273ff79ab29d89b0`。
+- fixed-upstream clean checkoutへの`git apply --check`と`build.py --apply`が成功。Native focused test 2件、実Native／JPEG Backend統合2件、Before／Whole Backend 17件、Preview HTTP 7件、artifact／receipt focused 21件が成功し、実EXEのMCP schema・settings・PNG／Frame・Before／After・Draft／Full・未知photo errorを確認した。実Nativeの応答比較はCPU設定で実行。実RAW／DNGはこの工程で自動検証していない。GUI・Windows画面・GPU実機操作は対象外。
+- **P3全体は未完了。** Region／Zoom／PanはLightCraftの`region_job`／`region_job_before`へつなぐv0.20.0公開MCP経路がなく、既存Backend経路は旧StageCache／execution診断応答を前提としているため、現行契約のままでは接続できない。WBスポイトは標準`develop.wbPick`が即時変更型で、既存UIの候補取得・確認境界を満たす読み取り専用APIとCrop／Rotate／Flip座標変換がない。ポイントカーブのターゲット位置はWhole／Crop／Rotate／Flip／Region／Zoom／Panの全行列で未確認。実RAW／DNG、Windows画面の表示品質・操作感、GPU動作も未確認。既存DB／Recipe／Historyデータは変更していない。
 
 ## 既存成果とpatchの扱い
 

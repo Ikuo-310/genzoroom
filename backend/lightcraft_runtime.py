@@ -619,16 +619,10 @@ class LightCraftManager:
                     continue
                 schema = tool.get("inputSchema")
                 props = schema.get("properties") if isinstance(schema, dict) else None
-                if not isinstance(props, dict) or not all(isinstance(props.get(k), dict) for k in
-                        ("quality", "preview_contract", "stage_cache", "stage_cache_budget_bytes")):
+                if not isinstance(props, dict) or not isinstance(props.get("quality"), dict):
                     continue
                 session.adaptive_preview = (props["quality"].get("type") == "string"
-                    and props["quality"].get("enum") == ["draft", "full"]
-                    and props["preview_contract"].get("type") == "integer"
-                    and props["preview_contract"].get("enum") == [1]
-                    and props["stage_cache"].get("type") == "string"
-                    and props["stage_cache"].get("enum") == ["off", "on"]
-                    and props["stage_cache_budget_bytes"].get("type") == "integer")
+                    and props["quality"].get("enum") == ["draft", "full"])
         return session.adaptive_preview
 
     async def _raw_frame_supported(self, generation):
@@ -705,15 +699,13 @@ class LightCraftManager:
             raise LightCraftError("raw_before_unsupported")
         options = {}
         if include_frame:
-            if before or crop_edit is not None or quality not in (None, "full") or not await self._raw_frame_supported(generation):
+            if crop_edit is not None or not await self._raw_frame_supported(generation):
                 raise LightCraftError("raw_preview_unsupported")
             options["include_frame"] = True
-        elif quality is not None:
+        if quality is not None:
             if not await self._raw_preview_supported(generation):
                 raise LightCraftError("raw_preview_unsupported")
-            options = {"quality": quality, "preview_contract": 1, "stage_cache": stage_cache}
-            if stage_cache == "on":
-                options["stage_cache_budget_bytes"] = stage_cache_budget_bytes
+            options["quality"] = quality
         if crop_edit is not None:
             from lightcraft_artifact import MANAGED
             if MANAGED.get('cropEditContract') != 1:

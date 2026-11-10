@@ -18,6 +18,12 @@ LightCraft is the source of truth for RAW decoding, development algorithms and g
 
 The enduring integration boundary is defined in the [LightCraft integration contract](research/lightcraft/LIGHTCRAFT_INTEGRATION_CONTRACT.md). GenzoRoom owns editing interaction, UI coordinates, Preview request/display and stale-response management, while LightCraft owns image generation, Crop/Straighten/WB calculations, execution selection, caches and memory. The v0.20.0 P1 status and the preceding v0.18.1 runtime are distinguished below.
 
+### Current LightCraft v0.20.0 Preview connection (P3 in progress)
+
+The v0.20.0 managed `render_preview` path requests Whole images from the Native Engine and can select Before/After plus Draft/Full. Native returns the image kind, actual quality, Before fingerprint and Frame from the same render; GenzoRoom validates those application fields and retains its revision, display generation, interaction ID/sequence and stale-result fences. Crop editing requests an uncropped render and its Frame through the existing P3 connection. LightCraft chooses GPU/CPU execution and manages its internal caches and memory; those details are not Preview success conditions or public GenzoRoom controls. The managed patch extends only the MCP input and response needed to call the standard Engine `render_job`, `RenderJob::draft()` and Crop-disabled render.
+
+Region/Zoom/Pan and read-only WB candidate connection remain incomplete for v0.20.0; the existing Region adapter still expects legacy internal diagnostic fields and must be replaced before it can call Engine region jobs. The standard `develop.wbPick` changes settings immediately, so it does not satisfy the existing candidate-confirmation flow. Historical v0.14/v0.18 descriptions below do not establish those capabilities for the current managed binary. Point-curve target mapping has not yet been verified across all Crop/Rotate/Flip/Region/Zoom states. The current phase status and verification evidence are in the [v0.20.0 upgrade plan](research/lightcraft/LIGHTCRAFT_V020_UPGRADE_PLAN.md).
+
 This section grew out of the RAW integration record. Windows now applies the existing LightCraft editing path to every Asset selected by the `lightcraft` development policy, including Native-accepted non-RAW images; Docker keeps its JPEG path. The RAW-specific constraints below remain RAW-specific, while shared Native UI and persistence behavior is not limited by the historical `raw` names.
 
 ### RAW point curves (LightCraft v0.18.1)
