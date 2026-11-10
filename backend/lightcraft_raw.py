@@ -2111,8 +2111,7 @@ class LightCraftRawSession:
                         try:
                             if ticket.region_operation is not None:
                                 result = await self.manager._raw_region(self._generation, photo.photo_id,
-                                    ticket.region_operation, ticket.region_target, timeout=self._timeouts.preview,
-                                    stage_cache=self._stage_mode, stage_cache_budget_bytes=self._stage_budget)
+                                    ticket.region_operation, ticket.region_target, timeout=self._timeouts.preview)
                             else:
                                 result = await self.manager._raw_preview(self._generation, photo.photo_id, ticket.max_side,
                                                                          timeout=self._timeouts.preview, **args)
@@ -2129,20 +2128,16 @@ class LightCraftRawSession:
                     validation_started = monotonic()
                     if ticket.region_operation is not None:
                         from raw_region import validate_result
-                        fingerprint = photo.before_fingerprint if ticket.region_target['identity']['kind'] == 'before' else None
                         data, metadata = await self._image(result, photo.photo_id, ticket.max_side,
-                            _validation_job=(validate_result, (result,ticket.region_target,ticket.region_operation,photo.photo_id,fingerprint)))
+                            _validation_job=(validate_result, (result,ticket.region_target,ticket.region_operation,photo.photo_id)))
                         del result
-                        diagnostics = metadata['diagnostics']
                         t = ticket.region_target
                         lightcraft_log('region.completed', level='debug', operation=ticket.region_operation, generation=self._generation,
                             revision=ticket.revision, quality=t['quality'], kind=t['identity']['kind'], geometryId=t['geometryId'],
                             fullWidth=metadata['response']['fullWidth'], fullHeight=metadata['response']['fullHeight'],
                             window=t.get('window'), validRegion=t.get('validRegion'), requestId=t['requestId'],
-                            nativeMs=native_ms, validationMs=(monotonic()-validation_started)*1000,
-                            renderMs=diagnostics['nativeMs'], workWindow=diagnostics.get('workWindow'),
-                            sourceLevel=diagnostics['sourceLevel'], sourceHostBytes=diagnostics['sourceHostBytes'],
-                            sourceCacheBytes=diagnostics['sourceCacheBytes'], payloadBytes=len(data))
+                            transportMs=native_ms, validationMs=(monotonic()-validation_started)*1000,
+                            payloadBytes=len(data))
                         if self._ticket_current(ticket):
                             ticket._finish(RegionResult(ticket.handle, data, json.dumps(metadata)))
                         else:

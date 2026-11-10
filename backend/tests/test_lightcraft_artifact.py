@@ -15,7 +15,9 @@ def write_receipt(executable, **changes):
     value = {**{key: MANAGED[key] for key in ('version', 'commit', 'patches')},
              'binarySha256': digest, 'wholeFrameContract': 1,
              **{key: 1 for key in ('cropEditContract', 'beforeAfterContract', 'draftContract')
-                if MANAGED.get(key) == 1}, **changes}
+                if MANAGED.get(key) == 1},
+             **({'regionContract': 1, 'geometryDescriptorContract': MANAGED['geometryDescriptorContract']}
+                if MANAGED.get('regionContract') == 1 else {}), **changes}
     executable.with_suffix('.genzoroom.json').write_text(json.dumps(value), encoding='utf-8')
     return digest
 
@@ -26,7 +28,7 @@ def write_receipt(executable, **changes):
     {'cropEditContract': True}, {'cropEditContract': 2}, {'cropEditContract': None},
     {'beforeAfterContract': True}, {'beforeAfterContract': 2}, {'beforeAfterContract': None},
     {'draftContract': True}, {'draftContract': 2}, {'draftContract': None},
-    {'beforeContract': 1}, {'regionContract': 1},
+    {'beforeContract': 1}, {'regionContract': 2}, {'geometryDescriptorContract': 1},
 ])
 def test_receipt_mismatch_never_claims_a_managed_version(tmp_path, changes):
     executable = tmp_path / 'engine.exe'

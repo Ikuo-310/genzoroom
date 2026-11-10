@@ -7,6 +7,7 @@ import re
 from lightcraft_mcp import LightCraftError, _decode
 
 SCHEMA = json.loads(Path(__file__).with_name('raw_region_schema.json').read_text(encoding='utf-8'))
+NATIVE_SCHEMA = json.loads(Path(__file__).with_name('raw_region_native_schema.json').read_text(encoding='utf-8'))
 MAX_SIDE = 2048
 MAX_PIXELS = 2_097_152
 MAX_PNG_BYTES = 9 * 1024**2
@@ -76,7 +77,7 @@ def supports_region(result):
     return s.get('type') == 'object' and {'id', 'region_contract', 'operation', 'target'} <= set(s.get('required', [])) \
         and p.get('id', {}).get('type') == 'string' and p.get('region_contract') == {'type': 'integer', 'enum': [1]} \
         and p.get('operation') == {'type': 'string', 'enum': ['plan', 'render']} \
-        and _schema_equal(p.get('target'), {'oneOf': [SCHEMA['$defs']['frameRequest'], SCHEMA['$defs']['request']]})
+        and _schema_equal(p.get('target'), {'oneOf': [NATIVE_SCHEMA['$defs']['frameRequest'], NATIVE_SCHEMA['$defs']['request']]})
 
 
 def _schema_equal(a, b):
@@ -87,57 +88,7 @@ def _schema_equal(a, b):
         return False
 
 
-def _diagnostics(d, operation, before_fingerprint):
-    keys = {'sourceLevel', 'sourceHostBytes', 'sourceCacheBytes', 'nativeMs'}
-    if operation == 'render':
-        keys |= {'execution', 'stageCache', 'workWindow'}
-    if before_fingerprint is not None:
-        keys |= {'beforeFingerprint', 'effectiveBeforeFingerprint'}
-    if isinstance(d, dict) and 'planTiming' in d:
-        if operation != 'plan':
-            raise ValueError()
-        validate_plan_timing(d['planTiming'], d.get('nativeMs'))
-        keys.add('planTiming')
-    if not isinstance(d, dict) or set(d) != keys or d['sourceLevel'] not in ('Thumb', 'Preview', 'Full'):
-        raise ValueError()
-    for key in ('sourceHostBytes', 'sourceCacheBytes'):
-        if type(d[key]) is not int or not 0 <= d[key] <= 2**53-1:
-            raise ValueError()
-    if type(d['nativeMs']) not in (int, float) or not math.isfinite(d['nativeMs']) or d['nativeMs'] < 0:
-        raise ValueError()
-    if before_fingerprint is not None and (d['beforeFingerprint'] != before_fingerprint
-            or type(d['effectiveBeforeFingerprint']) is not str or not re.fullmatch('[a-f0-9]{16}', d['effectiveBeforeFingerprint'])):
-        raise ValueError()
-    if operation == 'render':
-        cache = d['stageCache']
-        if not isinstance(cache, dict) or set(cache) != {'mode','applied','reason','cpuBytes','gpuBytes','retainedBytes','budgetBytes'} \
-                or cache['mode'] not in ('off','on') or type(cache['applied']) is not bool or cache['reason'] not in ('none','budget') \
-                or any(type(cache[k]) is not int or not 0 <= cache[k] <= 2**53-1 for k in ('cpuBytes','gpuBytes','retainedBytes','budgetBytes')) \
-                or cache['retainedBytes'] > cache['budgetBytes'] \
-                or cache['mode'] == 'off' and (cache['applied'] or cache['retainedBytes'] or cache['reason'] != 'none') \
-                or cache['mode'] == 'on' and (cache['budgetBytes'] == 0 or cache['applied'] != (cache['reason'] == 'none')):
-            raise ValueError()
-        e = d['execution']
-        if not isinstance(e, dict) or set(e) != {'outcome','backend','reason'} or not (
-                e == {'outcome':'gpu_success','backend':'gpu','reason':'none'}
-                or e == {'outcome':'cpu_fallback','backend':'cpu','reason':'gpu_failed'}
-                or e['outcome'] == 'cpu_not_tried' and e['backend'] == 'cpu'
-                and e['reason'] in ('cpu_requested','shutdown','gpu_disabled','unsupported','gpu_unavailable')):
-            raise ValueError()
-
-
-def validate_plan_timing(value, native_ms):
-    durations = {'sourcePreparationMs', 'sourceAcquisitionMs', 'imageSelectionMs',
-                 'plannerMs', 'geometryMs', 'sourceRetentionMs', 'otherMs'}
-    if not isinstance(value, dict) or set(value) != durations | {'sourceKind'} \
-            or value['sourceKind'] not in ('loaded', 'fit', 'file', 'other') \
-            or any(type(value[k]) not in (int, float) or not math.isfinite(value[k]) or value[k] < 0 for k in durations) \
-            or type(native_ms) not in (int, float) or not math.isfinite(native_ms) \
-            or abs(sum(value[k] for k in durations) - native_ms) > 0.01:
-        raise ValueError()
-
-
-def validate_result(result, target, operation, photo_id, before_fingerprint=None):
+def validate_result(result, target, operation, photo_id):
     """Runs on the owner's existing bounded validation thread, including plan-only metadata."""
     try:
         content = result['content']
@@ -149,16 +100,17 @@ def validate_result(result, target, operation, photo_id, before_fingerprint=None
         if not isinstance(text, str) or len(text.encode('utf-8')) > MAX_METADATA_BYTES:
             raise ValueError()
         meta = _decode(text.encode('utf-8'))
-        if set(meta) != {'response', 'diagnostics'}:
+        native_keys = ({'kind','quality','geometryId','nativeWidth','nativeHeight','fullWidth','fullHeight'}
+                       if operation == 'plan' else
+                       {'kind','quality','geometryId','fullWidth','fullHeight','window','width','height'})
+        if not isinstance(meta, dict) or set(meta) != native_keys:
             raise ValueError()
-        r = meta['response']
-        if not matches(r, SCHEMA['$defs']['frameResponse' if operation == 'plan' else 'response']):
-            raise ValueError()
-        mismatches = [key for key, expected in target.items() if r.get(key) != expected]
-        if r.get('kind') != target['identity']['kind']:
-            mismatches.append('kind')
+        mismatches = [key for key, expected in (('geometryId',target['geometryId']),
+            ('quality',target['quality']),('kind',target['identity']['kind'])) if meta.get(key) != expected]
+        if operation == 'render' and (meta.get('fullWidth') != target['fullWidth']
+                or meta.get('fullHeight') != target['fullHeight'] or meta.get('window') != target['window']):
+            mismatches.append('window')
         if mismatches:
-            # Echo diagnostics name fields only; opaque document/source tokens are never logged.
             from lightcraft_runtime import lightcraft_log
             context = {
                 'stage': 'native_response_echo', 'reason': 'echo_mismatch', 'operation': operation,
@@ -167,26 +119,26 @@ def validate_result(result, target, operation, photo_id, before_fingerprint=None
                 'mismatchFields': mismatches, 'nativeResponseReceived': True,
                 'mismatchSide': 'native_response',
                 'geometryMatches': 'geometryId' not in mismatches,
-                'identityMatches': 'identity' not in mismatches,
+                'identityMatches': True,
             }
             if 'desiredLongEdge' in target:
                 context['requestDesiredLongEdge'] = target['desiredLongEdge']
-                context['responseDesiredLongEdge'] = r.get('desiredLongEdge')
+                context['responseDesiredLongEdge'] = target['desiredLongEdge']
             lightcraft_log('region.geometryMismatch', level='warn', **context)
             raise LightCraftError('raw_region_geometry_mismatch')
-        _diagnostics(meta['diagnostics'], operation, before_fingerprint)
         if operation == 'plan':
+            r = {**target, **meta}
             if images or result.get('structuredContent') != meta or r['fullWidth'] > r['nativeWidth'] or r['fullHeight'] > r['nativeHeight']:
                 raise ValueError()
-            return b'', meta
-        validate_target({k:r[k] for k in target}, 'render')
-        if 'structuredContent' in result or len(images) != 1 or (r['width'],r['height']) != (r['window']['w'],r['window']['h']):
+            if not matches(r, SCHEMA['$defs']['frameResponse']):
+                raise ValueError()
+            return b'', {'response': r}
+        r = {**target, **meta}
+        if not matches(r, SCHEMA['$defs']['response']):
             raise ValueError()
-        work = meta['diagnostics']['workWindow']
-        if not matches(work, SCHEMA['$defs']['request']['properties']['window']) or work['w']*work['h'] > MAX_PIXELS \
-                or work['x']+work['w'] > r['fullWidth'] or work['y']+work['h'] > r['fullHeight'] \
-                or work['x'] > r['window']['x'] or work['y'] > r['window']['y'] \
-                or work['x']+work['w'] < r['window']['x']+r['window']['w'] or work['y']+work['h'] < r['window']['y']+r['window']['h']:
+        validate_target({k:r[k] for k in target}, 'render')
+        if 'structuredContent' in result or len(images) != 1 or r['window'] != target['window'] \
+                or (r['width'],r['height']) != (r['window']['w'],r['window']['h']):
             raise ValueError()
         data = images[0].get('data')
         if not isinstance(data, str) or not data or len(data) > 4*((MAX_PNG_BYTES+2)//3):
@@ -197,7 +149,7 @@ def validate_result(result, target, operation, photo_id, before_fingerprint=None
         raw, _, _ = _validate_png(shim, photo_id, MAX_SIDE)
         if len(raw) > MAX_PNG_BYTES:
             raise ValueError()
-        return raw, meta
+        return raw, {'response': r}
     except LightCraftError as error:
         if error.code == 'lightcraft_invalid_preview':
             raise LightCraftError('raw_invalid_region_response') from None

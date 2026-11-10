@@ -11,6 +11,7 @@
         "crates/mcp/src/headless.rs",
         "crates/mcp/src/lib.rs",
         "crates/mcp/src/preview.rs",
+        "crates/mcp/src/region_schema.json",
         "crates/mcp/src/tests.rs",
         "crates/mcp/src/tools.rs",
         "crates/pipeline/src/geometry.rs",
@@ -18,15 +19,17 @@
         "crates/ui-egui/src/render.rs"
       ],
       "file": "patches/0001-v0.20.0-whole-frame.patch",
-      "purpose": "Return rendered Whole and Crop editing geometry, Before/After images and actual Draft/Full quality",
-      "sha256": "63662dd63537f22e9fefb6d80adc5ebfcaf64cff592959a687ff27863e366813"
+      "purpose": "Expose rendered Whole/Crop Frame, Before/After, Draft/Full and minimal Engine Region rendering",
+      "sha256": "cd256727bd9f40661f2e066e1db37fa47ed2c26ccc4ead083bb46b0b6fd3dde8"
     }
   ],
   "commit": "192ff72923c39e6623f2c7ff67ab3a119deb8071",
   "version": "0.20.0",
   "wholeFrameContract": 1,
-  "developmentTargetDir": "target-p3-preview",
+  "developmentTargetDir": "target-p3-region",
   "cropEditContract": 1,
   "beforeAfterContract": 1,
-  "draftContract": 1
+  "draftContract": 1,
+  "regionContract": 1,
+  "geometryDescriptorContract": 2
 }

@@ -381,8 +381,10 @@ async def create(tmp_path, *, timeouts=QUICK, adaptive=False):
         **{key: MANAGED[key] for key in ('version', 'commit', 'patches')},
         'binarySha256': hashlib.sha256(b'fake').hexdigest(),
         'wholeFrameContract': 1,
-        **{key: 1 for key in ('cropEditContract', 'beforeAfterContract', 'draftContract')
-           if MANAGED.get(key) == 1}}), encoding='utf-8')
+        **{key: 1 for key in ('cropEditContract', 'beforeAfterContract', 'draftContract', 'regionContract')
+           if MANAGED.get(key) == 1},
+        **({'geometryDescriptorContract': MANAGED['geometryDescriptorContract']}
+           if MANAGED.get('regionContract') == 1 else {})}), encoding='utf-8')
     children = []
 
     async def spawn(*args, **kwargs):

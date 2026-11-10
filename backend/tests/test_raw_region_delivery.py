@@ -251,7 +251,7 @@ def test_http_failure_boundaries_reclaim_region_leases(local, tmp_path, monkeypa
                 if boundary == 'mismatch':
                     validate = raw_region.validate_result
                     def mismatch(result, *args):
-                        meta = json.loads(result['content'][1]['text']); meta['response']['viewGeneration'] += 1
+                        meta = json.loads(result['content'][1]['text']); meta['viewGeneration'] += 1
                         result['content'][1]['text'] = json.dumps(meta)
                         return validate(result, *args)
                     monkeypatch.setattr(raw_region, 'validate_result', mismatch)

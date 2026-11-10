@@ -14,6 +14,7 @@ a = Analysis(
     binaries=[],
     datas=[(str(frontend), 'frontend/dist'), (str(manifest), '.'),
            (str(repository / 'backend' / 'raw_region_schema.json'), '.'),
+           (str(repository / 'backend' / 'raw_region_native_schema.json'), '.'),
            (str(repository / 'native' / 'lightcraft' / 'manifest.json'), 'native/lightcraft')],
     hiddenimports=[],
     hookspath=[],

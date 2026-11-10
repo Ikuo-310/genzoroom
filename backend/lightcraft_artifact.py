@@ -24,6 +24,9 @@ def managed_manifest():
         for key in ('beforeAfterContract', 'draftContract'):
             if key in value and (type(value[key]) is not int or value[key] != 1):
                 raise ValueError('invalid managed LightCraft manifest')
+        if 'regionContract' in value and (type(value['regionContract']) is not int or value['regionContract'] != 1
+                or type(value.get('geometryDescriptorContract')) is not int or value['geometryDescriptorContract'] != 2):
+            raise ValueError('invalid managed LightCraft manifest')
         return value
     if type(value.get('geometryDescriptorContract')) is not int or value['geometryDescriptorContract'] != 2 \
             or value.get('contracts') != {'before': 1, 'preview': 1, 'region': 1, 'wb': 1} \
@@ -86,15 +89,20 @@ def verified_artifact(executable, digest, version):
                         'binarySha256': digest, 'wholeFrameContract': 1,
                         **({'cropEditContract': 1} if MANAGED.get('cropEditContract') == 1 else {}),
                         **({'beforeAfterContract': 1} if MANAGED.get('beforeAfterContract') == 1 else {}),
-                        **({'draftContract': 1} if MANAGED.get('draftContract') == 1 else {})}
+                        **({'draftContract': 1} if MANAGED.get('draftContract') == 1 else {}),
+                        **({'regionContract': 1, 'geometryDescriptorContract': MANAGED['geometryDescriptorContract']}
+                           if MANAGED.get('regionContract') == 1 else {})}
             if not isinstance(value, dict) or type(value.get('wholeFrameContract')) is not int \
-                or any(type(value.get(key)) is not int for key in ('cropEditContract', 'beforeAfterContract', 'draftContract') if key in expected) or value != expected \
+                or any(type(value.get(key)) is not int for key in ('cropEditContract', 'beforeAfterContract', 'draftContract',
+                    'regionContract', 'geometryDescriptorContract') if key in expected) or value != expected \
                     or version != expected['version'] or not re.fullmatch(r'[a-f0-9]{64}', digest):
                 return None
             return {'version': version, 'upstreamCommit': expected['commit'], 'managedPatch': True,
                     'wholeFrameContract': 1,
                     **({'beforeAfterContract': 1} if 'beforeAfterContract' in expected else {}),
-                    **({'draftContract': 1} if 'draftContract' in expected else {})}
+                    **({'draftContract': 1} if 'draftContract' in expected else {}),
+                    **({'regionContract': 1, 'geometryDescriptorContract': expected['geometryDescriptorContract']}
+                       if 'regionContract' in expected else {})}
         expected = {**{key: MANAGED[key] for key in ('version', 'commit', 'patches', 'geometryDescriptorContract')},
                     'binarySha256': digest, 'beforeContract': 1, 'previewContract': 1, 'regionContract': 1,
                     **({'cropEditContract': 1} if MANAGED.get('cropEditContract') == 1 else {}),

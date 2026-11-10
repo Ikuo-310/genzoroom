@@ -4,18 +4,18 @@
 
 この手順は開発用・配布用のどちらにも適用する。featureブランチの管理基準は **v0.20.0 / `192ff72923c39e6623f2c7ff67ab3a119deb8071`**。固定値とpatch digest・targetsの正本は [`native/lightcraft/manifest.json`](../../../native/lightcraft/manifest.json)。独自変更は本家commitに含めずGit patchとして保存する。patchはfull-index形式とし、`.gitattributes`でLFを固定する。
 
-## v0.20.0 Whole／Crop／Before／Draft Previewの再現手順
+## v0.20.0 Whole／Crop／Before／Draft／Region Previewの再現手順
 
-固定commitのcleanな専用checkoutを用意し、既存のsourceやcheckpointを上書きしない。次の`$source`はそのcheckoutを指す。現行Before／Draft candidateはmanifestの`developmentTargetDir`で分離し、P1／P3の以前のEXEとreceiptを上書きしない。
+固定commitのcleanな専用checkoutを用意し、既存のsourceやcheckpointを上書きしない。次の`$source`はそのcheckoutを指す。現行Region candidateはmanifestの`developmentTargetDir`で分離し、P1／以前のP3 EXEとreceiptを上書きしない。
 
 ```powershell
 $source = Join-Path $PWD '.tmp/lightcraft-0.20.0-p3'
 .\.venv\Scripts\python.exe native/lightcraft/build.py --source $source --apply
 .\.venv\Scripts\python.exe native/lightcraft/build.py --source $source --build
-.\.venv\Scripts\python.exe native/lightcraft/build.py --binary "$source\target-p3-preview\release\lightcraft-cli.exe"
+.\.venv\Scripts\python.exe native/lightcraft/build.py --binary "$source\target-p3-region\release\lightcraft-cli.exe"
 ```
 
-`--apply`は固定HEAD・upstream version・patch digestとtargetsを検査し、cleanな状態に順に適用する。部分・重複適用や未知のsource差分は拒否する。`--build`はfocused Native testと `cargo build --release --locked --no-default-features -p lightcraft-cli` を実行し、実EXEのMCP schema・settings・Whole／Crop／Before／Draft／FullのPNG・Frame・応答種別・品質・異常応答を確認してから隣接receiptを発行する。`--binary`は実EXEのSHA-256とmanifest／receiptの一致、および実応答を再検査する。StageCacheやGPU内部情報は接続schema／receiptの条件にしない。manifest変更時は `sync_identity.py` でFrontend identityを生成する。
+`--apply`は固定HEAD・upstream version・patch digestとtargetsを検査し、cleanな状態に順に適用する。部分・重複適用や未知のsource差分は拒否する。`--build`はfocused Native testと `cargo build --release --locked --no-default-features -p lightcraft-cli` を実行し、実EXEのMCP schema・settings・Whole／Crop／Before／Draft／Full／RegionのPNG・Frame・window・応答種別・実品質・異常応答を確認してから隣接receiptを発行する。Regionは標準Engineの`region_job`／`region_job_before`を呼び、Backend入力は表示対象windowと出力寸法までに限定する。内部Render Plan、StageCache、GPU execution、allocation情報は公開契約にしない。現在のmanifest／receiptは`wholeFrameContract`、`cropEditContract`、`beforeAfterContract`、`draftContract`、`regionContract`、`geometryDescriptorContract`を管理する。`--binary`は実EXEのSHA-256とmanifest／receiptの一致、および実応答を再検査する。manifest変更時は `sync_identity.py` でFrontend identityを生成する。
 
 ## 以下のv0.18.1以前の記録
 

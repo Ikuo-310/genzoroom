@@ -13,7 +13,8 @@ OPERATIONS = ('open', 'wholeDraft', 'wholeFull', 'mutationDraft', 'endFull',
 def sequence_plan(repeats):
     return [{"index": index, "operation": operation, "repeat": repeat, "warmup": repeat == 0,
              "quality": "draft" if operation in ('wholeDraft', 'mutationDraft') else "full",
-             "stageCache": "off", "temperature": "cold", "group": f"viewer:{repeat}"}
+             "stageCache": "off",
+             "temperature": "cold", "group": f"viewer:{repeat}"}
             for index, (repeat, operation) in enumerate(
                 (r, op) for r in range(repeats + 1) for op in OPERATIONS)]
 
@@ -30,8 +31,7 @@ class RawPreviewSequence:
         if operation == 'mutationDraft':
             snapshot = await self.raw.set_controls(self.handle, {'light.exposure': 0.25}, snapshot.revision)
         region = None
-        native_ms = validation_ms = None
-        plan_timing = None
+        request_ms = validation_ms = None
         if operation in ('regionPlan', 'regionFull', 'pan'):
             if not self.whole:
                 raise LightCraftError('raw_diagnostic_sequence_invalid')
@@ -46,8 +46,6 @@ class RawPreviewSequence:
                 if result is SUPERSEDED:
                     raise LightCraftError('raw_diagnostic_superseded')
                 self.plan = result.metadata['response']
-                native_ms = result.metadata['diagnostics']['nativeMs']
-                plan_timing = result.metadata['diagnostics'].get('planTiming')
                 frame = self.whole
             else:
                 if not self.plan:
@@ -63,7 +61,6 @@ class RawPreviewSequence:
                 if result is SUPERSEDED:
                     raise LightCraftError('raw_diagnostic_superseded')
                 metadata = result.metadata
-                native_ms = metadata['diagnostics']['nativeMs']
                 region = {'fullWidth': fw, 'fullHeight': fh, 'window': window,
                           'limited': fw < geometry['nativeWidth'] or fh < geometry['nativeHeight']}
                 frame = result
@@ -75,7 +72,7 @@ class RawPreviewSequence:
             if operation != 'before':
                 self.whole = frame
             if frame.metrics:
-                native_ms, validation_ms = frame.metrics['nativeMs'], frame.metrics['validationMs']
+                request_ms, validation_ms = frame.metrics['nativeMs'], frame.metrics['validationMs']
         geometry = frame.frame if operation == 'before' else self.whole.frame
         if not geometry:
             raise LightCraftError('raw_diagnostic_geometry_missing')
@@ -86,8 +83,7 @@ class RawPreviewSequence:
         return data, {'operation': operation, 'repeat': trial['repeat'], 'warmup': trial['warmup'],
             'revision': snapshot.revision, 'viewGeneration': trial['index'] + 1,
             'quality': trial['quality'], 'geometry': geometry, 'bitmap': bitmap, 'region': region,
-            'wholeRequestedSide': 1024, 'stageCache': {'mode': 'off', 'applied': False},
+            'wholeRequestedSide': 1024,
             'timing': {'backendOperationMs': elapsed + (self.open_ms if operation == 'open' else 0),
                        'openMs': self.open_ms if operation == 'open' else None,
-                       'nativeMs': native_ms, 'validationMs': validation_ms,
-                       **({'regionPlan': plan_timing} if plan_timing is not None else {})}, 'payloadBytes': len(data)}
+                       'nativeRequestMs': request_ms, 'validationMs': validation_ms}, 'payloadBytes': len(data)}

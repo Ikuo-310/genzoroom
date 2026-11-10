@@ -7,11 +7,13 @@ import importlib.util
 import json
 import math
 import os
+import queue
 import re
 from pathlib import Path
 import struct
 import subprocess
 import tempfile
+import threading
 import tomllib
 import zlib
 
@@ -47,7 +49,10 @@ def manifest(path=None):
         for key in ('beforeAfterContract', 'draftContract'):
             if key in value and (type(value[key]) is not int or value[key] != 1):
                 raise ValueError('invalid Whole Preview contract')
-    if 'geometryDescriptorContract' in value:
+        if 'regionContract' in value and (type(value['regionContract']) is not int or value['regionContract'] != 1
+                or type(value.get('geometryDescriptorContract')) is not int or value['geometryDescriptorContract'] != 2):
+            raise ValueError('invalid Region contract')
+    if 'geometryDescriptorContract' in value and 'wholeFrameContract' not in value:
         if 'cropEditContract' in value and (type(value['cropEditContract']) is not int or value['cropEditContract'] != 1):
             raise ValueError('unsupported crop editing contract')
         if 'lensProfileInfoContract' in value and (type(value['lensProfileInfoContract']) is not int or value['lensProfileInfoContract'] != 1):
@@ -105,7 +110,7 @@ def prepare(source, spec, apply=False):
             raise ValueError("patch verification failed")
     state = source_state(source, spec)
     # Every managed Region build shares the same artifacts, regardless of engine version.
-    if state == 'patched' and 'geometryDescriptorContract' in spec:
+    if state == 'patched' and 'geometryDescriptorContract' in spec and 'wholeFrameContract' not in spec:
         shared = ROOT.parents[1]
         for native, original in [('region_schema.json','frontend/src/rawRegion.schema.json'),
                 ('region_contract.json','frontend/src/rawRegionContract.json'),
@@ -115,6 +120,12 @@ def prepare(source, spec, apply=False):
                 raise ValueError('Region shared contract artifact mismatch')
         if (shared/'backend/raw_region_schema.json').read_bytes().replace(b'\r\n',b'\n') != (shared/'frontend/src/rawRegion.schema.json').read_bytes().replace(b'\r\n',b'\n'):
             raise ValueError('Backend Region schema mismatch')
+    if state == 'patched' and spec.get('regionContract') == 1:
+        shared = ROOT.parents[1]
+        expected = (shared/'backend/raw_region_native_schema.json').read_bytes().replace(b'\r\n',b'\n')
+        if (source/'crates/mcp/src/region_schema.json').read_bytes().replace(b'\r\n',b'\n') != expected \
+                or (shared/'backend/raw_region_schema.json').read_bytes().replace(b'\r\n',b'\n') != (shared/'frontend/src/rawRegion.schema.json').read_bytes().replace(b'\r\n',b'\n'):
+            raise ValueError('Region schema artifact mismatch')
     return state
 
 
@@ -218,7 +229,88 @@ def probe_whole_frame(binary, spec):
                     or not re.fullmatch(r'[0-9a-f]{16}', before_meta.get('beforeFingerprint', '')) \
                     or full_meta.get('kind') != 'after' or full_meta.get('quality') != 'full':
                 raise ValueError('binary Before/Draft/Full response mismatch')
+        if spec.get('regionContract') == 1:
+            probe_region(binary, source, spec['geometryDescriptorContract'])
     print('Whole Frame binary schema, settings, PNG and error response verified')
+
+
+def probe_region(binary, source, descriptor_contract):
+    """Verify the actual MCP Region schema and Engine-rendered Before/After windows."""
+    process = subprocess.Popen([str(binary), 'mcp', '--headless', '--compact'], stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding='utf-8', bufsize=1,
+        env={**os.environ, 'TEMP': str(source.parent), 'TMP': str(source.parent)},
+        creationflags=0x08000000 if os.name == 'nt' else 0)
+    lines = queue.Queue()
+    def read_stdout():
+        for line in process.stdout:
+            lines.put(line)
+        lines.put(None)
+    reader = threading.Thread(target=read_stdout, name='lightcraft-region-probe-output', daemon=True)
+    reader.start()
+    next_id = 1
+    def request(method, params):
+        nonlocal next_id
+        current = next_id
+        next_id += 1
+        process.stdin.write(json.dumps({'jsonrpc':'2.0','id':current,'method':method,'params':params}) + '\n')
+        process.stdin.flush()
+        try:
+            line = lines.get(timeout=120)
+        except queue.Empty:
+            raise ValueError('Region probe timed out') from None
+        if not line or len(line.encode('utf-8')) > 16 * 1024 * 1024:
+            raise ValueError('Region probe response missing or oversized')
+        response = json.loads(line)
+        if response.get('id') != current or 'error' in response:
+            raise ValueError('Region probe MCP request failed')
+        return response['result']
+    try:
+        initialized = request('initialize', {'protocolVersion':'2025-06-18','capabilities':{},
+            'clientInfo':{'name':'genzoroom-region-probe','version':'1'}})
+        if initialized['serverInfo'].get('version') != '0.20.0':
+            raise ValueError('Region Native version mismatch')
+        process.stdin.write(json.dumps({'jsonrpc':'2.0','method':'notifications/initialized'}) + '\n')
+        process.stdin.flush()
+        tools = request('tools/list', {})['tools']
+        region_tool = next((item for item in tools if item.get('name') == 'render_region_preview'), None)
+        if not region_tool or region_tool.get('_meta', {}).get('genzoroom.geometryDescriptorContract') != descriptor_contract:
+            raise ValueError('Region schema or Geometry descriptor mismatch')
+        def call(name, args):
+            result = request('tools/call', {'name':name,'arguments':args})
+            if result.get('isError'):
+                raise ValueError('Region probe tool call failed')
+            return result
+        call('command_run', {'id':'library.import','params':{'paths':[str(source)],'mode':'add'}})
+        call('command_run', {'id':'library.select','params':{'ids':[1],'active':1,'mode':'replace'}})
+        for kind, quality, before in (('after','full',False), ('before','draft',True)):
+            preview = call('render_preview', {'id':1,'max_side':32,'include_frame':True,'before':before,'quality':quality})
+            preview_meta = json.loads(next(item['text'] for item in preview['content'] if item['type']=='text'))
+            target = {'kind':kind,'quality':quality,'geometryId':preview_meta['frame']['geometryId'],'desiredLongEdge':32}
+            planned = call('render_region_preview', {'id':'1','region_contract':1,'operation':'plan','target':target})['structuredContent']
+            if planned.get('kind') != kind or planned.get('geometryId') != preview_meta['frame']['geometryId']:
+                raise ValueError('Region plan Geometry mismatch')
+            fw, fh = planned['fullWidth'], planned['fullHeight']
+            w, h = min(16, fw), min(16, fh)
+            window = {'x':max(0,(fw-w)//2),'y':max(0,(fh-h)//2),'w':w,'h':h}
+            target = {'kind':kind,'quality':quality,'geometryId':preview_meta['frame']['geometryId'],
+                'fullWidth':fw,'fullHeight':fh,'window':window}
+            result = call('render_region_preview', {'id':'1','region_contract':1,'operation':'render','target':target})
+            metadata = json.loads(next(item['text'] for item in result['content'] if item['type']=='text'))
+            image = next(item for item in result['content'] if item['type']=='image')
+            png = base64.b64decode(image['data'], validate=True)
+            if image.get('mimeType') != 'image/png' or png[:8] != b'\x89PNG\r\n\x1a\n' \
+                    or struct.unpack('>II', png[16:24]) != (window['w'],window['h']) \
+                    or metadata.get('kind') != kind or metadata.get('quality') != quality \
+                    or metadata.get('geometryId') != target['geometryId'] or metadata.get('window') != window:
+                raise ValueError('Region image, kind, quality or window mismatch')
+    finally:
+        if process.stdin:
+            process.stdin.close()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
 
 
 def probe(binary, spec=None):
@@ -528,7 +620,9 @@ def receipt(binary, spec):
                 'binarySha256': hashlib.sha256(binary.read_bytes()).hexdigest(), 'wholeFrameContract': 1,
                 **({'cropEditContract': 1} if spec.get('cropEditContract') == 1 else {}),
                 **({'beforeAfterContract': 1} if spec.get('beforeAfterContract') == 1 else {}),
-                **({'draftContract': 1} if spec.get('draftContract') == 1 else {})}
+                **({'draftContract': 1} if spec.get('draftContract') == 1 else {}),
+                **({'regionContract': 1, 'geometryDescriptorContract': spec['geometryDescriptorContract']}
+                   if spec.get('regionContract') == 1 else {})}
     return {"version": spec["version"], "commit": spec["commit"], "patches": spec["patches"],
             "binarySha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "beforeContract": 1, "previewContract": 1, "regionContract": 1,
             "geometryDescriptorContract": spec['geometryDescriptorContract'],
@@ -559,6 +653,9 @@ def main():
                 if spec.get('cropEditContract') == 1:
                     run(['cargo', 'test', '--release', '--locked', '-p', 'lightcraft-mcp', '--target-dir', str(target),
                          'crop_edit_returns_uncropped_frame_without_changing_settings', '--', '--test-threads=1'], cwd=args.source)
+                if spec.get('regionContract') == 1:
+                    run(['cargo', 'test', '--release', '--locked', '-p', 'lightcraft-mcp', '--target-dir', str(target),
+                         'region_plan_and_render_use_engine_frame_and_standard_region_jobs', '--', '--test-threads=1'], cwd=args.source)
             else:
                 run(["cargo", "test", "--locked", "-p", "lightcraft-mcp", "--", "--test-threads=1"], cwd=args.source)
             if spec.get('contracts', {}).get('wb') == 1:

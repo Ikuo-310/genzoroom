@@ -671,15 +671,18 @@ class LightCraftManager:
                 for tool in (items if isinstance(items, list) else []))
         return session.crop_edit
 
-    async def _raw_region(self, generation, photo_id, operation, target, *, timeout, stage_cache='off', stage_cache_budget_bytes=None):
+    async def _raw_region(self, generation, photo_id, operation, target, *, timeout):
         from raw_region import validate_target
         validate_target(target, operation)
         session = self._raw_session(generation)
         if not await self._raw_region_supported(generation):
             raise LightCraftError('raw_region_unsupported')
-        args = {'id':str(photo_id), 'region_contract':1, 'operation':operation, 'target':target, 'stage_cache':stage_cache}
-        if stage_cache == 'on':
-            args['stage_cache_budget_bytes'] = stage_cache_budget_bytes
+        native_target = {'kind':target['identity']['kind'], 'quality':target['quality'], 'geometryId':target['geometryId']}
+        if operation == 'plan':
+            native_target['desiredLongEdge'] = target['desiredLongEdge']
+        else:
+            native_target.update(fullWidth=target['fullWidth'], fullHeight=target['fullHeight'], window=target['window'])
+        args = {'id':str(photo_id), 'region_contract':1, 'operation':operation, 'target':native_target}
         try:
             result = await session.client.call_tool_result('render_region_preview', args, timeout=timeout)
             self._check_raw_session(session)

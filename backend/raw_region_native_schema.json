@@ -1,0 +1,38 @@
+{
+  "$defs": {
+    "frameRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "quality", "geometryId", "desiredLongEdge"],
+      "properties": {
+        "kind": {"type": "string", "enum": ["after", "before"]},
+        "quality": {"type": "string", "enum": ["draft", "full"]},
+        "geometryId": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "desiredLongEdge": {"type": "number", "exclusiveMinimum": 0, "maximum": 65536}
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "quality", "geometryId", "fullWidth", "fullHeight", "window"],
+      "properties": {
+        "kind": {"type": "string", "enum": ["after", "before"]},
+        "quality": {"type": "string", "enum": ["draft", "full"]},
+        "geometryId": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "fullWidth": {"type": "integer", "minimum": 1, "maximum": 65536},
+        "fullHeight": {"type": "integer", "minimum": 1, "maximum": 65536},
+        "window": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["x", "y", "w", "h"],
+          "properties": {
+            "x": {"type": "integer", "minimum": 0, "maximum": 65535},
+            "y": {"type": "integer", "minimum": 0, "maximum": 65535},
+            "w": {"type": "integer", "minimum": 1, "maximum": 2048},
+            "h": {"type": "integer", "minimum": 1, "maximum": 2048}
+          }
+        }
+      }
+    }
+  }
+}

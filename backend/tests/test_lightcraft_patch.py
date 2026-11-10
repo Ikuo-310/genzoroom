@@ -36,14 +36,16 @@ def test_whole_frame_manifest_rejects_invalid_contract_or_target(tmp_path, chang
         build.manifest(path)
 
 
-def test_whole_frame_receipt_does_not_claim_unimplemented_contracts(tmp_path):
+def test_whole_frame_receipt_claims_only_managed_preview_contracts(tmp_path):
     binary = tmp_path / 'engine.exe'
     binary.write_bytes(b'fixture executable')
     receipt = build.receipt(binary, build.manifest())
     assert receipt['wholeFrameContract'] == 1
     assert receipt['cropEditContract'] == 1
     assert receipt['binarySha256'] == hashlib.sha256(binary.read_bytes()).hexdigest()
-    assert not {'beforeContract', 'previewContract', 'regionContract', 'wbContract'} & receipt.keys()
+    assert receipt['beforeAfterContract'] == receipt['draftContract'] == receipt['regionContract'] == 1
+    assert receipt['geometryDescriptorContract'] == 2
+    assert not {'beforeContract', 'previewContract', 'wbContract'} & receipt.keys()
 
 
 def test_archived_010_manifest_and_patch_remain_reproducible():

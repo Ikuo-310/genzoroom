@@ -23,21 +23,11 @@ from tests.test_raw_adaptive_preview import target as whole_target
 def tool():
     return {'name':'render_region_preview','_meta':{'genzoroom.geometryDescriptorContract':2},'inputSchema':{'type':'object','required':['id','region_contract','operation','target'],
         'properties':{'id':{'type':'string'},'region_contract':{'type':'integer','enum':[1]},
-        'operation':{'type':'string','enum':['plan','render']},'target':{'oneOf':[region.SCHEMA['$defs']['frameRequest'],region.SCHEMA['$defs']['request']]}}}}
+        'operation':{'type':'string','enum':['plan','render']},'target':{'oneOf':[region.NATIVE_SCHEMA['$defs']['frameRequest'],region.NATIVE_SCHEMA['$defs']['request']]}}}}
 
 
-def test_plan_timing_partition_is_bounded_and_plan_only():
-    timing = dict(sourceKind='file', sourcePreparationMs=1, sourceAcquisitionMs=650,
-                  imageSelectionMs=0, plannerMs=1, geometryMs=1, sourceRetentionMs=1, otherMs=1)
-    diagnostics = dict(sourceLevel='Full', sourceHostBytes=4096, sourceCacheBytes=4096,
-                       nativeMs=655, planTiming=timing)
-    region._diagnostics(diagnostics, 'plan', None)
-    for changes in ({'sourceKind': 'PRIVATE'}, {'path': 'PRIVATE'}, {'sourceAcquisitionMs': -1},
-                    {'plannerMs': float('nan')}, {'geometryMs': True}, {'geometryMs': 2}):
-        with pytest.raises(ValueError):
-            region._diagnostics({**diagnostics, 'planTiming': {**timing, **changes}}, 'plan', None)
-    with pytest.raises(ValueError):
-        region._diagnostics(diagnostics, 'render', None)
+def test_region_result_does_not_require_internal_engine_diagnostics():
+    assert not hasattr(region, '_diagnostics')
 
 
 def target(raw, handle, *, operation='render', kind='after', view=1):
@@ -50,20 +40,23 @@ def target(raw, handle, *, operation='render', kind='after', view=1):
                 'validRegion':{'x':0,'y':0,'w':8,'h':8},'context':0,'prefetch':0}
 
 
-def result(t, operation, *, cache='off', budget=0):
-    r = t | {'kind':t['identity']['kind']}
-    d = {'sourceLevel':'Preview','sourceHostBytes':4096,'sourceCacheBytes':4096,'nativeMs':1.25}
-    if r['kind'] == 'before':
-        d.update(beforeFingerprint='b'*16,effectiveBeforeFingerprint='c'*16)
+def native_target(t, operation):
+    out = {'kind':t['identity']['kind'],'quality':t['quality'],'geometryId':t['geometryId']}
+    if operation == 'plan':
+        out['desiredLongEdge'] = t['desiredLongEdge']
+    else:
+        out.update(fullWidth=t['fullWidth'], fullHeight=t['fullHeight'], window=t['window'])
+    return out
+
+
+def result(t, operation):
+    r = {k:t[k] for k in ('kind','quality','geometryId')}
     if operation == 'plan':
         r.update(nativeWidth=32,nativeHeight=24,fullWidth=16,fullHeight=12)
-        d['planTiming'] = dict(sourceKind='loaded', sourcePreparationMs=0.25, sourceAcquisitionMs=0,
-                               imageSelectionMs=0, plannerMs=1, geometryMs=0, sourceRetentionMs=0, otherMs=0)
     else:
+        r.update(fullWidth=t['fullWidth'],fullHeight=t['fullHeight'],window=t['window'])
         r.update(width=t['window']['w'],height=t['window']['h'])
-        d.update(workWindow=t['window'],execution={'outcome':'cpu_not_tried','backend':'cpu','reason':'gpu_disabled'},
-                 stageCache={'mode':cache,'applied':cache=='on','reason':'none','cpuBytes':0,'gpuBytes':0,'retainedBytes':0,'budgetBytes':budget})
-    meta = {'response':r,'diagnostics':d}
+    meta = r
     output = {'isError':False,'content':[{'type':'text','text':json.dumps(meta)}]}
     if operation == 'plan':
         output['structuredContent'] = meta
@@ -80,7 +73,8 @@ def enable(child):
             properties = {'before': {'type': 'boolean'}}
             if child.adaptive_supported:
                 properties.update(quality={'type':'string','enum':['draft','full']},
-                    preview_contract={'type':'integer','enum':[1]}, stage_cache={'type':'string','enum':['off','on']},
+                    preview_contract={'type':'integer','enum':[1]}, include_frame={'type':'boolean'},
+                    stage_cache={'type':'string','enum':['off','on']},
                     stage_cache_budget_bytes={'type':'integer'})
             return reply(child.stdout,message,{'tools':[tool(),{'name':'render_preview','inputSchema':{'properties':properties}}]})
         if message['method'] != 'tools/call' or message['params']['name'] != 'render_region_preview':
@@ -94,7 +88,7 @@ def enable(child):
             try:
                 if child.gate is not None:
                     await child.gate.wait()
-                reply(child.stdout,message,result(args['target'],args['operation'],cache=args['stage_cache'],budget=args.get('stage_cache_budget_bytes',0)))
+                reply(child.stdout,message,result(args['target'],args['operation']))
             finally:
                 child.inflight -= 1
         task = asyncio.create_task(render())
@@ -141,7 +135,9 @@ def test_frozen_backend_includes_the_same_runtime_schema(tmp_path):
     data=eval(compile(ast.Expression(data_node),str(source),'eval'),
               {'repository':root,'frontend':root/'frontend/dist','manifest':tmp_path/'manifest.json','str':str})
     assert (str(root/'backend/raw_region_schema.json'),'.') in data
+    assert (str(root/'backend/raw_region_native_schema.json'),'.') in data
     assert json.loads((root/'backend/raw_region_schema.json').read_text())==region.SCHEMA
+    assert json.loads((root/'backend/raw_region_native_schema.json').read_text())==region.NATIVE_SCHEMA
 
 
 @pytest.mark.parametrize('operation,kind', [('plan','after'),('render','after'),('plan','before'),('render','before')])
@@ -163,7 +159,13 @@ def test_region_protocol_owner_and_settings_unchanged(tmp_path,operation,kind):
             assert raw._photo(handle).applied_revision == initial.revision
             assert children[0].max_inflight == 1
             assert await manager._raw_region_supported(handle.generation)
-            assert children[0].region_arguments[-1]['region_contract'] == 1
+            native_args = children[0].region_arguments[-1]
+            assert set(native_args) == {'id', 'region_contract', 'operation', 'target'}
+            assert native_args['region_contract'] == 1
+            expected_target_keys = {'kind', 'quality', 'geometryId'} | (
+                {'desiredLongEdge'} if operation == 'plan' else {'fullWidth', 'fullHeight', 'window'})
+            assert set(native_args['target']) == expected_target_keys
+            assert not {'identity', 'revision', 'requestId', 'viewGeneration', 'stage_cache', 'diagnostics'} & native_args['target'].keys()
             assert not any(command.startswith('develop.') and command != 'develop.get' for command,_ in children[0].commands)
         finally:
             await raw.close();await manager.close()
@@ -241,10 +243,10 @@ def test_region_response_png_metadata_and_identity_are_validated(tmp_path):
         raw,manager,children,files=await create(tmp_path)
         try:
             handle,_=await raw.open_raw(str(uuid4()),files[0]);t=target(raw,handle)
-            good=result(t,'render')
+            good=result(native_target(t,'render'),'render')
             assert region.validate_result(good,t,'render',1)[0].startswith(b'\x89PNG')
             for patch in ({'width':7},{'geometryId':'f'*64},{'viewGeneration':2},{'quality':'draft'}):
-                bad=copy.deepcopy(good);meta=json.loads(bad['content'][1]['text']);meta['response'].update(patch);bad['content'][1]['text']=json.dumps(meta)
+                bad=copy.deepcopy(good);meta=json.loads(bad['content'][1]['text']);meta.update(patch);bad['content'][1]['text']=json.dumps(meta)
                 with pytest.raises(LightCraftError):region.validate_result(bad,t,'render',1)
             bad=copy.deepcopy(good);bad['content'][0]['data']='A'*(4*((region.MAX_PNG_BYTES+2)//3)+4)
             with pytest.raises(LightCraftError):region.validate_result(bad,t,'render',1)
@@ -266,34 +268,34 @@ def test_plan_echo_mismatch_logs_field_names_without_opaque_identity_or_private_
         'generation': 1, 'documentToken': 'b' * 32, 'kind': kind, 'revision': 2},
         _photo=lambda _handle: SimpleNamespace(applied_revision=2))
     t = target(fake, object(), operation='plan')
-    good = result(t, 'plan')
+    good = result(native_target(t,'plan'), 'plan')
     assert region.validate_result(good, t, 'plan', 1)[1]['response']['desiredLongEdge'] == 16
     assert events == []
 
     meta = json.loads(good['content'][0]['text'])
-    meta['response']['desiredLongEdge'] = 4096
+    meta['geometryId'] = 'f' * 64
     good['content'][0]['text'] = json.dumps(meta)
     with pytest.raises(LightCraftError, match='^raw_region_geometry_mismatch$'):
         region.validate_result(good, t, 'plan', 1)
     event, context = events[-1]
     assert event == 'region.geometryMismatch'
     assert context['stage'] == 'native_response_echo' and context['reason'] == 'echo_mismatch'
-    assert context['mismatchFields'] == ['desiredLongEdge']
-    assert context['requestDesiredLongEdge'] == 16 and context['responseDesiredLongEdge'] == 4096
-    assert context['geometryMatches'] and context['identityMatches'] and context['nativeResponseReceived']
+    assert context['mismatchFields'] == ['geometryId']
+    assert not context['geometryMatches'] and context['identityMatches'] and context['nativeResponseReceived']
     serialized = json.dumps(context)
     for secret in (t['identity']['sourceId'], t['identity']['documentToken'], t['identity']['assetId'], 'unused-fixture'):
         assert secret not in serialized
 
     events.clear()
-    identity_bad = result(t, 'plan')
+    identity_bad = result(native_target(t,'plan'), 'plan')
     identity_meta = json.loads(identity_bad['content'][0]['text'])
-    identity_meta['response']['identity']['sourceId'] = 'c' * 64
+    identity_meta['geometryId'] = 'c' * 64
     identity_bad['content'][0]['text'] = json.dumps(identity_meta)
     with pytest.raises(LightCraftError, match='^raw_region_geometry_mismatch$'):
         region.validate_result(identity_bad, t, 'plan', 1)
     identity_context = events[-1][1]
-    assert identity_context['mismatchFields'] == ['identity'] and not identity_context['identityMatches']
+    assert identity_context['mismatchFields'] == ['geometryId']
+    assert not identity_context['geometryMatches'] and identity_context['identityMatches']
     serialized = json.dumps(identity_context)
     for secret in (t['identity']['sourceId'], t['identity']['documentToken'], t['identity']['assetId'], 'c' * 64):
         assert secret not in serialized
@@ -310,9 +312,9 @@ def test_malformed_plan_response_keeps_existing_error_code_without_echo_diagnost
         'generation': 1, 'documentToken': 'b' * 32, 'kind': kind, 'revision': 2},
         _photo=lambda _handle: SimpleNamespace(applied_revision=2))
     t = target(fake, object(), operation='plan')
-    malformed = result(t, 'plan')
+    malformed = result(native_target(t,'plan'), 'plan')
     meta = json.loads(malformed['content'][0]['text'])
-    del meta['response']['fullWidth']
+    del meta['fullWidth']
     malformed['content'][0]['text'] = json.dumps(meta)
     with pytest.raises(LightCraftError, match='^raw_invalid_region_response$'):
         region.validate_result(malformed, t, 'plan', 1)
@@ -349,15 +351,15 @@ def test_region_timeout_reaps_native_and_old_generation_is_unusable(tmp_path):
     asyncio.run(run())
 
 
-def test_region_cache_mode_and_budget_reach_the_same_owner(tmp_path):
+def test_region_request_does_not_publish_cache_controls(tmp_path):
     async def run():
         raw,manager,children,files=await create(tmp_path);enable(children[0])
         try:
             handle,_=await raw.open_raw(str(uuid4()),files[0])
-            raw._stage_mode='on';raw._stage_budget=512*1024**2
             output=await raw.request_region(handle,target(raw,handle))
-            assert output.metadata['diagnostics']['stageCache']['budgetBytes']==512*1024**2
-            assert children[0].region_arguments[-1]['stage_cache']=='on'
+            assert 'diagnostics' not in output.metadata
+            assert 'stage_cache' not in children[0].region_arguments[-1]
+            assert 'stage_cache_budget_bytes' not in children[0].region_arguments[-1]
         finally:
             await raw.close();await manager.close()
     asyncio.run(run())
