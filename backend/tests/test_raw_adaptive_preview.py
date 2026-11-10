@@ -119,7 +119,7 @@ def test_safe_native_tool_errors(local, tmp_path, monkeypatch, native, code, sta
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("budget", ["0", "-1", "1073741825", "1.5"])
+@pytest.mark.parametrize("budget", [None, "0", "-1", "1073741825", "1.5"])
 def test_internal_stage_cache_requires_finite_budget(monkeypatch, budget):
     monkeypatch.setenv("GENZOROOM_RAW_STAGE_CACHE", "on")
     if budget is None:
@@ -128,12 +128,6 @@ def test_internal_stage_cache_requires_finite_budget(monkeypatch, budget):
         monkeypatch.setenv("GENZOROOM_RAW_STAGE_CACHE_BUDGET_BYTES", budget)
     with pytest.raises(LightCraftError, match="raw_invalid_preview_request"):
         adapter.LightCraftRawSession(None)
-
-
-@pytest.mark.parametrize("budget", [0, -1, True, 1024**3 + 1])
-def test_explicit_invalid_legacy_budget_is_rejected(budget):
-    with pytest.raises(LightCraftError, match="raw_invalid_preview_request"):
-        adapter.LightCraftRawSession(None, stage_cache="on", stage_cache_budget_bytes=budget)
 
 
 @pytest.mark.parametrize('budget', [536870912, 1024**3])

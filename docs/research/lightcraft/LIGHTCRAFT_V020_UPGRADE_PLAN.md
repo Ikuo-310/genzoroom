@@ -4,7 +4,7 @@
 
 **本書前半の改訂計画を今後の実装方針とする。旧方針「Native内部契約の全面移植」は廃止し、既存Engineを利用する最小公開APIへの移行を採用する。** 後半の旧P0計画・技術調査・P1〜P4-A1の検証記録は履歴として保持する。旧P1〜P12の工程順・完了条件・必須metadata・全hunk移植を、新計画の完了条件へ引き継がない。
 
-本改訂は計画書のみの変更であり、Native／Backend／Frontendの実装、patch、manifest、EXE、receiptを変更した記録ではない。N1の途中段階としてN1-1a／N1-1b／N1-1c／N1-2／N1-3を実施。N1全体とN2以降は未完了。
+本改訂は計画書のみの変更であり、Native／Backend／Frontendの実装、patch、manifest、EXE、receiptを変更した記録ではない。N1の途中段階としてN1-1a／N1-1b／N1-1c／N1-2を実施。N1全体とN2以降は未完了。
 
 ## 改訂1. 目的・責任境界・不変条件
 
@@ -119,21 +119,11 @@ MCP模擬→Backend HTTPのfocused testで、Frameのみの応答、旧Nativeの
 
 候補Nativeから独自CPU／GPU allocation列挙、容量集計、追加予約・固定budget・admissionと計量専用testを削除し、上流がもともと持つ`StageCache::bytes`／`GpuStages::bytes`／shared source計量を上流どおりに戻した。実描画FrameとGPU execution sidecarは保持した。旧数値metadataを固定値で埋める公開契約は追加していない。
 
-`StagePool`は上流StageCacheのBefore／After各slotとsource identityの所有・解放だけを保持する。通常After Wholeは上流`render_job`へStageCacheを渡し、`run`／`Session::accept`を使用する。同一sourceの連続描画でownerを再利用し、source変更・内部OFF・失敗／不正Frame時に破棄する。GPU失敗時はstageを破棄して既存CPU fallbackを継続する。N1-2時点ではCache OFFは内部所有層のみだった。公開MCP接続は後述のN1-3で追加。
+`StagePool`は上流StageCacheのBefore／After各slotとsource identityの所有・解放だけを保持する。通常After Wholeは上流`render_job`へStageCacheを渡し、`run`／`Session::accept`を使用する。同一sourceの連続描画でownerを再利用し、source変更・内部OFF・失敗／不正Frame時に破棄する。GPU失敗時はstageを破棄して既存CPU fallbackを継続する。Cache OFFは内部所有層の動作であり、公開MCP操作としては未接続。
 
 focused testはPipeline 2件、MCP 3件、GPU 2件の計7件成功・失敗0・skip 0。中間sample／linearの再利用、source変更、Before／After別owner、内部OFF、cacheなし描画、GPU失敗後のstage破棄とCPU fallback、既存Whole Frame応答を確認。GPU testは利用可能adapterで実行したがDX12 deviceの特定・実機受入ではない。`cargo check --locked --offline -p lightcraft-cli --no-default-features`、`cargo fmt --all -- --check`、固定upstreamへの`git apply --check`、Native source `git diff --check`は成功。GenzoRoom rootの`git diff --check`はpatch内の空のunified diff context行を末尾空白として報告する。適用後sourceの問題とは分けて扱う。
 
 実RAW・実DX12、latency・RSS／VRAM・長時間挙動は未検証。Backend／Frontendおよび旧Adaptive契約、Before／Draft／Region公開、正式manifest／EXE／receiptは変更していない。N1全体の完了ではない。累積patch SHA-256: `50c1f98d35dba226966b1672e8d8aeae750bc869831fd3694ce18945b69a40b9`。checkpointは`.tmp/lightcraft-v020-state/N1-2/CHECKPOINT.md`。
-
-### N1-3 実施記録：StageCache保持・解放の公開契約
-
-Headlessの既存`render_preview`／`render_photo`は`stage_cache: on|off`を公開する。ONは上流StageCacheを保持・再利用し、OFFは所有slotを解放してcacheなしで描画する。旧budget引数・無効modeは拒否し、容量計量・admission・数値metadataは追加しない。未対応remoteではschemaへ公開せず、明示指定も拒否する。
-
-Backendは既存`_raw_preview`経路のschema照合で、`include_frame`とbudgetのない`stage_cache` enumを旧Adaptiveと区別する。通常Whole After／Fullで設定modeを渡し、budgetを送らない。Frame／PNG／寸法・要求世代・revision・stale拒否は維持し、execution詳細は存在時のみ検証する。v0.18.1の旧Adaptive／Regionは既存budget契約を維持する。新NativeのONではbudget不要のため、未指定budgetは初期化時に許容し、旧契約でONを選択したときNative描画前に拒否する。未知のNativeに新引数を送らない。新capabilityのないNativeは従来のcache動作を継続し、そのinterfaceに対してOFF適用を断定しない。
-
-Native focused 6件、Backend focused 46件成功、失敗・skip 0。ON／OFF、ON→OFF解放、PNG／Frame、Frame欠落・寸法不一致・stale拒否、旧budget送信、未対応fallback、GPU failure／CPU fallbackを確認。CLI checkとformat check、固定upstreamへの`git apply --check`、Native source `git diff --check`は成功。GenzoRoom rootの`git diff --check`はpatch内の空のcontext行2件を末尾空白として報告し、適用対象のNative source側は成功した。
-
-診断UIの旧capacity metadata依存、実v0.20.0 EXE／実RAW・DX12、latency・RSS／VRAM、Before／Draft／Regionの新公開契約は未対応・未検証。Backend／Frontend全suiteや実Immich操作は行わない。checkpoint `.tmp/lightcraft-v020-state/N1-3/CHECKPOINT.md`。累積patch SHA-256: `267836440a81de757d157260acda17f44da6b318a057b07e753b25bc1fddc973`。
 
 ## 改訂5. 性能の未検証事項と保護・成果物境界
 

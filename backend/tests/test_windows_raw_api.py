@@ -587,32 +587,3 @@ def test_whole_full_frame_response_and_legacy_fallback(local, tmp_path, monkeypa
         finally:
             await api.close()
     asyncio.run(run())
-
-
-@pytest.mark.parametrize("mode", ["on", "off"])
-def test_whole_full_simple_stage_cache_over_existing_http(local, tmp_path, monkeypatch, mode):
-    async def run():
-        import json
-        monkeypatch.setenv("GENZOROOM_RAW_STAGE_CACHE", mode)
-        monkeypatch.delenv("GENZOROOM_RAW_STAGE_CACHE_BUDGET_BYTES", raising=False)
-        api, manager, children, _ = await setup(tmp_path, local, monkeypatch)
-        child = children[0]
-        child.frame_supported = child.simple_cache_supported = True
-        try:
-            async with client(local) as http:
-                await authenticate(http, local)
-                _, doc = await open_document(http)
-                body = preview_body(doc) | {"quality": "full", "mode": "whole", "maxSide": 1024,
-                    "viewGeneration": 1, "geometryId": None}
-                response = await http.post(f'/api/raw/documents/{doc["handle"]}/preview', json=body)
-                assert response.status_code == 200, response.text
-                assert response.content.startswith(b"\x89PNG\r\n\x1a\n")
-                frame = json.loads(response.headers["x-raw-frame"])
-                assert (frame["fullWidth"], frame["fullHeight"]) == (16, 12)
-                assert child.preview_arguments[-1]["stage_cache"] == mode
-                assert "stage_cache_budget_bytes" not in child.preview_arguments[-1]
-                assert not await manager._raw_preview_supported(doc["generation"])
-                assert api.document["revision"] == doc["revision"]
-        finally:
-            await api.close()
-    asyncio.run(run())

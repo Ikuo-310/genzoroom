@@ -397,7 +397,7 @@ def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=N
             allowed.add("frame")
         elif quality is not None:
             allowed |= {"kind", "previewContract", "quality", "mode", "frame", "stageCache"}
-        if (frame_only or quality is not None) and isinstance(metadata, dict) and "execution" in metadata:
+        if not frame_only and quality is not None and isinstance(metadata, dict) and "execution" in metadata:
             allowed.add("execution")
             execution = metadata["execution"]
             if not isinstance(execution, dict) or set(execution) != {"outcome", "backend", "reason"} or not (
@@ -568,12 +568,10 @@ class LightCraftRawSession:
         self._closed = False
         self._diagnostics = diagnostics
         self._stage_mode = os.environ.get("GENZOROOM_RAW_STAGE_CACHE", "off") if stage_cache is None else stage_cache
-        budget = (os.environ.get("GENZOROOM_RAW_STAGE_CACHE_BUDGET_BYTES", "") if stage_cache is None
-                  else "" if stage_cache_budget_bytes is None else str(stage_cache_budget_bytes))
-        if self._stage_mode not in ("off", "on") or self._stage_mode == "on" and budget and (len(budget) > 10 or not budget.isascii() or not budget.isdigit() or not 0 < int(budget) <= 1024**3):
+        budget = os.environ.get("GENZOROOM_RAW_STAGE_CACHE_BUDGET_BYTES", "") if stage_cache is None else str(stage_cache_budget_bytes or "")
+        if self._stage_mode not in ("off", "on") or self._stage_mode == "on" and (len(budget) > 10 or not budget.isascii() or not budget.isdigit() or not 0 < int(budget) <= 1024**3):
             raise LightCraftError("raw_invalid_preview_request")
-        # A budget is needed only when the selected Native uses the legacy Adaptive contract.
-        self._stage_budget = int(budget) if self._stage_mode == "on" and budget else None
+        self._stage_budget = int(budget) if self._stage_mode == "on" else None
         self._preview_trials = 0
 
     def reserve_control(self):
@@ -2097,10 +2095,7 @@ class LightCraftRawSession:
                                       and ticket.kind == "after" and ticket.quality == "full"
                                       and await self.manager._raw_frame_supported(self._generation))
                         if frame_only:
-                            args = {"include_frame": True, "stage_cache": self._stage_mode}
-                        elif self._stage_mode == "on" and self._stage_budget is None:
-                            # Legacy Native required a budget even for non-adaptive sessions.
-                            raise LightCraftError("raw_invalid_preview_request")
+                            args = {"include_frame": True}
                         native_started = monotonic()
                         try:
                             if ticket.region_operation is not None:

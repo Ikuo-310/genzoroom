@@ -60,7 +60,6 @@ class _Session:
     before_preview: bool | None = None
     adaptive_preview: bool | None = None
     whole_frame: bool | None = None
-    whole_stage_cache: bool = False
     region_preview: bool | None = None
     white_balance: bool | None = None
 
@@ -637,23 +636,14 @@ class LightCraftManager:
             result = await session.client.request("tools/list", timeout=self._timeouts.request)
             self._check_raw_session(session)
             tools = result.get("tools", []) if isinstance(result, dict) else []
-            session.whole_frame = False
-            session.whole_stage_cache = False
-            for tool in tools if isinstance(tools, list) else []:
-                if not isinstance(tool, dict) or tool.get("name") != "render_preview":
-                    continue
-                schema = tool.get("inputSchema")
-                props = schema.get("properties") if isinstance(schema, dict) else None
-                if not isinstance(props, dict):
-                    continue
-                frame = props.get("include_frame")
-                cache = props.get("stage_cache")
-                session.whole_frame = isinstance(frame, dict) and frame.get("type") == "boolean"
-                # The old Adaptive contract has a separate mandatory budget parameter.
-                session.whole_stage_cache = (session.whole_frame and isinstance(cache, dict)
-                    and cache.get("type") == "string" and cache.get("enum") == ["on", "off"]
-                    and "stage_cache_budget_bytes" not in props)
-                break
+            session.whole_frame = any(
+                isinstance(tool, dict) and tool.get("name") == "render_preview"
+                and isinstance(tool.get("inputSchema"), dict)
+                and isinstance(tool["inputSchema"].get("properties"), dict)
+                and isinstance(tool["inputSchema"]["properties"].get("include_frame"), dict)
+                and tool["inputSchema"]["properties"]["include_frame"].get("type") == "boolean"
+                for tool in (tools if isinstance(tools, list) else [])
+            )
         return session.whole_frame
 
     async def _raw_region_supported(self, generation):
@@ -679,8 +669,6 @@ class LightCraftManager:
             raise LightCraftError('raw_region_unsupported')
         args = {'id':str(photo_id), 'region_contract':1, 'operation':operation, 'target':target, 'stage_cache':stage_cache}
         if stage_cache == 'on':
-            if type(stage_cache_budget_bytes) is not int or not 0 < stage_cache_budget_bytes <= 1024**3:
-                raise LightCraftError('raw_invalid_preview_request')
             args['stage_cache_budget_bytes'] = stage_cache_budget_bytes
         try:
             result = await session.client.call_tool_result('render_region_preview', args, timeout=timeout)
@@ -703,17 +691,11 @@ class LightCraftManager:
             if before or crop_edit is not None or quality not in (None, "full") or not await self._raw_frame_supported(generation):
                 raise LightCraftError("raw_preview_unsupported")
             options["include_frame"] = True
-            if session.whole_stage_cache:
-                if stage_cache not in ("on", "off"):
-                    raise LightCraftError("raw_invalid_preview_request")
-                options["stage_cache"] = stage_cache
         elif quality is not None:
             if not await self._raw_preview_supported(generation):
                 raise LightCraftError("raw_preview_unsupported")
             options = {"quality": quality, "preview_contract": 1, "stage_cache": stage_cache}
             if stage_cache == "on":
-                if type(stage_cache_budget_bytes) is not int or not 0 < stage_cache_budget_bytes <= 1024**3:
-                    raise LightCraftError("raw_invalid_preview_request")
                 options["stage_cache_budget_bytes"] = stage_cache_budget_bytes
         if crop_edit is not None:
             from lightcraft_artifact import MANAGED

@@ -560,23 +560,8 @@ index b05dae56ff5fccab298fc6dee10239ddd47ed4b9..2de01852f042f6d57040223c2e9764fd
  serde_json = { workspace = true }
 +sha2 = { workspace = true }
  log = { workspace = true }
-diff --git a/crates/mcp/src/backend.rs b/crates/mcp/src/backend.rs
-index a621f403723393f2dd28f23fb0a5f94e5e12bef9..e8887ad037eb116a5e6a986ab3c320ad25f23182 100644
---- a/crates/mcp/src/backend.rs
-+++ b/crates/mcp/src/backend.rs
-@@ -18,6 +18,10 @@ pub trait Backend {
-     fn has_ui(&self) -> bool;
-     /// Short human description ("headless", "remote 127.0.0.1:7980").
-     fn describe(&self) -> String;
-+    /// Whether this backend supports retaining and releasing preview stages.
-+    fn supports_stage_cache(&self) -> bool {
-+        false
-+    }
-     /// Progress/cancellation for the next headless batch export. Other backends ignore it.
-     fn set_progress(&mut self, _hook: Option<ProgressHook>) {}
- }
 diff --git a/crates/mcp/src/headless.rs b/crates/mcp/src/headless.rs
-index 11de914173043a86ea701ee0f9d55a89e92f2add..4ddadc7b058f0a06e9989a4e2a6567b36261b8c1 100644
+index 11de914173043a86ea701ee0f9d55a89e92f2add..f855f136c3a5131a337a3eab08be1e6622d8fec8 100644
 --- a/crates/mcp/src/headless.rs
 +++ b/crates/mcp/src/headless.rs
 @@ -14,6 +14,7 @@ use crate::backend::{Backend, ProgressHook};
@@ -622,7 +607,7 @@ index 11de914173043a86ea701ee0f9d55a89e92f2add..4ddadc7b058f0a06e9989a4e2a6567b3
      }
  
      /// The UI command `app.export`, emulated with the same parameters as the desktop app
-@@ -139,15 +157,54 @@ impl Backend for Headless {
+@@ -139,15 +157,42 @@ impl Backend for Headless {
                  Ok(Value::Array(v))
              }
              "ui.render" => {
@@ -632,27 +617,15 @@ index 11de914173043a86ea701ee0f9d55a89e92f2add..4ddadc7b058f0a06e9989a4e2a6567b3
 -                        self.session.check_write_target(path)?;
 -                        write_image(Path::new(path), &img, 92)?;
 -                        Ok(json!({"path": path, "width": img.width, "height": img.height}))
-+                if p.get("stage_cache_budget_bytes").is_some() {
-+                    return Err("unsupported stage_cache_budget_bytes".into());
-+                }
 +                if p.get("include_frame").is_some_and(|v| !v.is_boolean()) {
 +                    return Err("invalid include_frame".into());
-+                }
-+                let cache_enabled = match p.get("stage_cache") {
-+                    None => true,
-+                    Some(Value::String(mode)) if mode == "on" => true,
-+                    Some(Value::String(mode)) if mode == "off" => false,
-+                    _ => return Err("invalid stage_cache".into()),
-+                };
-+                if !cache_enabled {
-+                    self.stages.prepare(1, false);
 +                }
 +                let id = self.photo_or_active(&p)?;
 +                let photo = self.session.catalog.photo(id).ok_or("no such photo")?;
 +                let original = (photo.width as usize, photo.height as usize);
 +                let source = format!("{:?}", lightcraft_engine::media::source_identity(photo));
 +                let size = p.get("size").or(p.get("longEdge")).and_then(Value::as_u64).unwrap_or(1600).clamp(16, 16384) as usize;
-+                let rendered = self.render_photo_result(id, size, cache_enabled)?;
++                let rendered = self.render_photo_result(id, size, true)?;
 +                let img = rendered.image;
 +                let geometry = if p.get("include_frame") == Some(&json!(true)) {
 +                    let frame = rendered
@@ -684,18 +657,7 @@ index 11de914173043a86ea701ee0f9d55a89e92f2add..4ddadc7b058f0a06e9989a4e2a6567b3
              }
              "app.export" => self.export(&p),
              m if m.starts_with("ui.") || m == "app.quit" => {
-@@ -161,6 +218,10 @@ impl Backend for Headless {
-         false
-     }
- 
-+    fn supports_stage_cache(&self) -> bool {
-+        true
-+    }
-+
-     fn describe(&self) -> String {
-         "headless".into()
-     }
-@@ -205,6 +266,82 @@ pub fn write_image(path: &Path, img: &Rgba8, quality: u8) -> Result<(), String>
+@@ -205,6 +250,25 @@ pub fn write_image(path: &Path, img: &Rgba8, quality: u8) -> Result<(), String>
  mod tests {
      use super::*;
  
@@ -716,63 +678,6 @@ index 11de914173043a86ea701ee0f9d55a89e92f2add..4ddadc7b058f0a06e9989a4e2a6567b3
 +        assert!(h.render_photo_result(second, 64, false).is_ok());
 +        assert!(next.is_empty());
 +        assert!(!std::sync::Arc::ptr_eq(&next, &h.stages.prepare(1, true).unwrap()));
-+    }
-+
-+    #[test]
-+    fn whole_stage_cache_mcp_on_off_releases_owner_without_capacity_metadata() {
-+        let mut h = Headless::demo();
-+        let id = h.session.active().unwrap().0;
-+        let tools = crate::tools::tool_definitions(&mut h, false);
-+        for tool in tools.iter().filter(|t| matches!(t["name"].as_str(), Some("render_preview" | "render_photo"))) {
-+            let properties = &tool["inputSchema"]["properties"];
-+            assert_eq!(properties["stage_cache"]["enum"], json!(["on", "off"]));
-+            assert!(properties.get("stage_cache_budget_bytes").is_none());
-+        }
-+        let args = |mode| json!({"id": id, "max_side": 64, "include_frame": true, "stage_cache": mode});
-+        let on = crate::call_tool(&mut h, "render_preview", &args("on"));
-+        assert!(!on.is_error && on.image().is_some(), "{on:?}");
-+        let meta: Value = serde_json::from_str(on.content[1]["text"].as_str().unwrap()).unwrap();
-+        assert!(meta.get("frame").is_some() && meta.get("stageCache").is_none());
-+        let owner = h.stages.prepare(1, true).unwrap();
-+        let again = crate::call_tool(&mut h, "render_preview", &args("on"));
-+        assert!(!again.is_error && std::sync::Arc::ptr_eq(&owner, &h.stages.prepare(1, true).unwrap()));
-+        let off = crate::call_tool(&mut h, "render_preview", &args("off"));
-+        assert!(!off.is_error && off.image().is_some());
-+        assert_eq!(std::sync::Arc::strong_count(&owner), 1, "OFF releases the retained owner");
-+        assert!(owner.is_empty());
-+        let on_again = crate::call_tool(&mut h, "render_preview", &args("on"));
-+        assert!(!on_again.is_error);
-+        assert!(!std::sync::Arc::ptr_eq(&owner, &h.stages.prepare(1, true).unwrap()));
-+        let invalid = crate::call_tool(&mut h, "render_preview", &args("bad"));
-+        assert!(invalid.is_error);
-+        let budget = crate::call_tool(&mut h, "render_preview", &json!({"id": id, "stage_cache": "on", "stage_cache_budget_bytes": 5}));
-+        assert!(budget.is_error, "the old budget parameter is not accepted");
-+        assert!(h.call("ui.render", json!({"id": id, "stage_cache": "on", "stage_cache_budget_bytes": 5})).is_err());
-+    }
-+
-+    #[test]
-+    fn remote_does_not_advertise_or_accept_stage_cache() {
-+        struct RemoteOnly;
-+        impl crate::Backend for RemoteOnly {
-+            fn call(&mut self, _: &str, _: Value) -> Result<Value, String> {
-+                Err("unexpected remote call".into())
-+            }
-+            fn has_ui(&self) -> bool {
-+                true
-+            }
-+            fn describe(&self) -> String {
-+                "remote".into()
-+            }
-+        }
-+        let mut remote = RemoteOnly;
-+        let tools = crate::tools::tool_definitions(&mut remote, false);
-+        for tool in tools.iter().filter(|t| matches!(t["name"].as_str(), Some("render_preview" | "render_photo"))) {
-+            assert!(tool["inputSchema"]["properties"].get("stage_cache").is_none());
-+        }
-+        for name in ["render_preview", "render_photo"] {
-+            let result = crate::call_tool(&mut remote, name, &json!({"stage_cache": "on"}));
-+            assert!(result.is_error);
-+        }
 +    }
 +
      /// A headless session reads the lens database the desktop app downloaded, as the desktop does (the same raw gets
@@ -1174,63 +1079,26 @@ index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..e43518d4fe6b47c35d4038842480a1fd
 +    assert_eq!(preview_meta["frame"]["geometryId"], meta["frame"]["geometryId"]);
 +}
 diff --git a/crates/mcp/src/tools.rs b/crates/mcp/src/tools.rs
-index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..f4bf35e374623262edf385c609d0d30fa7d7e732 100644
+index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..766c8b513fe16da58ee41da30e6a278669b6c816 100644
 --- a/crates/mcp/src/tools.rs
 +++ b/crates/mcp/src/tools.rs
-@@ -120,6 +120,8 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
+@@ -120,6 +120,7 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
              json!({
                  "id": {"type": "integer", "description": "Photo id (default: the active photo); selection is unchanged"},
                  "max_side": {"type": "integer", "description": "Long edge in pixels (default 1024, max 4096)"},
 +                "include_frame": {"type": "boolean", "description": "Include geometry of the rendered frame"},
-+                "stage_cache": {"type": "string", "enum": ["on", "off"], "description": "Retain or release intermediate preview stages"},
                  "format": {"type": "string", "enum": ["png", "jpeg"], "description": "Image encoding (default png; jpeg is smaller)"},
              }),
              &[],
-@@ -219,6 +221,8 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
+@@ -219,6 +220,7 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
              json!({
                  "id": {"type": "integer", "description": "Photo id (default: the active photo); selection is unchanged"},
                  "size": {"type": "integer", "description": "Long edge in pixels (default 1024, max 4096)"},
 +                "include_frame": {"type": "boolean", "description": "Include geometry of the rendered frame"},
-+                "stage_cache": {"type": "string", "enum": ["on", "off"], "description": "Retain or release intermediate preview stages"},
                  "format": {"type": "string", "enum": ["png", "jpeg"], "description": "Image encoding (default png; jpeg is smaller)"},
                  "path": {"type": "string", "description": "Also save the rendered file here"}
              }),
-@@ -415,6 +419,16 @@ pub(crate) fn check_args(name: &str, args: &Value) -> Result<(), String> {
- /// All tools: helpers, plus the generated command tools when `with_commands`.
- pub fn tool_definitions(backend: &mut dyn Backend, with_commands: bool) -> Vec<Value> {
-     let mut v = helper_tools(backend.has_ui());
-+    // A remote desktop may accept unknown ui.render fields without honoring them.
-+    if !backend.supports_stage_cache() {
-+        for tool in &mut v {
-+            if matches!(tool["name"].as_str(), Some("render_preview" | "render_photo")) {
-+                if let Some(props) = tool["inputSchema"]["properties"].as_object_mut() {
-+                    props.remove("stage_cache");
-+                }
-+            }
-+        }
-+    }
-     if with_commands {
-         v.extend(command_tools(backend));
-     }
-@@ -540,6 +554,17 @@ fn check_save_path(b: &mut dyn Backend, args: &Value) -> Result<(), String> {
- }
- 
- fn render_photo(b: &mut dyn Backend, args: &Value) -> ToolResult {
-+    if args.get("stage_cache_budget_bytes").is_some() {
-+        return ToolResult::error("unsupported stage_cache_budget_bytes");
-+    }
-+    if let Some(mode) = args.get("stage_cache") {
-+        if !matches!(mode.as_str(), Some("on" | "off")) {
-+            return ToolResult::error("invalid stage_cache");
-+        }
-+        if !b.supports_stage_cache() {
-+            return ToolResult::error("stage_cache unsupported");
-+        }
-+    }
-     if let Err(e) = check_save_path(b, args) {
-         return ToolResult::error(e);
-     }
-@@ -557,11 +582,21 @@ fn render_photo(b: &mut dyn Backend, args: &Value) -> ToolResult {
+@@ -557,11 +559,18 @@ fn render_photo(b: &mut dyn Backend, args: &Value) -> ToolResult {
          Err(e) => return ToolResult::error(e),
      };
      let path = tmp.file.to_string_lossy().to_string();
@@ -1238,9 +1106,6 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..f4bf35e374623262edf385c609d0d30f
 +    let mut request = json!({"id": id, "size": size, "path": path});
 +    if let Some(include) = args.get("include_frame") {
 +        request["include_frame"] = include.clone();
-+    }
-+    if let Some(mode) = args.get("stage_cache") {
-+        request["stage_cache"] = mode.clone();
 +    }
 +    let meta = match b.call("ui.render", request) {
          Ok(m) => m,
@@ -1253,15 +1118,12 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..f4bf35e374623262edf385c609d0d30f
      meta["id"] = json!(id);
      image_result(&tmp.file, None, args.get("format").and_then(Value::as_str).unwrap_or("png"), args.get("path").and_then(Value::as_str), meta)
  }
-@@ -664,7 +699,10 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
+@@ -664,7 +673,7 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
          }
          "doc_inspect" => ToolResult::from(doc_inspect(b)),
          "render_preview" => {
 -            let mut a = obj(args, &["id", "format"]);
-+            if args.get("stage_cache_budget_bytes").is_some() {
-+                return ToolResult::error("unsupported stage_cache_budget_bytes");
-+            }
-+            let mut a = obj(args, &["id", "format", "include_frame", "stage_cache"]);
++            let mut a = obj(args, &["id", "format", "include_frame"]);
              if let Some(m) = args.get("max_side") {
                  a["size"] = m.clone();
              }
