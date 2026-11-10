@@ -34,6 +34,14 @@ feature側でv0.18.1の実行契約や旧Nativeとの互換性を維持する必
 - 合成PNGを用いた実Native MCP検証で初期化、schema、写真読込、settings取得・変更、Whole After／Full PNG・photo ID・Frame寸法、存在しない写真へのエラーと正常終了を確認。実receiptで認証したBackend経由でも読込、露出変更、revision更新、Whole取得と終了を確認した。Backendのmanifest・receipt test 44件、Frame・HTTP test 9件、起動・通信test 82件、設定画面test 28件とFrontend production buildが成功。ビルド時には未使用upstream patch、CJK font未同梱およびFrontend bundleに関する警告が出た。
 - DBや既存データは変更していない。実RAW／JPEG、UI実機操作、Before／Draft／Region、Crop／Straighten、WB、Recipe／History、Export／Immich、実DX12は未検証でありP2以降に残す。既存の旧patch・累積暫定patch・checkpointは保持した。
 
+### P2 実施記録（2026-11-10）
+
+- 既存UIからBackendの49数値コントロールとv0.20.0のNative定義を照合し、名前・settings上の保存先・最小／最大・刻み・既定値の一致を確認した。基本補正、WB温度／色かぶり、彩度、グレーディング、Effects／周辺光量、Detail／ノイズ除去、Opticsが対象。ポイントカーブは既存の`develop.curve`経路を使用する。設定値の変換やNative patchの追加は不要だった。
+- P1の実EXEをreceiptで認証し、リポジトリ内JPEGのコピーをBackendから開いて49項目を連続変更・readbackした。ポイントカーブ変更、編集前後のWhole Full PNG変化、カーブ操作中の画像、無効な値／未対応コントロールの拒否、各種Reset・section切替・周辺光量style・Optics flagも確認した。元JPEGには変更を加えていない。実RAWでは検証していない。
+- NativeのDraftが未接続の場合、カーブ操作中もWhole Fullを要求して実際の品質をFullとして返す。通常の編集中PreviewもFull応答とFrameを受け入れる。画像の世代・revision・カーブ操作IDとstale応答の既存管理は維持し、FullをDraftと偽装しない。
+- Backendのコントロール・カーブ・カテゴリ操作86件、カーブ／Frame管理14件、カーブHTTP 2件、Whole HTTP 4件、Frontend関連326件が成功。Frontend型チェック・production build、実EXE／receipt／manifestの再検証も成功した。Frontend buildには大きなbundleと依存モジュールのdirectiveに関する警告がある。ブラウザ・実機操作は未実施。
+- DB・Recipe形式・既存データおよびNative patch／manifest／receiptは変更していない。Before／Draft／Region、Crop／Straighten、WBスポイト、保存・History全体、Export／Immich、実RAW・DX12統合はP3以降の対象。
+
 ## 既存成果とpatchの扱い
 
 N1-1a〜cのFrame取得・受信・表示経路とN1-2のStageCache所有簡素化は再利用候補であり、そのままの採用を要求しない。N1-3はRevert済みであり、StageCache ON／OFFを公開接続契約として再導入しない。累積暫定patchとcheckpointは開発中の成果・履歴として保持し、正式採用時に必要な接続だけをmanaged patchへ整理する。旧成果の検証はその時点の範囲に限り、v0.20.0の完成を意味しない。

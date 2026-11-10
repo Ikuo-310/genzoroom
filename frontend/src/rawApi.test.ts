@@ -139,13 +139,22 @@ it('routes temporary curve updates through the existing adaptive Draft Preview c
   expect(fetch.mock.calls[2]?.[0]).toBe(`/api/raw/documents/${doc.handle}/curve-interaction/cancel`);
 });
 it.each<Record<string, string>>([
-  { 'X-Raw-Quality': 'full' }, { 'X-Raw-View-Generation': '3' }, { 'X-Raw-Mode': 'region' },
+  { 'X-Raw-View-Generation': '3' }, { 'X-Raw-Mode': 'region' },
   { 'X-Raw-Frame': JSON.stringify({ ...geometry, fullWidth: 17 }) },
   { 'X-Raw-Frame': JSON.stringify({ ...geometry, window: {} }) },
   { 'X-Raw-Frame': JSON.stringify({ ...geometry, nativeHeight: 0 }) },
 ])('rejects malformed adaptive response: %j', async patch => {
   vi.stubGlobal('fetch', vi.fn(async () => response({ ...adaptiveHeaders(), ...patch })));
   await expect(rawPreview(doc, 3, new AbortController().signal, 'after', adaptiveTarget)).rejects.toThrow();
+});
+it('accepts Whole Full with geometry when Draft is unavailable', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => response({ ...adaptiveHeaders(), 'X-Raw-Quality': 'full' })));
+  const frame = await rawPreview(doc, 3, new AbortController().signal, 'after', adaptiveTarget);
+  expect(frame.quality).toBe('full'); expect(frame.frame).toEqual(geometry);
+});
+it('rejects Draft for a Full request', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => response(adaptiveHeaders())));
+  await expect(rawPreview(doc, 3, new AbortController().signal, 'after', { ...adaptiveTarget, quality: 'full' })).rejects.toThrow();
 });
 it('accepts explicit legacy Full fallback without fabricating native geometry', async () => {
   const headers = adaptiveHeaders(); delete (headers as Partial<typeof headers>)['X-Raw-Frame'];

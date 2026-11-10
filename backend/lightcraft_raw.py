@@ -2091,8 +2091,10 @@ class LightCraftRawSession:
                             crop_expected = {'requestId':request_id,'settingsFingerprint':fingerprint,
                                              'canonicalGeometry':self._before_geometry(photo)}
                         # The frame-only contract is independent of the older Adaptive capability.
+                        # Curve gestures can request Draft even when Native only exposes Whole Full.
                         frame_only = (ticket.region_operation is None and crop_expected is None
-                                      and ticket.kind == "after" and ticket.quality == "full"
+                                      and ticket.kind == "after" and (ticket.quality == "full"
+                                          or ticket.interaction_id is not None and not await self.manager._raw_preview_supported(self._generation))
                                       and await self.manager._raw_frame_supported(self._generation))
                         if frame_only:
                             args = {"include_frame": True}
@@ -2159,15 +2161,16 @@ class LightCraftRawSession:
                     if metadata and not frame_only and (metadata["stageCache"]["mode"] != self._stage_mode or
                             self._stage_mode == "on" and metadata["stageCache"]["budgetBytes"] != self._stage_budget):
                         raise LightCraftError("lightcraft_invalid_preview")
+                    actual_quality = "full" if frame_only else ticket.quality
                     self._preview_trials += 1
                     digest = None
                     try:
-                        if (self._diagnostics or backend_logger.get_level() == "debug") and ticket.quality == "full":
+                        if (self._diagnostics or backend_logger.get_level() == "debug") and actual_quality == "full":
                             digest = hashlib.sha256(data).hexdigest()
                     except Exception:
                         pass
                     lightcraft_log("preview.measured", level="debug", generation=self._generation,
-                        revision=ticket.revision, sequence=ticket.sequence, quality=ticket.quality, kind=ticket.kind,
+                        revision=ticket.revision, sequence=ticket.sequence, quality=actual_quality, kind=ticket.kind,
                         trialIndex=self._preview_trials, configuredBackend=self.manager._gpu_backend, maxSide=ticket.max_side,
                         execution=metadata.get("execution") if metadata else None,
                         pngSha256=digest,
@@ -2180,7 +2183,7 @@ class LightCraftRawSession:
                     if self._ticket_current(ticket):
                         frame = PreviewFrame(ticket.handle, ticket.revision, ticket.epoch,
                                              ticket.sequence, w, h, data, kind=ticket.kind, key=ticket.key,
-                                             quality=ticket.quality,
+                                             quality=actual_quality,
                                              _crop_json=json.dumps({k:metadata[k] for k in ('canonicalGeometry','bitmapSpace')}) if crop_expected else None,
                                              _frame_json=json.dumps(metadata["frame"]) if metadata else None,
                                              _metrics_json=json.dumps({"nativeMs": native_ms,
@@ -2194,7 +2197,7 @@ class LightCraftRawSession:
                             self._before_cache = frame
                         ticket._finish(frame)
                         lightcraft_log("preview.completed", level="debug", generation=self._generation,
-                            revision=ticket.revision, sequence=ticket.sequence, quality=ticket.quality,
+                            revision=ticket.revision, sequence=ticket.sequence, quality=actual_quality,
                             kind=ticket.kind, width=w, height=h, payloadBytes=len(data))
                     else:
                         ticket._finish()

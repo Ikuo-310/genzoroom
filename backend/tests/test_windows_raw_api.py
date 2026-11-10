@@ -555,7 +555,8 @@ def test_native_release_failure_cannot_start_cache_cleanup_or_reopen(local, tmp_
 
 
 @pytest.mark.parametrize("frame_supported", [False, True])
-def test_whole_full_frame_response_and_legacy_fallback(local, tmp_path, monkeypatch, frame_supported):
+@pytest.mark.parametrize("quality", ["draft", "full"])
+def test_whole_full_frame_response_and_legacy_fallback(local, tmp_path, monkeypatch, frame_supported, quality):
     async def run():
         import json
         api, manager, children, _ = await setup(tmp_path, local, monkeypatch)
@@ -566,7 +567,7 @@ def test_whole_full_frame_response_and_legacy_fallback(local, tmp_path, monkeypa
                 await authenticate(http, local)
                 _, doc = await open_document(http)
                 url = f'/api/raw/documents/{doc["handle"]}/preview'
-                body = preview_body(doc) | {"quality": "full", "mode": "whole", "maxSide": 1024,
+                body = preview_body(doc) | {"quality": quality, "mode": "whole", "maxSide": 1024,
                     "viewGeneration": 1, "geometryId": None}
                 result = await http.post(url, json=body)
                 assert result.status_code == 200, result.text

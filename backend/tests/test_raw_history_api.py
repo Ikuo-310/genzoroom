@@ -135,10 +135,12 @@ def test_confirmed_gesture_undo_redo_jump_noop_and_replay(local, tmp_path, monke
     asyncio.run(run())
 
 
-def test_curve_interaction_preview_cancel_and_single_history_confirmation(local, tmp_path, monkeypatch):
+@pytest.mark.parametrize('adaptive', [True, False])
+def test_curve_interaction_preview_cancel_and_single_history_confirmation(local, tmp_path, monkeypatch, adaptive):
     async def run():
         api, _, children, _ = await setup(tmp_path, local, monkeypatch)
-        children[0].adaptive_supported = True
+        children[0].adaptive_supported = adaptive
+        children[0].frame_supported = not adaptive
         try:
             async with client(local) as http:
                 await authenticate(http, local)
@@ -163,7 +165,7 @@ def test_curve_interaction_preview_cancel_and_single_history_confirmation(local,
                     "interactionId": interaction_id, "interactionSequence": 1, "serial": 1, "maxSide": 1024,
                     "viewGeneration": 0, "geometryId": None})
                 assert preview.status_code == 200
-                assert preview.headers["x-raw-quality"] == "draft"
+                assert preview.headers["x-raw-quality"] == ("draft" if adaptive else "full")
                 assert preview.headers["x-raw-interaction-id"] == interaction_id
                 assert preview.headers["x-raw-interaction-sequence"] == "1"
                 assert preview.content.startswith(b"\x89PNG\r\n\x1a\n")

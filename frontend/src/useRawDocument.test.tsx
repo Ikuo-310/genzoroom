@@ -602,6 +602,18 @@ describe('RAW native Before cache', () => {
     diagnostics.mockRestore();
   });
 
+  it('displays a Full fallback for an acknowledged edit during a gesture', async () => {
+    vi.useFakeTimers(); await render('a'); await flush();
+    vi.mocked(api.rawPreview).mockImplementation(async () => ({ blob: new Blob(['full']), width: 16, height: 12,
+      epoch: 1, sequence: 2, quality: 'full', frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000,
+        nativeHeight: 3000, aspect: 4 / 3, fullWidth: 16, fullHeight: 12, window: null } }));
+    act(() => { current!.beginControls('light.exposure'); current!.changeControls({ 'light.exposure': 1 }); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); }); await flush();
+    expect(vi.mocked(api.rawPreview).mock.calls.at(-1)?.[4]?.quality).toBe('draft');
+    expect(current?.quality).toBe('full'); expect(current?.imageRevision).toBe(current?.settings?.revision);
+    expect(current?.displayError).toBeUndefined();
+  });
+
   it('cancels and rejects a running ACK Draft from the previous view', async () => {
     vi.useFakeTimers(); await render('a'); await flush();
     const gate = deferred<api.RawFrame>(); vi.mocked(api.rawPreview).mockReturnValueOnce(gate.promise);

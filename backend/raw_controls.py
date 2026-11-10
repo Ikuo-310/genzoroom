@@ -1,4 +1,4 @@
-"""RAW control allowlist from pinned LightCraft v0.18.1; never JPEG Recipe values."""
+"""LightCraft control allowlist for the Native editor; never JPEG Recipe values."""
 
 import math
 
