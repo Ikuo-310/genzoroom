@@ -32,6 +32,12 @@ Pixel／PentaxのRecipeではDetail Reset後の`nr_outliers=false`を保存本�
 
 Queue／runtime／Retry／identity関連Backend testsは**101 passed**。既存群に旧Engine tupleのみの登録拒否とQueue不変、Windows非RAWもNative adapterへ進む経路、Docker JPEG経路、失敗・cancel・Retry・重複Start／stale応答の状態遷移テストを含む。Arm／DisarmはFrontendの既存制御で、本作業ではFrontendを変更せずBackend Start契約を通した。新しいQueue状態や製品コードの変更なし。Immich登録・STACK／COVER／Gallery連携はP5-Dへ残す。
 
+### P5-D2：登録失敗・STACK部分成功・Gallery更新（2026-11-13）
+
+既存Mock ImmichとQueue runtimeテストを再利用し、登録失敗ではrun/itemがfailedとなり`registration_failed`を記録すること、STACKまたはalbum後半の失敗では登録済みJPEG IDを保持して未完了扱いにすることを確認した。Manual Retry群では同一JPEG upload／Asset IDを再利用して処理を続け、成功時だけQueue runをcompletedにする既存契約を検証した。STACK writeが失敗した場合、前段でalbumに追加済みの元Stack member／outputを削除せず、未検証COVERへ切り替えない。Recipe revision変更を伴う新しいretry runは新しいfrozen Recipe／成果物を選ぶ既存仕様も確認した。新しい冪等性・復旧仕様は加えていない。
+
+Gallery側は`GalleryRefresh.test.tsx`、`GalleryStacks.test.tsx`、`GalleryExportQueue.test.tsx`、`useExportRuntime.test.tsx`、`useExportQueue.test.tsx`の既存テストで、stale refreshの破棄、navigation／view変更後の古い応答拒否、stack/export更新予約とqueue状態表示を確認した。追加Frontend test・製品変更なし。focused Backend Queue／Registrar／Mock Immich／STACK suite **215 passed**、Frontend Gallery／Export queue更新suite **253 passed**。Gallery testは通知の発行元を実Immichへ接続するものではなく、UI更新境界の状態管理をfixtureで検証する。P5-D2は既存契約確認のみで、Gallery UI・Export retry契約は変更なし。実Immich・GUI・P6は未実施。
+
 ### P5-D1：QueueからImmich登録・STACK正常系（2026-11-13）
 
 `test_queue_export_registers_jpeg_and_promotes_it_as_stack_cover`を追加した。既存Queue／`ExportRuntime`からFake Adapterで有効なJPEGを返し、Mock Immich上の既存Stack（元Asset AとB、BがCOVER）へRegistrarが登録する経路を通した。Upload filenameは`IMG-Genzo04.jpg`、JPEG bytesはデコード可能な32×24 JPEG、Mockが返した新Asset IDはrun itemに記録された。RegistrarのSTACK POSTは新Assetを含み、その新JPEGがCOVERとなり、既存A／BのStack membershipも維持した。
