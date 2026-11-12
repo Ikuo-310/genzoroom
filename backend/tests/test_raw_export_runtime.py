@@ -83,6 +83,50 @@ def test_optics_frozen_recipe_reaches_export_and_registrar(db):
     assert len(registrar.calls) == 1 and registrar.calls[0][1].jpeg == b'raw-jpeg'
 
 
+def test_queue_worker_passes_frozen_raw_recipe_to_adapter_and_completes(db):
+    from io import BytesIO
+    from PIL import Image
+    from tests.test_raw_export_artifact import jpeg
+
+    saved = settings()
+    saved['light']['exposure'] = .85
+    saved['color']['vibrance'] = 17.
+    saved['grading']['shadows'].update(hue=215., sat=22., lum=-5.)
+    saved['detail']['nr_luminance'] = 19.
+    recipe = raw.put_raw_recipe(identity(), 0, uuid4(), saved,
+        import_defaults_fingerprint=raw._digest(raw._settings_json(settings(), 1)))
+    enqueue_export_assets([A])
+    seen, registrar = [], Recorder()
+
+    async def adapter(request):
+        seen.append(request)
+        assert request.source_filename == 'IMG.PEF'
+        assert request.expected_content_hash == recipe['recipe']['sourceContentHash']
+        assert request.settings == saved
+        # A Recipe edit after run creation must not replace the run's frozen snapshot.
+        save_raw(exposure=2., revision=1)
+        return ExportArtifact('IMG-Genzo04.jpg', jpeg())
+
+    async def run():
+        runtime = ExportRuntime(source=MixedSource(), family=Family(), registrar=registrar,
+                                raw_artifact=adapter)
+        run_id = await runtime.start([A])
+        await runtime.wait()
+        return get_export_run(run_id)
+
+    result = asyncio.run(run())
+    assert len(seen) == 1
+    item = result.items[0]
+    assert item.asset_id == A and item.kind == 'raw' and item.frozen_revision == 1
+    assert item.recipe['settings'] == saved and item.status == 'succeeded'
+    assert list_export_queue() == []
+    assert len(registrar.calls) == 1
+    with Image.open(BytesIO(registrar.calls[0][1].jpeg)) as image:
+        image.load()
+        assert image.format == 'JPEG' and image.size == (32, 24)
+    assert raw.get_raw_recipe(identity())['recipe']['settings']['light']['exposure'] == 2.
+
+
 def test_windows_native_export_accepts_non_raw_immich_asset(db, monkeypatch):
     monkeypatch.setattr(storage, "WINDOWS_STORAGE", True)
     save_raw()

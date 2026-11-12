@@ -26,6 +26,12 @@ P5-B1の実Nativeテストへ`test_real_native_saved_recipe_export`を追加し�
 
 Pixel／PentaxのRecipeではDetail Reset後の`nr_outliers=false`を保存本文から省略し、Native送信payloadではfalse明示、生成時のreadback比較成功を確認した。Recipe settings fingerprintを含むrowとreceipt群はExport前後で同一。テストは既存manifest／receipt検証済み`target-p3-wb` EXE、`I:\code\raw-test`原本からのTEMPコピー、pytest隔離DB／Export先を使用した。Thumbnail Live、Export artifact、Export runtimeのfocused Backendテストは合計**92 passed**。実Native Exportの製品不具合は再現せず、製品コード変更なし。Queue／Immich／STACKとP5-C以降は未実施。
 
+### P5-C：Export Queue接続検証（2026-11-13）
+
+`test_queue_worker_passes_frozen_raw_recipe_to_adapter_and_completes`を追加した。現行Engine tupleのRAW RecipeをQueueへ登録し、既存`ExportRuntime.start()`／workerからRAW Export Adapter callbackへ到達させ、Source filename／content hash／複数カテゴリsettingsを照合する。Queueがrun作成時に固定したAsset／Recipe revision 1をAdapter実行中にRecipe revision 2へ更新しても、Adapter request、run item、Registrarへ渡るJPEGはrevision 1のRecipeに一致し、対象Assetの成功状態が記録された。JPEGはfixtureから得た正常画像をRegistrar境界まで通してdecode検証した。
+
+Queue／runtime／Retry／identity関連Backend testsは**101 passed**。既存群に旧Engine tupleのみの登録拒否とQueue不変、Windows非RAWもNative adapterへ進む経路、Docker JPEG経路、失敗・cancel・Retry・重複Start／stale応答の状態遷移テストを含む。Arm／DisarmはFrontendの既存制御で、本作業ではFrontendを変更せずBackend Start契約を通した。新しいQueue状態や製品コードの変更なし。Immich登録・STACK／COVER／Gallery連携はP5-Dへ残す。
+
 ## 目的とバージョン方針
 
 既存の編集、Preview、保存、Export、Immich登録をv0.20.0で成立させる。旧Native内部契約の全面移植は廃止し、標準APIで足りない接続だけを最小限のpatchで補う。`main`は変更せず、このfeatureブランチをv0.20.0専用構成へ移す。P1でmanifestと基本Native接続をv0.20.0へ切替えた。後続機能は各工程で接続する。
