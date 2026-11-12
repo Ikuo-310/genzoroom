@@ -14,6 +14,12 @@ Backend focused test 65件成功。実EXE `target-p3-wb`はmanifest receipt／SH
 
 対象9ファイルのBackend Thumbnail／Export／Queue／Immich／STACK回帰は修正後**344 passed**。この段階ではテスト・文書のみの変更で、実Native Thumbnail／ExportおよびP5-B以降の統合は実施していない。
 
+### P5-B1：実Native Thumbnail統合（2026-11-13）
+
+`test_lightcraft_v020_thumbnail_live.py`を追加し、既存`generate_raw_thumbnail()`→独立Native Sessionを通す実NativeテストをJPEG／Pixel DNG／Pentax DNGで実行、**3 passed**。現行Native identityとSource hashからRecipeを隔離SQLiteへ保存し、Native Thumbnail Sessionのrestore readback全体を保存settingsと正規化比較した。JPEG thumbnailはデコード可能なJPEGで最大辺1024以下。Recipe rowとSQLite bytesは生成前後で不変、元fixture／DNG原本の内容も一時コピー使用前後で不変だった。DNGではDetail Reset後に`nr_outliers=false`が省略されたRecipeを保存し、独立Sessionのreadbackもfalse相当であることを確認した。
+
+使用EXEは既存manifest／receipt検証済み`target-p3-wb`。DNGは`I:\code\raw-test`のPixel／Pentax `sample`からTEMPへコピーした。隔離DBはpytest `tmp_path`、ThumbnailのSource stagingは既存TemporaryDirectory、Immich取得は一時API fixtureを使用。関連Recipe store／Thumbnail generator／lifecycle testは**157 passed**。実Native Export、Export JPEG、Thumbnail／Export間比較はP5-B1対象外で未確認。製品コード・Native patch・schema変更なし。
+
 ## 目的とバージョン方針
 
 既存の編集、Preview、保存、Export、Immich登録をv0.20.0で成立させる。旧Native内部契約の全面移植は廃止し、標準APIで足りない接続だけを最小限のpatchで補う。`main`は変更せず、このfeatureブランチをv0.20.0専用構成へ移す。P1でmanifestと基本Native接続をv0.20.0へ切替えた。後続機能は各工程で接続する。
