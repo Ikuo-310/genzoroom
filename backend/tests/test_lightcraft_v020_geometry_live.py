@@ -29,6 +29,47 @@ def region_target(raw, handle, frame, revision, *, kind, quality, operation, vie
 
 
 @pytest.mark.skipif(not os.environ.get('GENZOROOM_TEST_LIGHTCRAFT_EXE'), reason='real Native executable not requested')
+def test_real_native_snapshot_nr_outliers_false_and_true_round_trip(tmp_path):
+    async def run():
+        source = tmp_path / 'sample.jpg'
+        shutil.copyfile(Path(__file__).resolve().parents[2] / 'docs/images/Anshitsu_Sakura.jpg', source)
+        manager = LightCraftManager(environment={**os.environ,
+            'GENZOROOM_LIGHTCRAFT_EXE': os.environ['GENZOROOM_TEST_LIGHTCRAFT_EXE']}, platform='win32', gpu_backend='off')
+        raw = LightCraftRawSession(manager)
+        try:
+            await manager.start()
+            async with asyncio.timeout(30):
+                while manager.status().state in ('starting', 'initializing'):
+                    await asyncio.sleep(.05)
+            assert manager.status().state == 'ready'
+            handle, state = await raw.open_raw(str(uuid4()), str(source))
+            assert state.settings['detail'].get('nr_outliers', False) is False
+            other_settings = {key: value for key, value in state.settings.items() if key != 'detail'}
+            reset = await raw.apply_history_operation(
+                handle, 'sectionReset', {'section': 'detail'}, state.revision)
+            assert reset.settings['detail'].get('nr_outliers', False) is False
+            assert {key: value for key, value in reset.settings.items() if key != 'detail'} == other_settings
+
+            partial = await raw.merge_settings(handle, {'detail': {'nr_luminance': 12}}, reset.revision)
+            assert partial.settings['detail'].get('nr_outliers', False) is False
+            false_snapshot = partial.settings
+            false_snapshot['detail'].pop('nr_outliers', None)
+            identity = raw.recipe_identity(handle)
+            restored_false = await raw.restore_persisted_settings(
+                handle, identity | {'settings': false_snapshot}, partial.revision)
+            assert restored_false.settings['detail'].get('nr_outliers', False) is False
+
+            true_snapshot = restored_false.settings
+            true_snapshot['detail']['nr_outliers'] = True
+            restored_true = await raw.restore_persisted_settings(
+                handle, identity | {'settings': true_snapshot}, restored_false.revision)
+            assert restored_true.settings['detail']['nr_outliers'] is True
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+@pytest.mark.skipif(not os.environ.get('GENZOROOM_TEST_LIGHTCRAFT_EXE'), reason='real Native executable not requested')
 def test_real_native_geometry_and_targeted_curve(tmp_path):
     async def run():
         source = tmp_path / 'sample.jpg'

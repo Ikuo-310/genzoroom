@@ -1,6 +1,7 @@
 """LightCraft control allowlist for the Native editor; never JPEG Recipe values."""
 
 import math
+import copy
 
 from lightcraft_mcp import LightCraftError
 
@@ -75,6 +76,26 @@ CONTROL_PATHS = {control: tuple(control.split(".")) for control in CONTROLS} | {
 # A native Detail reset includes controls not exposed by GenzoRoom yet.
 DETAIL_RESET_DEFAULTS = dict(sharpen_amount=0, sharpen_radius=1, sharpen_detail=25, sharpen_masking=0,
     nr_luminance=0, nr_detail=50, nr_contrast=0, nr_color=0, nr_color_detail=50, nr_color_smoothness=50)
+
+
+def complete_snapshot_for_merge(settings):
+    """State false explicitly when restoring a full snapshot; partial merges keep omission semantics."""
+    if type(settings) is not dict:
+        raise LightCraftError("raw_invalid_settings")
+    result = copy.deepcopy(settings)
+    detail = result.setdefault("detail", {})
+    if type(detail) is not dict:
+        raise LightCraftError("raw_invalid_settings")
+    if "nr_outliers" not in detail:
+        detail["nr_outliers"] = False
+    elif type(detail["nr_outliers"]) is not bool:
+        raise LightCraftError("raw_invalid_settings")
+    return result
+
+
+def settings_snapshot_for_comparison(settings):
+    """Treat Native's omitted serde-default false as equal to an explicit false snapshot value."""
+    return complete_snapshot_for_merge(settings)
 
 
 def control_location(settings, control):

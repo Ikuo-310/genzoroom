@@ -73,13 +73,16 @@ def merge(base, patch):
     for k, v in patch.items():
         if k not in base:
             # Native serde recognizes this optional field even when it was omitted in readback.
-            if k == 'denoise_on' and type(v) is bool:
+            if k in ('denoise_on', 'nr_outliers') and type(v) is bool:
                 base[k] = v
             continue
         if isinstance(base[k], dict) and isinstance(v, dict):
             merge(base[k], v)
         else:
-            base[k] = copy.deepcopy(v)
+            if k == 'nr_outliers' and v is False:
+                base.pop(k, None)
+            else:
+                base[k] = copy.deepcopy(v)
 
 
 class RawProcess(FakeProcess):
@@ -94,6 +97,7 @@ class RawProcess(FakeProcess):
         self.render_count = self.inflight = self.max_inflight = 0
         self.deferred = set()
         self.kind = "raw"
+        self.bad_detail_reset = False
         self.preview_only = None
         self.import_failure = self.partial_failure = False
         self.fail_get = self.mismatch = False
@@ -216,7 +220,9 @@ class RawProcess(FakeProcess):
                 value["duplicates"] = [{"existing": old, "reason": "content", "path": path}]
             else:
                 photo_id = len(self.photos) + 1
-                self.photos[photo_id] = {"hash": digest, "settings": copy.deepcopy(DEFAULT)}
+                settings = copy.deepcopy(DEFAULT)
+                settings["detail"]["nr_outliers"] = True
+                self.photos[photo_id] = {"hash": digest, "settings": settings}
                 value["imported"] = [photo_id]
             if self.partial_failure:
                 value["failed"] = [[path, "PRIVATE secret"]]
@@ -259,6 +265,7 @@ class RawProcess(FakeProcess):
             value = {"ok": True}
         elif command == "develop.reset":
             self.photos[self.active]["settings"] = copy.deepcopy(DEFAULT)
+            self.photos[self.active]["settings"]["detail"]["nr_outliers"] = True
             value = {"ok": True}
         elif command == "develop.sectionEnabled":
             settings = self.photos[self.active]["settings"]
@@ -289,6 +296,9 @@ class RawProcess(FakeProcess):
                 settings[section] = copy.deepcopy(DEFAULT[section])
             if section == "detail":
                 settings["detail"].update(sharpen_amount=0., nr_color=0.)
+                settings["detail"].pop("nr_outliers", None)
+                if self.bad_detail_reset:
+                    settings["detail"]["nr_outliers"] = True
                 settings["enhance"]["denoise"] = 0.
                 settings["enhance"].pop("denoise_on", None)
             if section == "color":
@@ -440,6 +450,32 @@ def test_import_edit_readback_restore_preview_and_capacity(tmp_path):
             await raw.close()
         assert_reaped(session)
         assert raw.status().state == "stopped"
+    asyncio.run(run())
+
+
+def test_detail_reset_accepts_omitted_false_but_keeps_full_snapshot_checks(tmp_path):
+    async def run():
+        raw, _, children, files = await create(tmp_path)
+        try:
+            handle, initial = await raw.open_raw("detail-reset", files[0])
+            before = initial.settings
+            assert before["detail"]["nr_outliers"] is True
+            result = await raw.apply_history_operation(
+                handle, "sectionReset", {"section": "detail"}, initial.revision)
+            assert result.settings["detail"].get("nr_outliers", False) is False
+            assert result.settings["detail"]["sharpen_amount"] == 0.
+            assert result.settings["detail"]["nr_color"] == 0.
+            assert result.settings["optics"] == before["optics"]
+            assert result.settings["wb"] == before["wb"]
+
+            child = children[0]
+            child.bad_detail_reset = True
+            malformed = await raw.get_settings(handle)
+            with pytest.raises(LightCraftError, match="raw_operation_readback_mismatch"):
+                await raw.apply_history_operation(
+                    handle, "sectionReset", {"section": "detail"}, malformed.revision)
+        finally:
+            await raw.close()
     asyncio.run(run())
 
 

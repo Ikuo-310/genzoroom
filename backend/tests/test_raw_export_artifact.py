@@ -142,7 +142,9 @@ def test_isolated_session_cleanup(tmp_path, mode, monkeypatch):
                     raise MCPToolError()
                 value = {'imported': [1]}
             if name == 'command_run' and args['id'] == 'develop.merge':
-                assert args['params']['settings'] == settings
+                expected_settings = copy.deepcopy(settings)
+                expected_settings.setdefault('detail', {}).setdefault('nr_outliers', False)
+                assert args['params']['settings'] == expected_settings
             if name == 'get_develop':
                 value = {} if mode == 'mismatch' else native_settings
             if name == 'export':
@@ -256,9 +258,11 @@ def test_saved_curve_recipe_uses_existing_raw_export_native_path(tmp_path, curve
     request = RawExportInput(source(), 'curve.dng', (), settings, datetime.now(timezone.utc))
     result = asyncio.run(export_raw_artifact(request, manager=Manager(), temp_root=tmp_path))
     assert result.jpeg.startswith(b'\xff\xd8')
-    assert native_calls[0] == settings
+    expected_payload = copy.deepcopy(settings)
+    expected_payload.setdefault('detail', {}).setdefault('nr_outliers', False)
+    assert native_calls[0] == expected_payload
     assert native_commands.count(('develop.reset', {'ids': [1]})) == 1
-    assert native_commands.count(('develop.merge', {'settings': settings})) == 1
+    assert native_commands.count(('develop.merge', {'settings': expected_payload})) == 1
     assert native_calls.count('readback') == 2 and native_calls.count('export') == 1
     assert events == ['start', 'close']
     assert settings == original_settings

@@ -64,6 +64,12 @@ Native自身は`to_json_for_merge()`でfalseを明示している（`N:crates/de
 
 推奨：対象fieldのsnapshot送信・readback比較とDetail Reset検証を最小範囲で合わせる。通常の部分更新へfalse補完を適用しない。DB保存形式、既存receipt、fingerprintの正本、P4-Bの完全identity一致／非互換初期値起動／旧Recipe保持は維持する。標準APIのまま修正可能で、Native patch追加は不要。全面的な設定正規化frameworkは不要。
 
+#### H1修正済み（2026-11-12）
+
+`raw_controls.complete_snapshot_for_merge`が完全snapshotだけへfalseを明示し、readback比較用helperはNativeの省略falseを同値として扱う。編集snapshot、persisted Recipe、History rollback／Undo／Redo／Jump／Thumbnailは共通`_restore`を通る。Exportも独立processのまま同じwire変換とcomparison semanticsを使う。Recipe／History保存本文、receipt、fingerprintは変換せず、部分`develop.merge`経路にも適用しない。Detail ResetではNative readbackの省略／falseを受け入れ、trueや他settingsの差分は従来どおり全体比較で拒否する。既存Findingの根拠は維持し、修正記録として追記する。
+
+Backend focused testsは65件成功（raw_controls snapshot helper、RawSession restore／Detail Reset、Recipe restore、Export artifact）。失敗rollbackと既存 Export settings検証を含む。Receipt付きLightCraft v0.20.0の実EXE（`target-p3-wb`）で、リポジトリJPEGの一時コピーを使いDetail Reset、partial merge、false省略／明示true snapshotの往復を1件確認。実Native EXEのbuild.py identity／SHA/schema probeも成功。本監査・修正ではRAW実素材がないため、RAW import true、Pixel／Pentax DNG、実NativeでのRAW初期値reset、Windows実RAWの画像種別差、実Native Thumbnail／独立Export、ユーザーDB上の既存tuple再Openは未確認。合成DNGによるBackendテストは実DNG検証ではない。
+
 **先行理由：** RAWで正当なResetを拒否し、false状態の保存復元にも波及する具体的な接続不整合である。広いP4-C回帰を先に回しても同じ失敗が複数経路に出るため、P4-Cの受入本走行より前にこの境界だけを修正・局所検証する価値がある。P4-C計画を全面停止して別の大規模改修を行う理由はない。P5へは修正と関連復元確認を済ませてから進む。
 
 ### M1 — Medium：Native snapshotとUIの既定値補完が混ざる

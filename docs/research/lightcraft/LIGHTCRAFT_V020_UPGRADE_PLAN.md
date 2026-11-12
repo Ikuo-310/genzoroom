@@ -2,6 +2,12 @@
 
 正式改訂：2026-11-10（Asia/Tokyo）。対象は `feature/lightcraft-v020-port`。恒久的な責務・接続原則は [統合契約](LIGHTCRAFT_INTEGRATION_CONTRACT.md) を正本とする。本節のみを今後のv0.20.0移植計画とし、以下の旧N1〜N6および旧P0・P1〜P12は実施当時の計画・検証履歴として保持する。それらの工程、必須metadata、hunk移植、v0.18.1環境維持の指示は新計画に適用しない。
 
+### H1限定修正記録（2026-11-12）
+
+監査Finding `LIGHTCRAFT_DEPENDENCY_AUDIT.md` §4 H1に対し、完全snapshot wire変換で省略`detail.nr_outliers`をfalseとしてmergeし、保存snapshot／History本文／receipt／fingerprintは変更しない。通常partial mergeはそのまま。Reset検証はNative省略falseと期待falseを同値化したうえで全settings一致を維持し、誤ったtrue・他項目変更を拒否する。Exportの独立sessionも同じ変換を使い、process境界と原本保護を維持する。P4-C、P5統合、他Findingには着手しない。
+
+Backend focused test 65件成功。実EXE `target-p3-wb`はmanifest receipt／SHA／schema probe成功。実Native＋リポジトリJPEG一時コピー1件でDetail Reset、部分更新、false／true snapshotの復元を確認した。RAW DNG素材による`nr_outliers=true` import／reset、Pixel／Pentax、実Native Thumbnail／Export、実ユーザーtupleは未確認。詳細と残る検証範囲は上記監査文書を参照。
+
 ## 目的とバージョン方針
 
 既存の編集、Preview、保存、Export、Immich登録をv0.20.0で成立させる。旧Native内部契約の全面移植は廃止し、標準APIで足りない接続だけを最小限のpatchで補う。`main`は変更せず、このfeatureブランチをv0.20.0専用構成へ移す。P1でmanifestと基本Native接続をv0.20.0へ切替えた。後続機能は各工程で接続する。

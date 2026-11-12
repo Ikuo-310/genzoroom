@@ -3,10 +3,23 @@ import asyncio
 import pytest
 
 from lightcraft_mcp import LightCraftError
-from raw_controls import CONTROLS, validate_controls
+from raw_controls import (CONTROLS, complete_snapshot_for_merge, settings_snapshot_for_comparison,
+                          validate_controls)
 from tests.test_lightcraft_raw import DEFAULT
 from tests.test_windows_local import local, client, authenticate
 from tests.test_windows_raw_api import setup, open_document, preview_body
+
+
+def test_nr_outliers_snapshot_conversion_isolated_from_partial_merge():
+    snapshot = {"detail": {"nr_luminance": 0}, "wb": {"temp": 5000}}
+    payload = complete_snapshot_for_merge(snapshot)
+    assert payload["detail"] == {"nr_luminance": 0, "nr_outliers": False}
+    assert snapshot == {"detail": {"nr_luminance": 0}, "wb": {"temp": 5000}}
+    assert settings_snapshot_for_comparison({"detail": {"nr_luminance": 0}})["detail"] == payload["detail"]
+    assert settings_snapshot_for_comparison({"detail": {"nr_luminance": 0, "nr_outliers": False}})["detail"] == payload["detail"]
+    assert settings_snapshot_for_comparison({"detail": {"nr_luminance": 0, "nr_outliers": True}})["detail"] != payload["detail"]
+    with pytest.raises(LightCraftError, match="raw_invalid_settings"):
+        complete_snapshot_for_merge({"detail": {"nr_outliers": "false"}})
 
 
 def identity(doc):

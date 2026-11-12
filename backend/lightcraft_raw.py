@@ -1445,14 +1445,18 @@ class LightCraftRawSession:
         return snapshot
 
     async def _restore(self, photo, encoded, deadline, *, count_attempts=False):
+        from raw_controls import complete_snapshot_for_merge, settings_snapshot_for_comparison
         if count_attempts:
             self._edits += 1
         await self._command("develop.reset", {"ids": [photo.photo_id]}, deadline)
         if count_attempts:
             self._edits += 1
-        await self._command("develop.merge", {"settings": json.loads(encoded)}, deadline)
+        snapshot = json.loads(encoded)
+        payload = complete_snapshot_for_merge(snapshot)
+        await self._command("develop.merge", {"settings": payload}, deadline)
         actual = await self._read_settings(photo, deadline)
-        if actual != encoded:
+        if _settings_json(settings_snapshot_for_comparison(json.loads(actual))) != \
+                _settings_json(settings_snapshot_for_comparison(snapshot)):
             raise LightCraftError("raw_restore_mismatch")
         return actual
 
@@ -1783,16 +1787,20 @@ class LightCraftRawSession:
                     if type(expected.get("detail")) is not dict or type(expected.get("enhance")) is not dict:
                         raise LightCraftError("raw_operation_readback_mismatch")
                     expected["detail"].update(DETAIL_RESET_DEFAULTS)
+                    expected["detail"]["nr_outliers"] = False
                     # Native resets AI amount and removes its optional override, but preserves
                     # raw_details, super_resolution and all unrelated settings.
                     expected["enhance"]["denoise"] = 0
                     expected["enhance"].pop("denoise_on", None)
                     detail, enhance = actual.get("detail"), actual.get("enhance")
+                    comparable = json.loads(json.dumps(actual))
+                    comparable["detail"].setdefault("nr_outliers", False)
                     if (type(detail) is not dict or type(enhance) is not dict
                             or any(type(detail.get(key)) not in (int, float) for key in DETAIL_RESET_DEFAULTS)
+                            or detail.get("nr_outliers", False) is not False
                             or type(enhance.get("denoise")) not in (int, float)
                             or any(type(enhance.get(key)) is not bool for key in ("raw_details", "super_resolution"))
-                            or actual != expected):
+                            or comparable != expected):
                         raise LightCraftError("raw_operation_readback_mismatch")
                     return
                 if section == "optics":
@@ -1827,13 +1835,14 @@ class LightCraftRawSession:
         return await self._mutate(handle, "develop.merge", {"settings": partial}, expected_revision)
 
     async def restore_settings(self, handle, engine_snapshot, expected_revision):
+        from raw_controls import complete_snapshot_for_merge
         if not isinstance(handle, RawHandle) or not isinstance(engine_snapshot, DevelopSnapshot) or engine_snapshot.engine_version != ENGINE_VERSION or \
                 engine_snapshot.engine_commit != ENGINE_COMMIT or engine_snapshot.handle.source_key != handle.source_key:
             raise LightCraftError("raw_invalid_snapshot")
         photo = self._photo(handle, active=True)
         if engine_snapshot._fingerprint != photo.fingerprint or engine_snapshot._content_hash != photo.content_hash:
             raise LightCraftError("raw_source_changed")
-        encoded = _settings_json(engine_snapshot.settings)
+        encoded = _settings_json(complete_snapshot_for_merge(engine_snapshot.settings))
         return await self._mutate(handle, "develop.merge", {}, expected_revision, restored=encoded)
 
     def recipe_identity(self, handle):
@@ -1850,6 +1859,7 @@ class LightCraftRawSession:
     async def restore_persisted_settings(self, handle, recipe, expected_revision):
         """Restore a validated DB recipe to a new import; never relax private snapshot identity."""
         from raw_recipe_store import InvalidRawRecipe, IDENTITY_FIELDS, validate_raw_recipe
+        from raw_controls import complete_snapshot_for_merge
         try:
             recipe = validate_raw_recipe(recipe)
         except InvalidRawRecipe:
@@ -1870,7 +1880,7 @@ class LightCraftRawSession:
 
         verify()
         # Preserve the native adapter's explicit legacy-scale normalization, not JPEG WB conversion.
-        encoded = _settings_json(recipe["settings"])
+        encoded = _settings_json(complete_snapshot_for_merge(recipe["settings"]))
         try:
             return await self._mutate(handle, "develop.merge", {}, expected_revision,
                                       restored=encoded, verify=verify)

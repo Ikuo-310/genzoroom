@@ -17,7 +17,8 @@ from PIL import Image, ImageCms, ExifTags, TiffImagePlugin
 from export_artifact import ExportArtifact, next_export_filename
 from edit_store import _json
 from raw_recipe_store import MAX_SETTINGS_BYTES
-from raw_controls import with_legacy_grading_defaults, with_legacy_curve_defaults
+from raw_controls import (complete_snapshot_for_merge, settings_snapshot_for_comparison,
+                          with_legacy_grading_defaults, with_legacy_curve_defaults)
 import jpeg_metadata as metadata
 from lightcraft_runtime import LightCraftManager, lightcraft_log
 from lightcraft_mcp import MCPToolError, LightCraftError
@@ -35,11 +36,12 @@ class RawExportError(ValueError):
 
 
 def _export_comparison_settings(settings):
-    wb = settings.get("wb") if isinstance(settings, dict) else None
-    if type(wb) is not dict or "scale" in wb:
-        return settings
-    # Native omits its serde-default legacy scale; compare its semantic value, not serialization shape.
-    return {**settings, "wb": {**wb, "scale": "legacy"}}
+    normalized = settings_snapshot_for_comparison(settings)
+    wb = normalized.get("wb")
+    if type(wb) is dict and "scale" not in wb:
+        # Native omits its serde-default legacy scale; compare its semantic value, not serialization shape.
+        normalized = {**normalized, "wb": {**wb, "scale": "legacy"}}
+    return normalized
 
 
 def extract_raw_metadata(source):
@@ -322,7 +324,8 @@ async def export_raw_artifact(request: RawExportInput, *, manager=None, temp_roo
             raise ValueError
         settings = json.loads(encoded_settings)
         expected_settings = _export_comparison_settings(
-            with_legacy_curve_defaults(with_legacy_grading_defaults(settings)))
+            complete_snapshot_for_merge(
+                with_legacy_curve_defaults(with_legacy_grading_defaults(settings))))
     except (TypeError, ValueError, RecursionError) as error:
         raise RawExportError("raw_export_invalid_settings") from error
     source = bytes(request.source)
@@ -378,7 +381,7 @@ async def export_raw_artifact(request: RawExportInput, *, manager=None, temp_roo
                     if not isinstance(info, dict) or info.get("content_hash") != request.expected_content_hash:
                         raise RawExportError("raw_export_source_mismatch")
                 await command("develop.reset", {"ids": [photo]})
-                await command("develop.merge", {"settings": settings})
+                await command("develop.merge", {"settings": complete_snapshot_for_merge(settings)})
                 restored = await tool("get_develop", {"id": photo})
                 phase = "settings_validation_before_export"
                 if _export_comparison_settings(restored) != expected_settings:
