@@ -77,7 +77,7 @@ def test_simple_crop_frame_is_bound_to_verified_request(fault):
     from lightcraft_raw import _validate_simple_crop_png
     result = native.image_result()
     meta = json.loads(result['content'][1]['text'])
-    meta.update(cropEdit=True, frame={'geometryId': 'a' * 64, 'nativeWidth': 4000, 'nativeHeight': 3000,
+    meta.update(cropEdit=True, quality='full', kind='after', frame={'geometryId': 'a' * 64, 'nativeWidth': 4000, 'nativeHeight': 3000,
         'aspect': 4 / 3, 'fullWidth': 16, 'fullHeight': 12, 'window': None})
     if fault == 'marker': meta['cropEdit'] = False
     if fault == 'frame': meta['frame']['fullWidth'] = 15

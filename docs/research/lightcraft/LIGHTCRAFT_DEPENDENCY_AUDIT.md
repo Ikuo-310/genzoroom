@@ -72,6 +72,12 @@ Backend focused testsは65件成功（raw_controls snapshot helper、RawSession 
 
 **先行理由：** RAWで正当なResetを拒否し、false状態の保存復元にも波及する具体的な接続不整合である。広いP4-C回帰を先に回しても同じ失敗が複数経路に出るため、P4-Cの受入本走行より前にこの境界だけを修正・局所検証する価値がある。P4-C計画を全面停止して別の大規模改修を行う理由はない。P5へは修正と関連復元確認を済ませてから進む。
 
+#### H1 P4-C追確認（2026-11-12）
+
+P4-Cの実Native HTTPテストで、JPEG／Pixel DNG／Pentax DNG各1件をreceipt検証済みv0.20.0 Nativeと一時DBで実行した。RAW素材は`I:\code\raw-test`のPixel／Pentax DNGを一時コピーし、原本は読み取りのみ。3素材すべてで複数カテゴリRecipeの保存・Document破棄・再Open後にNative settings一致を確認した。RAWではImport `nr_outliers=true`→Detail category reset後のfalse相当readback→false省略Recipe再Openまで成立し、その後のallResetはNative Import baselineのtrueへ戻ることも確認した。WB／Optics／`disabled_sections`の既存Reset意味論を維持した。
+
+これによりH1で残していたPixel／Pentaxの実RAW初期値・Resetとfalse Recipe再Openの未確認は解消した。実NativeのWB候補・Curve・Geometry往復、Thumbnail／Export process、実ユーザーDBの既存tuple、ユーザーGUI操作は未検証であり、この追確認をP5またはP4全操作の完了とは扱わない。P4-CのFake Native／HTTP／Frontend回帰件数と残件は`LIGHTCRAFT_V020_UPGRADE_PLAN.md`のP4-C記録を参照。
+
 ### M1 — Medium：Native snapshotとUIの既定値補完が混ざる
 
 `_settings_json`はbounded JSON検査だけでなく既定値を追加する。`with_legacy_optics_defaults`は部分的に不足したOpticsにも値を追加する。Curveは全キー固定検査が保存storeでも呼ばれるため、単なるUIの未知field非表示では済まず、上流の項目追加が保存・open・Historyへ波及する。

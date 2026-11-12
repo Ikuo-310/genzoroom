@@ -378,7 +378,9 @@ def test_selection_change_during_restore_prevents_old_commit(tmp_path, monkeypat
                 await restoring
             await selecting
             assert raw._photos[handle.source_key].applied_revision == initial.revision
-            assert (await raw.get_settings(other)).settings == DEFAULT
+            expected_import = copy.deepcopy(DEFAULT)
+            expected_import["detail"]["nr_outliers"] = True
+            assert (await raw.get_settings(other)).settings == expected_import
         finally:
             await raw.close()
     asyncio.run(asyncio.wait_for(run(), 10))
@@ -455,7 +457,9 @@ def test_no_recipe_for_current_asset_opens_initial_settings(local, tmp_path, mon
                 assert response.status_code == 200
                 doc = response.json()
                 assert doc["recipeStatus"] == "none" and doc["recipeRevision"] == 0
-                assert children[0].photos[1]["settings"] == DEFAULT
+                expected_import = copy.deepcopy(DEFAULT)
+                expected_import["detail"]["nr_outliers"] = True
+                assert children[0].photos[1]["settings"] == expected_import
                 assert not any(name == "develop.merge" for name, _ in children[0].commands)
                 assert database_rows() == before
         finally:

@@ -188,6 +188,14 @@ Frontendは通常のopen errorを表示する。`RawDocument`に非互換Recipe�
 - focused自動検証：Backend Recipe store／restore／Windows open／History API／Thumbnail lifecycle **252 passed**。旧Recipe非適用、Import初期値公開、初期値no-opで未作成、旧Recipe／History保持、初回保存失敗後の再Open、再試行、transaction後の応答不明からreceipt replay、current tuple再Openを一時SQLiteとfake Nativeで確認。Frontend rawApi／RawHistorySave／暗室Preview関連 **397 passed**。Frontend TypeScriptとproduction build成功（既存chunk size／`use client` warningsあり）。実Native・ユーザーWindows GUIによるP4-B受入は未実施。
 - P4-CではJPEG／RAW実素材、WB／Curve／Geometryを含む全初回操作種別、通信切断・応答消失後のretry、保存cancel／再Open／Undo境界を引き続き確認する。P4-BはP4-Cを完了扱いにせず、P4全体も未完了。
 
+#### P4-C検証記録（2026-11-12）
+
+- 実Native v0.20.0（既存manifest／receipt検証済み`target-p3-wb` EXE）、隔離pytest DB、HTTP API、JPEGとPixel／Pentax DNGの一時コピーで`test_raw_reset_live.py`を実行し、**3素材すべて成功**。各素材でDocument open→複数カテゴリ編集の確定→workspace破棄→再Open→Native confirmed settings／Recipe一致とHistory cursorを確認した。RAWではImport `nr_outliers=true`、Detail category reset後のfalse相当readbackとRecipe再Open、続くallReset後のImport baseline true復帰を別々に確認した。Optics、WB、`disabled_sections`もallReset後の期待状態を維持した。JPEGにはRAW専用`nr_outliers`期待値を適用していない。
+- focused Backend Recipe／History／Reset／WB／Curve／Geometry群は**487 passed、8 skipped**（未指定時にskipする実Native geometry testsを含む）。これらのFake Native／HTTPテストでUndo／Redo／Jump、分岐、cursor／receipt、P4-B非互換Recipe復旧、retry／CAS／保存失敗、WB候補確定・cancel、Curve draft／commit、Geometry操作境界を確認した。H1で追加したRAW Import trueを反映するようFake import初期値の期待値を更新し、simple crop validator用metadata fixtureにfull/after品質を明示した。製品コードの変更はない。
+- Frontend Recipe／History／WB／Geometry／document focused testsは**9 files、475 passed**。`npm run build`（`tsc --noEmit`を含む）成功。既存bundle chunk sizeとReact Router `use client` directive warningsあり。
+- 実Nativeで確認したのは上記複数カテゴリRecipe再Open、Detail/all Reset、RAWのH1 false省略復元、optics／WB／disabled sectionsの保存境界。WBスポイト候補・cancel／確定、Curve、Geometryの各編集から再Openまでの組合せ、Undo／Redo／JumpのNative再適用、通信断・timeout・DB保存失敗の実Native再現は未実施。これらはfocused Fake Native／HTTP／Frontend testで確認し、P4-C全操作の実Native受入を意味しない。Before／After、Previewの保存独立性も既存テスト範囲に限る。GUI／Computer Use、実画質確認、独立Exportは未実施（Export統合はP5）。
+- テスト素材原本は読み取りのみで、一時コピーをNativeへ渡した。ユーザーDB／Immich資産、schema、Recipe identity、Native patch／EXEは変更していない。P4-Cで確認した履歴・保存契約を超える網羅試験は追加しておらず、P5には着手しない。
+
 #### P4-Aの実施結果・未確認
 
 - ソース監査に加え、上記旧fixture×素材6ケースを実Native MCPで実行した。結果はsettings差分だけを出力し、ユーザーRecipe全文や写真情報を診断ログへ追加していない。
