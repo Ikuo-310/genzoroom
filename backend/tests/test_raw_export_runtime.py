@@ -284,9 +284,9 @@ def test_raw_default_and_reset_keep_intent_but_start_revalidates(db):
 
 def test_old_recipe_engine_does_not_pin_export_engine(db):
     save_raw(engine={'engineVersion':'0.9.1','engineCommit':'a'*40})
-    enqueue_export_assets([A]);run=create_export_run([A])
-    assert run.items[0].kind=='raw'
-    assert run.items[0].recipe['engineVersion']=='0.9.1'
+    with pytest.raises(edit_store.QueueRejected, match='asset_not_eligible'):
+        enqueue_export_assets([A])
+    assert list_export_queue() == []
 
 
 def test_raw_unknown_baseline_is_not_eligible(db):
@@ -297,7 +297,8 @@ def test_raw_unknown_baseline_is_not_eligible(db):
 @pytest.mark.parametrize('curve_mode', ['legacy', 'multi_channel'])
 def test_raw_curve_export_keeps_saved_recipe_and_receipt_unchanged(db, tmp_path, curve_mode):
     from pathlib import Path
-    from raw_controls import with_legacy_curve_defaults, with_legacy_grading_defaults
+    from raw_controls import (complete_snapshot_for_merge, with_legacy_curve_defaults,
+                              with_legacy_grading_defaults)
     from raw_export_artifact import export_raw_artifact
     from tests.test_raw_export_artifact import jpeg
 
@@ -367,8 +368,10 @@ def test_raw_curve_export_keeps_saved_recipe_and_receipt_unchanged(db, tmp_path,
 
     result = asyncio.run(run())
     assert result.items[0].status == 'succeeded'
-    assert forwarded == [saved]
-    assert ('develop.merge', {'settings': saved}) in commands
+    wire_settings = complete_snapshot_for_merge(saved)
+    assert forwarded == [wire_settings]
+    assert ('develop.merge', {'settings': wire_settings}) in commands
+    assert wire_settings['detail']['nr_outliers'] is False
     assert saved_result['recipe']['settings'] == saved
     assert persisted_rows() == before_rows
 

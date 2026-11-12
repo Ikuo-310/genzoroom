@@ -8,6 +8,12 @@
 
 Backend focused test 65件成功。実EXE `target-p3-wb`はmanifest receipt／SHA／schema probe成功。実Native＋リポジトリJPEG一時コピー1件でDetail Reset、部分更新、false／true snapshotの復元を確認した。RAW DNG素材による`nr_outliers=true` import／reset、Pixel／Pentax、実Native Thumbnail／Export、実ユーザーtupleは未確認。詳細と残る検証範囲は上記監査文書を参照。
 
+### P5-A：既存Exportテスト期待値の修正（2026-11-13）
+
+直前のP5関連Backend suiteで失敗した3件を再現し、製品動作と照合した。旧Engine tupleだけがあるRAW Assetは`select_raw_export_state()`が`exportEligible=false`を返し、Export Queueへの登録を拒否する。旧RecipeをQueue登録・Exportできるとしたテストを、拒否とQueue不変を確認する期待へ修正した。H1関連の2件は`raw_export_artifact`が完全snapshot送信時に`complete_snapshot_for_merge()`を適用するため`detail.nr_outliers=false`がpayloadに加わる。Export Nativeへのwire payloadだけでfalse補完を検証し、保存Recipe本文・receiptが不変である既存assertを維持した。
+
+対象9ファイルのBackend Thumbnail／Export／Queue／Immich／STACK回帰は修正後**344 passed**。この段階ではテスト・文書のみの変更で、実Native Thumbnail／ExportおよびP5-B以降の統合は実施していない。
+
 ## 目的とバージョン方針
 
 既存の編集、Preview、保存、Export、Immich登録をv0.20.0で成立させる。旧Native内部契約の全面移植は廃止し、標準APIで足りない接続だけを最小限のpatchで補う。`main`は変更せず、このfeatureブランチをv0.20.0専用構成へ移す。P1でmanifestと基本Native接続をv0.20.0へ切替えた。後続機能は各工程で接続する。
