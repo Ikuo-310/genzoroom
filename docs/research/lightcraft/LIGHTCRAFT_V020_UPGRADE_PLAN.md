@@ -20,6 +20,12 @@ Backend focused test 65件成功。実EXE `target-p3-wb`はmanifest receipt／SH
 
 使用EXEは既存manifest／receipt検証済み`target-p3-wb`。DNGは`I:\code\raw-test`のPixel／Pentax `sample`からTEMPへコピーした。隔離DBはpytest `tmp_path`、ThumbnailのSource stagingは既存TemporaryDirectory、Immich取得は一時API fixtureを使用。関連Recipe store／Thumbnail generator／lifecycle testは**157 passed**。実Native Export、Export JPEG、Thumbnail／Export間比較はP5-B1対象外で未確認。製品コード・Native patch・schema変更なし。
 
+### P5-B2：実Native独立Export統合（2026-11-13）
+
+P5-B1の実Nativeテストへ`test_real_native_saved_recipe_export`を追加し、JPEG／Pixel DNG／Pentax DNGの各素材で**3件成功**。現行tuple・Source hashのRecipeを隔離SQLiteへ保存し、複数カテゴリのExposure／Color／Grading値を含めて既存`export_raw_artifact()`を実行した。既存adapterの独立Native SessionがImport、完全snapshot merge、Native readback検証、LightCraft標準JPEG Exportを行い、返却JPEGをデコードして形式・寸法・ICC profileを確認した。Export前後でRecipe／Recipe receipt／History rowが不変、素材コピーが不変、adapterのTemporaryDirectory内に生成物が残らないことを確認した。
+
+Pixel／PentaxのRecipeではDetail Reset後の`nr_outliers=false`を保存本文から省略し、Native送信payloadではfalse明示、生成時のreadback比較成功を確認した。Recipe settings fingerprintを含むrowとreceipt群はExport前後で同一。テストは既存manifest／receipt検証済み`target-p3-wb` EXE、`I:\code\raw-test`原本からのTEMPコピー、pytest隔離DB／Export先を使用した。Thumbnail Live、Export artifact、Export runtimeのfocused Backendテストは合計**92 passed**。実Native Exportの製品不具合は再現せず、製品コード変更なし。Queue／Immich／STACKとP5-C以降は未実施。
+
 ## 目的とバージョン方針
 
 既存の編集、Preview、保存、Export、Immich登録をv0.20.0で成立させる。旧Native内部契約の全面移植は廃止し、標準APIで足りない接続だけを最小限のpatchで補う。`main`は変更せず、このfeatureブランチをv0.20.0専用構成へ移す。P1でmanifestと基本Native接続をv0.20.0へ切替えた。後続機能は各工程で接続する。
