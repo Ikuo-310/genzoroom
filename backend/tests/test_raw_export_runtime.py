@@ -447,6 +447,80 @@ def test_raw_uses_existing_immich_registrar_with_album_stack_cover(db,favorite):
     assert not list_export_queue()
 
 
+def test_queue_export_registers_jpeg_and_promotes_it_as_stack_cover(db):
+    import httpx
+    from io import BytesIO
+    from PIL import Image
+    from immich_export import ImmichExportRegistrar
+    from tests.test_immich_export import Remote, OUT, DATE, stack
+    from tests.test_raw_export_artifact import jpeg
+    from tests.test_export_runtime import jpg
+
+    recipe_result = save_raw()
+    saved_recipe = raw.get_raw_recipe(identity())
+    enqueue_export_assets([A])
+    album = uuid4()
+
+    class CapturingRemote(Remote):
+        stack_request = None
+
+        async def handle(self, request):
+            if request.method == 'POST' and request.url.path == '/api/stacks':
+                self.stack_request = __import__('json').loads(request.content)
+            return await super().handle(request)
+
+    remote = CapturingRemote([stack([B, A], B)])
+    remote.source_albums = [album]
+    remote.album_members[album] = {A, B}
+    class MockImmichSource(MixedSource):
+        async def detail(self, asset_id):
+            detail = await super().detail(asset_id)
+            return detail.model_copy(update={'date': DATE})
+    source = MockImmichSource()
+    artifacts = []
+
+    async def adapter(request):
+        assert request.expected_content_hash == recipe_result['recipe']['sourceContentHash']
+        assert request.settings == saved_recipe['recipe']['settings']
+        artifact = ExportArtifact('IMG-Genzo04.jpg', jpeg())
+        artifacts.append(artifact)
+        return artifact
+
+    def rows():
+        with edit_store._connection() as connection:
+            return tuple(connection.execute(f'SELECT * FROM {table}').fetchall() for table in (
+                'asset_raw_recipes', 'raw_recipe_saves', 'asset_raw_histories',
+                'asset_raw_history_steps', 'raw_history_saves'))
+
+    rows_before = rows()
+
+    async def run():
+        registrar = ImmichExportRegistrar('http://immich/api', 'private-key',
+            transport=httpx.MockTransport(remote.handle))
+        runtime = ExportRuntime(source=source, family=Family(), registrar=registrar, raw_artifact=adapter)
+        run_id = await runtime.start([A])
+        await runtime.wait()
+        return get_export_run(run_id)
+
+    result = asyncio.run(run())
+    item = result.items[0]
+    assert result.status == 'completed' and item.status == 'succeeded', item
+    assert item.asset_id == A and item.recipe == saved_recipe['recipe']
+    assert item.registered_asset_id == OUT
+    assert remote.uploads[0][0] == 'IMG-Genzo04.jpg' and remote.uploads[0][1] == artifacts[0].jpeg
+    with Image.open(BytesIO(remote.uploads[0][1])) as uploaded:
+        uploaded.load()
+        assert uploaded.format == 'JPEG' and uploaded.size == (32, 24)
+    assert remote.stack_request == {'assetIds': [str(OUT), str(B)]}
+    assert remote.stacks[0]['primaryAssetId'] == str(OUT)
+    assert {member['id'] for member in remote.stacks[0]['assets']} == {str(A), str(B), str(OUT)}
+    assert source.started == [A] and len(source.originals) == 1
+    assert source.originals[0].closed == 1 and source.originals[0].content == jpg()
+    assert rows() == rows_before
+    assert raw.get_raw_recipe(identity()) == saved_recipe
+    assert not list_export_queue()
+
+
 def test_raw_source_mismatch_does_not_encode(db):
     save_raw();enqueue_export_assets([A])
     async def artifact(request):raise AssertionError('must not encode incorrect source')

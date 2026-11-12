@@ -32,6 +32,12 @@ Pixel／PentaxのRecipeではDetail Reset後の`nr_outliers=false`を保存本�
 
 Queue／runtime／Retry／identity関連Backend testsは**101 passed**。既存群に旧Engine tupleのみの登録拒否とQueue不変、Windows非RAWもNative adapterへ進む経路、Docker JPEG経路、失敗・cancel・Retry・重複Start／stale応答の状態遷移テストを含む。Arm／DisarmはFrontendの既存制御で、本作業ではFrontendを変更せずBackend Start契約を通した。新しいQueue状態や製品コードの変更なし。Immich登録・STACK／COVER／Gallery連携はP5-Dへ残す。
 
+### P5-D1：QueueからImmich登録・STACK正常系（2026-11-13）
+
+`test_queue_export_registers_jpeg_and_promotes_it_as_stack_cover`を追加した。既存Queue／`ExportRuntime`からFake Adapterで有効なJPEGを返し、Mock Immich上の既存Stack（元Asset AとB、BがCOVER）へRegistrarが登録する経路を通した。Upload filenameは`IMG-Genzo04.jpg`、JPEG bytesはデコード可能な32×24 JPEG、Mockが返した新Asset IDはrun itemに記録された。RegistrarのSTACK POSTは新Assetを含み、その新JPEGがCOVERとなり、既存A／BのStack membershipも維持した。
+
+Queue run中のAsset／保存Recipe identity・settingsが登録処理まで一致し、Recipe／receipt／History関連SQLite rowは前後で不変。Mock Source original bytesも不変で、取得streamはcloseされた。関連Queue／Export runtime／retry identity／Mock Immich registrar／STACK suiteは**215 passed**（追加した正常系は最終focused rerunもpass）。失敗・部分成功・Retry・Gallery更新の再検証は行わず後続へ残す。製品コード変更なし。P5-D1で正常系だけ確認し、P5-D2／P6へは進んでいない。
+
 ## 目的とバージョン方針
 
 既存の編集、Preview、保存、Export、Immich登録をv0.20.0で成立させる。旧Native内部契約の全面移植は廃止し、標準APIで足りない接続だけを最小限のpatchで補う。`main`は変更せず、このfeatureブランチをv0.20.0専用構成へ移す。P1でmanifestと基本Native接続をv0.20.0へ切替えた。後続機能は各工程で接続する。
