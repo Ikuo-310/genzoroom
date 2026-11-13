@@ -49,7 +49,7 @@ SETTINGS_SECTIONS = SECTIONS
 HISTORY_CONTROLS = frozenset(CONTROLS)
 HISTORY_FLAG_CONTROLS = frozenset(("optics.remove_ca", "optics.lens_profile", "profile.camera_local_tone"))
 # Vignette has a Native reset section, but its eye belongs to Effects.
-RESET_SECTIONS = (*SETTINGS_SECTIONS, "vignette")
+RESET_SECTIONS = (*SETTINGS_SECTIONS, "vignette", "mixer")
 CURVE_CHANNELS = ("master", "red", "green", "blue")
 CURVE_SETTING_FIELDS = frozenset((*CURVE_CHANNELS, "highlights", "lights", "darks", "shadows",
                                   "split_shadows", "split_mid", "split_highlights", "refine_saturation"))

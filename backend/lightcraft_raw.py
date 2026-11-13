@@ -1782,6 +1782,15 @@ class LightCraftRawSession:
                     if actual != expected:
                         raise LightCraftError("raw_operation_readback_mismatch")
                     return
+                if section == "mixer":
+                    expected = json.loads(before)
+                    for control, spec in CONTROLS.items():
+                        if control.startswith("mixer."):
+                            parent, key = control_location(expected, control)
+                            parent[key] = spec[3]
+                    if actual != expected:
+                        raise LightCraftError("raw_operation_readback_mismatch")
+                    return
                 if section in ("effects", "vignette"):
                     expected = json.loads(before)
                     # Each subsection resets only its numeric controls; style, seed and the eye survive.

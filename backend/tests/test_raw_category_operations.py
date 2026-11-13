@@ -253,7 +253,7 @@ def test_control_reset_off_as_shot_history_and_replay(local, tmp_path, monkeypat
 
 
 @pytest.mark.parametrize("kind,metadata,cost", [("sectionReset", {"section": "light"}, 1),
-    ("sectionReset", {"section": "color"}, 2), ("allReset", {}, 3)])
+    ("sectionReset", {"section": "color"}, 2), ("sectionReset", {"section": "mixer"}, 1), ("allReset", {}, 3)])
 def test_compound_reset_keeps_bypass_one_step_and_reopens(local, tmp_path, monkeypatch, kind, metadata, cost):
     async def run():
         api, _, children, _ = await setup(tmp_path, local, monkeypatch)
@@ -261,7 +261,8 @@ def test_compound_reset_keeps_bypass_one_step_and_reopens(local, tmp_path, monke
         try:
             async with client(local) as http:
                 doc = await open_history(http, local, api)
-                doc = await patch(http, doc, {"light.exposure": 1., "wb.temp": 11000., "wb.tint": 26., "color.vibrance": 15.})
+                doc = await patch(http, doc, {"light.exposure": 1., "wb.temp": 11000., "wb.tint": 26.,
+                    "color.vibrance": 15., "mixer.red.hue": 24., "mixer.blue.sat": -37.})
                 doc = await operation(http, doc, "commit", body(doc) | {"kind": "control", "metadata": {"control": "light.exposure"}})
                 # Model a complete saved native state containing settings outside the current UI.
                 children[0].photos[children[0].active]["settings"]["disabled_sections"] = ["detail"]
@@ -274,6 +275,7 @@ def test_compound_reset_keeps_bypass_one_step_and_reopens(local, tmp_path, monke
                 before = copy.deepcopy(doc)
                 before_settings = store.get_raw_history(api._history_identity)["recipe"]["settings"]
                 attempts = api.raw.status().edits
+                commands_before_reset = list(children[0].commands)
                 doc = await edit(http, doc, kind, metadata)
                 assert doc["history"]["length"] == before["history"]["length"] + 1
                 assert doc["sections"] == {"light": False, "color": False, "grading": True, "effects": True,
@@ -282,7 +284,22 @@ def test_compound_reset_keeps_bypass_one_step_and_reopens(local, tmp_path, monke
                 assert actual["disabled_sections"] == before_settings["disabled_sections"]
                 if kind == "sectionReset":
                     assert actual["curve"] == before_settings["curve"]
-                assert api.raw.status().edits - attempts == cost
+                    if metadata.get("section") == "color":
+                        assert actual["mixer"] == before_settings["mixer"]
+                    if metadata.get("section") == "mixer":
+                        expected_settings = copy.deepcopy(before_settings)
+                        for channels in expected_settings["mixer"].values():
+                            for field in ("hue", "sat", "lum"):
+                                channels[field] = 0.
+                        assert actual == expected_settings
+                        reset_commands = children[0].commands[len(commands_before_reset):]
+                        assert reset_commands.count(("develop.resetSection", {"section": "mixer"})) == 1
+                        assert api.raw.status().edits - attempts == cost
+                        history_length = doc["history"]["length"]
+                        doc = await edit(http, doc, kind, metadata)
+                        assert doc["history"]["length"] == history_length and doc["ack"]["changed"] is False
+                if metadata.get("section") != "mixer":
+                    assert api.raw.status().edits - attempts == cost
                 if kind == "allReset" or metadata.get("section") == "color":
                     assert (doc["wb"]["mode"], doc["values"]["wb.temp"], doc["values"]["wb.tint"], doc["wb"]["scale"]) == ("asShot", 4875., 13., "kelvin")
                 undone = await operation(http, doc, "undo")

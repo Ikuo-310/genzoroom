@@ -389,6 +389,21 @@
       "wbUnavailable": "この画像のWB能力を確認できないため、WBを操作できません。",
       "wbResetAsShot": "色温度と色かぶり補正の両方を撮影時のWBへ戻す",
       "colorCategory": "カラー",
+      "mixer": {
+        "title": "カラーミキサー", "reset": "カラーミキサーをリセット", "colorsLabel": "カラーミキサーの色",
+        "colorNames": {"red": "レッド", "orange": "オレンジ", "yellow": "イエロー", "green": "グリーン", "aqua": "アクア", "blue": "ブルー", "purple": "パープル", "magenta": "マゼンタ"},
+        "hue": "色相", "sat": "彩度", "lum": "輝度",
+        "colors": {
+          "red": {"hue": "レッドの色相", "hueValue": "レッドの色相の値", "hueReset": "レッドの色相をリセット", "sat": "レッドの彩度", "satValue": "レッドの彩度の値", "satReset": "レッドの彩度をリセット", "lum": "レッドの輝度", "lumValue": "レッドの輝度の値", "lumReset": "レッドの輝度をリセット"},
+          "orange": {"hue": "オレンジの色相", "hueValue": "オレンジの色相の値", "hueReset": "オレンジの色相をリセット", "sat": "オレンジの彩度", "satValue": "オレンジの彩度の値", "satReset": "オレンジの彩度をリセット", "lum": "オレンジの輝度", "lumValue": "オレンジの輝度の値", "lumReset": "オレンジの輝度をリセット"},
+          "yellow": {"hue": "イエローの色相", "hueValue": "イエローの色相の値", "hueReset": "イエローの色相をリセット", "sat": "イエローの彩度", "satValue": "イエローの彩度の値", "satReset": "イエローの彩度をリセット", "lum": "イエローの輝度", "lumValue": "イエローの輝度の値", "lumReset": "イエローの輝度をリセット"},
+          "green": {"hue": "グリーンの色相", "hueValue": "グリーンの色相の値", "hueReset": "グリーンの色相をリセット", "sat": "グリーンの彩度", "satValue": "グリーンの彩度の値", "satReset": "グリーンの彩度をリセット", "lum": "グリーンの輝度", "lumValue": "グリーンの輝度の値", "lumReset": "グリーンの輝度をリセット"},
+          "aqua": {"hue": "アクアの色相", "hueValue": "アクアの色相の値", "hueReset": "アクアの色相をリセット", "sat": "アクアの彩度", "satValue": "アクアの彩度の値", "satReset": "アクアの彩度をリセット", "lum": "アクアの輝度", "lumValue": "アクアの輝度の値", "lumReset": "アクアの輝度をリセット"},
+          "blue": {"hue": "ブルーの色相", "hueValue": "ブルーの色相の値", "hueReset": "ブルーの色相をリセット", "sat": "ブルーの彩度", "satValue": "ブルーの彩度の値", "satReset": "ブルーの彩度をリセット", "lum": "ブルーの輝度", "lumValue": "ブルーの輝度の値", "lumReset": "ブルーの輝度をリセット"},
+          "purple": {"hue": "パープルの色相", "hueValue": "パープルの色相の値", "hueReset": "パープルの色相をリセット", "sat": "パープルの彩度", "satValue": "パープルの彩度の値", "satReset": "パープルの彩度をリセット", "lum": "パープルの輝度", "lumValue": "パープルの輝度の値", "lumReset": "パープルの輝度をリセット"},
+          "magenta": {"hue": "マゼンタの色相", "hueValue": "マゼンタの色相の値", "hueReset": "マゼンタの色相をリセット", "sat": "マゼンタの彩度", "satValue": "マゼンタの彩度の値", "satReset": "マゼンタの彩度をリセット", "lum": "マゼンタの輝度", "lumValue": "マゼンタの輝度の値", "lumReset": "マゼンタの輝度をリセット"}
+        }
+      },
       "detailCategory": "ディテール",
       "opticsCategory": "光学補正",
       "opticsControls": {

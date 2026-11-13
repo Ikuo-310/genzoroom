@@ -27,6 +27,8 @@ DEFAULT = {"version": 1, "process": 2, "wb": {"mode": "custom", "temp": 6500., "
            "light": {key: 0. for key in ("exposure", "contrast", "highlights", "shadows", "whites", "blacks")},
            "grading": {**{band: {"hue": 0., "sat": 0., "lum": 0.} for band in ("shadows", "midtones", "highlights", "global")}, "blending": 50., "balance": 0.},
            "color": {"vibrance": 0., "saturation": 0.}, "geometry": {"scale": 100.},
+           "mixer": {color: {field: 0. for field in ("hue", "sat", "lum")}
+                     for color in ("red", "orange", "yellow", "green", "aqua", "blue", "purple", "magenta")},
            "effects": {"texture": 0., "clarity": 0., "dehaze": 0.},
            "vignette": {"amount": 0., "midpoint": 50., "feather": 50., "roundness": 0., "highlights": 0., "style": "highlightPriority"},
            "grain": {"amount": 0., "size": 25., "roughness": 50., "seed": 0},

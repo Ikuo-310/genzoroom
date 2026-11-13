@@ -398,6 +398,21 @@
       "wbUnavailable": "White balance capability could not be confirmed for this image, so WB controls are disabled.",
       "wbResetAsShot": "Reset both temperature and tint to As Shot",
       "colorCategory": "Color",
+      "mixer": {
+        "title": "Color Mixer", "reset": "Reset Color Mixer", "colorsLabel": "Color Mixer colors",
+        "colorNames": {"red": "Red", "orange": "Orange", "yellow": "Yellow", "green": "Green", "aqua": "Aqua", "blue": "Blue", "purple": "Purple", "magenta": "Magenta"},
+        "hue": "Hue", "sat": "Saturation", "lum": "Luminance",
+        "colors": {
+          "red": {"hue": "Red Hue", "hueValue": "Red Hue value", "hueReset": "Reset Red Hue", "sat": "Red Saturation", "satValue": "Red Saturation value", "satReset": "Reset Red Saturation", "lum": "Red Luminance", "lumValue": "Red Luminance value", "lumReset": "Reset Red Luminance"},
+          "orange": {"hue": "Orange Hue", "hueValue": "Orange Hue value", "hueReset": "Reset Orange Hue", "sat": "Orange Saturation", "satValue": "Orange Saturation value", "satReset": "Reset Orange Saturation", "lum": "Orange Luminance", "lumValue": "Orange Luminance value", "lumReset": "Reset Orange Luminance"},
+          "yellow": {"hue": "Yellow Hue", "hueValue": "Yellow Hue value", "hueReset": "Reset Yellow Hue", "sat": "Yellow Saturation", "satValue": "Yellow Saturation value", "satReset": "Reset Yellow Saturation", "lum": "Yellow Luminance", "lumValue": "Yellow Luminance value", "lumReset": "Reset Yellow Luminance"},
+          "green": {"hue": "Green Hue", "hueValue": "Green Hue value", "hueReset": "Reset Green Hue", "sat": "Green Saturation", "satValue": "Green Saturation value", "satReset": "Reset Green Saturation", "lum": "Green Luminance", "lumValue": "Green Luminance value", "lumReset": "Reset Green Luminance"},
+          "aqua": {"hue": "Aqua Hue", "hueValue": "Aqua Hue value", "hueReset": "Reset Aqua Hue", "sat": "Aqua Saturation", "satValue": "Aqua Saturation value", "satReset": "Reset Aqua Saturation", "lum": "Aqua Luminance", "lumValue": "Aqua Luminance value", "lumReset": "Reset Aqua Luminance"},
+          "blue": {"hue": "Blue Hue", "hueValue": "Blue Hue value", "hueReset": "Reset Blue Hue", "sat": "Blue Saturation", "satValue": "Blue Saturation value", "satReset": "Reset Blue Saturation", "lum": "Blue Luminance", "lumValue": "Blue Luminance value", "lumReset": "Reset Blue Luminance"},
+          "purple": {"hue": "Purple Hue", "hueValue": "Purple Hue value", "hueReset": "Reset Purple Hue", "sat": "Purple Saturation", "satValue": "Purple Saturation value", "satReset": "Reset Purple Saturation", "lum": "Purple Luminance", "lumValue": "Purple Luminance value", "lumReset": "Reset Purple Luminance"},
+          "magenta": {"hue": "Magenta Hue", "hueValue": "Magenta Hue value", "hueReset": "Reset Magenta Hue", "sat": "Magenta Saturation", "satValue": "Magenta Saturation value", "satReset": "Reset Magenta Saturation", "lum": "Magenta Luminance", "lumValue": "Magenta Luminance value", "lumReset": "Reset Magenta Luminance"}
+        }
+      },
       "detailCategory": "Detail",
       "opticsCategory": "Optics",
       "opticsControls": {

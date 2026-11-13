@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AdjustmentSlider } from './AdjustmentSlider';
 import { commitAdjustmentEdits, focusAdjustmentCategory, navigateAdjustments, preserveAdjustmentNumberFocus,
@@ -12,6 +12,8 @@ import type { useRawDocument } from './useRawDocument';
 import { displayTemperature, displayTint, nativeTemperature } from './rawWhiteBalance';
 
 type RawCategoryId = 'basic' | 'color' | 'grading' | 'curves' | 'effects' | 'detail';
+const mixerColors = ['red', 'orange', 'yellow', 'green', 'aqua', 'blue', 'purple', 'magenta'] as const;
+const mixerFields = ['hue', 'sat', 'lum'] as const;
 const sections: Record<Exclude<RawCategoryId, 'curves'>, RawSectionId> = { basic: 'light', color: 'color', grading: 'grading', effects: 'effects', detail: 'detail' };
 const wbErrors: Record<string, string> = {
   raw_wb_no_valid_samples: 'awNoSamples', raw_wb_geometry_mismatch: 'wbGeometryMismatch',
@@ -20,10 +22,9 @@ const wbErrors: Record<string, string> = {
   raw_wb_connection_failed: 'wbConnectionFailed', raw_wb_timeout: 'wbTimeout',
 };
 const bindings: { category: RawCategoryId; controls: RawControlId[]; ids: SliderAdjustmentId[] }[] = [
-  { category: 'color', controls: ['wb.temp', 'wb.tint', 'color.vibrance', 'color.saturation'], ids: ['temperature', 'tint', 'vibrance', 'saturation'] },
   { category: 'basic', controls: ['light.exposure', 'light.contrast', 'light.highlights', 'light.whites', 'light.shadows', 'light.blacks'],
     ids: ['exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks'] },
-  { category: 'grading', controls: [], ids: [] },
+  { category: 'color', controls: ['wb.temp', 'wb.tint', 'color.vibrance', 'color.saturation'], ids: ['temperature', 'tint', 'vibrance', 'saturation'] },
   { category: 'curves', controls: [], ids: [] },
   { category: 'effects', controls: ['effects.texture', 'effects.clarity', 'effects.dehaze',
     'vignette.amount', 'vignette.midpoint', 'vignette.feather', 'vignette.roundness', 'vignette.highlights'],
@@ -33,6 +34,8 @@ const bindings: { category: RawCategoryId; controls: RawControlId[]; ids: Slider
     'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'],
     ids: ['detail.sharpenAmount', 'detail.sharpenMasking', 'detail.nrLuminance', 'detail.nrDetail',
       'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'] },
+  // Keep the legacy standalone grading panel available until its P1-B2 move into Color.
+  { category: 'grading', controls: [], ids: [] },
 ];
 const detailHeadings: Partial<Record<RawControlId, string>> = {
   'detail.sharpenAmount': 'sharpening', 'detail.nrLuminance': 'noiseReduction', 'detail.nrColor': 'colorNoiseReduction',
@@ -46,6 +49,8 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
   const { t } = useTranslation();
   const settings = raw.settings;
   const [gradingBand, setGradingBand] = useState<'shadows' | 'midtones' | 'highlights'>('shadows');
+  const [mixerOpen, setMixerOpen] = useState(false);
+  const [mixerColor, setMixerColor] = useState<typeof mixerColors[number]>('red');
   const panel = useRef<HTMLDivElement>(null);
   const operate = (operation: RawHistoryOperation) => {
     if (panel.current) commitAdjustmentEdits(panel.current);
@@ -159,6 +164,9 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
           onChange={value => raw.changeControls({ [control]: control === 'wb.temp' ? nativeTemperature(value, settings.wb.scale) : value })}
           onCommit={() => raw.flushControls(control)} /></Fragment>;
       })}</div>
+      {category === 'color' && <RawColorMixer raw={raw} color={mixerColor} onColorChange={setMixerColor}
+        open={mixerOpen} onOpenChange={setMixerOpen} locked={actionsLocked || !settings.sections.color}
+        onReset={() => operate({ kind: 'sectionReset', metadata: { section: 'mixer' } })} operate={operate} panel={panel} />}
       {category === 'detail' && <RawLensCorrections key={raw.assetId} raw={raw} locked={actionsLocked} operate={operate} />}
     </RawCategory>)}
     {raw.operationError && <p role="alert">{t(`workspace.rawPreview.${wbErrors[raw.operationError] ?? 'awFailed'}`)}</p>}
@@ -211,6 +219,64 @@ function RawSubcategoryHeader({ name, disabled, onReset, className = '' }: { nam
       aria-label={t('workspace.rawPreview.resetSubcategory', { name })} title={t('workspace.rawPreview.resetSubcategory', { name })}
       onFocus={focusAdjustmentCategory} onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>{t('workspace.reset')}</button>
   </div>;
+}
+
+function RawColorMixer({ raw, color, onColorChange, open, onOpenChange, locked, onReset, operate, panel }: {
+  raw: NonNullable<ReturnType<typeof useRawDocument>>; color: typeof mixerColors[number];
+  onColorChange: (color: typeof mixerColors[number]) => void; open: boolean; onOpenChange: (open: boolean) => void;
+  locked: boolean; onReset: () => void; operate: (operation: RawHistoryOperation) => void; panel: React.RefObject<HTMLDivElement | null>;
+}) {
+  const { t } = useTranslation();
+  const contentId = useId();
+  const settings = raw.settings!;
+  return <section className="raw-color-mixer">
+    <div className="raw-adjustment-subsection-header">
+      <button type="button" className="raw-color-mixer-title" aria-expanded={open} aria-controls={contentId}
+        onClick={() => onOpenChange(!open)} onFocus={focusAdjustmentCategory}
+        onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>
+        <span className="adjustment-category-chevron" aria-hidden="true">{open ? '▾' : '▸'}</span>
+        <span>{t('workspace.rawPreview.mixer.title')}</span>
+      </button>
+      <button type="button" className="adjustment-category-reset" disabled={locked}
+        aria-label={t('workspace.rawPreview.mixer.reset')} title={t('workspace.rawPreview.mixer.reset')}
+        onClick={onReset} onFocus={focusAdjustmentCategory}
+        onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>{t('workspace.reset')}</button>
+    </div>
+    {open && <div id={contentId} className="raw-color-mixer-content">
+      <div role="radiogroup" aria-label={t('workspace.rawPreview.mixer.colorsLabel')} className="raw-color-mixer-swatches">
+        {mixerColors.map((name, index) => <button key={name} type="button" role="radio" aria-checked={color === name}
+          aria-label={t(`workspace.rawPreview.mixer.colorNames.${name}`)} title={t(`workspace.rawPreview.mixer.colorNames.${name}`)}
+          className={`raw-color-mixer-swatch${color === name ? ' is-selected' : ''}`} style={{ '--mixer-swatch': ['#d7191c', '#e98200', '#d5c900', '#23a832', '#00aeb0', '#1765dc', '#7626b5', '#c00070'][index] } as CSSProperties}
+          tabIndex={color === name ? 0 : -1}
+          onClick={() => { if (panel.current) commitAdjustmentEdits(panel.current); onColorChange(name); }}
+          onFocus={focusAdjustmentCategory} onKeyDown={event => {
+            const delta = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1
+              : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0;
+            if (!delta) { navigateAdjustments(event.nativeEvent, event.currentTarget); return; }
+            event.preventDefault();
+            const nextIndex = (index + delta + mixerColors.length) % mixerColors.length;
+            const nextColor = mixerColors[nextIndex];
+            if (panel.current) commitAdjustmentEdits(panel.current);
+            onColorChange(nextColor);
+            event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[nextIndex]?.focus();
+          }} />)}
+      </div>
+      {mixerFields.map(field => {
+        const control = `mixer.${color}.${field}` as RawControlId;
+        const spec = settings.controls.find(item => item.id === control)!;
+        return <AdjustmentSlider key={control} adjustmentId={control} commitPolicy="operation-boundary" hideToggle
+          label={t(`workspace.rawPreview.mixer.colors.${color}.${field}`)}
+          enabled={settings.sections.color} onToggle={() => {}} onReset={() => operate({ kind: 'controlReset', metadata: { control } })}
+          onBegin={() => raw.beginControls(control)} value={raw.desired?.[control] ?? settings.values[control]}
+          min={spec.min} max={spec.max} step={spec.step} precision={spec.precision} defaultValue={spec.default}
+          resetLabel={t(`workspace.rawPreview.mixer.colors.${color}.${field}Reset`)}
+          valueLabel={t(`workspace.rawPreview.mixer.colors.${color}.${field}Value`)}
+          valueText={(raw.desired?.[control] ?? settings.values[control]).toFixed(spec.precision)}
+          disabled={locked} resetDisabled={locked}
+          onChange={value => raw.changeControls({ [control]: value })} onCommit={() => raw.flushControls(control)} />;
+      })}
+    </div>}
+  </section>;
 }
 
 function RawCategory({ category, enabled, disabled, resetDisabled, autoWhiteBalance, picker, onToggle, onReset, showActions = true, headerActions, children }: {

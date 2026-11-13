@@ -27,7 +27,7 @@ export function rawSettings(doc: RawDocument): RawSettings {
     controls: RAW_SETTINGS_CONTROL_IDS.map(id => {
       const optics = opticsSpecs[id];
       return { id, min: optics?.[0] ?? (id.startsWith('grading.') && !id.endsWith('.lum') && id !== 'grading.balance' ? 0 : id.startsWith('detail.') || ['vignette.midpoint', 'vignette.feather', 'vignette.highlights'].includes(id) ? 0 : id === 'wb.temp' ? 2000 : id === 'light.exposure' ? -5 : id === 'wb.tint' ? -150 : -100),
-        max: optics?.[1] ?? (id.endsWith('.hue') ? 360 : id === 'detail.sharpenAmount' ? 150 : id === 'wb.temp' ? 50000 : id === 'light.exposure' ? 5 : id === 'wb.tint' ? 150 : 100),
+        max: optics?.[1] ?? (id.endsWith('.hue') && !id.startsWith('mixer.') ? 360 : id === 'detail.sharpenAmount' ? 150 : id === 'wb.temp' ? 50000 : id === 'light.exposure' ? 5 : id === 'wb.tint' ? 150 : 100),
         step: id === 'wb.temp' ? 50 : id === 'light.exposure' ? .01 : 1, default: optics?.[2] ?? (id === 'wb.temp' ? 6500 : controlDefaults[id] ?? 0),
         precision: id === 'light.exposure' ? 2 : 0 };
     }) };

@@ -453,7 +453,7 @@ HISTORY_CONTROLS |= frozenset(f"optics.{control}" for control in ("distortion", 
     "defringeGreen", "defringeGreenHueLo", "defringeGreenHueHi", "caRed", "caBlue"))
 HISTORY_FLAG_CONTROLS = frozenset(("optics.remove_ca", "optics.lens_profile", "profile.camera_local_tone"))
 HISTORY_SECTIONS = frozenset(("light", "color", "grading", "effects", "detail", "optics"))
-HISTORY_RESET_SECTIONS = HISTORY_SECTIONS | {"vignette"}
+HISTORY_RESET_SECTIONS = HISTORY_SECTIONS | {"vignette", "mixer"}
 HISTORY_CURVE_CHANNELS = frozenset(("master", "red", "green", "blue", "point"))
 
 

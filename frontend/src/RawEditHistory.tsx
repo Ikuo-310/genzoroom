@@ -9,7 +9,7 @@ import { displayTemperature, displayTint } from './rawWhiteBalance';
 const mixerColors = ['red', 'orange', 'yellow', 'green', 'aqua', 'blue', 'purple', 'magenta'] as const;
 const mixerFields = ['hue', 'sat', 'lum'] as const;
 const mixerLabels = Object.fromEntries(mixerColors.flatMap(color =>
-  mixerFields.map(field => [`mixer.${color}.${field}`, `rawPreview.mixer.${field}`]))) as
+  mixerFields.map(field => [`mixer.${color}.${field}`, `rawPreview.mixer.colors.${color}.${field}`]))) as
   Pick<Record<RawHistoryControlId, string>, Extract<RawHistoryControlId, `mixer.${string}`>>;
 const mixerFormatters = Object.fromEntries(mixerColors.flatMap(color =>
   mixerFields.map(field => [`mixer.${color}.${field}`, (value: number) => value.toFixed(0)]))) as
@@ -126,8 +126,10 @@ function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t'
     return label + (change ? ` ${pair(change)}` : '');
   }
   const opticsSection = step.metadata.section === 'optics';
+  const mixerSection = step.metadata.section === 'mixer';
   const operation = step.kind === 'wbPick' ? t('workspace.rawPreview.wbPick') : step.kind === 'wbAuto' ? t('workspace.rawPreview.aw') : step.kind === 'allReset' ? t('workspace.allReset')
     : opticsSection && step.kind === 'sectionReset' ? t('workspace.rawPreview.resetLensCorrections')
+      : mixerSection && step.kind === 'sectionReset' ? t('workspace.rawPreview.mixer.reset')
       : t(step.metadata.section === 'grading' ? 'workspace.rawPreview.gradingCategory' : step.metadata.section === 'vignette' ? 'workspace.rawPreview.vignette'
       : step.metadata.section === 'effects' ? step.kind === 'sectionReset' ? 'workspace.rawPreview.basicEffects' : 'workspace.rawPreview.effectsCategory'
       : step.metadata.section === 'light' ? 'workspace.basic' : step.metadata.section === 'detail'
