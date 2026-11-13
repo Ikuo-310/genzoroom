@@ -497,6 +497,8 @@ def _history_metadata(kind, metadata):
         valid = set(metadata) == {"channel"} and type(metadata["channel"]) is str and metadata["channel"] in HISTORY_CURVE_CHANNELS - {"point"}
     elif kind == "curveReset":
         valid = set(metadata) == {"channel"} and type(metadata["channel"]) is str and metadata["channel"] in HISTORY_CURVE_CHANNELS
+    elif kind in ("colorReset", "wbReset"):
+        valid = not metadata
     else:
         valid = kind in ("allReset", "wbAuto", "wbPick") and not metadata
     if not valid:

@@ -7,14 +7,14 @@ import type { SliderAdjustmentId } from './adjustmentSliderIds';
 import { TINT_TRACK_GRADIENT, TEMPERATURE_TRACK_GRADIENT } from './WhiteBalanceAdjustmentControls';
 import { RawPointCurveControls } from './RawPointCurveControls';
 import { RawEyedropperIcon } from './RawEyedropperIcon';
-import { RAW_VIGNETTE_STYLES, type RawControlId, type RawCurvePoint, type RawHistoryControlId, type RawHistoryOperation, type RawOpticsFlagId, type RawSectionId, type RawVignetteStyle } from './rawApi';
+import { RAW_VIGNETTE_STYLES, type RawControlId, type RawCurvePoint, type RawHistoryControlId, type RawHistoryOperation, type RawOpticsFlagId, type RawToggleSectionId, type RawVignetteStyle } from './rawApi';
 import type { useRawDocument } from './useRawDocument';
 import { displayTemperature, displayTint, nativeTemperature } from './rawWhiteBalance';
 
-type RawCategoryId = 'basic' | 'color' | 'grading' | 'curves' | 'effects' | 'detail';
+type RawCategoryId = 'basic' | 'color' | 'curves' | 'effects' | 'detail';
 const mixerColors = ['red', 'orange', 'yellow', 'green', 'aqua', 'blue', 'purple', 'magenta'] as const;
 const mixerFields = ['hue', 'sat', 'lum'] as const;
-const sections: Record<Exclude<RawCategoryId, 'curves'>, RawSectionId> = { basic: 'light', color: 'color', grading: 'grading', effects: 'effects', detail: 'detail' };
+const sections: Record<Exclude<RawCategoryId, 'curves'>, RawToggleSectionId> = { basic: 'light', color: 'color', effects: 'effects', detail: 'detail' };
 const wbErrors: Record<string, string> = {
   raw_wb_no_valid_samples: 'awNoSamples', raw_wb_geometry_mismatch: 'wbGeometryMismatch',
   raw_wb_point_outside_source: 'wbPointOutside', raw_wb_source_unavailable: 'wbSourceUnavailable',
@@ -34,8 +34,6 @@ const bindings: { category: RawCategoryId; controls: RawControlId[]; ids: Slider
     'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'],
     ids: ['detail.sharpenAmount', 'detail.sharpenMasking', 'detail.nrLuminance', 'detail.nrDetail',
       'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'] },
-  // Keep the legacy standalone grading panel available until its P1-B2 move into Color.
-  { category: 'grading', controls: [], ids: [] },
 ];
 const detailHeadings: Partial<Record<RawControlId, string>> = {
   'detail.sharpenAmount': 'sharpening', 'detail.nrLuminance': 'noiseReduction', 'detail.nrColor': 'colorNoiseReduction',
@@ -50,6 +48,7 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
   const settings = raw.settings;
   const [gradingBand, setGradingBand] = useState<'shadows' | 'midtones' | 'highlights'>('shadows');
   const [mixerOpen, setMixerOpen] = useState(false);
+  const [gradingOpen, setGradingOpen] = useState(false);
   const [mixerColor, setMixerColor] = useState<typeof mixerColors[number]>('red');
   const panel = useRef<HTMLDivElement>(null);
   const operate = (operation: RawHistoryOperation) => {
@@ -63,7 +62,7 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
   const actionsLocked = locked || !!raw.historyLoading || !!raw.historyError || !raw.history;
   useEffect(() => { if (!actionsLocked && panel.current) restorePendingAdjustmentFocus(panel.current); }, [actionsLocked]);
   return <div className="raw-adjustment-controls" ref={panel} onPointerDownCapture={event => {
-    if (event.target instanceof Element && event.target.closest('.adjustment-reset, .adjustment-category-actions button, .raw-adjustment-subsection-header button, .raw-vignette-mode label, .raw-grading-band label'))
+    if (event.target instanceof Element && event.target.closest('.adjustment-reset, .adjustment-category-actions button, .raw-wb-state-actions button, .raw-adjustment-subsection-header button, .raw-vignette-mode label, .raw-grading-band label'))
       preserveAdjustmentNumberFocus(event);
   }}>
     <label className="raw-optics-flag raw-camera-local-tone">
@@ -76,43 +75,41 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
     {settings && bindings.map(({ category, controls, ids }) => <RawCategory key={category} category={category}
       enabled={category === 'curves' || settings.sections[sections[category]]} disabled={actionsLocked}
       resetDisabled={actionsLocked || category === 'color' && !settings.wb.available}
-      picker={category === 'color' ? { disabled: actionsLocked || !raw.pickAvailable, active: !!raw.pickActive,
-        run: () => { if (panel.current) commitAdjustmentEdits(panel.current); raw.togglePick(); } } : undefined}
-      autoWhiteBalance={category === 'color' ? {
-        disabled: actionsLocked || !settings.sections.color || !settings.wb.available || !settings.wbAutoAvailable,
-        run: () => operate({ kind: 'wbAuto', metadata: {} }),
-      } : undefined}
       onToggle={() => { if (category !== 'curves') operate({ kind: 'sectionToggle', metadata: { section: sections[category],
         enabled: !settings.sections[sections[category]] } }); }}
-      onReset={category === 'effects' || category === 'curves' ? undefined : () => operate({ kind: 'sectionReset', metadata: { section: sections[category] } })}
+      onReset={category === 'effects' || category === 'curves' ? undefined : () => {
+        if (category === 'color') operate({ kind: 'colorReset', metadata: {} });
+        else operate({ kind: 'sectionReset', metadata: { section: sections[category] } });
+      }}
+      resetLabel={category === 'color' ? t('workspace.rawPreview.colorReset') : undefined}
       showActions={category !== 'curves'} headerActions={category === 'curves' ? <button type="button"
         className="adjustment-category-reset" disabled={actionsLocked} aria-label={t('workspace.resetCategory')}
         title={t('workspace.resetCategory')} onClick={() => operate({ kind: 'curveReset', metadata: { channel: 'point' } })}
         onFocus={focusAdjustmentCategory} onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>{t('workspace.reset')}</button> : undefined}>
-      {category === 'color' && <p className="edit-source-note">{settings.wb.available
-        ? `${settings.wb.mode} · Kelvin` : t('workspace.rawPreview.wbUnavailable')}</p>}
-      {category === 'effects' && <RawSubcategoryHeader name={t('workspace.rawPreview.basicEffects')}
-        disabled={actionsLocked} onReset={() => operate({ kind: 'sectionReset', metadata: { section: 'effects' } })} />}
-      {category === 'grading' && <div className="binary-radio-choice raw-grading-band" role="radiogroup" aria-label={t('workspace.rawPreview.gradingBand')}
-        onKeyDown={event => navigateAdjustments(event.nativeEvent, event.target as HTMLElement)}>
-        <div className="binary-radio-options">
-          {(['shadows', 'midtones', 'highlights'] as const).map(band => <label key={band}>
-            <input type="radio" name="raw-grading-band" checked={gradingBand === band} disabled={locked}
-              onFocus={focusAdjustmentCategory} onChange={event => {
-                // Numeric edits can lock the radio before click, and switching unmounts
-                // the old band's number input. Restore here only while focus stays in this panel.
-                const active = document.activeElement;
-                if (active === event.currentTarget || active instanceof HTMLInputElement
-                  && active.matches('.adjustment-number') && panel.current?.contains(active))
-                  preservePendingAdjustmentFocus(event.currentTarget);
-                // Finish edits before unmounting the old band's sliders so History keeps its boundary.
-                if (panel.current) commitAdjustmentEdits(panel.current);
-                setGradingBand(band);
-              }} />
-            <span>{t(`workspace.rawPreview.gradingBands.${band}`)}</span>
-          </label>)}
+      {category === 'color' && <div className="raw-wb-state-row">
+        <p className="edit-source-note">{settings.wb.available ? `${settings.wb.mode} · Kelvin` : t('workspace.rawPreview.wbUnavailable')}</p>
+        <div className="raw-wb-state-actions">
+          <button type="button" className="adjustment-category-icon raw-auto-wb" data-category-command
+            disabled={actionsLocked || !settings.sections.color || !settings.wb.available || !settings.wbAutoAvailable}
+            onClick={() => operate({ kind: 'wbAuto', metadata: {} })} aria-label={t('workspace.rawPreview.aw')}
+            title={t('workspace.rawPreview.aw')} onFocus={focusAdjustmentCategory}
+            onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>AW</button>
+          <button type="button" className={`adjustment-category-icon raw-wb-pick${raw.pickActive ? ' is-selected' : ''}`}
+            disabled={actionsLocked || !raw.pickAvailable} aria-pressed={!!raw.pickActive}
+            aria-label={t('workspace.rawPreview.wbPick')} title={t('workspace.rawPreview.wbPick')}
+            onClick={() => { if (panel.current) commitAdjustmentEdits(panel.current); raw.togglePick(); }}
+            onFocus={focusAdjustmentCategory} onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>
+            <RawEyedropperIcon />
+          </button>
+          <button type="button" className="adjustment-reset raw-wb-reset"
+            disabled={actionsLocked || !settings.sections.color || !settings.wb.available}
+            aria-label={t('workspace.rawPreview.wbReset')} title={t('workspace.rawPreview.wbReset')}
+            onClick={() => operate({ kind: 'wbReset', metadata: {} })}
+            onFocus={focusAdjustmentCategory} onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>↺</button>
         </div>
       </div>}
+      {category === 'effects' && <RawSubcategoryHeader name={t('workspace.rawPreview.basicEffects')}
+        disabled={actionsLocked} onReset={() => operate({ kind: 'sectionReset', metadata: { section: 'effects' } })} />}
         {category === 'curves' && <RawPointCurveControls key={raw.assetId} curve={{ ...settings.curve,
           ...(raw.targetedCurvePoints?.channel ? { [raw.targetedCurvePoints.channel]: raw.targetedCurvePoints.points } : {}) }}
           channel={raw.curveChannel} onChannelChange={raw.setCurveChannel}
@@ -123,9 +120,9 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
         onDragChange={(_channel, points) => raw.updateCurveInteraction(points)}
         onDragCancel={() => raw.cancelCurveInteraction()}
           onDragCommit={({ channel, after, changed }) => raw.finishCurveInteraction(channel, after, changed)} />}
-      <div className={category === 'detail' ? 'raw-detail-controls' : undefined}>{(category === 'grading' ? [`grading.${gradingBand}.hue`, `grading.${gradingBand}.sat`, `grading.${gradingBand}.lum`, 'grading.blending', 'grading.balance'] as RawControlId[] : controls).map((control, index) => {
+      <div className={category === 'detail' ? 'raw-detail-controls' : undefined}>{controls.map((control, index) => {
         const spec = settings.controls.find(spec => spec.id === control)!;
-        const id = category === 'grading' ? control : ids[index];
+        const id = ids[index];
         const nativeValue = raw.desired?.[control] ?? settings.values[control];
         const relativeWb = settings.wb.scale === 'legacy';
         const relativeWbControl = relativeWb && control.startsWith('wb.');
@@ -137,7 +134,7 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
         const enabled = category === 'curves' ? true : settings.sections[sections[category]];
         const dependent = control.startsWith('vignette.') && control !== 'vignette.amount'
           && (raw.desired?.['vignette.amount'] ?? settings.values['vignette.amount']) === 0;
-        const labelKey = category === 'grading' ? `rawPreview.${control}` : category === 'detail' || category === 'effects' ? `rawPreview.${vignetteLabels[control] ?? control.split('.')[1]}` : id;
+        const labelKey = category === 'detail' || category === 'effects' ? `rawPreview.${vignetteLabels[control] ?? control.split('.')[1]}` : id;
         return <Fragment key={`${raw.assetId}:${control}`}>
           {control === 'vignette.amount' && <>
             <div className="raw-adjustment-subcategory-divider" aria-hidden="true" />
@@ -167,6 +164,9 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
       {category === 'color' && <RawColorMixer raw={raw} color={mixerColor} onColorChange={setMixerColor}
         open={mixerOpen} onOpenChange={setMixerOpen} locked={actionsLocked || !settings.sections.color}
         onReset={() => operate({ kind: 'sectionReset', metadata: { section: 'mixer' } })} operate={operate} panel={panel} />}
+      {category === 'color' && <RawColorGrading raw={raw} band={gradingBand} onBandChange={setGradingBand}
+        open={gradingOpen} onOpenChange={setGradingOpen} locked={actionsLocked || !settings.sections.color}
+        operate={operate} panel={panel} />}
       {category === 'detail' && <RawLensCorrections key={raw.assetId} raw={raw} locked={actionsLocked} operate={operate} />}
     </RawCategory>)}
     {raw.operationError && <p role="alert">{t(`workspace.rawPreview.${wbErrors[raw.operationError] ?? 'awFailed'}`)}</p>}
@@ -279,12 +279,69 @@ function RawColorMixer({ raw, color, onColorChange, open, onOpenChange, locked, 
   </section>;
 }
 
-function RawCategory({ category, enabled, disabled, resetDisabled, autoWhiteBalance, picker, onToggle, onReset, showActions = true, headerActions, children }: {
+function RawColorGrading({ raw, band, onBandChange, open, onOpenChange, locked, operate, panel }: {
+  raw: NonNullable<ReturnType<typeof useRawDocument>>; band: 'shadows' | 'midtones' | 'highlights';
+  onBandChange: (band: 'shadows' | 'midtones' | 'highlights') => void; open: boolean; onOpenChange: (open: boolean) => void;
+  locked: boolean; operate: (operation: RawHistoryOperation) => void; panel: React.RefObject<HTMLDivElement | null>;
+}) {
+  const { t } = useTranslation();
+  const contentId = useId();
+  const settings = raw.settings!;
+  const controls = [`grading.${band}.hue`, `grading.${band}.sat`, `grading.${band}.lum`, 'grading.blending', 'grading.balance'] as RawControlId[];
+  return <section className="raw-color-grading">
+    <div className="raw-adjustment-subsection-header">
+      <button type="button" className="raw-color-grading-title" aria-expanded={open} aria-controls={contentId}
+        onClick={() => onOpenChange(!open)} onFocus={focusAdjustmentCategory}
+        onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>
+        <span className="adjustment-category-chevron" aria-hidden="true">{open ? '▾' : '▸'}</span>
+        <span>{t('workspace.rawPreview.gradingCategory')}</span>
+      </button>
+      <button type="button" className="adjustment-category-reset" disabled={locked}
+        aria-label={t('workspace.rawPreview.gradingReset')} title={t('workspace.rawPreview.gradingReset')}
+        onClick={() => operate({ kind: 'sectionReset', metadata: { section: 'grading' } })}
+        onFocus={focusAdjustmentCategory} onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>{t('workspace.reset')}</button>
+    </div>
+    {open && <div id={contentId} className="raw-color-grading-content">
+      <div className="binary-radio-choice raw-grading-band" role="radiogroup" aria-label={t('workspace.rawPreview.gradingBand')}
+        onKeyDown={event => navigateAdjustments(event.nativeEvent, event.target as HTMLElement)}>
+        <div className="binary-radio-options">
+          {(['shadows', 'midtones', 'highlights'] as const).map(option => <label key={option}>
+            <input type="radio" name="raw-grading-band" checked={band === option} disabled={locked}
+              onFocus={focusAdjustmentCategory} onChange={event => {
+                const active = document.activeElement;
+                if (active === event.currentTarget || active instanceof HTMLInputElement
+                  && active.matches('.adjustment-number') && panel.current?.contains(active))
+                  preservePendingAdjustmentFocus(event.currentTarget);
+                if (panel.current) commitAdjustmentEdits(panel.current);
+                onBandChange(option);
+              }} />
+            <span>{t(`workspace.rawPreview.gradingBands.${option}`)}</span>
+          </label>)}
+        </div>
+      </div>
+      {controls.map(control => {
+        const spec = settings.controls.find(item => item.id === control)!;
+        const value = raw.desired?.[control] ?? settings.values[control];
+        const hue = control.endsWith('.hue');
+        return <AdjustmentSlider key={control} adjustmentId={control} commitPolicy="operation-boundary" hideToggle
+          trackGradient={hue ? 'linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)' : undefined}
+          valueSuffix={hue ? '°' : undefined} label={t(`workspace.rawPreview.${control}`)}
+          enabled={settings.sections.color} onToggle={() => {}} value={value}
+          min={spec.min} max={spec.max} step={spec.step} precision={spec.precision} defaultValue={spec.default}
+          valueText={`${value.toFixed(spec.precision)}${hue ? '°' : ''}`}
+          resetLabel={t(`workspace.rawPreview.${control}Reset`)} valueLabel={t(`workspace.rawPreview.${control}Value`)}
+          disabled={locked} resetDisabled={locked}
+          onBegin={() => raw.beginControls(control)} onChange={next => raw.changeControls({ [control]: next })}
+          onCommit={() => raw.flushControls(control)} onReset={() => operate({ kind: 'controlReset', metadata: { control } })} />;
+      })}
+    </div>}
+  </section>;
+}
+
+function RawCategory({ category, enabled, disabled, resetDisabled, onToggle, onReset, resetLabel, showActions = true, headerActions, children }: {
   category: RawCategoryId; enabled: boolean; disabled: boolean; resetDisabled: boolean;
-  onToggle: () => void; onReset?: () => void; children: ReactNode;
+  onToggle: () => void; onReset?: () => void; resetLabel?: string; children: ReactNode;
   showActions?: boolean; headerActions?: ReactNode;
-  picker?: { disabled: boolean; active: boolean; run: () => void };
-  autoWhiteBalance?: { disabled: boolean; run: () => void };
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(true);
@@ -302,23 +359,12 @@ function RawCategory({ category, enabled, disabled, resetDisabled, autoWhiteBala
       </button></h3>
       {(showActions || headerActions) && <div className="adjustment-category-actions">
         {showActions && <>
-        {autoWhiteBalance && <button type="button" className="adjustment-category-icon raw-auto-wb" data-category-command disabled={autoWhiteBalance.disabled}
-          onClick={autoWhiteBalance.run} aria-label={t('workspace.rawPreview.aw')} title={t('workspace.rawPreview.aw')}
-          onFocus={focusAdjustmentCategory}
-          onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>AW</button>}
-        {picker && <button type="button" className={`adjustment-category-icon raw-wb-pick${picker.active ? ' is-selected' : ''}`}
-          data-category-command disabled={picker.disabled} aria-pressed={picker.active}
-          aria-label={t('workspace.rawPreview.wbPick')} title={t('workspace.rawPreview.wbPick')}
-          onClick={picker.run} onFocus={focusAdjustmentCategory}
-          onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>
-          <RawEyedropperIcon />
-        </button>}
         <button type="button" className={`adjustment-category-icon${enabled ? '' : ' is-off'}`} data-category-switch disabled={disabled}
           aria-pressed={enabled} onClick={onToggle} aria-label={t(`workspace.${enabled ? 'disable' : 'enable'}${titleKey}`)}
           title={t(`workspace.${enabled ? 'disable' : 'enable'}${titleKey}`)} onFocus={focusAdjustmentCategory}
           onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>⏻</button>
         {onReset && <button type="button" className="adjustment-category-reset" disabled={resetDisabled} onClick={onReset}
-          aria-label={t('workspace.resetCategory')} title={t('workspace.resetCategory')} onFocus={focusAdjustmentCategory}
+          aria-label={resetLabel ?? t('workspace.resetCategory')} title={resetLabel ?? t('workspace.resetCategory')} onFocus={focusAdjustmentCategory}
           onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>{t('workspace.reset')}</button>}
         </>}
         {headerActions}

@@ -127,7 +127,9 @@ function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t'
   }
   const opticsSection = step.metadata.section === 'optics';
   const mixerSection = step.metadata.section === 'mixer';
-  const operation = step.kind === 'wbPick' ? t('workspace.rawPreview.wbPick') : step.kind === 'wbAuto' ? t('workspace.rawPreview.aw') : step.kind === 'allReset' ? t('workspace.allReset')
+  const operation = step.kind === 'wbReset' ? t('workspace.rawPreview.wbReset')
+    : step.kind === 'colorReset' ? t('workspace.rawPreview.colorReset')
+      : step.kind === 'wbPick' ? t('workspace.rawPreview.wbPick') : step.kind === 'wbAuto' ? t('workspace.rawPreview.aw') : step.kind === 'allReset' ? t('workspace.allReset')
     : opticsSection && step.kind === 'sectionReset' ? t('workspace.rawPreview.resetLensCorrections')
       : mixerSection && step.kind === 'sectionReset' ? t('workspace.rawPreview.mixer.reset')
       : t(step.metadata.section === 'grading' ? 'workspace.rawPreview.gradingCategory' : step.metadata.section === 'vignette' ? 'workspace.rawPreview.vignette'

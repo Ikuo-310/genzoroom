@@ -278,7 +278,7 @@ it('wires native Before into the shared Viewer lazily without changing RAW edits
 it('binds engine control specs to shared sliders and commits RAW values without JPEG rendering', async () => {
   await mount();
   const sliders = [...host.querySelectorAll<HTMLInputElement>('.adjustment-range')];
-  expect(sliders).toHaveLength(33);
+  expect(sliders).toHaveLength(28);
   expect(host.querySelector('[data-adjustment-id="optics.profileDistortion"]')).toBeNull();
   expect(sliders.map(slider => slider.dataset.adjustmentId)).toEqual([
     'exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks',
@@ -288,7 +288,6 @@ it('binds engine control specs to shared sliders and commits RAW values without 
     'detail.sharpenAmount', 'detail.sharpenMasking',
     'detail.nrLuminance', 'detail.nrDetail', 'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness',
     'optics.distortion', 'optics.vignetting', 'optics.vignettingMidpoint',
-    'grading.shadows.hue', 'grading.shadows.sat', 'grading.shadows.lum', 'grading.blending', 'grading.balance',
   ]);
   expect(sliders[0].min).toBe('-5'); expect(sliders[0].max).toBe('5'); expect(sliders[0].step).toBe('0.01');
   expect(sliders[6].min).toBe('2000'); expect(sliders[6].max).toBe('50000'); expect(sliders[6].step).toBe('50');
@@ -299,9 +298,9 @@ it('binds engine control specs to shared sliders and commits RAW values without 
   expect(sliders[7].style.getPropertyValue('--adjustment-track-gradient')).toContain('#4f9b62');
   expect(sliders[7].style.getPropertyValue('--adjustment-track-gradient')).toContain('#b05aa0');
   const actions = [...host.querySelectorAll<HTMLButtonElement>('.adjustment-power, .adjustment-reset, .adjustment-category-actions button, .develop-panel .workspace-section-action')];
-  expect(actions).toHaveLength(48);
+  expect(actions).toHaveLength(40);
   expect(host.querySelectorAll('.adjustment-power')).toHaveLength(0);
-  expect(actions.filter(button => button.disabled)).toHaveLength(6);
+  expect(actions.filter(button => button.disabled)).toHaveLength(5);
   const number = sliders[0].closest('.adjustment-control')!.querySelector<HTMLInputElement>('input[type="number"]')!;
   act(() => {
     number.focus();
@@ -553,7 +552,7 @@ it('reuses Detail category collapse, action navigation, toggle and Reset', async
   });
   await mount();
   expect([...host.querySelectorAll('.raw-adjustment-category > .adjustment-category-header .adjustment-category-label')].map(item => item.textContent))
-    .toEqual(['Basic', 'Color', 'Curves', 'Effects', 'Detail', 'Color Grading']);
+    .toEqual(['Basic', 'Color', 'Curves', 'Effects', 'Detail']);
   const category = host.querySelectorAll('.raw-adjustment-category')[4];
   expect(category.textContent).toContain('Sharpening');
   const title = category.querySelector<HTMLButtonElement>('.adjustment-category-title')!;
@@ -616,8 +615,8 @@ it.each(['ja', 'en'])('keeps Effects eye in the category and Reset in Basic Effe
   await mount();
   const categories = host.querySelectorAll('.raw-adjustment-category');
   expect([...categories].map(category => category.querySelector('.adjustment-category-label')!.textContent)).toEqual(language === 'ja'
-    ? ['基本補正', 'カラー', 'カーブ', 'エフェクト', 'ディテール', 'カラーグレーディング']
-    : ['Basic', 'Color', 'Curves', 'Effects', 'Detail', 'Color Grading']);
+    ? ['基本補正', 'カラー', 'カーブ', 'エフェクト', 'ディテール']
+    : ['Basic', 'Color', 'Curves', 'Effects', 'Detail']);
   const category = categories[3];
   const title = category.querySelector<HTMLButtonElement>('.adjustment-category-title')!;
   const subtitle = category.querySelector<HTMLElement>('.raw-adjustment-subsection-title')!;
@@ -669,7 +668,7 @@ it('places display-only Curves between Grading and Effects and keeps channel swi
   await mount();
   const categories = [...host.querySelectorAll<HTMLElement>('.raw-adjustment-category')];
   expect(categories.map(category => category.querySelector('.adjustment-category-label')!.textContent))
-    .toEqual(['Basic', 'Color', 'Curves', 'Effects', 'Detail', 'Color Grading']);
+    .toEqual(['Basic', 'Color', 'Curves', 'Effects', 'Detail']);
   const curveCategory = categories[2];
   expect(curveCategory.querySelector('[data-category-switch]')).toBeNull();
   const curveReset = curveCategory.querySelector<HTMLButtonElement>('.adjustment-category-header .adjustment-category-reset')!;
@@ -829,21 +828,32 @@ it.each(['ja', 'en'])('labels Mixer and color-specific History rows in %s', asyn
   await i18n.changeLanguage(language);
   const doc = { workspaceId: 'workspace', assetId: base.id, handle: 'handle', generation: 1, documentToken: 'token', revision: 1 };
   const fakeRaw = { ...doc, settings: { ...rawSettings(doc), wb: { available: true, mode: 'custom', scale: 'kelvin' } },
-    history: { initialized: true, cursor: 2, length: 2, selectedStepId: '00000000-0000-4000-8000-000000000002' },
+    history: { initialized: true, cursor: 4, length: 4, selectedStepId: '00000000-0000-4000-8000-000000000004' },
     historySteps: [
       { stepId: '00000000-0000-4000-8000-000000000001', kind: 'sectionReset', metadata: { section: 'mixer' },
         createdAt: '2026-11-14T00:00:00Z', changes: [{ control: 'mixer.red.hue', before: 12, after: 0 },
           { control: 'mixer.blue.sat', before: -7, after: 0 }] },
       { stepId: '00000000-0000-4000-8000-000000000002', kind: 'control', metadata: { control: 'mixer.blue.lum' },
         createdAt: '2026-11-14T00:00:00Z', changes: [{ control: 'mixer.blue.lum', before: 0, after: 15 }] },
+      { stepId: '00000000-0000-4000-8000-000000000003', kind: 'wbReset', metadata: {},
+        createdAt: '2026-11-14T00:00:00Z', changes: [{ control: 'wb.temp', before: 6100, after: 6500 },
+          { control: 'wb.tint', before: 8, after: 0 }] },
+      { stepId: '00000000-0000-4000-8000-000000000004', kind: 'colorReset', metadata: {},
+        createdAt: '2026-11-14T00:00:00Z', changes: [{ control: 'color.vibrance', before: 20, after: 0 },
+          { control: 'mixer.red.hue', before: 12, after: 0 }, { control: 'grading.balance', before: -10, after: 0 }] },
     ] };
   await act(async () => root.render(<RawEditHistory raw={fakeRaw as never} disabled={false} onReset={() => {}} />));
   const mixerReset = host.querySelector('li[value="1"]')?.textContent ?? '';
   const blueLuminance = host.querySelector('li[value="2"]')?.textContent ?? '';
+  const wbReset = host.querySelector('li[value="3"]')?.textContent ?? '';
+  const colorReset = host.querySelector('li[value="4"]')?.textContent ?? '';
   expect(mixerReset).toContain(language === 'ja' ? 'カラーミキサーをリセット' : 'Reset Color Mixer');
   expect(mixerReset).toContain(language === 'ja' ? 'レッドの色相' : 'Red Hue');
   expect(mixerReset).toContain(language === 'ja' ? 'ブルーの彩度' : 'Blue Saturation');
   expect(blueLuminance).toContain(language === 'ja' ? 'ブルーの輝度' : 'Blue Luminance');
+  expect(wbReset).toContain(language === 'ja' ? '色温度と色かぶり補正をリセット' : 'Reset white balance');
+  expect(colorReset).toContain(language === 'ja' ? 'カラー全体をリセット' : 'Reset Color adjustments');
+  expect(colorReset).toContain(language === 'ja' ? 'レッドの色相' : 'Red Hue');
 });
 
 it('persists point additions and interior deletions through the existing curve History operation', async () => {
@@ -1200,7 +1210,7 @@ it('shows a five-digit temperature with an overlaid K suffix while WB Reset upda
   expect(input.parentElement?.classList.contains('adjustment-number-wrap')).toBe(true);
   expect(input.parentElement?.querySelector('.adjustment-number-suffix')).not.toBeNull();
   const rows = [...host.querySelectorAll<HTMLElement>('.raw-adjustment-controls .adjustment-control')];
-  expect(rows).toHaveLength(33);
+  expect(rows).toHaveLength(28);
   expect(rows.every(row => row.querySelector('.adjustment-number-wrap input[type="number"]')
     && row.querySelectorAll('.adjustment-value-controls .adjustment-reset').length === 1)).toBe(true);
   const reset = temp.querySelector<HTMLButtonElement>('.adjustment-reset')!;
@@ -1233,7 +1243,7 @@ it('retains values across category OFF/ON and permits Reset while OFF on the sam
   });
   await mount();
   const categories = host.querySelectorAll('.raw-adjustment-category');
-  expect(categories).toHaveLength(6);
+  expect(categories).toHaveLength(5);
   expect(categories[0].querySelector('.adjustment-category-label')!.textContent).toBe('Basic');
   const toggle = categories[0].querySelector<HTMLButtonElement>('.adjustment-category-icon')!;
   const reset = categories[0].querySelector<HTMLButtonElement>('.adjustment-category-reset')!;
@@ -1264,22 +1274,19 @@ it('keeps the overlaid suffix outside the numeric temperature value during Enter
   expect(input.parentElement?.querySelector('.adjustment-number-suffix')?.textContent).toBe('K');
 });
 
-it('navigates RAW category controls in title, AW, toggle, Reset order without activating them', async () => {
+it('navigates RAW category controls in title, toggle, Reset order without activating them', async () => {
   await mount();
   const header = host.querySelectorAll<HTMLElement>('.raw-adjustment-category .adjustment-category-header')[1];
   const title = header.querySelector<HTMLButtonElement>('.adjustment-category-title')!;
-  const aw = header.querySelector<HTMLButtonElement>('[data-category-command]')!;
   const toggle = header.querySelector<HTMLButtonElement>('[data-category-switch]')!;
   const reset = header.querySelector<HTMLButtonElement>('.adjustment-category-reset')!;
   const enabled = toggle.getAttribute('aria-pressed');
   const historyCount = vi.mocked(rawApi.saveRawHistory).mock.calls.length;
   const move = (element: HTMLElement, key: string) => historyKey(key, { ctrlKey: false, shiftKey: true }, element);
-  act(() => title.focus()); move(title, 'ArrowRight'); expect(document.activeElement).toBe(aw);
-  move(aw, 'ArrowRight'); expect(document.activeElement).toBe(toggle);
+  act(() => title.focus()); move(title, 'ArrowRight'); expect(document.activeElement).toBe(toggle);
   move(toggle, 'ArrowRight'); expect(document.activeElement).toBe(reset);
   move(reset, 'ArrowLeft'); expect(document.activeElement).toBe(toggle);
-  move(toggle, 'ArrowLeft'); expect(document.activeElement).toBe(aw);
-  move(aw, 'ArrowLeft'); expect(document.activeElement).toBe(title);
+  move(toggle, 'ArrowLeft'); expect(document.activeElement).toBe(title);
   expect(toggle.getAttribute('aria-pressed')).toBe(enabled);
   expect(vi.mocked(rawApi.saveRawHistory).mock.calls).toHaveLength(historyCount);
 });
@@ -1323,7 +1330,7 @@ it.each(['Enter', ' '])('leaves RAW Reset activation to the native %s button act
   expect(vi.mocked(rawApi.saveRawHistory).mock.calls.map(([request]) => request.action)).toEqual(before);
   act(() => reset.click()); await flush();
   expect(vi.mocked(rawApi.saveRawHistory).mock.calls.at(-1)?.[0].operation).toEqual({
-    kind: 'sectionReset', metadata: { section: 'color' },
+    kind: 'colorReset', metadata: {},
   });
   expect(model.cursor()).toBe(0);
 });
@@ -2022,14 +2029,19 @@ it('toggles Picker, cancels with Escape/other edits/Asset change, and submits on
       fullWidth: 16, fullHeight: 12, aspect: 4/3, window: null } }));
   await mount();
   const picker = () => host.querySelector<HTMLButtonElement>('.raw-wb-pick')!;
+  const wbReset = () => host.querySelector<HTMLButtonElement>('.raw-wb-reset')!;
   expect(picker().disabled).toBe(false);
   expect(picker().previousElementSibling?.textContent).toBe('AW');
+  expect(wbReset().previousElementSibling).toBe(picker());
+  expect(wbReset().getAttribute('aria-label')).toBe('Reset white balance');
   expect(picker().querySelector('svg')?.getAttribute('width')).toBe('16');
   expect(picker().querySelector('svg')?.getAttribute('stroke-width')).toBe('1.8');
   expect(picker().querySelector('path')?.getAttribute('d')).toBe('m14 5 5 5M16 3l5 5-3 3-1-1-10 10-4 1 1-4L14 7l-1-1z');
   const aw = picker().previousElementSibling as HTMLButtonElement;
   act(() => aw.focus()); historyKey('ArrowRight', { ctrlKey: false, shiftKey: true }, aw);
   expect(document.activeElement).toBe(picker());
+  historyKey('ArrowRight', { ctrlKey: false, shiftKey: true }, picker()); expect(document.activeElement).toBe(wbReset());
+  historyKey('ArrowLeft', { ctrlKey: false, shiftKey: true }, wbReset()); expect(document.activeElement).toBe(picker());
   act(() => picker().click()); await flush(); expect(picker().getAttribute('aria-pressed')).toBe('true');
   act(() => picker().click()); await flush(); expect(picker().getAttribute('aria-pressed')).toBe('false');
   act(() => picker().click()); await flush();
@@ -2061,6 +2073,45 @@ it('toggles Picker, cancels with Escape/other edits/Asset change, and submits on
   act(() => picker().click()); await flush();
   await act(async () => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[2].click()); await flush();
   expect(picker().getAttribute('aria-pressed')).toBe('false');
+});
+
+it('submits the WB-only Reset as one explicit History operation and keeps it out of the parent reset', async () => {
+  await mount();
+  const wbReset = host.querySelector<HTMLButtonElement>('.raw-wb-reset')!;
+  expect(wbReset.disabled).toBe(false);
+  act(() => wbReset.click()); await flush();
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls.at(-1)?.[0].operation).toEqual({ kind: 'wbReset', metadata: {} });
+  expect(host.querySelector('.raw-color-mixer-title')).not.toBeNull();
+  expect(host.querySelector('.raw-color-grading-title')).not.toBeNull();
+  expect(host.querySelector('.raw-color-grading-content')).toBeNull();
+  expect(host.querySelector('.raw-color-mixer [data-category-switch]')).toBeNull();
+  expect(host.querySelector('.raw-color-grading [data-category-switch]')).toBeNull();
+});
+
+it('uses only the parent Color switch to disable Mixer and Grading editing', async () => {
+  commitHistory.mockImplementation(async request => {
+    const next = structuredClone(request.doc);
+    if (request.operation?.kind === 'sectionToggle') next.sections[request.operation.metadata.section] = request.operation.metadata.enabled;
+    return rawHistoryResult({ ...request, doc: next });
+  });
+  await mount();
+  const color = host.querySelectorAll<HTMLElement>('.raw-adjustment-category')[1];
+  const parentToggle = color.querySelector<HTMLButtonElement>('[data-category-switch]')!;
+  const mixer = color.querySelector<HTMLElement>('.raw-color-mixer')!;
+  const grading = color.querySelector<HTMLElement>('.raw-color-grading')!;
+  act(() => mixer.querySelector<HTMLButtonElement>('.raw-color-mixer-title')!.click());
+  act(() => grading.querySelector<HTMLButtonElement>('.raw-color-grading-title')!.click());
+  expect(grading.querySelector('[data-category-switch]')).toBeNull();
+  expect(mixer.querySelector('[data-category-switch]')).toBeNull();
+  act(() => parentToggle.click()); await flush();
+  expect(commitHistory).toHaveBeenLastCalledWith(expect.objectContaining({ operation: {
+    kind: 'sectionToggle', metadata: { section: 'color', enabled: false },
+  } }));
+  expect(mixer.querySelector<HTMLInputElement>('[data-adjustment-id="mixer.red.hue"]')!.disabled).toBe(true);
+  expect(grading.querySelector<HTMLInputElement>('[data-adjustment-id="grading.shadows.hue"]')!.disabled).toBe(true);
+  expect(mixer.querySelector<HTMLButtonElement>('.adjustment-category-reset')!.disabled).toBe(true);
+  expect(grading.querySelector<HTMLButtonElement>('.adjustment-category-reset')!.disabled).toBe(true);
+  expect(color.querySelector<HTMLButtonElement>('.raw-wb-reset')!.disabled).toBe(true);
 });
 
 it.each(['off', 'wbUnavailable', 'helperUnavailable'])('disables AW when %s while retaining the category actions', async reason => {
@@ -2157,6 +2208,7 @@ it('queues an inactive saved RAW from Filmstrip without switching or saving the 
 
 it.each(['shadows', 'midtones', 'highlights'] as const)('edits RAW grading %s through the existing preview and History owner', async band => {
   await mount();
+  act(() => host.querySelector<HTMLButtonElement>('.raw-color-grading-title')!.click());
   const selectBand = (index: number) => act(() => host.querySelectorAll<HTMLInputElement>('.raw-grading-band input')[index].click());
   selectBand(['shadows', 'midtones', 'highlights'].indexOf(band));
   const ids = [`grading.${band}.hue`, `grading.${band}.sat`, `grading.${band}.lum`, 'grading.blending', 'grading.balance'];
@@ -2197,6 +2249,7 @@ it.each(['shadows', 'midtones', 'highlights'] as const)('edits RAW grading %s th
 
 it('switches grading bands while a numeric edit commits without losing the click', async () => {
   await mount();
+  act(() => host.querySelector<HTMLButtonElement>('.raw-color-grading-title')!.click());
   const number = host.querySelector<HTMLInputElement>('[data-adjustment-id="grading.shadows.hue"]')!
     .closest('.adjustment-control')!.querySelector<HTMLInputElement>('.adjustment-number')!;
   act(() => {
@@ -2219,6 +2272,7 @@ it('switches grading bands while a numeric edit commits without losing the click
 
 it('records one drag operation for each of the eleven grading controls and no band-switch operations', async () => {
   await mount();
+  act(() => host.querySelector<HTMLButtonElement>('.raw-color-grading-title')!.click());
   const ids = rawApi.RAW_CONTROL_IDS.filter(id => id.startsWith('grading.'));
   for (const control of ids) {
     const band = control.split('.')[1];
@@ -2245,6 +2299,7 @@ it('records one drag operation for each of the eleven grading controls and no ba
 
 it('keeps a pending Shadows mutation bound to Shadows after switching to Midtones', async () => {
   await mount();
+  act(() => host.querySelector<HTMLButtonElement>('.raw-color-grading-title')!.click());
   let finish!: () => void;
   vi.mocked(rawApi.setRawControls).mockImplementationOnce((doc, patch) => new Promise(resolve => {
     finish = () => resolve({ ...(doc as rawApi.RawSettings), revision: doc.revision + 1,

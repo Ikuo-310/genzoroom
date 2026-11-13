@@ -1,5 +1,11 @@
 # GenzoRoom 開発ノート
 
+## LightCraft Color UI再編とReset（2026-11-14）
+
+Windows Native UIを基本補正、カラー、カーブ、エフェクト、ディテールの5カテゴリへ整理し、Color内にMixerとGradingの折り畳みサブカテゴリを配置する。Gradingの独立ON/OFF UIは撤去し、既存Recipe/Historyの`disabled_sections`値は復元時にそのまま保持する。WB Resetは専用History操作として色温度・色かぶり補正をまとめ、Color ResetはWB、Vibrance、Saturation、Mixer 24項目、公開Grading 11項目を1操作で初期化する。RAW WBはAs Shot、legacy非RAW WBはNativeの既定値6500/0で表示上の相対0/0に戻す。どちらも既存Recipe/History/Undo/Redo/Preview/Export経路を使用し、Native `resetSection(color)`契約、managed patch、Native binary、SQLite schema、Docker JPEG現像は変更しない。
+
+将来検討: Mixer／Grading／Point Colorの効果だけを比較する独立ON/OFFを調査する。第一候補はRecipe内の元設定値を保持しPreview／Export向け設定だけを中立化する方式。保存形式とHistory境界は未決定で、P1-B2では実装しない。
+
 ## Windows Desktop LightCraft共通現像：設計確定・実装完了（2026-11-09）
 
 Windows DesktopはLightCraft Nativeを唯一の現像エンジンとし、Immichの画像原本を形式判定・変換なしで渡す方針を確定した。拡張子／MIMEの現像対応ホワイトリスト、アニメーション拒否、形式別開放工程は追加しない。GIF等の先頭フレーム処理やNative内部のpreview-only利用もNativeの判断に従う。Native拒否・起動失敗時に旧JPEG WebGPU／CPUへFallbackしない。Dockerは従来JPEG動作とNative不要の起動を維持する。`is_raw`は分類・STACK・Trash保護に残す。

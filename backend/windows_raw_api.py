@@ -1091,6 +1091,10 @@ class RawPreviewApi:
         if step["kind"] in ("control", "controlReset"):
             controls = (["wb.temp", "wb.tint"] if step["kind"] == "controlReset"
                         and metadata["control"].startswith("wb.") else [metadata["control"]])
+        elif step["kind"] == "wbReset":
+            controls = ["wb.temp", "wb.tint"]
+        elif step["kind"] == "colorReset":
+            controls = [control for control in CONTROLS if control.startswith(("wb.", "color.", "mixer.", "grading."))]
         elif step["kind"] in ("opticsFlag", "opticsFlagReset"):
             controls = []
         elif step['kind'] in ('wbAuto', 'wbPick'):
@@ -1229,7 +1233,7 @@ class RawPreviewApi:
             elif 'curveInteractionId' in body:
                 raise LightCraftError("raw_invalid_request")
             kind, metadata = body["kind"], body["metadata"]
-            if not self._wb_available and (kind in ("allReset", "wbAuto", "wbPick") or kind == "sectionReset" and metadata["section"] == "color"
+            if not self._wb_available and (kind in ("allReset", "wbAuto", "wbPick", "wbReset", "colorReset") or kind == "sectionReset" and metadata["section"] == "color"
                     or kind == "controlReset" and metadata["control"].startswith("wb.")):
                 raise LightCraftError("raw_wb_unavailable")
         return body

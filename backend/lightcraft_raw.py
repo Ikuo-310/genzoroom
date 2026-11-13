@@ -1689,7 +1689,7 @@ class LightCraftRawSession:
         before = photo.settings_json
         original = json.loads(before)
         disabled = original.get("disabled_sections", [])
-        needs_wb = (kind == "allReset" or kind == "sectionReset" and metadata["section"] == "color"
+        needs_wb = (kind in ("allReset", "colorReset", "wbReset") or kind == "sectionReset" and metadata["section"] == "color"
                     or kind == "controlReset" and metadata["control"].startswith("wb."))
         reset_to_as_shot = needs_wb and photo.wb_kelvin and photo.as_shot_wb is not None
         if kind == "vignetteStyle":
@@ -1705,6 +1705,43 @@ class LightCraftRawSession:
             commands = [("develop.sectionEnabled", metadata)]
         elif kind == "controlReset":
             commands = [("develop.wb", {"mode": "asShot"})] if reset_to_as_shot else [("develop.resetControl", metadata)]
+        elif kind in ("wbReset", "colorReset"):
+            expected = json.loads(before)
+            if kind == "colorReset":
+                patch = {"color": {}, "mixer": {}, "grading": {band: {} for band in ("shadows", "midtones", "highlights")}}
+                for control, spec in CONTROLS.items():
+                    if control.startswith(("color.", "mixer.", "grading.")):
+                        path = CONTROL_PATHS[control]
+                        target = patch
+                        for key in path[:-1]:
+                            target = target.setdefault(key, {})
+                        target[path[-1]] = spec[3]
+                        expected_parent, expected_key = control_location(expected, control)
+                        expected_parent[expected_key] = spec[3]
+                commands = [("develop.merge", {"settings": patch})]
+            else:
+                commands = []
+            if reset_to_as_shot:
+                commands.append(("develop.wb", {"mode": "asShot"}))
+                temp, tint = photo.as_shot_wb
+                expected["wb"].update(mode="asShot", temp=temp, tint=tint, scale="kelvin")
+            else:
+                for control in ("wb.temp", "wb.tint"):
+                    commands.append(("develop.resetControl", {"control": control}))
+                    parent, key = control_location(expected, control)
+                    parent[key] = CONTROLS[control][3]
+            # One API operation may use several Native commands, but a neutral state must not
+            # consume a Native edit or create a no-op History entry.
+            if kind == "wbReset":
+                expected = json.loads(before)
+                if reset_to_as_shot:
+                    expected["wb"].update(mode="asShot", temp=temp, tint=tint, scale="kelvin")
+                else:
+                    for control in ("wb.temp", "wb.tint"):
+                        parent, key = control_location(expected, control)
+                        parent[key] = CONTROLS[control][3]
+            if expected == original:
+                return self.confirmed_settings(handle, expected_revision)
         else:
             commands = [("develop.reset", {"ids": [photo.photo_id]})] if kind == "allReset" else [("develop.resetSection", metadata)]
             if reset_to_as_shot:
@@ -1770,6 +1807,23 @@ class LightCraftRawSession:
                     matches = actual == expected
                 if not matches:
                     raise LightCraftError("raw_operation_readback_mismatch")
+            elif kind in ("wbReset", "colorReset"):
+                expected = json.loads(before)
+                if kind == "colorReset":
+                    for control, spec in CONTROLS.items():
+                        if control.startswith(("color.", "mixer.", "grading.")):
+                            parent, key = control_location(expected, control)
+                            parent[key] = spec[3]
+                if reset_to_as_shot:
+                    temp, tint = photo.as_shot_wb
+                    expected["wb"].update(mode="asShot", temp=temp, tint=tint, scale="kelvin")
+                else:
+                    for control in ("wb.temp", "wb.tint"):
+                        parent, key = control_location(expected, control)
+                        parent[key] = CONTROLS[control][3]
+                if actual != expected:
+                    raise LightCraftError("raw_operation_readback_mismatch")
+                return
             elif kind == "sectionReset":
                 section = metadata["section"]
                 if section == "grading":

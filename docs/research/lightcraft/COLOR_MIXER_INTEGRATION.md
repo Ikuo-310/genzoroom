@@ -3,15 +3,19 @@
 調査日: 2026-11-14
 対象: GenzoRoom `main` (`eda9c20`)、Managed LightCraft v0.20.0
 
-## 実装到達点（P1-B1）
+## 実装到達点（P1-B2）
 
-更新日: 2026-11-14。P0調査時点の事実と区別し、ここではP1-A/P1-B1で確定したGenzoRoom側の統合仕様を記録する。P1-AはGenzoRoom commit `9c55bcd`を前提とする。P1-B1は8色×H/S/Lの既存Native数値controlをWindows Native UIへ接続し、専用Native編集経路やRecipe形式を追加しない。UIはRed、Orange、Yellow、Green、Aqua、Blue、Purple、Magentaの選択と、選択色のHue/Saturation/Luminanceスライダーを提供する。値の範囲は−100〜+100、step 1、初期値0、表示0桁。Native readback値は内部で丸めない。RAW／非RAWは既存の共通Windows Native Sessionを利用する。
+更新日: 2026-11-14。P0調査時点の事実、P1-B1時点の暫定UI、P1-B2で確定した実装を区別する。P1-AはGenzoRoom commit `9c55bcd`、P1-B1は親 commit `0b89865`を前提とする。P1-B2はこの作業で追加されるカラーUI再編とReset契約である。
 
-Windows Nativeカテゴリは「基本補正→カラー→カーブ→エフェクト→ディテール」の順に並ぶ。P1-B1では既存の独立カラーグレーディングカテゴリを末尾に一時維持する。カラー内はWB、自然な彩度、彩度、カラーミキサーの順。Mixerは初期折り畳みで、開閉と選択色は画面内のUI状態であり、RecipeやHistoryを変更しない。Color sectionがOFFならMixerの編集と専用Resetを無効化する。Mixerに独立ON/OFFはない。専用ResetはNative `resetSection(mixer)`を使い、Mixer 24項目だけを1回のHistory操作で初期化する。個別スライダーResetは0へ戻す。Mixer以外のカラー設定には触れない。
+Windows Nativeカテゴリは「基本補正→カラー→カーブ→エフェクト→ディテール」の5つで、独立したGradingカテゴリはない。Color内はWB状態と操作、温度・色かぶり補正、自然な彩度、彩度、折り畳みMixer、折り畳みColor Gradingの順。Mixer／Gradingは初期折り畳みであり、展開状態・Mixer選択色・Grading帯選択はUIローカル状態で、設定・Recipe・Historyを変更しない。WB行の操作順は状態表示、AW、スポイト、WB Reset。WB Resetは明示的な1 History操作で、RAWは取得済みAs Shot値へ戻し、legacy WBを使う非RAWはNativeの数値既定値(temp 6500, tint 0)へ戻して相対表示0/0にする。AW／スポイトの実行条件は既存どおり。
 
-P1-B2で行う未実装の設計決定: 最終カテゴリは上記5カテゴリのみとし、カラー内をWB・自然な彩度・彩度、折り畳みMixer、将来実装するポイントカラー、折り畳みカラーグレーディングの順にする。未実装のポイントカラーは空表示しない。親Color ResetはGenzoRoomの複合操作として1件のHistoryにまとめ、RAW WBはAs Shot、非RAW WBは相対色温度0・相対色かぶり補正0、自然な彩度・彩度・Mixer 24項目・カラーグレーディング全項目を初期化する。将来のポイントカラーも実装後に対象へ加える。Native `resetSection(color)`単独の意味は変更しない。これらの移動と親ResetはP1-B2で実装する。P2のH/S/Lターゲット調整も未実装であり、Native readbackが示す複数色帯の変更を一回のHistory操作へ反映する。既存の共通`ViewerPointLoupe`を再利用する。
+親Color Resetは`colorReset`としてGenzoRoomの1 History操作にまとめ、WB・vibrance・saturation・Mixer 24項目・公開中のGrading 11項目を既定値へ戻す。WB Resetと同じNative WB初期化手順を共有し、RAWはAs Shot、非RAWはtemp 6500/tint 0でlegacy相対表示0/0とする。Mixer／GradingはNative readbackを照合し、未公開の`grading.global.*`やその他設定は維持する。親ResetではNative `resetSection(color)`の意味を変更せず、Mixer／Gradingの数値とWBのみを限定したNative更新で扱う。Grading固有のsection ON/OFF UIと操作は撤去し、Mixer／Grading／将来のPoint Colorに独立ON/OFFを置かない。Native v0.20.0では親`color` sectionがカラー処理全体（WB、Mixer、Grading、Point Colorを含む）を描画から除外する。Recipe/History内の既存`disabled_sections`に`grading`があっても消去・書換えせず、Recipe復元・Undo/Redoでその保存値を保持する。
 
-P1-B1の確認対象はFrontendのカテゴリ・スウォッチ・スライダー・折り畳み・History境界と、BackendのMixer section Reset・Undo/Redo・Recipe復元である。LightCraft上流、managed patch、Native実行ファイル、SQLite schema、保存済みRecipe/History/receiptは変更しない。モノクロB&W Mix、ポイントカラー、ターゲットモードは今回の実装対象外。P1・P2の基本仕様にmanaged patch追加は不要である。過去LightCraftバージョンの記録は現在のNative契約として扱わない。
+P1-B2の実装到達点は、5カテゴリ配置、カラー内にWB操作と折り畳みMixer／Grading、WB専用Reset・親Color Resetを統合したこと。既存のNative数値コントロール、Recipe形式、History append／Undo／Redo、Preview、Export経路を再利用する。変更した操作契約は本節とarchitectureに記載し、以下のP0調査結果は調査時点の記録として残す。次段階はP1-C（将来Point Color）とP2（ターゲットH/S/L調整）であり、どちらもP1-B2の対象外。
+
+**将来検討：カラーサブカテゴリ独立ON/OFF。** 親Color OFFではWB・vibrance・saturation・Mixer・Gradingがまとめて描画対象外になるため、WB調整を保ったままMixer／Gradingの効果だけを比較できないケースがある。将来Mixer、Grading、Point Colorごとに独立ON/OFFを設ける案を検討する。第一候補は元の設定値を維持し、Preview／Exportに渡す設定のみ対象サブカテゴリを中立化する方式。managed patch追加を避けGenzoRoom側で実現することを優先するが、実装方式・保存形式・History境界は未決定であり、LightCraft契約とRecipe／Export経路を調査してから判断する。P1-B2では実装しない。
+
+P1-B2 focused testでは5カテゴリ、WB操作位置とWB Reset／親Color Reset要求、折り畳みGrading、Grading toggle UI撤去、既定値／履歴表示、RAW／legacy非RAWのReset・History・Undo/Redo・旧`grading` bypass値保持を確認する。LightCraft上流、managed patch、Native実行ファイル、SQLite schema、保存済みRecipe/History/receiptは変更しない。モノクロB&W Mix、Point Color、ターゲットモードは今回の実装対象外。P1・P2の確認済み基本仕様にmanaged patch追加は不要である。過去LightCraftバージョンの記録は現在のNative契約として扱わない。
 
 P1-B1検証結果: `AnshitsuRawPreview.test.tsx` 132件、Mixer/ColorのBackend reset・History統合3件とLightCraft Native adapter test 76件が成功。`npm run build`でTypeScript checkと本番buildが成功し、既存bundle-sizeとReact Router directiveの警告が出た。Backendのloopback統合テストはWindows asyncio socketpairのsandbox制約によりsandbox外で実行した。LightCraft Desktop実機での目視確認は未実施。
 

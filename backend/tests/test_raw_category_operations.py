@@ -5,6 +5,7 @@ import copy
 import pytest
 
 import raw_recipe_store as store
+from raw_controls import CONTROLS, control_location
 from edit_store import StoreUnavailable
 from tests.test_windows_local import local, client, authenticate
 from tests.test_windows_raw_api import setup, open_document, preview_body
@@ -363,6 +364,104 @@ def test_failed_reset_does_not_commit_and_retry_preserves_intent(local, tmp_path
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("kind,raw_wb", [("wbReset", True), ("wbReset", False),
+    ("colorReset", True), ("colorReset", False)])
+def test_wb_and_color_reset_use_one_history_step_and_restore_exact_scope(local, tmp_path, monkeypatch, kind, raw_wb):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        child = children[0]
+        child.as_shot_wb = [4875., 13.] if raw_wb else None
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                _, doc = await open_document(http)
+                legacy_settings = {"disabled_sections": ["grading"]}
+                if not raw_wb:
+                    legacy_settings["wb"] = {"scale": "legacy"}
+                await api.raw.merge_settings(api._raw_handle, legacy_settings, doc["revision"])
+                identity_body = {key: doc[key] for key in ("workspaceId", "generation", "documentToken")}
+                doc = (await http.post(f'/api/raw/documents/{doc["handle"]}/settings', json=identity_body)).json()
+                doc = await operation(http, doc, "initialize")
+                doc = await edit(http, doc, "sectionToggle", {"section": "color", "enabled": False})
+                assert store.get_raw_history(api._history_identity)["recipe"]["settings"]["disabled_sections"] == ["grading", "color"]
+                doc = await edit(http, doc, "sectionToggle", {"section": "color", "enabled": True})
+                assert store.get_raw_history(api._history_identity)["recipe"]["settings"]["disabled_sections"] == ["grading"]
+                values = {"wb.temp": 11000., "wb.tint": 26., "light.exposure": 1.25,
+                    "color.vibrance": 31., "color.saturation": -17., "mixer.red.hue": 24.,
+                    "mixer.blue.sat": -37., "grading.shadows.hue": 120., "grading.midtones.lum": -22.,
+                    "grading.highlights.sat": 45., "grading.blending": 63., "grading.balance": -15.}
+                doc = await patch(http, doc, values)
+                doc = await operation(http, doc, "commit", body(doc) | {"kind": "control", "metadata": {"control": "mixer.red.hue"}})
+                before_settings = copy.deepcopy(store.get_raw_history(api._history_identity)["recipe"]["settings"])
+                before_length = doc["history"]["length"]
+                reset = await edit(http, doc, kind, {})
+                assert reset["history"]["length"] == before_length + 1
+                saved = store.get_raw_history(api._history_identity)
+                after = saved["recipe"]["settings"]
+                expected = copy.deepcopy(before_settings)
+                if kind == "colorReset":
+                    for control, spec in CONTROLS.items():
+                        if control.startswith(("color.", "mixer.", "grading.")):
+                                group, key = control_location(expected, control)
+                                group[key] = spec[3]
+                if raw_wb:
+                    expected["wb"].update(mode="asShot", temp=4875., tint=13., scale="kelvin")
+                    assert reset["wb"] == {"available": True, "mode": "asShot", "scale": "kelvin"}
+                else:
+                    expected["wb"]["temp"], expected["wb"]["tint"] = 6500., 0.
+                    assert reset["wb"]["scale"] == "legacy"
+                    assert (reset["values"]["wb.temp"], reset["values"]["wb.tint"]) == (6500., 0.)
+                assert after == expected
+                step = (await http.get(url(reset), headers=headers(reset))).json()["steps"][-1]
+                changed_controls = {control for control in CONTROLS
+                    if control.startswith(("wb.", "color.", "mixer.", "grading."))
+                    and control_location(before_settings, control)[0][control_location(before_settings, control)[1]]
+                    != control_location(expected, control)[0][control_location(expected, control)[1]]}
+                assert {change["control"] for change in step["changes"]} == changed_controls
+                assert after["light"]["exposure"] == before_settings["light"]["exposure"]
+                assert after["disabled_sections"] == before_settings["disabled_sections"]
+                undo = await operation(http, reset, "undo")
+                assert store.get_raw_history(api._history_identity)["recipe"]["settings"] == before_settings
+                redo = await operation(http, undo, "redo")
+                assert store.get_raw_history(api._history_identity)["recipe"]["settings"] == expected
+                length = redo["history"]["length"]
+                noop = await edit(http, redo, kind, {})
+                assert noop["history"]["length"] == length and noop["ack"]["changed"] is False
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("kind", ["wbReset", "colorReset"])
+def test_color_reset_failure_rolls_back_and_retries_the_same_operation(local, tmp_path, monkeypatch, kind):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        child = children[0]
+        child.as_shot_wb = [4875., 13.]
+        try:
+            async with client(local) as http:
+                doc = await open_history(http, local, api)
+                doc = await patch(http, doc, {"wb.temp": 11000., "wb.tint": 26., "color.vibrance": 35.,
+                    "mixer.red.hue": 20., "grading.shadows.hue": 120.})
+                doc = await operation(http, doc, "commit", body(doc) | {"kind": "control", "metadata": {"control": "mixer.red.hue"}})
+                before_history = store.get_raw_history(api._history_identity)
+                before_native = copy.deepcopy(child.photos[child.active]["settings"])
+                request = body(doc) | {"kind": kind, "metadata": {}}
+                child.fail_commands = {"develop.wb"}
+                failed = await http.post(url(doc, "operate"), json=request)
+                assert failed.status_code >= 500
+                assert store.get_raw_history(api._history_identity) == before_history
+                assert child.photos[child.active]["settings"] == before_native
+                assert api.raw.status().state == "synced"
+                child.fail_commands.clear()
+                retried = await operation(http, doc, "operate", request)
+                assert retried["history"]["length"] == doc["history"]["length"] + 1
+                assert retried["history"]["selectedStepId"] == retried["ack"]["stepId"]
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
 def test_reset_noop_retains_redo_and_budget_is_per_native_command(local, tmp_path, monkeypatch):
     async def run():
         api, _, children, _ = await setup(tmp_path, local, monkeypatch)
@@ -487,9 +586,9 @@ def test_full_history_page_with_repeated_all_reset_deltas_stays_bounded(local, t
                     doc = await edit(http, doc, "allReset", {})
                 response = await http.get(url(doc), headers=headers(doc))
                 assert response.status_code == 200 and len(response.content) <= 256 * 1024
-                print(f'History 20 steps / 36 controls: {len(response.content)} bytes; full-precision ack: {ack_bytes} bytes')
+                print(f'History 20 steps / 60 controls: {len(response.content)} bytes; full-precision ack: {ack_bytes} bytes')
                 steps = response.json()["steps"]
-                assert len(steps) == 20 and all(len(step["changes"]) == 36 for step in steps[1::2])
+                assert len(steps) == 20 and all(len(step["changes"]) == 60 for step in steps[1::2])
         finally:
             await api.close()
     asyncio.run(run())

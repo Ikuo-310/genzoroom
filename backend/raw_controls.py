@@ -344,6 +344,7 @@ def validate_history_operation(kind, metadata):
              and type(metadata["channel"]) is str and metadata["channel"] in CURVE_CHANNELS
              or kind == "curveReset" and set(metadata) == {"channel"}
              and type(metadata["channel"]) is str and metadata["channel"] in (*CURVE_CHANNELS, "point")
+             or kind in ("colorReset", "wbReset") and not metadata
              or kind in ("allReset", "wbAuto", "wbPick") and not metadata)
     if not valid:
         raise LightCraftError("raw_invalid_request")

@@ -50,7 +50,7 @@ GenzoRoom does not directly modify or delete the original image files.
 ### 〇 Develop Workspace 〇
 
 Send photos selected in the Gallery to Develop to adjust exposure and color.  
-The Docker edition develops JPEG images with its existing WebGPU / CPU pipeline and does not support RAW development. The Windows Desktop build is in development and validation and uses LightCraft Native for RAW and Native-accepted JPEG and other images. Windows adds Native Preview, Recipe and History, rendered thumbnails, and JPEG Export, including RAW Crop / Straighten, Lens Corrections, Point Curve, White Balance sampling, and Color Grading. Windows editing data is stored separately from the Docker database; Windows is not yet offered as a stable general-purpose installer.
+The Docker edition develops JPEG images with its existing WebGPU / CPU pipeline and does not support RAW development. The Windows Desktop build is in development and validation and uses LightCraft Native for RAW and Native-accepted JPEG and other images. Windows adds Native Preview, Recipe and History, rendered thumbnails, and JPEG Export, including RAW Crop / Straighten, Lens Corrections, Point Curve, White Balance sampling, an eight-color HSL Color Mixer, and Color Grading inside the Color category. Windows editing data is stored separately from the Docker database; Windows is not yet offered as a stable general-purpose installer.
 
 Develop is designed around keyboard shortcuts to minimize mouse interaction.  
 When working with multiple photos, you can switch between them using the filmstrip.
@@ -100,8 +100,8 @@ For better performance with demanding images, you can switch to the lower-resolu
 | --- | --- |
 | White Balance | Temperature (relative adjustment for JPEG images), Tint |
 | Basic | Exposure, Contrast, Highlights, Whites, Shadows, Blacks |
-| Color | Vibrance, Saturation |
-| Color Grading | Separate Temperature and Tint adjustments for Shadows, Midtones, and Highlights |
+| Color | Vibrance, Saturation; Windows Native adds Hue, Saturation, and Luminance controls for eight color bands |
+| Color Grading | Docker uses separate Temperature and Tint adjustments for Shadows, Midtones, and Highlights; Windows Native uses Hue, Saturation, and Luminance controls in the Color category |
 
 ### 〇 Export Management 〇
 

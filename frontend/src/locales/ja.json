@@ -388,6 +388,9 @@
       "actionsUnavailable": "この現像機能は準備中です",
       "wbUnavailable": "この画像のWB能力を確認できないため、WBを操作できません。",
       "wbResetAsShot": "色温度と色かぶり補正の両方を撮影時のWBへ戻す",
+      "wbReset": "色温度と色かぶり補正をリセット",
+      "colorReset": "カラー全体をリセット",
+      "gradingReset": "カラーグレーディングをリセット",
       "colorCategory": "カラー",
       "mixer": {
         "title": "カラーミキサー", "reset": "カラーミキサーをリセット", "colorsLabel": "カラーミキサーの色",
