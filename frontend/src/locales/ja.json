@@ -444,6 +444,7 @@
       "noiseReduction": "ノイズリダクション",
       "colorNoiseReduction": "カラーノイズリダクション",
       "lensCorrections": "レンズ補正",
+      "cameraLocalTone": "カメラのローカルトーンマッピング",
       "disableLensCorrections": "レンズ補正を無効にする",
       "enableLensCorrections": "レンズ補正を有効にする",
       "removeChromaticAberration": "色収差を除去",

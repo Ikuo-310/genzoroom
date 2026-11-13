@@ -18,7 +18,7 @@ export function rawSettings(doc: RawDocument): RawSettings {
     recipeRevision: doc.recipeRevision ?? 0, recipeFingerprint: doc.recipeFingerprint ?? null,
     importDefaultsFingerprint: doc.importDefaultsFingerprint ?? 'b'.repeat(64),
     mutationAttempts: 0, mutationLimit: 256, regenerationThreshold: 200,
-    process: 2, vignetteStyle: 'highlightPriority', opticsFlags: { remove_ca: false, lens_profile: false },
+    process: 2, vignetteStyle: 'highlightPriority', opticsFlags: { remove_ca: false, lens_profile: false }, cameraLocalTone: false,
     lensProfileInfo: { cameraMake: null, cameraModel: null, lensMake: null, lensModel: null, lensId: null,
       profileAvailable: null, profileSource: 'unknown', profileName: null, profileApplied: false },
     wbAutoAvailable: true, wb: { available: true, mode: 'asShot', scale: 'kelvin' }, sections: { light: true, color: true, grading: true, effects: true, detail: true, optics: true },

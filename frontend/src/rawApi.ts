@@ -41,8 +41,8 @@ export const RAW_SETTINGS_CONTROL_IDS = [...RAW_CONTROL_IDS,
 export const RAW_HISTORY_CONTROL_IDS = RAW_SETTINGS_CONTROL_IDS;
 export type RawHistoryControlId = typeof RAW_HISTORY_CONTROL_IDS[number];
 export type RawSettingControlId = RawHistoryControlId;
-export type RawOpticsFlagId = 'optics.remove_ca' | 'optics.lens_profile';
-export const RAW_OPTICS_FLAG_IDS: readonly RawOpticsFlagId[] = ['optics.remove_ca', 'optics.lens_profile'];
+export type RawOpticsFlagId = 'optics.remove_ca' | 'optics.lens_profile' | 'profile.camera_local_tone';
+export const RAW_OPTICS_FLAG_IDS: readonly RawOpticsFlagId[] = ['optics.remove_ca', 'optics.lens_profile', 'profile.camera_local_tone'];
 export const RAW_SECTION_IDS = ['light', 'color', 'grading', 'effects', 'detail', 'optics'] as const;
 export type RawSectionId = typeof RAW_SECTION_IDS[number];
 export const RAW_SETTINGS_SECTION_IDS = RAW_SECTION_IDS;
@@ -83,7 +83,7 @@ export type RawSettings = RawDocument & { settingsFingerprint: string; recipeRev
   recipeRecoveryPending?: boolean;
   sections: Record<RawSettingsSectionId, boolean>;
   mutationAttempts: number; mutationLimit: number; regenerationThreshold: number;
-  values: RawValues; opticsFlags: { remove_ca: boolean; lens_profile: boolean }; lensProfileInfo: RawLensProfileInfo;
+  values: RawValues; opticsFlags: { remove_ca: boolean; lens_profile: boolean }; cameraLocalTone: boolean; lensProfileInfo: RawLensProfileInfo;
   vignetteStyle: RawVignetteStyle; process: number; wbAutoAvailable?: boolean;
   controls: { id: RawSettingControlId; min: number; max: number; step: number; default: number; precision: number }[];
   wb: { available: boolean; mode: string; scale: string } };
@@ -352,6 +352,7 @@ function settings(value: RawSettings, doc: RawDocument): RawSettings {
     || typeof value.wb.mode !== 'string' || value.wb.mode.length > 32 || typeof value.wb.scale !== 'string' || value.wb.scale.length > 32
     || value.wbAutoAvailable !== undefined && typeof value.wbAutoAvailable !== 'boolean'
     || !value.opticsFlags || typeof value.opticsFlags.remove_ca !== 'boolean' || typeof value.opticsFlags.lens_profile !== 'boolean'
+    || typeof value.cameraLocalTone !== 'boolean'
     || !validRawLensProfileInfo(value.lensProfileInfo)
     || !RAW_VIGNETTE_STYLES.includes(value.vignetteStyle)
     || !value.sections || !RAW_SETTINGS_SECTION_IDS.every(section => typeof value.sections[section] === 'boolean')

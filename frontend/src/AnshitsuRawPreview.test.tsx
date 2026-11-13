@@ -104,6 +104,7 @@ function thumbnailPosts() {
 
 it('routes a non-RAW asset through Native without fetching or rendering the legacy JPEG original', async () => {
   await mount(jpeg.id);
+  expect(host.querySelector('.raw-camera-local-tone input')).not.toBeNull();
   expect(vi.mocked(rawApi.openRawDocument)).toHaveBeenCalledWith('workspace', jpeg.id);
   expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes(`/assets/${jpeg.id}/original`))).toBe(false);
   expect(host.querySelector('[data-jpeg-renderer]')).toBeNull();
@@ -168,6 +169,7 @@ it('keeps the Viewer empty while development policy is still loading', async () 
 it('keeps the Docker JPEG path on the legacy edit state and renderer', async () => {
   developmentPolicy.engine = 'jpeg';
   await mount(jpeg.id);
+  expect(host.querySelector('.raw-camera-local-tone input')).toBeNull();
   expect(vi.mocked(rawApi.openRawDocument)).not.toHaveBeenCalled();
   expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes(`/assets/${jpeg.id}/original`))).toBe(true);
   expect(host.querySelector('[data-jpeg-renderer]')).not.toBeNull();
@@ -277,7 +279,7 @@ it('binds engine control specs to shared sliders and commits RAW values without 
   }); await flush();
   expect(rawApi.setRawControls).toHaveBeenCalledWith(expect.objectContaining({ revision: 1 }), { 'light.exposure': 1.25 });
   expect(rawApi.rawPreview).toHaveBeenCalledTimes(2); expect(adjusted).not.toHaveBeenCalled();
-  expect(number.value).toBe('1.25'); expect(host.textContent).toContain('Development recipes are autosaved');
+  expect(number.value).toBe('1.25'); expect(host.textContent).not.toContain('Development recipes are autosaved');
 });
 it('places all RAW optics controls after NR, uses readback History flags and preserves independent sections', async () => {
   vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => doc.assetId !== base.id ? rawSettings(doc) : ({ ...rawSettings(doc),
@@ -292,16 +294,32 @@ it('places all RAW optics controls after NR, uses readback History flags and pre
         profileAvailable: true, profileSource: 'database' as const, profileName: 'Example Lens Profile', profileApplied: false } };
     if (request.operation?.kind === 'opticsFlag') {
       const { control, enabled } = request.operation.metadata;
-      next.opticsFlags = { ...next.opticsFlags, [control === 'optics.lens_profile' ? 'lens_profile' : 'remove_ca']: enabled };
+      if (control === 'profile.camera_local_tone') next.cameraLocalTone = enabled;
+      else next.opticsFlags = { ...next.opticsFlags, [control === 'optics.lens_profile' ? 'lens_profile' : 'remove_ca']: enabled };
     }
     if (request.operation?.kind === 'sectionToggle') next.sections[request.operation.metadata.section] = request.operation.metadata.enabled;
     if (request.operation?.kind === 'sectionReset' && request.operation.metadata.section === 'optics') {
       next.sections.optics = true;
       next.opticsFlags = { remove_ca: false, lens_profile: false };
     }
+    if (request.operation?.kind === 'allReset') next.cameraLocalTone = false;
     return rawHistoryResult({ ...request, doc: next });
   });
   await mount();
+  const cameraLocalTone = host.querySelector<HTMLInputElement>('.raw-camera-local-tone input')!;
+  expect(cameraLocalTone.checked).toBe(false);
+  expect(cameraLocalTone.disabled).toBe(false);
+  expect(host.querySelector('.raw-camera-local-tone')?.nextElementSibling?.classList.contains('raw-adjustment-category')).toBe(true);
+  act(() => cameraLocalTone.click()); await flush();
+  expect(commitHistory).toHaveBeenLastCalledWith(expect.objectContaining({ operation: {
+    kind: 'opticsFlag', metadata: { control: 'profile.camera_local_tone', enabled: true } } }));
+  expect(host.querySelector<HTMLInputElement>('.raw-camera-local-tone input')!.checked).toBe(true);
+  act(() => host.querySelector<HTMLInputElement>('.raw-camera-local-tone input')!.click()); await flush();
+  expect(commitHistory).toHaveBeenLastCalledWith(expect.objectContaining({ operation: {
+    kind: 'opticsFlag', metadata: { control: 'profile.camera_local_tone', enabled: false } } }));
+  expect(host.querySelector<HTMLInputElement>('.raw-camera-local-tone input')!.checked).toBe(false);
+  act(() => host.querySelector<HTMLInputElement>('.raw-camera-local-tone input')!.click()); await flush();
+  expect(host.querySelector<HTMLInputElement>('.raw-camera-local-tone input')!.checked).toBe(true);
   const category = host.querySelectorAll('.raw-adjustment-category')[5];
   const titles = [...category.querySelectorAll('.raw-detail-controls h4')].map(item => item.textContent);
   expect(titles.slice(-2)).toEqual(['Noise Reduction', 'Color Noise Reduction']);
@@ -400,6 +418,12 @@ it('places all RAW optics controls after NR, uses readback History flags and pre
   act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[0].click()); await flush();
   expect(host.querySelector('.raw-optics-panel')).not.toBeNull();
   expect(host.querySelector('.raw-optics-panel')?.textContent).toContain('Example Lens Profile');
+  expect(host.querySelector<HTMLInputElement>('.raw-camera-local-tone input')!.checked).toBe(false);
+  act(() => host.querySelector<HTMLInputElement>('.raw-camera-local-tone input')!.click()); await flush();
+  expect(host.querySelector<HTMLInputElement>('.raw-camera-local-tone input')!.checked).toBe(true);
+  act(() => host.querySelector<HTMLButtonElement>('.develop-panel .workspace-section-action')!.click()); await flush();
+  expect(commitHistory).toHaveBeenLastCalledWith(expect.objectContaining({ operation: { kind: 'allReset', metadata: {} } }));
+  expect(host.querySelector<HTMLInputElement>('.raw-camera-local-tone input')!.checked).toBe(false);
 });
 it.each([
   { source: 'unknown' as const, available: null, applied: null, label: 'Profile information is unavailable', disabled: false },

@@ -61,7 +61,13 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
     if (event.target instanceof Element && event.target.closest('.adjustment-reset, .adjustment-category-actions button, .raw-adjustment-subsection-header button, .raw-vignette-mode label, .raw-grading-band label'))
       preserveAdjustmentNumberFocus(event);
   }}>
-    <p className="edit-source-note">{t('workspace.rawPreview.temporary')}</p>
+    <label className="raw-optics-flag raw-camera-local-tone">
+      <input type="checkbox" checked={settings?.cameraLocalTone ?? false} disabled={actionsLocked}
+        onChange={event => operate({ kind: 'opticsFlag', metadata: {
+          control: 'profile.camera_local_tone', enabled: event.currentTarget.checked,
+        } })} />
+      <span>{t('workspace.rawPreview.cameraLocalTone')}</span>
+    </label>
     {settings && bindings.map(({ category, controls, ids }) => <RawCategory key={category} category={category}
       enabled={category === 'curves' || settings.sections[sections[category]]} disabled={actionsLocked}
       resetDisabled={actionsLocked || category === 'color' && !settings.wb.available}

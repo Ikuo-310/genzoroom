@@ -71,10 +71,12 @@ const formatters: Record<RawHistoryControlId, (value: number) => string> = {
   'optics.caBlue': value => value.toFixed(0) };
 const flagLabels: Record<RawOpticsFlagId, string> = {
   'optics.remove_ca': 'rawPreview.removeChromaticAberration', 'optics.lens_profile': 'rawPreview.enableProfileCorrections',
+  'profile.camera_local_tone': 'rawPreview.cameraLocalTone',
 };
 const flagResetLabels: Record<RawOpticsFlagId, string> = {
   'optics.remove_ca': 'workspace.rawPreview.removeChromaticAberrationReset',
   'optics.lens_profile': 'workspace.rawPreview.enableProfileCorrectionsReset',
+  'profile.camera_local_tone': 'workspace.rawPreview.cameraLocalTone',
 };
 
 function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t'], wbScale: string) {

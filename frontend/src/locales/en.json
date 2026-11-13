@@ -453,6 +453,7 @@
       "noiseReduction": "Noise Reduction",
       "colorNoiseReduction": "Color Noise Reduction",
       "lensCorrections": "Lens Corrections",
+      "cameraLocalTone": "Camera Local Tone Mapping",
       "disableLensCorrections": "Disable Lens Corrections",
       "enableLensCorrections": "Enable Lens Corrections",
       "removeChromaticAberration": "Remove Chromatic Aberration",

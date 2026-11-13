@@ -943,7 +943,6 @@ export function AnshitsuPage() {
               onReset={() => dispatch({ type: 'colorGradingReset' })}>
               <ColorGradingAdjustmentControls assetId={assetId} recipe={session.recipe} dispatch={dispatch} onOpenContextMenu={openSliderMenu} onOpenRangeMenu={openRangeMenu} />
             </AdjustmentCategory>
-            <p className="edit-source-note">{t('workspace.previewEditingNote')}</p>
           </> : canEdit ? <div role="status" className={loadStatus === 'error' ? 'error-text' : undefined}>
             <p>{t(loadStatus === 'error' ? 'workspace.editStateLoadFailed' : 'workspace.editStateLoading')}</p>
             {loadStatus === 'error' && <button type="button" className="tool-button" onClick={retryLoad}>{t('workspace.retry')}</button>}

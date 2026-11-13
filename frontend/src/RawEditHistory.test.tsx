@@ -225,6 +225,10 @@ it.each(['ja', 'en'])('uses registered Optics labels for controls, resets, flags
       changes: [], flagChanges: [{ control: 'optics.remove_ca', before: true, after: false }] },
     { stepId: 'lens-profile-reset', kind: 'opticsFlagReset', metadata: { control: 'optics.lens_profile' }, createdAt: '',
       changes: [], flagChanges: [{ control: 'optics.lens_profile', before: true, after: false }] },
+    { stepId: 'camera-local-tone-on', kind: 'opticsFlag', metadata: { control: 'profile.camera_local_tone', enabled: true }, createdAt: '',
+      changes: [], flagChanges: [{ control: 'profile.camera_local_tone', before: false, after: true }] },
+    { stepId: 'camera-local-tone-off', kind: 'opticsFlag', metadata: { control: 'profile.camera_local_tone', enabled: false }, createdAt: '',
+      changes: [], flagChanges: [{ control: 'profile.camera_local_tone', before: true, after: false }] },
     { stepId: 'section-off', kind: 'sectionToggle', metadata: { section: 'optics', enabled: false }, createdAt: '', changes: [] },
     { stepId: 'section-reset', kind: 'sectionReset', metadata: { section: 'optics' }, createdAt: '', changes: [
       { control: 'optics.distortion', before: 1, after: 0 }, { control: 'optics.caRed', before: 2, after: 0 },
@@ -238,9 +242,11 @@ it.each(['ja', 'en'])('uses registered Optics labels for controls, resets, flags
   }
   for (const label of language === 'ja'
     ? ['色収差を除去 OFF → ON', 'レンズ補正を有効にする ON → OFF', '色収差除去をリセット ON → OFF',
-      'レンズ補正をリセット ON → OFF', 'レンズ補正 OFF', 'レンズ補正をリセット:']
+      'レンズ補正をリセット ON → OFF', 'レンズ補正 OFF', 'レンズ補正をリセット:',
+      'カメラのローカルトーンマッピング OFF → ON', 'カメラのローカルトーンマッピング ON → OFF']
     : ['Remove Chromatic Aberration OFF → ON', 'Enable Profile Corrections ON → OFF', 'Reset chromatic aberration removal ON → OFF',
-      'Reset profile corrections ON → OFF', 'Lens Corrections OFF', 'Reset lens corrections:']) expect(markup).toContain(label);
+      'Reset profile corrections ON → OFF', 'Lens Corrections OFF', 'Reset lens corrections:',
+      'Camera Local Tone Mapping OFF → ON', 'Camera Local Tone Mapping ON → OFF']) expect(markup).toContain(label);
   expect(markup).not.toContain('rawPreview.opticsControls');
   expect(markup).not.toContain('workspace.');
 });
