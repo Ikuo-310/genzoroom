@@ -6,6 +6,18 @@ Internal changes are omitted unless they affect users.
 
 ## [Unreleased]
 
+### Changed
+
+- Windows Desktop (development/validation) now uses LightCraft v0.20.0 as the shared Native engine for RAW and Native-accepted non-RAW originals. Docker remains on its separate JPEG WebGPU/CPU path, and the two editions keep independent editing databases.
+- Windows Desktop Recipes use the current Native engine identity. An incompatible older Recipe is retained and is not applied; the darkroom can open from Native import defaults, and the first confirmed edit establishes a current-identity Recipe. No bulk Recipe migration is performed.
+- Windows Desktop Native Detail Reset and complete Recipe/History restoration preserve `nr_outliers=false` for RAW images even when Native JSON omits the false field. Partial updates keep their omitted-field behavior.
+- Windows Desktop rendered thumbnails and JPEG Export restore saved Native settings in independent Native sessions and continue through the existing Export Queue and Immich registration flow. Export creates a JPEG and does not modify the original.
+
+### Known limitations
+
+- Windows Desktop remains in development and validation; this migration does not introduce a stable general-purpose Windows installer. LightCraft decides which image originals it can read, and unsupported originals do not fall back to the Docker JPEG engine.
+- Developer RAW Preview Diagnostics still has legacy expectations for execution and StageCache metadata that the current Native preview response does not provide. This affects diagnostic reporting and its related tests, not ordinary Preview rendering.
+
 ## [0.3.0] - 2026-11-09
 
 ### Added

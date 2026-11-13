@@ -1,8 +1,26 @@
 # GenzoRoom / LightCraft v0.20.0 接続境界・依存度監査
 
+## P6-C最終状態（2026-11-13）
+
+この監査の初版は2026-11-12時点の記録であり、以下の当時の優先順位・未実施項目は後続工程により一部解消されている。P6-C開始時点では`origin/main`に対しfeature branchが33 commits ahead、変更55 filesで、behindは0。H1は修正済みで、P4-C、P5、P6-Aの検証記録を参照。P6-BはユーザーがWindows GUIで一巡したとの報告があり、報告範囲で問題なし。Crop「すべてリセット」はCrop／Aspect／Straighten／Flipを戻し、90° rotationを維持する期待動作だった。これは限定的な手動報告であり網羅的な受入証跡ではない。
+
+| Finding | 最終状態 | 統合判断 |
+|---|---|---|
+| H1 | 修正済み。完全snapshot送信、Reset readback、Recipe／History／Thumbnail／Exportを後続工程で確認。 | 解消。保存形式・fingerprint・receiptは維持。 |
+| M1 | Native snapshotとUI fallbackの混在、Curve等のknown-key制約は残る。 | 保守課題。現在の受入を止めない。 |
+| M2 | 写真別Optics baselineとH1 false比較は修正済み。Reset経路の全settings予測比較は残る。 | 保守課題。個別の誤拒否が再現した場合に絞って扱う。 |
+| M3 | 完全snapshot wire変換／comparisonは`raw_controls` helperを編集・Exportが共有。Export process自体は独立し、P5-B2で実Native確認済み。 | 当初の復元差分リスクはH1について解消。communication／session構造の共通化は不要。 |
+| M4 | `Rendered.frame`とGeometry descriptor／Region planのmanaged patch依存が残る。P6-A clean buildと代表MCP probeは成功。 | 更新時の重点追従点。標準同等APIを確認せずに削除しない。 |
+| M5 | 暫定Crop表示とWB／target座標adapterの範囲リスクが残る。P6-Bの限定GUI報告にずれの申告なし。 | 全Warp／全組合せの正確性を保証しないが、現状で再現不具合なし。 |
+| M6 | RAW Diagnosticsは旧metadata前提のテスト4件が失敗（`metrics.execution`／`metrics.stageCache`欠落）。 | Developer診断の未解決事項。通常Preview／編集の受入を止める障害ではない。別工程で診断契約を整理する。 |
+
+P6-Cのfocused実行ではLightCraft runtime／artifact **65 passed**、settings／Recipe／History／Geometry／Export／Thumbnail／Queue／Immichを含む選定Backend群全体で**858 passed**。Frontend TypeScript checkとproduction buildも成功。`test_raw_diagnostics.py`は**14 passed／4 failed**。失敗は3 parametrized execution metadata checksと1 StageCache metadata checkで、現Native frame metricsに旧keyが存在しないことが原因。M6は対象外の診断不整合として残し、Preview本体に失敗を示す結果ではない。固定upstream、managed patch、manifest／EXE／receiptのP6-A整合性は確認済み。P6-Bの報告にあったCrop全リセット挙動は仕様どおりとして記録する。Full Backend／Frontend suiteは未実施。
+
+P6-Cで文書記録を揃えた後のbranchはmain未統合であり、`origin/main`へのmerge／pushは行わない。M6を含む既知の限定事項をmerge記録へ明示したうえで、他の受入経路はmain統合前提を満たす状態と判断する。M1〜M6を一括リファクタリングする必要はない。
+
 監査日：2026-11-12（Asia/Tokyo）。基準：`feature/lightcraft-v020-port` / `40a84cd`（P4-B完了）。作業開始時のworking treeはclean。本監査は実装変更を行わない。
 
-## 1. 総合評価
+## 1. 総合評価（初版監査時点：2026-11-12）
 
 **現行統合は、エンジン全体を過剰に所有する構造から、標準Engineを利用する構造へ改善している。ただし、settingsの予測検証とGeometry metadataには重要な内部依存が残る。**
 
@@ -12,7 +30,7 @@
 - 移行が重くなった原因は、upstreamの変更だけではない。旧内部契約を移植する作業を実施した後、所有境界を見直して新しい最小接続へ切り替えたため、**旧拡張の追従と設計変更の双方のコスト**が発生した。人時の記録がないため、原因別の割合は算定しない。
 - 次回更新はStageCache／GPU内部への追従が不要になった分、軽くなる見込み。ただしReset検証、snapshot復元、Frame構造変更は引き続き追従点になる。
 
-**判断：大規模な再設計のためにP4-Cを止める必要はない。ただしH1のRAW Detail Reset／省略false復元を、P4-Cの広い受入確認より先に対象を絞って修正・確認すべきである。P5のExport／Thumbnail受入にも同じ復元問題を持ち越さない。** 本監査では修正もP4-C／P5の実施も行わない。
+**当時の判断：大規模な再設計のためにP4-Cを止める必要はない。ただしH1のRAW Detail Reset／省略false復元を、P4-Cの広い受入確認より先に対象を絞って修正・確認すべきである。P5のExport／Thumbnail受入にも同じ復元問題を持ち越さない。** この提案は後続工程で実施済みである。現状は本書冒頭のP6-C最終状態を正とする。
 
 ## 2. 根拠・調査範囲
 

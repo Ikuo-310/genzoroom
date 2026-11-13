@@ -2,13 +2,25 @@
 
 正式改訂：2026-11-10（Asia/Tokyo）。対象は `feature/lightcraft-v020-port`。恒久的な責務・接続原則は [統合契約](LIGHTCRAFT_INTEGRATION_CONTRACT.md) を正本とする。本節のみを今後のv0.20.0移植計画とし、以下の旧N1〜N6および旧P0・P1〜P12は実施当時の計画・検証履歴として保持する。それらの工程、必須metadata、hunk移植、v0.18.1環境維持の指示は新計画に適用しない。
 
+### P6-C最終状態（2026-11-13）
+
+P1〜P5およびP6-Aの自動検証を完了した。P6-BのWindows GUI確認はユーザー報告で一巡し、報告範囲内で問題なし。Cropの「すべてリセット」はCrop／Aspect／Straighten／Flipを初期化し、90° rotationを維持する期待動作だった。これはユーザー実施の限定的な受入報告であり、全操作・全組合せの網羅検証ではない。P6-Cでは`origin/main`との差分監査と文書整理を実施し、`main`への統合・pushは行わない。
+
+H1はReset検証と完全snapshot復元の修正を実装済みで、P4〜P5のRecipe／History／Thumbnail／Export検証を含む。旧監査Findingは履歴として残し、修正済みと明示する。M1〜M5には責務境界・内部metadata依存・座標adapterなどの保守課題が残るが、今回範囲の受入を止める再現済み不具合ではない。M6 Developer RAW Preview Diagnosticsは旧`metrics.execution`／`metrics.stageCache`前提のテスト4件が引き続き失敗する。これは診断画面／測定契約の未解決事項で、通常のPreview・編集処理の失敗を示すものではなく、別工程に残す。P6-Cの監査で新たな製品コード不具合は見つからなかった。
+
+最終監査で選定したBackend runtime／artifact／settings／Recipe／History／Geometry／Export／Thumbnail／Queue／Immich regression群は**858 passed**。`test_lightcraft_runtime.py`／`test_lightcraft_artifact.py`単独は**65 passed**。`test_raw_diagnostics.py`は既知のM6 mismatchにより**14 passed／4 failed**。Frontend TypeScript checkとproduction buildは成功し、既存のbundle sizeおよびdependency directive warningが出た。P6-CでFrontend source testを追加・変更しておらず、P5-D2のGallery／Export UI focused **253 passed**記録を再利用した。full Frontend／Backend suiteは実施していない。
+
 ### H1限定修正記録（2026-11-12）
+
+> 当時の修正記録。直後のP4-C、P5、P6-Aおよび上記P6-C最終状態が、後続検証と現在の残件を示す。
 
 監査Finding `LIGHTCRAFT_DEPENDENCY_AUDIT.md` §4 H1に対し、完全snapshot wire変換で省略`detail.nr_outliers`をfalseとしてmergeし、保存snapshot／History本文／receipt／fingerprintは変更しない。通常partial mergeはそのまま。Reset検証はNative省略falseと期待falseを同値化したうえで全settings一致を維持し、誤ったtrue・他項目変更を拒否する。Exportの独立sessionも同じ変換を使い、process境界と原本保護を維持する。P4-C、P5統合、他Findingには着手しない。
 
-Backend focused test 65件成功。実EXE `target-p3-wb`はmanifest receipt／SHA／schema probe成功。実Native＋リポジトリJPEG一時コピー1件でDetail Reset、部分更新、false／true snapshotの復元を確認した。RAW DNG素材による`nr_outliers=true` import／reset、Pixel／Pentax、実Native Thumbnail／Export、実ユーザーtupleは未確認。詳細と残る検証範囲は上記監査文書を参照。
+Backend focused test 65件成功。実EXE `target-p3-wb`はmanifest receipt／SHA／schema probe成功。実Native＋リポジトリJPEG一時コピー1件でDetail Reset、部分更新、false／true snapshotの復元を確認した。当時未確認だったRAW／Pixel／Pentax、Thumbnail／Export等は後続工程の記録を参照。
 
 ### P6前：GPU backendの既定動作へ委譲（2026-11-13）
+
+> この記録は当時の起動設定工程の状態を示す。後続のP6-A／P6-B／P6-Cは下記の各記録を参照。
 
 固定upstream `192ff72923c39e6623f2c7ff67ab3a119deb8071`の未変更`crates/gpu/src/backend.rs`は、`LIGHTCRAFT_GPU_BACKEND`／`WGPU_BACKEND`未指定時に`Auto`を選び、Windowsのcompute／window既定をDX12にする（`default_compute_backends`、`default_window_backends`）。通常起動の`LightCraftManager`既定値を未指定へ変更し、allowlist済みchild environmentからambient GPU backend変数を除外したままNativeへ指定を注入しない。独立Export Sessionも通常manager既定を使う。診断SessionのCPU=`off`およびGPU測定=`dx12`の明示指定は維持した。
 
@@ -20,7 +32,11 @@ manifest固定commit `192ff72923c39e6623f2c7ff67ab3a119deb8071`／v0.20.0を確�
 
 同cloneの`target-p3-wb`へ`build.py --build`を実行。所定のrelease MCP focused test 4件（Whole Frame、Crop Edit、Region、WB candidate）はすべて成功し、`cargo build --release --locked --no-default-features -p lightcraft-cli`、Native schema／settings／Preview／Before／Draft／Region／WB／error response probeも成功した。生成EXEは`.tmp/lightcraft-0.20.0-p6a-verify/target-p3-wb/release/lightcraft-cli.exe`、SHA-256 `bc32450bc5f89dbbc11ed993a916926db40e7452e04d136f43e3265b0ab8c71b`。build.pyが正式手順で隣接receiptを発行し、同`--binary`検証でmanifest／receipt／実EXE SHAの一致とprobeを再確認した。receipt identityはv0.20.0、固定commit、patch SHAおよび`wholeFrameContract=1`／`cropEditContract=1`／`beforeAfterContract=1`／`draftContract=1`／`regionContract=1`／`geometryDescriptorContract=2`／`wbContract=1`。
 
-新EXEをGenzoRoom経由で実行した`test_real_native_geometry_and_targeted_curve`と`test_real_native_before_after_and_draft_full`は**2 passed**（receipt認証、Native起動・終了、settings操作、Preview生成を含む）。Backend `test_lightcraft_runtime.py`／`test_lightcraft_artifact.py`は**65 passed**。既存稼働候補`.tmp/lightcraft-0.20.0-p3/target-p3-wb/release/lightcraft-cli.exe`はSHA-256 `30fa30913ceca0f3083ea05d0ebce27fb5668c00b1e78f9d6c2365e43686aa04`と隣接receiptが引き続き一致し、今回の別clone buildで置換していない。Cargoのunused egui patch warningとcraft-fonts未同梱warningは出た（後者は日本語・中国語UI文字の描画制限）。既存native startup／receiptは正常で、patch／manifest／build.py変更なし。P5 RAW／JPEG Thumbnail／Export再実行、GPU fallback・画質比較は対象外。P6-B以降には進んでいない。
+新EXEをGenzoRoom経由で実行した`test_real_native_geometry_and_targeted_curve`と`test_real_native_before_after_and_draft_full`は**2 passed**（receipt認証、Native起動・終了、settings操作、Preview生成を含む）。Backend `test_lightcraft_runtime.py`／`test_lightcraft_artifact.py`は**65 passed**。既存稼働候補`.tmp/lightcraft-0.20.0-p3/target-p3-wb/release/lightcraft-cli.exe`はSHA-256 `30fa30913ceca0f3083ea05d0ebce27fb5668c00b1e78f9d6c2365e43686aa04`と隣接receiptが引き続き一致し、今回の別clone buildで置換していない。Cargoのunused egui patch warningとcraft-fonts未同梱warningは出た（後者は日本語・中国語UI文字の描画制限）。既存native startup／receiptは正常で、patch／manifest／build.py変更なし。P5 RAW／JPEG Thumbnail／Export再実行、GPU fallback・画質比較は対象外。このP6-A工程の時点ではP6-B以降を実施していない。
+
+### P6-B：Windows実機受入確認（2026-11-13、ユーザー報告）
+
+ユーザーが作成した受入チェックリストに沿って一巡し、報告範囲で問題はなかった。Crop「すべてリセット」はCrop／Aspect／Straighten／Flipを初期値に戻し、90° rotationを維持することを確認した。これはユーザーの手動実施報告で、CodexのGUI操作・自動化ではない。操作全件・全素材・全状態組合せを網羅した確認とは扱わず、個別の不具合報告はなかった。
 
 ### P5-A：既存Exportテスト期待値の修正（2026-11-13）
 
