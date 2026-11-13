@@ -14,6 +14,14 @@ Backend focused test 65件成功。実EXE `target-p3-wb`はmanifest receipt／SH
 
 Runtime／artifact receipt／Export／Thumbnail focused Backend tests **165 passed**。receipt検証済みv0.20.0実EXEでは、通常起動でready・managed receipt認識・GPU available（Radeon RX 580 Series／Dx12）を確認。実Nativeの既存snapshot round-tripは診断`off`指定で**1 passed**。Native patch、GPU選択・fallback実装、StageCache、Recipe／History／Queueは変更していない。補助で実行した`test_raw_diagnostics.py`を含む群は4件失敗し、既存診断metadataの`metrics.execution`／`metrics.stageCache`欠落が原因。今回の変更箇所外であり修正せず、focused起動関連165件は別実行で成功した。P6には着手していない。
 
+### P6-A：Native成果物の整合性・再現性（2026-11-13）
+
+manifest固定commit `192ff72923c39e6623f2c7ff67ab3a119deb8071`／v0.20.0を確認した。唯一のactive patchは`0001-v0.20.0-whole-frame.patch`で、manifest記載SHA-256 `ca30ff958ff5fbbd04e8e50b31c7c01a6319b7864b49ef8e506c3f20acc5f2ab`と一致。build.pyの検証でpatch内17 targetsとmanifest targetsが一致し、StageCache／GPU内部制御の旧patchはactive manifestに含まれない。cleanな別clone `.tmp/lightcraft-0.20.0-p6a-verify`を固定commitから作り、`build.py --apply`が成功。build.pyによる適用source差分照合も`patched`で成功した。
+
+同cloneの`target-p3-wb`へ`build.py --build`を実行。所定のrelease MCP focused test 4件（Whole Frame、Crop Edit、Region、WB candidate）はすべて成功し、`cargo build --release --locked --no-default-features -p lightcraft-cli`、Native schema／settings／Preview／Before／Draft／Region／WB／error response probeも成功した。生成EXEは`.tmp/lightcraft-0.20.0-p6a-verify/target-p3-wb/release/lightcraft-cli.exe`、SHA-256 `bc32450bc5f89dbbc11ed993a916926db40e7452e04d136f43e3265b0ab8c71b`。build.pyが正式手順で隣接receiptを発行し、同`--binary`検証でmanifest／receipt／実EXE SHAの一致とprobeを再確認した。receipt identityはv0.20.0、固定commit、patch SHAおよび`wholeFrameContract=1`／`cropEditContract=1`／`beforeAfterContract=1`／`draftContract=1`／`regionContract=1`／`geometryDescriptorContract=2`／`wbContract=1`。
+
+新EXEをGenzoRoom経由で実行した`test_real_native_geometry_and_targeted_curve`と`test_real_native_before_after_and_draft_full`は**2 passed**（receipt認証、Native起動・終了、settings操作、Preview生成を含む）。Backend `test_lightcraft_runtime.py`／`test_lightcraft_artifact.py`は**65 passed**。既存稼働候補`.tmp/lightcraft-0.20.0-p3/target-p3-wb/release/lightcraft-cli.exe`はSHA-256 `30fa30913ceca0f3083ea05d0ebce27fb5668c00b1e78f9d6c2365e43686aa04`と隣接receiptが引き続き一致し、今回の別clone buildで置換していない。Cargoのunused egui patch warningとcraft-fonts未同梱warningは出た（後者は日本語・中国語UI文字の描画制限）。既存native startup／receiptは正常で、patch／manifest／build.py変更なし。P5 RAW／JPEG Thumbnail／Export再実行、GPU fallback・画質比較は対象外。P6-B以降には進んでいない。
+
 ### P5-A：既存Exportテスト期待値の修正（2026-11-13）
 
 直前のP5関連Backend suiteで失敗した3件を再現し、製品動作と照合した。旧Engine tupleだけがあるRAW Assetは`select_raw_export_state()`が`exportEligible=false`を返し、Export Queueへの登録を拒否する。旧RecipeをQueue登録・Exportできるとしたテストを、拒否とQueue不変を確認する期待へ修正した。H1関連の2件は`raw_export_artifact`が完全snapshot送信時に`complete_snapshot_for_merge()`を適用するため`detail.nr_outliers=false`がpayloadに加わる。Export Nativeへのwire payloadだけでfalse補完を検証し、保存Recipe本文・receiptが不変である既存assertを維持した。
