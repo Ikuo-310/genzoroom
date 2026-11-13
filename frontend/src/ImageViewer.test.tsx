@@ -227,8 +227,8 @@ describe('Viewer edit settings context menu', () => {
     expect(loupe.dataset.pointX).toBe('0.25');
     expect(loupe.style.width).toBe('120px');
     expect(loupe.style.left).toBe('90px');
-    expect(loupe.style.top).toBe('141px');
-    expect(host.querySelector('.viewer-point-crosshair')).not.toBeNull();
+    expect(loupe.style.top).toBe('161px');
+    expect(host.querySelector('.viewer-point-crosshair')).toBeNull();
     pointer('pointerdown', 125);
     expect(loupe.dataset.fixed).toBe('true');
     expect(begin).toHaveBeenCalledWith({ x: .25, y: .25 });
@@ -237,7 +237,7 @@ describe('Viewer edit settings context menu', () => {
     pointer('pointermove', 123);
     pointer('pointermove', 125);
     expect(loupe.style.left).toBe('90px');
-    expect(loupe.style.top).toBe('141px');
+    expect(loupe.style.top).toBe('161px');
     expect(loupe.dataset.pointX).toBe('0.25');
     expect(move.mock.calls).toEqual([[[1]], [[-1]]]);
     pointer('pointerup', 125);
@@ -348,7 +348,7 @@ describe('Viewer edit settings context menu', () => {
     const base = host.querySelector<HTMLImageElement>('.raw-whole-base')!;
     Object.defineProperty(base, 'naturalWidth', { value: 1472 }); Object.defineProperty(base, 'naturalHeight', { value: 1104 });
     act(() => base.dispatchEvent(new Event('load')));
-    expect(position.style.cursor).toBe('none');
+    expect(position.style.cursor).toBe('crosshair');
     expect(viewport.style.cursor).toBe('');
     const pointer = (type: string, x: number, y: number) => act(() => viewport.dispatchEvent(new MouseEvent(type,
       { bubbles: true, button: 0, clientX: x, clientY: y })));
@@ -358,7 +358,7 @@ describe('Viewer edit settings context menu', () => {
     expect(loupe.style.width).toBe('120px');
     expect(loupe.style.pointerEvents).toBe('none');
     expect(loupe.dataset.pointX).toBe('0.5');
-    expect(host.querySelector('.viewer-point-crosshair')).not.toBeNull();
+    expect(host.querySelector('.viewer-point-crosshair')).toBeNull();
     expect([...host.querySelectorAll<HTMLImageElement>('.viewer-point-loupe-image img')].map(image => image.getAttribute('src')))
       .toEqual(['blob:retained-after', 'blob:region']);
     // The rectangle is the Whole CSS transform even when a pointer-transparent Region is on top.

@@ -2,7 +2,7 @@ import type { Point } from './viewerMath';
 
 export const VIEWER_POINT_LOUPE_SIZE = 120;
 export const VIEWER_POINT_LOUPE_MAGNIFICATION = 4;
-const VIEWER_POINT_LOUPE_GAP = 16;
+const VIEWER_POINT_LOUPE_GAP = 36;
 
 export function viewerPointLoupePosition(viewport: Point, anchor: Point): Point | null {
   const size = VIEWER_POINT_LOUPE_SIZE;

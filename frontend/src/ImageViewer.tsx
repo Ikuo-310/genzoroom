@@ -783,7 +783,7 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
     >
       {rawCrop?.active && <RawCropSurface binding={rawCrop} viewport={viewportSize} scale={scale} pan={pan} busy={setCropBusy} handTool={spaceHand && scale>fitScale || viewerPanActive} panning={viewerPanActive} />}
       <div ref={imagePositionRef} className="viewer-image-position" style={{ display: rawCrop?.active ? 'none' : undefined,
-        cursor: rawPickActive ? pickReady ? 'none' : 'not-allowed' : targetDragging ? 'ns-resize' : rawTargetedActive && !showBeforeAdjustments && !spaceHand ? 'crosshair' : undefined,
+        cursor: rawPickActive ? pickReady ? 'crosshair' : 'not-allowed' : targetDragging ? 'ns-resize' : rawTargetedActive && !showBeforeAdjustments && !spaceHand ? 'crosshair' : undefined,
         transform: `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px))` }}
         onPointerDown={(event) => {
           if (event.button === 0) viewportRef.current?.focus({ preventScroll: true });

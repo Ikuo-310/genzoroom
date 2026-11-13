@@ -35,6 +35,7 @@ it('magnifies the displayed Whole image at the same normalized point and aligns 
   expect(image.style.left).toBe('-140px'); expect(image.style.top).toBe('-100px');
   expect(overlay.style.left).toBe('80px'); expect(overlay.style.top).toBe('40px');
   expect(overlay.style.width).toBe('80px'); expect(overlay.style.height).toBe('80px');
+  expect(host.querySelector('.viewer-point-crosshair')).toBeNull();
   expect(host.querySelector('.viewer-point-loupe-crosshair')).not.toBeNull();
 
   act(() => root.render(<ViewerPointLoupe viewport={{ x: 400, y: 300 }} anchor={{ x: 200, y: 180 }} imagePoint={{ x: .25, y: .4 }}
