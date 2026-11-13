@@ -6,6 +6,10 @@ Internal changes are omitted unless they affect users.
 
 ## [Unreleased]
 
+### Added
+
+- Windows Desktop LightCraft development adds a Camera Local Tone Mapping toggle for images with supported camera tone-map data.
+
 ### Changed
 
 - Windows Desktop (development/validation) now uses LightCraft v0.20.0 as the shared Native engine for RAW and Native-accepted non-RAW originals. Docker remains on its separate JPEG WebGPU/CPU path, and the two editions keep independent editing databases.
