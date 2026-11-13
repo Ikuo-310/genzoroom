@@ -567,6 +567,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .raw-optics-profile-status, .raw-optics-unavailable { margin: 2px 0 7px; color: #aaa; font-size: 0.66rem; line-height: 1.35; overflow-wrap: anywhere; }
 .raw-optics-unavailable { color: #c7a28b; }
 .raw-optics-flag { display: flex; min-width: 0; min-height: 26px; align-items: center; gap: 5px; color: #ddd; font-size: 0.7rem; }
+.raw-camera-local-tone span { font-size: 13px; }
 .raw-optics-flag input { flex: 0 0 auto; margin: 0; accent-color: #9caec4; }
 .raw-optics-flag span { min-width: 0; overflow-wrap: anywhere; }
 .raw-optics-fold-header { display: flex; min-width: 0; align-items: center; gap: 4px; margin: 5px 0 3px; border-radius: 4px; background: #232325; padding: 2px 4px; }
