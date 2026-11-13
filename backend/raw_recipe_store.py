@@ -236,15 +236,18 @@ def select_raw_export_state(connection, asset_id):
     if current is None:
         raise StoreUnavailable()
     fingerprint = current.get("importDefaultsFingerprint")
-    from raw_controls import with_legacy_grading_defaults, with_legacy_optics_defaults
+    from raw_controls import (with_legacy_grading_defaults, with_legacy_optics_defaults,
+                              with_legacy_profile_defaults)
     settings = current["recipe"]["settings"]
     if fingerprint is not None:
         eligible = _digest(_settings_json(settings, identity["settingsSchemaVersion"])) != fingerprint
         if eligible:
             # Old import fingerprints can omit serde-default sections introduced later.
             defaults = {"grading": with_legacy_grading_defaults({})["grading"],
-                        "optics": with_legacy_optics_defaults({})["optics"]}
-            normalized = with_legacy_optics_defaults(with_legacy_grading_defaults(settings))
+                        "optics": with_legacy_optics_defaults({})["optics"],
+                        "profile": with_legacy_profile_defaults({})["profile"]}
+            normalized = with_legacy_profile_defaults(
+                with_legacy_optics_defaults(with_legacy_grading_defaults(settings)))
             candidates = [normalized]
             omittable = [section for section, default in defaults.items() if normalized.get(section) == default]
             for mask in range(1, 1 << len(omittable)):
@@ -257,8 +260,9 @@ def select_raw_export_state(connection, asset_id):
                            for candidate in candidates)
     else:
         eligible = None if history is None else (
-            _json(with_legacy_optics_defaults(with_legacy_grading_defaults(settings)))
-            != _json(with_legacy_optics_defaults(with_legacy_grading_defaults(history["baselineSettings"]))))
+            _json(with_legacy_profile_defaults(with_legacy_optics_defaults(with_legacy_grading_defaults(settings))))
+            != _json(with_legacy_profile_defaults(with_legacy_optics_defaults(
+                with_legacy_grading_defaults(history["baselineSettings"])))))
     return {"currentRecipe": current["recipe"], "revision": current["revision"],
             "recipeVersion": identity["settingsSchemaVersion"],
             "processingVersion": RAW_EXPORT_PROCESSING_VERSION, "exportEligible": eligible}
@@ -446,7 +450,7 @@ HISTORY_CONTROLS |= frozenset(f"grading.{band}.{field}" for band in ("shadows", 
 HISTORY_CONTROLS |= frozenset(f"optics.{control}" for control in ("distortion", "vignetting", "vignettingMidpoint",
     "profileDistortion", "profileVignetting", "defringePurple", "defringePurpleHueLo", "defringePurpleHueHi",
     "defringeGreen", "defringeGreenHueLo", "defringeGreenHueHi", "caRed", "caBlue"))
-HISTORY_FLAG_CONTROLS = frozenset(("optics.remove_ca", "optics.lens_profile"))
+HISTORY_FLAG_CONTROLS = frozenset(("optics.remove_ca", "optics.lens_profile", "profile.camera_local_tone"))
 HISTORY_SECTIONS = frozenset(("light", "color", "grading", "effects", "detail", "optics"))
 HISTORY_RESET_SECTIONS = HISTORY_SECTIONS | {"vignette"}
 HISTORY_CURVE_CHANNELS = frozenset(("master", "red", "green", "blue", "point"))

@@ -73,13 +73,18 @@ def merge(base, patch):
     for k, v in patch.items():
         if k not in base:
             # Native serde recognizes this optional field even when it was omitted in readback.
-            if k in ('denoise_on', 'nr_outliers') and type(v) is bool:
+            if k == 'camera_local_tone' and v is False:
+                base.pop(k, None)
+            elif k in ('denoise_on', 'nr_outliers', 'camera_local_tone') and type(v) is bool:
                 base[k] = v
+            elif k == 'profile' and type(v) is dict:
+                base[k] = {"id": "lc.color", "amount": 100.}
+                merge(base[k], v)
             continue
         if isinstance(base[k], dict) and isinstance(v, dict):
             merge(base[k], v)
         else:
-            if k == 'nr_outliers' and v is False:
+            if k in ('nr_outliers', 'camera_local_tone') and v is False:
                 base.pop(k, None)
             else:
                 base[k] = copy.deepcopy(v)

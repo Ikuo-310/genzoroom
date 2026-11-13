@@ -15,6 +15,7 @@ from tests.test_raw_recipe_restore import open_asset
 
 OPTICS_NUMERIC = tuple(control for control in CONTROLS if control.startswith("optics."))
 OPTICS_FLAGS = ("optics.remove_ca", "optics.lens_profile")
+CAMERA_LOCAL_TONE = "profile.camera_local_tone"
 
 
 @pytest.mark.parametrize("control", OPTICS_NUMERIC)
@@ -85,6 +86,68 @@ def test_optics_boolean_history_preserves_bool_type_and_reset(local, tmp_path, m
                 assert doc["opticsFlags"][field] is False
                 page = (await http.get(url(doc), headers=headers(doc))).json()
                 assert page["steps"][-1]["flagChanges"] == [{"control": control, "before": True, "after": False}]
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
+def test_camera_local_tone_history_recipe_restore_and_omitted_default(local, tmp_path, monkeypatch):
+    from lightcraft_raw import _settings_json
+    from raw_controls import settings_snapshot_for_comparison
+
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            async with client(local) as http:
+                doc = await open_history(http, local, api)
+                assert doc["cameraLocalTone"] is False
+                assert "camera_local_tone" not in children[0].photos[children[0].active]["settings"].get("profile", {})
+
+                doc = await edit(http, doc, "opticsFlag", {"control": CAMERA_LOCAL_TONE, "enabled": True})
+                assert doc["cameraLocalTone"] is True
+                native = children[0].photos[children[0].active]["settings"]
+                assert native["profile"]["camera_local_tone"] is True
+                assert ("develop.merge", {"settings": {"profile": {"camera_local_tone": True}}}) in children[0].commands
+                page = (await http.get(url(doc), headers=headers(doc))).json()
+                assert page["steps"][-1]["flagChanges"] == [
+                    {"control": CAMERA_LOCAL_TONE, "before": False, "after": True}]
+
+                enabled_step = doc["history"]["selectedStepId"]
+                doc = await edit(http, doc, "opticsFlag", {"control": CAMERA_LOCAL_TONE, "enabled": False})
+                assert doc["cameraLocalTone"] is False
+                assert "camera_local_tone" not in children[0].photos[children[0].active]["settings"].get("profile", {})
+                page = (await http.get(url(doc), headers=headers(doc))).json()
+                assert page["steps"][-1]["flagChanges"] == [
+                    {"control": CAMERA_LOCAL_TONE, "before": True, "after": False}]
+
+                doc = await operation(http, doc, "undo")
+                assert doc["cameraLocalTone"] is True
+                doc = await operation(http, doc, "redo")
+                assert doc["cameraLocalTone"] is False
+                doc = await operation(http, doc, "jump", body(doc) | {"targetStepId": enabled_step})
+                assert doc["cameraLocalTone"] is True
+
+                settings = children[0].photos[children[0].active]["settings"]
+                explicit_off = copy.deepcopy(settings)
+                explicit_off["profile"]["camera_local_tone"] = False
+                omitted_off = copy.deepcopy(explicit_off)
+                omitted_off["profile"].pop("camera_local_tone")
+                assert settings_snapshot_for_comparison(omitted_off) == settings_snapshot_for_comparison(explicit_off)
+                assert "camera_local_tone" not in __import__("json").loads(_settings_json(omitted_off))["profile"]
+
+                await http.delete(f'/api/raw/workspaces/{doc["workspaceId"]}')
+                _, response = await open_asset(http, doc["assetId"])
+                assert response.status_code == 200, response.text
+                restored = await operation(http, response.json(), "initialize")
+                assert restored["cameraLocalTone"] is True
+
+                restored = await edit(http, restored, "allReset", {})
+                assert restored["cameraLocalTone"] is False
+                assert "camera_local_tone" not in children[-1].photos[children[-1].active]["settings"].get("profile", {})
+                page = (await http.get(url(restored), headers=headers(restored))).json()
+                assert any(change["control"] == CAMERA_LOCAL_TONE
+                           and change["before"] is True and change["after"] is False
+                           for change in page["steps"][-1]["flagChanges"])
         finally:
             await api.close()
     asyncio.run(run())

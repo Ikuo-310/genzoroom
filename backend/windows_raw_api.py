@@ -1078,11 +1078,13 @@ class RawPreviewApi:
 
     @staticmethod
     def _history_changes(step, before_settings, after_settings):
-        from raw_controls import with_legacy_grading_defaults, with_legacy_optics_defaults
+        from raw_controls import with_legacy_grading_defaults, with_legacy_optics_defaults, with_legacy_profile_defaults
         before_settings = with_legacy_grading_defaults(before_settings)
         after_settings = with_legacy_grading_defaults(after_settings)
         before_settings = with_legacy_optics_defaults(before_settings)
         after_settings = with_legacy_optics_defaults(after_settings)
+        before_settings = with_legacy_profile_defaults(before_settings)
+        after_settings = with_legacy_profile_defaults(after_settings)
         metadata = step["metadata"]
         if step['kind'] in ('vignetteStyle', 'geometry'):
             return []
@@ -1117,11 +1119,13 @@ class RawPreviewApi:
     @staticmethod
     def _history_flag_changes(step, before_settings, after_settings):
         from raw_controls import (HISTORY_FLAG_CONTROLS, control_location, with_legacy_grading_defaults,
-                                  with_legacy_optics_defaults)
+                                  with_legacy_optics_defaults, with_legacy_profile_defaults)
         before_settings = with_legacy_grading_defaults(before_settings)
         after_settings = with_legacy_grading_defaults(after_settings)
         before_settings = with_legacy_optics_defaults(before_settings)
         after_settings = with_legacy_optics_defaults(after_settings)
+        before_settings = with_legacy_profile_defaults(before_settings)
+        after_settings = with_legacy_profile_defaults(after_settings)
         kind = step['kind']
         if kind in ('opticsFlag', 'opticsFlagReset'):
             controls = [step['metadata']['control']]

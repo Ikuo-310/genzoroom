@@ -44,7 +44,7 @@ CONTROLS = {
 SECTIONS = ("light", "color", "grading", "effects", "detail", "optics")
 SETTINGS_SECTIONS = SECTIONS
 HISTORY_CONTROLS = frozenset(CONTROLS)
-HISTORY_FLAG_CONTROLS = frozenset(("optics.remove_ca", "optics.lens_profile"))
+HISTORY_FLAG_CONTROLS = frozenset(("optics.remove_ca", "optics.lens_profile", "profile.camera_local_tone"))
 # Vignette has a Native reset section, but its eye belongs to Effects.
 RESET_SECTIONS = (*SETTINGS_SECTIONS, "vignette")
 CURVE_CHANNELS = ("master", "red", "green", "blue")
@@ -72,6 +72,7 @@ CONTROL_PATHS = {control: tuple(control.split(".")) for control in CONTROLS} | {
         "defringeGreenHueLo": "defringe_green_hue_lo", "defringeGreenHueHi": "defringe_green_hue_hi",
         "caRed": "ca_red", "caBlue": "ca_blue"}.items()},
     "optics.remove_ca": ("optics", "remove_ca"), "optics.lens_profile": ("optics", "lens_profile"),
+    "profile.camera_local_tone": ("profile", "camera_local_tone"),
 }
 # A native Detail reset includes controls not exposed by GenzoRoom yet.
 DETAIL_RESET_DEFAULTS = dict(sharpen_amount=0, sharpen_radius=1, sharpen_detail=25, sharpen_masking=0,
@@ -95,7 +96,7 @@ def complete_snapshot_for_merge(settings):
 
 def settings_snapshot_for_comparison(settings):
     """Treat Native's omitted serde-default false as equal to an explicit false snapshot value."""
-    return complete_snapshot_for_merge(settings)
+    return with_legacy_profile_defaults(complete_snapshot_for_merge(settings))
 
 
 def control_location(settings, control):
@@ -129,6 +130,19 @@ def with_legacy_optics_defaults(settings):
         return {**settings, "optics": defaults}
     missing = defaults.keys() - optics.keys()
     return {**settings, "optics": {**{key: defaults[key] for key in missing}, **optics}} if missing else settings
+
+
+def with_legacy_profile_defaults(settings):
+    profile = settings.get("profile")
+    if profile is not None and type(profile) is not dict:
+        return settings
+    if profile is None:
+        profile = {}
+    profile = {"id": "lc.color", "amount": 100., **profile}
+    value = profile.get("camera_local_tone", False)
+    if type(value) is not bool:
+        raise LightCraftError("raw_invalid_settings")
+    return {**settings, "profile": {**profile, "camera_local_tone": value}}
 
 
 def with_legacy_curve_defaults(settings):
@@ -224,6 +238,10 @@ def controls_state(snapshot):
     flags = {name: optics.get(name) for name in ("remove_ca", "lens_profile")}
     if any(type(value) is not bool for value in flags.values()):
         raise LightCraftError("raw_invalid_settings")
+    profile = settings.get("profile", {})
+    camera_local_tone = profile.get("camera_local_tone", False) if type(profile) is dict else None
+    if type(camera_local_tone) is not bool:
+        raise LightCraftError("raw_invalid_settings")
     lens_info = snapshot.lens_profile_info
     lens_applied = False
     if flags["lens_profile"] and "optics" not in disabled:
@@ -239,7 +257,8 @@ def controls_state(snapshot):
     curve_points = curve_readback(settings)
     wb_scale = wb.get("scale", "legacy")
     wb_available = wb_scale in ("kelvin", "legacy")
-    return {**geometry_state(settings), "values": values, "curve": curve_points, "opticsFlags": flags, "vignetteStyle": style, "wbAutoAvailable": snapshot.wb_auto and wb_available,
+    return {**geometry_state(settings), "values": values, "curve": curve_points, "opticsFlags": flags,
+            "cameraLocalTone": camera_local_tone, "vignetteStyle": style, "wbAutoAvailable": snapshot.wb_auto and wb_available,
             "lensProfileInfo": public_lens_info,
             "sections": {section: section not in disabled for section in SETTINGS_SECTIONS},
             "controls": [dict(id=key, min=v[0], max=v[1], step=v[2], default=v[3], precision=v[4])

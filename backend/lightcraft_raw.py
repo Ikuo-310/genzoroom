@@ -1658,7 +1658,8 @@ class LightCraftRawSession:
 
     async def apply_history_operation(self, handle, kind, metadata, expected_revision, *, curve_points=None):
         from raw_controls import (CONTROLS, CONTROL_PATHS, control_location, DETAIL_RESET_DEFAULTS,
-                                  HISTORY_FLAG_CONTROLS, validate_history_operation, validate_curve_input)
+                                  HISTORY_FLAG_CONTROLS, with_legacy_profile_defaults,
+                                  validate_history_operation, validate_curve_input)
         if kind == "curveReset":
             validate_history_operation(kind, metadata)
             channel = metadata["channel"]
@@ -1696,9 +1697,9 @@ class LightCraftRawSession:
             commands = [("develop.merge", {"settings": {"vignette": {"style": metadata["style"]}}})]
         elif kind in ("opticsFlag", "opticsFlagReset"):
             control = metadata["control"]
-            field = CONTROL_PATHS[control][1]
+            parent, field = CONTROL_PATHS[control]
             value = metadata.get("enabled", False)
-            commands = [("develop.merge", {"settings": {"optics": {field: value}}})]
+            commands = [("develop.merge", {"settings": {parent: {field: value}}})]
         elif kind == "sectionToggle":
             commands = [("develop.sectionEnabled", metadata)]
         elif kind == "controlReset":
@@ -1728,7 +1729,7 @@ class LightCraftRawSession:
                     raise LightCraftError("raw_operation_readback_mismatch")
             for control in HISTORY_FLAG_CONTROLS:
                 values, key = control_location(actual, control)
-                if type(values) is not dict or type(values.get(key)) is not bool:
+                if type(values) is not dict or type(values.get(key, False)) is not bool:
                     raise LightCraftError("raw_operation_readback_mismatch")
             expected_disabled = ([section for section in disabled if section != metadata["section"]]
                                  + ([] if metadata["enabled"] else [metadata["section"]])) if kind == "sectionToggle" else disabled
@@ -1751,6 +1752,8 @@ class LightCraftRawSession:
                 elif kind == "sectionToggle":
                     expected["disabled_sections"] = expected_disabled
                 elif kind in ("opticsFlag", "opticsFlagReset"):
+                    group, _ = CONTROL_PATHS[metadata["control"]]
+                    expected.setdefault(group, {})
                     parent, key = control_location(expected, metadata["control"])
                     parent[key] = metadata.get("enabled", False)
                 elif reset_to_as_shot:
@@ -1759,7 +1762,12 @@ class LightCraftRawSession:
                     parent, key = control_location(expected, metadata["control"])
                     parent[key] = CONTROLS[metadata["control"]][3]
                 # Native defaults can encode 0 as 0.0; compare full values, not numeric JSON spelling.
-                if actual != expected:
+                if metadata.get("control") == "profile.camera_local_tone":
+                    from raw_controls import settings_snapshot_for_comparison
+                    matches = settings_snapshot_for_comparison(actual) == settings_snapshot_for_comparison(expected)
+                else:
+                    matches = actual == expected
+                if not matches:
                     raise LightCraftError("raw_operation_readback_mismatch")
             elif kind == "sectionReset":
                 section = metadata["section"]
