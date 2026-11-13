@@ -156,6 +156,16 @@ export function AnshitsuPage() {
   const jpegOriginal = useJpegOriginal(developmentEngine === 'jpeg' ? activeDetail : null, settings.initialImage,
     initialGpu?.assetId === assetId && initialGpu.usable);
   const rawDocument = useRawDocument(usesLightcraft && activeDetail ? assetId : null, viewerShowsBefore);
+  const observedRawRecipe = useRef<{ assetId: string; revision: number } | null>(null);
+  useEffect(() => {
+    const recipeRevision = rawDocument?.settings?.recipeRevision;
+    if (!usesLightcraft || rawDocument?.assetId !== assetId || rawDocument.status !== 'ready'
+      || typeof recipeRevision !== 'number') return;
+    const previous = observedRawRecipe.current;
+    observedRawRecipe.current = { assetId, revision: recipeRevision };
+    if (previous?.assetId === assetId && recipeRevision > previous.revision)
+      setRawStatusRefresh(value => value + 1);
+  }, [assetId, rawDocument?.assetId, rawDocument?.settings?.recipeRevision, rawDocument?.status, usesLightcraft]);
   const canEdit = developmentEngine === 'jpeg' && !!activeDetail && supportsEditing(activeDetail);
   const { session, dispatch, canUndo, organizeHistory, loadStatus, save, discard, retryLoad, pauseAutosave, resumeAutosave, autosaveError,
     recipeChangeRevision,

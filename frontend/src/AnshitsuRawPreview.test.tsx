@@ -111,6 +111,35 @@ it('routes a non-RAW asset through Native without fetching or rendering the lega
   expect(host.querySelector('.viewer-panel img')?.getAttribute('src')).toBe('blob:lightcraft');
 });
 
+it('refreshes inactive Native edit badges after a confirmed Recipe revision', async () => {
+  let edited = false;
+  vi.mocked(editApi.getRawAssetEditStatuses).mockImplementation(async ids => Object.fromEntries(ids.map(id => [id, edited])));
+  commitHistory.mockImplementation(async request => {
+    if (request.operation?.kind === 'opticsFlag' && request.operation.metadata.control === 'profile.camera_local_tone')
+      edited = request.operation.metadata.enabled;
+    if (request.operation?.kind === 'allReset') edited = false;
+    const fingerprint = edited ? 'a'.repeat(64) : request.doc.importDefaultsFingerprint;
+    const next = { ...request.doc as rawApi.RawSettings, cameraLocalTone: edited,
+      settingsFingerprint: fingerprint, recipeFingerprint: fingerprint };
+    return rawHistoryResult({ ...request, doc: next });
+  });
+  await mount();
+  const statusCalls = vi.mocked(editApi.getRawAssetEditStatuses).mock.calls.length;
+  act(() => host.querySelector<HTMLInputElement>('.raw-camera-local-tone input')!.click());
+  await flush();
+  expect(vi.mocked(editApi.getRawAssetEditStatuses).mock.calls.length).toBeGreaterThan(statusCalls);
+  act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-entry')[2].querySelector<HTMLButtonElement>('.filmstrip-item')!.click());
+  await flush();
+  expect(host.querySelectorAll<HTMLElement>('.filmstrip-entry')[0].querySelector('.edited-badge')).not.toBeNull();
+  act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-entry')[0].querySelector<HTMLButtonElement>('.filmstrip-item')!.click());
+  await flush();
+  act(() => host.querySelector<HTMLButtonElement>('.develop-panel .workspace-section-action')!.click());
+  await flush();
+  act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-entry')[2].querySelector<HTMLButtonElement>('.filmstrip-item')!.click());
+  await flush();
+  expect(host.querySelectorAll<HTMLElement>('.filmstrip-entry')[0].querySelector('.edited-badge')).toBeNull();
+});
+
 it('shows clamped relative WB for Native legacy settings without writing until the user changes it', async () => {
   vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc),
     wb: { available: true, mode: 'custom', scale: 'legacy' }, values: { ...rawSettings(doc).values,
