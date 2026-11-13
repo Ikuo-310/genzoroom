@@ -227,7 +227,7 @@ describe('Viewer edit settings context menu', () => {
     expect(loupe.dataset.pointX).toBe('0.25');
     expect(loupe.style.width).toBe('120px');
     expect(loupe.style.left).toBe('90px');
-    expect(loupe.style.top).toBe('161px');
+    expect(loupe.style.top).toBe('151px');
     expect(host.querySelector('.viewer-point-crosshair')).toBeNull();
     pointer('pointerdown', 125);
     expect(loupe.dataset.fixed).toBe('true');
@@ -237,7 +237,7 @@ describe('Viewer edit settings context menu', () => {
     pointer('pointermove', 123);
     pointer('pointermove', 125);
     expect(loupe.style.left).toBe('90px');
-    expect(loupe.style.top).toBe('161px');
+    expect(loupe.style.top).toBe('151px');
     expect(loupe.dataset.pointX).toBe('0.25');
     expect(move.mock.calls).toEqual([[[1]], [[-1]]]);
     pointer('pointerup', 125);
