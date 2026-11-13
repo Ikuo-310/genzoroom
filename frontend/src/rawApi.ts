@@ -29,7 +29,10 @@ export const RAW_CONTROL_IDS = ['light.exposure', 'light.contrast', 'light.highl
   'grading.shadows.hue', 'grading.shadows.sat', 'grading.shadows.lum',
   'grading.midtones.hue', 'grading.midtones.sat', 'grading.midtones.lum',
   'grading.highlights.hue', 'grading.highlights.sat', 'grading.highlights.lum', 'grading.blending', 'grading.balance',
-  'wb.temp', 'wb.tint', 'color.vibrance', 'color.saturation', 'effects.texture', 'effects.clarity', 'effects.dehaze',
+  'wb.temp', 'wb.tint', 'color.vibrance', 'color.saturation',
+  ...(['red', 'orange', 'yellow', 'green', 'aqua', 'blue', 'purple', 'magenta'] as const).flatMap(color =>
+    (['hue', 'sat', 'lum'] as const).map(field => `mixer.${color}.${field}` as const)),
+  'effects.texture', 'effects.clarity', 'effects.dehaze',
   'vignette.amount', 'vignette.midpoint', 'vignette.feather', 'vignette.roundness', 'vignette.highlights',
   'detail.sharpenAmount', 'detail.sharpenMasking',
   'detail.nrLuminance', 'detail.nrDetail', 'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'] as const;

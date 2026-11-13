@@ -6,6 +6,15 @@ import { formatContrast, formatExposure, formatHighlights, formatShadows, format
 import type { RawHistoryControlId, RawOpticsFlagId, RawHistoryStep } from './rawApi';
 import { displayTemperature, displayTint } from './rawWhiteBalance';
 
+const mixerColors = ['red', 'orange', 'yellow', 'green', 'aqua', 'blue', 'purple', 'magenta'] as const;
+const mixerFields = ['hue', 'sat', 'lum'] as const;
+const mixerLabels = Object.fromEntries(mixerColors.flatMap(color =>
+  mixerFields.map(field => [`mixer.${color}.${field}`, `rawPreview.mixer.${field}`]))) as
+  Pick<Record<RawHistoryControlId, string>, Extract<RawHistoryControlId, `mixer.${string}`>>;
+const mixerFormatters = Object.fromEntries(mixerColors.flatMap(color =>
+  mixerFields.map(field => [`mixer.${color}.${field}`, (value: number) => value.toFixed(0)]))) as
+  Pick<Record<RawHistoryControlId, (value: number) => string>, Extract<RawHistoryControlId, `mixer.${string}`>>;
+
 const labels: Record<RawHistoryControlId, string> = {
   'grading.shadows.hue': 'rawPreview.grading.shadows.hue',
   'grading.shadows.sat': 'rawPreview.grading.shadows.sat',
@@ -18,6 +27,7 @@ const labels: Record<RawHistoryControlId, string> = {
   'grading.highlights.lum': 'rawPreview.grading.highlights.lum',
   'grading.blending': 'rawPreview.grading.blending',
   'grading.balance': 'rawPreview.grading.balance',
+  ...mixerLabels,
  'wb.temp': 'temperature', 'wb.tint': 'tint', 'light.exposure': 'exposure', 'light.contrast': 'contrast',
   'light.highlights': 'highlights', 'light.whites': 'whites', 'light.shadows': 'shadows', 'light.blacks': 'blacks',
   'color.vibrance': 'vibrance', 'color.saturation': 'saturation',
@@ -52,6 +62,7 @@ const formatters: Record<RawHistoryControlId, (value: number) => string> = {
   'grading.highlights.lum': value => value.toFixed(0),
   'grading.blending': value => value.toFixed(0),
   'grading.balance': value => value.toFixed(0),
+  ...mixerFormatters,
  'wb.temp': value => `${Math.round(value)} K`, 'wb.tint': formatTint,
   'light.exposure': formatExposure, 'light.contrast': formatContrast, 'light.highlights': formatHighlights, 'light.whites': formatWhites,
   'light.shadows': formatShadows, 'light.blacks': formatBlacks, 'color.vibrance': formatVibrance, 'color.saturation': formatSaturation,

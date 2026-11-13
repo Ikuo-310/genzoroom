@@ -447,6 +447,7 @@ HISTORY_CONTROLS = frozenset(("wb.temp", "wb.tint", "color.vibrance", "color.sat
                             "detail.nrLuminance", "detail.nrDetail", "detail.nrColor", "detail.nrColorDetail",
                             "detail.nrColorSmoothness"))
 HISTORY_CONTROLS |= frozenset(f"grading.{band}.{field}" for band in ("shadows", "midtones", "highlights") for field in ("hue", "sat", "lum")) | {"grading.blending", "grading.balance"}
+HISTORY_CONTROLS |= frozenset(f"mixer.{color}.{field}" for color in ("red", "orange", "yellow", "green", "aqua", "blue", "purple", "magenta") for field in ("hue", "sat", "lum"))
 HISTORY_CONTROLS |= frozenset(f"optics.{control}" for control in ("distortion", "vignetting", "vignettingMidpoint",
     "profileDistortion", "profileVignetting", "defringePurple", "defringePurpleHueLo", "defringePurpleHueHi",
     "defringeGreen", "defringeGreenHueLo", "defringeGreenHueHi", "caRed", "caBlue"))

@@ -18,6 +18,9 @@ CONTROLS = {
     "wb.tint": (-150, 150, 1, 0, 0),
     "color.vibrance": (-100, 100, 1, 0, 0),
     "color.saturation": (-100, 100, 1, 0, 0),
+    **{f"mixer.{color}.{field}": (-100, 100, 1, 0, 0)
+       for color in ("red", "orange", "yellow", "green", "aqua", "blue", "purple", "magenta")
+       for field in ("hue", "sat", "lum")},
     **{f"effects.{key}": (-100, 100, 1, 0, 0) for key in ("texture", "clarity", "dehaze")},
     "vignette.amount": (-100, 100, 1, 0, 0),
     "vignette.midpoint": (0, 100, 1, 50, 0),
@@ -84,6 +87,15 @@ def complete_snapshot_for_merge(settings):
     if type(settings) is not dict:
         raise LightCraftError("raw_invalid_settings")
     result = copy.deepcopy(settings)
+    mixer = result.setdefault("mixer", {})
+    if type(mixer) is not dict:
+        raise LightCraftError("raw_invalid_settings")
+    for color in ("red", "orange", "yellow", "green", "aqua", "blue", "purple", "magenta"):
+        band = mixer.setdefault(color, {})
+        if type(band) is not dict:
+            raise LightCraftError("raw_invalid_settings")
+        for field in ("hue", "sat", "lum"):
+            band.setdefault(field, 0.0)
     detail = result.setdefault("detail", {})
     if type(detail) is not dict:
         raise LightCraftError("raw_invalid_settings")
@@ -96,7 +108,25 @@ def complete_snapshot_for_merge(settings):
 
 def settings_snapshot_for_comparison(settings):
     """Treat Native's omitted serde-default false as equal to an explicit false snapshot value."""
-    return with_legacy_profile_defaults(complete_snapshot_for_merge(settings))
+    return with_legacy_mixer_defaults(with_legacy_profile_defaults(complete_snapshot_for_merge(settings)))
+
+
+def with_legacy_mixer_defaults(settings):
+    """Use LightCraft's HSL defaults when an older full snapshot omitted the mixer."""
+    mixer = settings.get("mixer")
+    if mixer is not None and type(mixer) is not dict:
+        raise LightCraftError("raw_invalid_settings")
+    mixer = {} if mixer is None else mixer
+    result = {}
+    for color in ("red", "orange", "yellow", "green", "aqua", "blue", "purple", "magenta"):
+        band = mixer.get(color, {})
+        if type(band) is not dict:
+            raise LightCraftError("raw_invalid_settings")
+        result[color] = {field: band.get(field, 0.0) for field in ("hue", "sat", "lum")}
+    if all(color in mixer and all(field in mixer[color] for field in ("hue", "sat", "lum")) for color in result):
+        return settings
+    return {**settings, "mixer": {**mixer, **{color: {**mixer.get(color, {}), **values}
+                                                 for color, values in result.items()}}}
 
 
 def control_location(settings, control):
@@ -222,7 +252,7 @@ def controls_state(snapshot):
     values = {}
     for control in CONTROLS:
         parent, key = control_location(settings, control)
-        value = parent.get(key)
+        value = parent.get(key, CONTROLS[control][3] if control.startswith("mixer.") else None)
         if type(value) not in (int, float) or not math.isfinite(value):
             raise LightCraftError("raw_invalid_settings")
         values[control] = value

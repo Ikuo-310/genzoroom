@@ -2,7 +2,7 @@
 import { LIGHTCRAFT_ENGINE } from './lightcraftEngine';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRawWorkspace,abortRawWorkspaceRequests,discardRawWorkspace, rawCapability, rawPreview, beginRawCurveInteraction, cancelRawCurveInteraction, updateRawTargetedCurve, readRawSettings, setRawControls, saveRawRecipe, saveRawHistory, readRawHistory, readRawRecipe, rawWorkspaceEmpty,
-  RAW_CONTROL_IDS, RawSaveError, type RawDocument, type RawHistoryRequest, type RawHistoryOperation, validRawCurve, validRawCurveInput } from './rawApi';
+  RAW_CONTROL_IDS, RAW_HISTORY_CONTROL_IDS, RawSaveError, type RawDocument, type RawHistoryRequest, type RawHistoryOperation, validRawCurve, validRawCurveInput } from './rawApi';
 import { downloadRawLensDatabase, readRawLensDatabaseStatus } from './rawApi';
 import { rawSettings } from './test/rawSettings';
 import { RawSuperseded } from './rawApi';
@@ -183,11 +183,17 @@ it('sends Before kind and validates its opaque key separately from After', async
   expect(JSON.parse(init.body as string).kind).toBe('before');
 });
 describe('RAW History transport', () => {
+  it('registers all 24 Native Mixer controls as numeric History controls', () => {
+    const expected = ['red', 'orange', 'yellow', 'green', 'aqua', 'blue', 'purple', 'magenta']
+      .flatMap(color => ['hue', 'sat', 'lum'].map(field => `mixer.${color}.${field}`));
+    expect(RAW_CONTROL_IDS.filter(control => control.startsWith('mixer.'))).toEqual(expected);
+    expect(RAW_HISTORY_CONTROL_IDS.filter(control => control.startsWith('mixer.'))).toEqual(expected);
+  });
   it('accepts 200 steps with 36 full precision deltas above 256KiB and rejects above 1MiB', async () => {
     const data = rawHistoryData(rawSettings(doc));
     data.steps = Array.from({ length: 200 }, (_, i) => ({ stepId: `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`,
       kind: 'allReset', metadata: {}, createdAt: '2026-10-27T00:00:00Z',
-      changes: RAW_CONTROL_IDS.filter(control => !control.startsWith('optics.')).map(control => ({ control, before: -9.876543210987654e100, after: 1.234567890123456e200 })) }));
+      changes: RAW_CONTROL_IDS.filter(control => !control.startsWith('optics.' )).slice(0, 36).map(control => ({ control, before: -9.876543210987654e100, after: 1.234567890123456e200 })) }));
     data.history = { initialized: true, cursor: 200, length: 200, selectedStepId: data.steps[199].stepId };
     const encoded = JSON.stringify(data);
     expect(new TextEncoder().encode(encoded).length).toBeGreaterThan(256 * 1024);

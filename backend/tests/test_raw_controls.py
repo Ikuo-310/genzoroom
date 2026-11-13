@@ -3,7 +3,7 @@ import asyncio
 import pytest
 
 from lightcraft_mcp import LightCraftError
-from raw_controls import (CONTROLS, complete_snapshot_for_merge, settings_snapshot_for_comparison,
+from raw_controls import (CONTROLS, HISTORY_CONTROLS, complete_snapshot_for_merge, settings_snapshot_for_comparison,
                           validate_controls)
 from tests.test_lightcraft_raw import DEFAULT
 from tests.test_windows_local import local, client, authenticate
@@ -49,6 +49,35 @@ def test_optics_specs_and_typed_switches_match_lightcraft():
             validate_controls({flag: 1}, True)
     with pytest.raises(LightCraftError, match='raw_invalid_controls'):
         validate_controls({'optics.remove_ca': True, 'light.exposure': 1}, True)
+
+
+def test_mixer_controls_are_native_numeric_controls_and_legacy_defaults_are_zero():
+    from raw_controls import CONTROL_PATHS, validate_history_operation
+    from raw_recipe_store import _history_metadata
+    colors = ("red", "orange", "yellow", "green", "aqua", "blue", "purple", "magenta")
+    ids = {f"mixer.{color}.{field}" for color in colors for field in ("hue", "sat", "lum")}
+    assert ids <= CONTROLS.keys() and ids <= CONTROL_PATHS.keys()
+    assert ids <= HISTORY_CONTROLS
+    assert all(CONTROLS[control] == (-100, 100, 1, 0, 0) for control in ids)
+    for control in ids:
+        validate_controls({control: 12.375}, True)
+        with pytest.raises(LightCraftError, match="raw_invalid_controls"):
+            validate_controls({control: 100.01}, True)
+        with pytest.raises(LightCraftError, match="raw_invalid_controls"):
+            validate_controls({control: float("inf")}, True)
+    validate_history_operation("controlReset", {"control": "mixer.red.hue"})
+    assert _history_metadata("control", {"control": "mixer.blue.sat"}) == {"control": "mixer.blue.sat"}
+    assert CONTROL_PATHS["mixer.blue.sat"] == ("mixer", "blue", "sat")
+    settings = {"version": 1, "process": 1, "wb": {}, "mixer": {
+        "red": {"hue": 12.375}, "blue": {"sat": -40.25}}}
+    from raw_controls import with_legacy_mixer_defaults
+    normalized = with_legacy_mixer_defaults(settings)
+    assert settings["mixer"] == {"red": {"hue": 12.375}, "blue": {"sat": -40.25}}
+    assert normalized["mixer"]["red"] == {"hue": 12.375, "sat": 0., "lum": 0.}
+    assert normalized["mixer"]["blue"] == {"hue": 0., "sat": -40.25, "lum": 0.}
+    assert normalized["mixer"]["orange"] == {"hue": 0., "sat": 0., "lum": 0.}
+    assert settings_snapshot_for_comparison({"version": 1, "process": 1, "wb": {}})["mixer"]["red"] == {
+        "hue": 0., "sat": 0., "lum": 0.}
 
 
 def test_optics_numeric_and_boolean_settings_use_native_merge_and_readback(local, tmp_path, monkeypatch):
