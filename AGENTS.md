@@ -123,12 +123,15 @@ Existing checks may be simplified or removed when they no longer serve a concret
 
 - When updating LightCraft, follow [the update guide](docs/research/lightcraft/UPDATE_GUIDE.md): verify the pinned upstream commit and every GenzoRoom patch, fail on partial/duplicate application, then build and test native Before/After capability and affected GenzoRoom behavior. Verify the actual binary's schema, response kind and SHA-256 receipt; version alone is insufficient. Check compatibility against the actual Native API contract and affected GenzoRoom flows; do not turn this into a requirement to match LightCraft's internal implementation or guarantee pixel-level output equivalence beyond its published contract. Retire a patch only after upstream equivalents pass the same compatibility checks.
 
-- Do not commit or push changes unless explicitly requested. The user performs Git operations, deployment, and NAS/Firefox verification.
-- Use Conventional Commits with an English type prefix and a Japanese change summary after the colon, for example `fix: RAWスライダーのフォーカスを維持`. Keep existing commits unchanged.
-- Do not deploy to the NAS or claim to have performed manual browser testing.
+- For implementation and bug-fix tasks, commit and push completed changes after the required tests and checks pass, unless explicitly instructed otherwise.
+- For read-only investigations, reviews, and audits, do not commit or push unless explicitly requested.
+- Preserve unrelated and pre-existing uncommitted changes. Never include them in a commit without explicit authorization.
+- Do not amend, rebase, reset, force-push, or otherwise rewrite existing Git history unless explicitly requested.
+- Use Conventional Commits with an English type prefix and a Japanese change summary after the colon, for example `fix: RAWスライダーのフォーカスを維持`.
+- The user performs deployment, NAS verification, and manual Windows Desktop/browser testing. Do not perform these operations or claim they have been completed.
 - Do not update README, CHANGELOG, or other project documentation unless the task requests it or the implementation makes an update necessary.
 - Keep README content for general users: describe features, operation, and limitations, not internal implementation or development history. Normally leave README unchanged during implementation, audit, and fix work. Once a feature is confirmed complete, update README for changes that affect users. Before completion, update it only when explicitly requested or when correcting a serious error or misleading instruction.
 - Keep `README.md` and `README.ja.md` aligned and update both in the same change, using natural wording in each language rather than a literal translation. Keep feature descriptions concise; put technical specifications in `docs/architecture.md` and deployment information in the English and Japanese deployment guides.
 - Maintain CHANGELOG as a user-facing change history. Finalize entries for a release only when explicitly instructed to prepare or publish that release.
 - If it is unclear whether a completed feature warrants a README update, do not add content speculatively; report whether an update appears necessary in the task summary.
-- At the end of each task, report changed files, key design decisions, test results, and any remaining risks or manual verification requirements.
+- At the end of each task, report changed files, key design decisions, test results, commit SHA and push status when applicable, and any remaining risks or manual verification requirements.
