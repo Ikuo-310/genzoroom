@@ -8,6 +8,12 @@
 
 Backend focused test 65件成功。実EXE `target-p3-wb`はmanifest receipt／SHA／schema probe成功。実Native＋リポジトリJPEG一時コピー1件でDetail Reset、部分更新、false／true snapshotの復元を確認した。RAW DNG素材による`nr_outliers=true` import／reset、Pixel／Pentax、実Native Thumbnail／Export、実ユーザーtupleは未確認。詳細と残る検証範囲は上記監査文書を参照。
 
+### P6前：GPU backendの既定動作へ委譲（2026-11-13）
+
+固定upstream `192ff72923c39e6623f2c7ff67ab3a119deb8071`の未変更`crates/gpu/src/backend.rs`は、`LIGHTCRAFT_GPU_BACKEND`／`WGPU_BACKEND`未指定時に`Auto`を選び、Windowsのcompute／window既定をDX12にする（`default_compute_backends`、`default_window_backends`）。通常起動の`LightCraftManager`既定値を未指定へ変更し、allowlist済みchild environmentからambient GPU backend変数を除外したままNativeへ指定を注入しない。独立Export Sessionも通常manager既定を使う。診断SessionのCPU=`off`およびGPU測定=`dx12`の明示指定は維持した。
+
+Runtime／artifact receipt／Export／Thumbnail focused Backend tests **165 passed**。receipt検証済みv0.20.0実EXEでは、通常起動でready・managed receipt認識・GPU available（Radeon RX 580 Series／Dx12）を確認。実Nativeの既存snapshot round-tripは診断`off`指定で**1 passed**。Native patch、GPU選択・fallback実装、StageCache、Recipe／History／Queueは変更していない。補助で実行した`test_raw_diagnostics.py`を含む群は4件失敗し、既存診断metadataの`metrics.execution`／`metrics.stageCache`欠落が原因。今回の変更箇所外であり修正せず、focused起動関連165件は別実行で成功した。P6には着手していない。
+
 ### P5-A：既存Exportテスト期待値の修正（2026-11-13）
 
 直前のP5関連Backend suiteで失敗した3件を再現し、製品動作と照合した。旧Engine tupleだけがあるRAW Assetは`select_raw_export_state()`が`exportEligible=false`を返し、Export Queueへの登録を拒否する。旧RecipeをQueue登録・Exportできるとしたテストを、拒否とQueue不変を確認する期待へ修正した。H1関連の2件は`raw_export_artifact`が完全snapshot送信時に`complete_snapshot_for_merge()`を適用するため`detail.nr_outliers=false`がpayloadに加わる。Export Nativeへのwire payloadだけでfalse補完を検証し、保存Recipe本文・receiptが不変である既存assertを維持した。

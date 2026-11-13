@@ -66,7 +66,7 @@ class FakeProcess:
         self.exit(-9)
 
 
-def make_manager(tmp_path, *, process_options=None, environment=None, spawn_gate=None):
+def make_manager(tmp_path, *, process_options=None, environment=None, spawn_gate=None, gpu_backend=None):
     executable = tmp_path / "lightcraft-cli.exe"
     executable.write_bytes(b"fake executable")
     env = {"GENZOROOM_LIGHTCRAFT_EXE": str(executable), "SYSTEMROOT": "C:\\Windows"}
@@ -79,7 +79,8 @@ def make_manager(tmp_path, *, process_options=None, environment=None, spawn_gate
         process = FakeProcess(**(process_options or {}))
         children.append(process)
         return process
-    return LightCraftManager(environment=env, platform="win32", spawn=spawn, timeouts=FAST), children, launches
+    return LightCraftManager(environment=env, platform="win32", spawn=spawn, timeouts=FAST,
+                             gpu_backend=gpu_backend), children, launches
 
 
 def assert_reaped(session):
@@ -105,7 +106,7 @@ def test_start_handshake_hash_gpu_and_idempotent_close(tmp_path):
         args, kwargs = launches[0]
         assert args[1:] == ("mcp", "--headless", "--compact")
         assert kwargs["shell"] is False and kwargs["creationflags"] != 0
-        assert kwargs["env"]["LIGHTCRAFT_GPU_BACKEND"] == "dx12"
+        assert "LIGHTCRAFT_GPU_BACKEND" not in kwargs["env"]
         await manager.ping()
         gpu = await manager.get_gpu_info()
         assert gpu.available and gpu.adapter == GPU["adapter"]
@@ -242,15 +243,16 @@ def test_environment_is_allowlisted_and_parent_is_unchanged():
     parent = {"SystemRoot": "C:\\Windows", "LOCALAPPDATA": "C:\\Users\\test", "TEMP": "C:\\Temp",
               "IMMICH_API_KEY": "secret", "CUSTOM_PASSWORD": "secret", "PATH": "private python path",
               "LIGHTCRAFT_GPU": "0", "LIGHTCRAFT_GPU_ADAPTER": "wrong", "LIGHTCRAFT_GPU_BACKEND": "vulkan",
+              "WGPU_BACKEND": "vulkan",
               "LIGHTCRAFT_LENSFUN_DIR": "C:\\Users\\test\\Lensfun", "WGPU_DX12_COMPILER": "dxc",
               "RUST_LOG": "trace", "PYTHONPATH": "private"}
     before = dict(parent)
     env = child_environment(parent)
     assert parent == before
-    assert set(env) == {"SYSTEMROOT", "LOCALAPPDATA", "TEMP", "PATH", "LIGHTCRAFT_GPU_BACKEND", "LIGHTCRAFT_LOG",
+    assert set(env) == {"SYSTEMROOT", "LOCALAPPDATA", "TEMP", "PATH", "LIGHTCRAFT_LOG",
                         "LIGHTCRAFT_LENSFUN_DIR"}
     assert env["LIGHTCRAFT_LENSFUN_DIR"] == "C:\\Users\\test\\Lensfun"
-    assert env["LIGHTCRAFT_GPU_BACKEND"] == "dx12"
+    assert "LIGHTCRAFT_GPU_BACKEND" not in env and "WGPU_BACKEND" not in env
     assert "private" not in json.dumps(env) and "secret" not in json.dumps(env)
 
 
@@ -609,8 +611,7 @@ def test_real_subprocess_stderr_keeps_draining_after_failed_reap(tmp_path):
 def test_private_temp_and_internal_cpu_setting_reaped_across_generations(tmp_path):
     from lightcraft_mcp import MAX_PREVIEW_LINE_BYTES
     async def run():
-        manager, children, launches = make_manager(tmp_path)
-        manager._gpu_backend = "off"
+        manager, children, launches = make_manager(tmp_path, gpu_backend="off")
         await manager.start()
         await until(lambda: manager.status().state == "ready")
         session = manager._session

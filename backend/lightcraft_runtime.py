@@ -72,8 +72,8 @@ def lightcraft_log(event, *, level="info", **context):
         pass
 
 
-def child_environment(parent, *, gpu_backend="dx12", temp_directory=None):
-    if gpu_backend not in ("dx12", "off"):
+def child_environment(parent, *, gpu_backend=None, temp_directory=None):
+    if gpu_backend not in (None, "dx12", "off"):
         raise ValueError("lightcraft_invalid_gpu_backend")
     # Copy only OS runtime locations; arbitrary inherited keys can contain credentials.
     allowed = {"SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP", "LOCALAPPDATA", "APPDATA",
@@ -84,7 +84,9 @@ def child_environment(parent, *, gpu_backend="dx12", temp_directory=None):
     if root:
         # Frozen Python's PATH and developer GPU/compiler overrides do not belong to the CLI.
         result["PATH"] = str(Path(root) / "System32") + os.pathsep + root
-    result["LIGHTCRAFT_GPU_BACKEND"] = gpu_backend
+    # The Native owns platform defaults; only explicit diagnostic modes override them.
+    if gpu_backend is not None:
+        result["LIGHTCRAFT_GPU_BACKEND"] = gpu_backend
     result["LIGHTCRAFT_LOG"] = "warn"
     if temp_directory is not None:
         result["TEMP"] = result["TMP"] = str(temp_directory)
@@ -273,8 +275,8 @@ async def _await_task_resilient(task):
 
 
 class LightCraftManager:
-    def __init__(self, *, environment=None, platform=None, spawn=None, timeouts=None, gpu_backend="dx12"):
-        if gpu_backend not in ("dx12", "off"):
+    def __init__(self, *, environment=None, platform=None, spawn=None, timeouts=None, gpu_backend=None):
+        if gpu_backend not in (None, "dx12", "off"):
             raise ValueError("lightcraft_invalid_gpu_backend")
         self._gpu_backend = gpu_backend
         self._environment = dict(os.environ if environment is None else environment)

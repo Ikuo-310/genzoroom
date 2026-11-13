@@ -333,8 +333,8 @@ async def export_raw_artifact(request: RawExportInput, *, manager=None, temp_roo
     if not 8 <= len(source) <= MAX_RAW_BYTES:
         raise RawExportError("raw_export_invalid_source")
     input_filename = _input_filename(request.source_filename)
-    owned = (manager or LightCraftManager()).diagnostic_manager(
-        manager._gpu_backend if manager is not None else "dx12")
+    template = manager or LightCraftManager()
+    owned = template.diagnostic_manager(template._gpu_backend)
     lightcraft_log("export.started", sourceBytes=len(source))
     phase = "prepare"
     try:

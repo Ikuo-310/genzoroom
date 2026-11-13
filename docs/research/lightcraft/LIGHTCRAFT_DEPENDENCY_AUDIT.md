@@ -160,12 +160,14 @@ active manifestは1本のみ。SHA-256=`ca30ff958ff5fbbd04e8e50b31c7c01a6319b786
 | 区分 | 確認結果 |
 |---|---|
 | 現行描画・active patch | StagePool、admission、retained capacity、execution outcomeの独自公開・制御はない。`_raw_preview`はstage_cache引数を受けるが送信しない（`lightcraft_runtime.py:697`）。GPUファイル変更はFrame伝播。 |
-| 実行中の標準API利用 | `app.memoryBudget` 1024 MiB設定、`LIGHTCRAFT_GPU_BACKEND`選択、`app.gpu`照会は残る。Engineへ実行環境／上限を渡すA/Bであり、内部GPU fallback／Buffer所有のDではない。固定budgetの運用選択は別問題。 |
+| 実行中の標準API利用 | `app.memoryBudget` 1024 MiB設定と`app.gpu`照会は残る。通常起動では`LIGHTCRAFT_GPU_BACKEND`を注入せず、Windows既定DX12を固定upstreamへ委譲する。診断Sessionの`off`／`dx12`条件指定は測定条件に限る。内部GPU fallback／Buffer所有のDではない。固定budgetの運用選択は別問題。 |
 | 実行中だが効かない旧設定 | `LightCraftRawSession.__init__`が`GENZOROOM_RAW_STAGE_CACHE*`を検証する（`:544,575`）。無効値なら失敗するが、正しいONを指定しても現行Native要求に反映されない。完全なdead codeではない。 |
 | 実行可能な旧診断UI | `DeveloperPage.tsx:112`→`RawPreviewDiagnostics.tsx:149`、`windows_local.py:123`→`raw_diagnostics.py:211`。ON/OFF試行を作るが現在の`frame.metrics`はtiming／PNG digestだけ（`lightcraft_raw.py:2184`）。Frontend `rawDiagnostics.ts:112,122`はstageCache metadataを必須にする。現行Native応答との不整合がある。 |
 | 旧fallback／署名 | `_raw_preview`の旧crop_edit payload分岐、`_validate_crop_png`、旧StageCache error mappingなど。現行capabilityではsimple_cropを選ぶ。現行の受入要件として維持する必要は薄いが、削除時には呼出し確認が必要。 |
 | buildの旧版専用処理 | `build.py:341`はwholeFrameContract=1で新probeへreturn。後続旧StageCache probeはactive manifestでは実行しない。旧manifestを明示すれば使用されるため、すべて未使用とは言わない。 |
 | 非active成果物・研究履歴 | `0002-v0.18.1-native-contracts.patch`、`0003-v0.18.1-lens-profile-info.patch`、`porting/v0.20.0/0002-v0.20-native-contracts.patch`と旧研究記録はactive manifest対象外。現行StagePool依存の根拠にはしない。 |
+
+P6前の起動設定整理（2026-11-13）では、通常起動の`LIGHTCRAFT_GPU_BACKEND`注入を撤去し、固定upstreamのWindows既定DX12へ委譲した。明示`off`／`dx12`は診断条件だけに残す。詳細とfocused／実EXE検証結果は移植計画の「P6前：GPU backendの既定動作へ委譲」を参照。
 
 **M6 — Medium：** 現行診断UIと無効なStageCache指定を整理する。Nativeへ内部制御を再導入して旧診断を復活させる案は不適切。timing／quality／表示成功等の現在取得できる測定へ合わせ、ON/OFFが実際に切り替わるかのような表示をなくす。診断UIの実操作は未実施で、コード上のproducer／consumer不一致として報告する。通常編集のPreview失敗を示すものではなく、P4-Cの編集受入を止めるHighではない。
 
