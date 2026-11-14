@@ -21,8 +21,8 @@ describe('RAW History display', () => {
       { stepId: 'reset', kind: 'sectionReset', metadata: { section: 'vignette' }, changes: [{ control: 'vignette.amount', before: -73, after: 0 }], createdAt: '2026-10-28T00:00:00Z' },
     ];
     const markup = renderToStaticMarkup(<RawEditHistory raw={rawHistory(steps, 4) as never} disabled={false} onReset={() => {}} />);
-    for (const label of language === 'ja' ? ['ハイライト', 'カラー', 'ペイント', '周辺光量補正 リセット'] : ['Highlight', 'Color', 'Paint', 'Vignette Reset']) expect(markup).toContain(label);
-    expect(markup).toContain('-73 → 0'); expect(markup).not.toContain('workspace.');
+    for (const label of language === 'ja' ? ['ハイライト', 'カラー', 'ペイント', '周辺光量補正をリセット'] : ['Highlight', 'Color', 'Paint', 'Reset Vignette']) expect(markup).toContain(label);
+    expect(markup).not.toContain('-73 → 0'); expect(markup).not.toContain('workspace.');
   });
 
   it.each(['ja', 'en'])('distinguishes Effects toggle from Basic Effects Reset and formats all three values in %s', async language => {
@@ -37,7 +37,7 @@ describe('RAW History display', () => {
         changes: controls.map(control => ({ control, before: 73, after: 0 })) });
     const markup = renderToStaticMarkup(<RawEditHistory raw={rawHistory(steps, steps.length) as never} disabled={false} onReset={() => {}} />);
     expect(markup).toContain(language === 'ja' ? 'エフェクト OFF' : 'Effects OFF');
-    expect(markup).toContain(language === 'ja' ? '基本エフェクト リセット' : 'Basic Effects Reset');
+    expect(markup).toContain(language === 'ja' ? '基本エフェクトをリセット' : 'Reset Basic Effects');
     for (const label of language === 'ja' ? ['テクスチャ', '明瞭度', 'かすみの除去'] : ['Texture', 'Clarity', 'Dehaze']) expect(markup).toContain(label);
     expect(markup).toContain('-40 → 73'); expect(markup).toContain('73 → 0'); expect(markup).not.toContain('workspace.');
   });
@@ -70,7 +70,7 @@ describe('RAW History display', () => {
     expect(markup).toContain(language === 'ja' ? 'シャープ量' : 'Sharpening Amount');
     expect(markup).toContain(language === 'ja' ? 'マスクをリセット' : 'Reset masking');
     expect(markup).toContain(language === 'ja' ? 'ディテール OFF' : 'Detail OFF');
-    expect(markup).toContain(language === 'ja' ? 'ディテール リセット' : 'Detail Reset');
+    expect(markup).toContain(language === 'ja' ? 'ディテールをリセット' : 'Reset Detail');
     expect(markup).toContain('40 → 120'); expect(markup).toContain('60 → 0');
   });
 
@@ -124,8 +124,10 @@ describe('RAW History display', () => {
         createdAt: '2026-10-23T11:14:52Z', changes: [{ control: 'light.exposure', before: .3, after: 0 }] },
     ];
     const markup = renderToStaticMarkup(<RawEditHistory raw={rawHistory(steps, 2) as never} disabled={false} onReset={() => {}} />);
-    expect(markup).toContain('カラー リセット: 色かぶり補正 +8 → 0、自然な彩度 +20 → 0');
-    expect(markup).toContain('すべてリセット: 露光量 +0.30 → 0.00');
+    expect(markup).toContain('カラーをリセット');
+    expect(markup).toContain('すべてリセット');
+    expect(markup).not.toContain('色かぶり補正 +8 → 0');
+    expect(markup).not.toContain('露光量 +0.30 → 0.00');
   });
 
   it('includes both WB values when either WB Reset changes temperature and tint', () => {
@@ -160,8 +162,32 @@ it.each(['ja', 'en'])('labels RAW grading controls and category Reset in %s', as
   ];
   const markup = renderToStaticMarkup(<RawEditHistory raw={rawHistory(steps, 3) as never} disabled={false} onReset={() => {}} />);
   expect(markup).toContain('0° → 360°'); expect(markup).toContain('73 → 50');
-  expect(markup).toContain(language === 'ja' ? 'カラーグレーディング リセット' : 'Color Grading Reset');
+  expect(markup).toContain(language === 'ja' ? 'カラーグレーディングをリセット' : 'Reset Color Grading');
   expect(markup).not.toContain('workspace.');
+});
+
+it.each([
+  ['ja', 'hue', '色相ターゲット調整'], ['ja', 'sat', '彩度ターゲット調整'], ['ja', 'lum', '輝度ターゲット調整'],
+  ['en', 'hue', 'Hue Target Adjustment'], ['en', 'sat', 'Saturation Target Adjustment'], ['en', 'lum', 'Luminance Target Adjustment'],
+] as const)('shows only the %s %s Mixer target operation label', async (language, target, label) => {
+  await i18n.changeLanguage(language);
+  const field = target === 'hue' ? 'hue' : target === 'sat' ? 'sat' : 'lum';
+  const step: RawHistoryStep = { stepId: 'mixer-target', kind: 'mixerTarget', metadata: { target }, createdAt: '', changes: [
+    { control: `mixer.red.${field}`, before: 0, after: 12.75 },
+    { control: `mixer.orange.${field}`, before: -2.5, after: 8.25 },
+  ] };
+  const markup = renderToStaticMarkup(<RawEditHistory raw={rawHistory([step], 1) as never} disabled={false} onReset={() => {}} />);
+  expect(markup).toContain(label);
+  expect(markup).not.toContain('12.75'); expect(markup).not.toContain('8.25');
+  expect(markup).not.toContain('レッド'); expect(markup).not.toContain('Red');
+});
+
+it.each(['ja', 'en'])('does not label an unknown History kind as a Color Reset in %s', async language => {
+  await i18n.changeLanguage(language);
+  const step = { stepId: 'unknown', kind: 'futureOperation', metadata: {}, createdAt: '', changes: [] } as unknown as RawHistoryStep;
+  const markup = renderToStaticMarkup(<RawEditHistory raw={rawHistory([step], 1) as never} disabled={false} onReset={() => {}} />);
+  expect(markup).toContain(language === 'ja' ? '不明な現像操作' : 'Unknown development operation');
+  expect(markup).not.toContain(language === 'ja' ? 'カラー全体をリセット' : 'Reset all Color adjustments');
 });
 
 it.each(['ja', 'en'])('labels every point curve operation by kind and channel in %s', async language => {
@@ -242,10 +268,10 @@ it.each(['ja', 'en'])('uses registered Optics labels for controls, resets, flags
   }
   for (const label of language === 'ja'
     ? ['色収差を除去 OFF → ON', 'レンズ補正を有効にする ON → OFF', '色収差除去をリセット ON → OFF',
-      'レンズ補正をリセット ON → OFF', 'レンズ補正 OFF', 'レンズ補正をリセット:',
+      'レンズ補正をリセット ON → OFF', 'レンズ補正 OFF', 'レンズ補正をリセット',
       'カメラのローカルトーンマッピング OFF → ON', 'カメラのローカルトーンマッピング ON → OFF']
     : ['Remove Chromatic Aberration OFF → ON', 'Enable Profile Corrections ON → OFF', 'Reset chromatic aberration removal ON → OFF',
-      'Reset profile corrections ON → OFF', 'Lens Corrections OFF', 'Reset lens corrections:',
+      'Reset profile corrections ON → OFF', 'Lens Corrections OFF', 'Reset lens corrections',
       'Camera Local Tone Mapping OFF → ON', 'Camera Local Tone Mapping ON → OFF']) expect(markup).toContain(label);
   expect(markup).not.toContain('rawPreview.opticsControls');
   expect(markup).not.toContain('workspace.');

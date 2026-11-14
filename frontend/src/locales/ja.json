@@ -393,6 +393,7 @@
       "wbResetHistory": "ホワイトバランスをリセット",
       "colorReset": "カラー全体をリセット",
       "colorResetHistory": "カラー全体をリセット",
+      "unknownHistoryOperation": "不明な現像操作",
       "gradingReset": "カラーグレーディングをリセット",
       "sectionResetHistory": "{{section}}をリセット",
       "colorCategory": "カラー",
@@ -402,6 +403,7 @@
         "hue": "色相", "sat": "彩度", "lum": "輝度",
         "targetTools": "カラーミキサーのターゲット調整",
         "targets": { "hue": "色相ターゲット調整", "sat": "彩度ターゲット調整", "lum": "輝度ターゲット調整" },
+        "targetHistory": { "hue": "色相ターゲット調整", "sat": "彩度ターゲット調整", "lum": "輝度ターゲット調整" },
         "targetLabels": { "hue": "色相", "sat": "彩度", "lum": "輝度" },
         "colors": {
           "red": {"hue": "レッドの色相", "hueValue": "レッドの色相の値", "hueReset": "レッドの色相をリセット", "sat": "レッドの彩度", "satValue": "レッドの彩度の値", "satReset": "レッドの彩度をリセット", "lum": "レッドの輝度", "lumValue": "レッドの輝度の値", "lumReset": "レッドの輝度をリセット"},

@@ -104,6 +104,7 @@ function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t'
       : `reset${String(step.metadata.channel).charAt(0).toUpperCase()}${String(step.metadata.channel).slice(1)}`;
     return t(`workspace.rawPreview.curveHistory.${resetLabel}`);
   }
+  if (step.kind === 'mixerTarget') return t(`workspace.rawPreview.mixer.targetHistory.${step.metadata.target}`);
   if (step.kind === 'vignetteStyle')
     return `${t('workspace.rawPreview.vignetteMode')}: ${t(`workspace.rawPreview.vignetteStyles.${step.metadata.style}`)}`;
   if (step.kind === 'opticsFlag' || step.kind === 'opticsFlagReset') {
@@ -141,9 +142,10 @@ function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t'
     if (section === 'optics') return t('workspace.rawPreview.resetLensCorrections');
     return t('workspace.rawPreview.sectionResetHistory', { section: t(sectionLabels[section]) });
   }
+  if (step.kind !== 'wbPick' && step.kind !== 'wbAuto' && step.kind !== 'sectionToggle')
+    return t('workspace.rawPreview.unknownHistoryOperation');
   const operation = step.kind === 'wbPick' ? t('workspace.rawPreview.wbPick') : step.kind === 'wbAuto' ? t('workspace.rawPreview.aw')
-    : t(section ? sectionLabels[section] : 'workspace.rawPreview.colorCategory')
-      + ' ' + t(step.kind === 'sectionToggle' ? step.metadata.enabled ? 'workspace.basicOn' : 'workspace.basicOff' : 'workspace.reset');
+    : t(sectionLabels[step.metadata.section as RawResetSectionId]) + ' ' + t(step.metadata.enabled ? 'workspace.basicOn' : 'workspace.basicOff');
   const changes = step.changes;
   const numeric = changes?.map(change => `${name(change.control)} ${pair(change)}`) ?? [];
   const flags = step.flagChanges?.map(change => `${t(`workspace.${flagLabels[change.control]}`)} ${t(change.before ? 'workspace.basicOn' : 'workspace.basicOff')} → ${t(change.after ? 'workspace.basicOn' : 'workspace.basicOff')}`) ?? [];

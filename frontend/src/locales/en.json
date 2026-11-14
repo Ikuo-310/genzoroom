@@ -402,6 +402,7 @@
       "wbResetHistory": "Reset White Balance",
       "colorReset": "Reset Color adjustments",
       "colorResetHistory": "Reset all Color adjustments",
+      "unknownHistoryOperation": "Unknown development operation",
       "gradingReset": "Reset Color Grading",
       "sectionResetHistory": "Reset {{section}}",
       "colorCategory": "Color",
@@ -411,6 +412,7 @@
         "hue": "Hue", "sat": "Saturation", "lum": "Luminance",
         "targetTools": "Color Mixer targeted adjustment",
         "targets": { "hue": "Hue targeted adjustment", "sat": "Saturation targeted adjustment", "lum": "Luminance targeted adjustment" },
+        "targetHistory": { "hue": "Hue Target Adjustment", "sat": "Saturation Target Adjustment", "lum": "Luminance Target Adjustment" },
         "targetLabels": { "hue": "Hue", "sat": "Saturation", "lum": "Luminance" },
         "colors": {
           "red": {"hue": "Red Hue", "hueValue": "Red Hue value", "hueReset": "Reset Red Hue", "sat": "Red Saturation", "satValue": "Red Saturation value", "satReset": "Reset Red Saturation", "lum": "Red Luminance", "lumValue": "Red Luminance value", "lumReset": "Reset Red Luminance"},
