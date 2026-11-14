@@ -270,3 +270,17 @@ History operationはP1-A2bの`LightCraftRawSession.apply_history_operation`へdi
 正規化metadataを含むimmutable request bodyから既存transport fingerprintを生成し、同じsave IDの異なるmetadata/payloadを拒否する。保存receiptがあればNative mutationを行わずresponseを再生する。Store保存前の失敗は成功応答せず`stage=save`を保持し、後続の別編集を`raw_history_save_pending`で拒否する。同じrequestのretryはStore保存を再試行し、採色を再送しない。Native未変更で確定できるPoint Color snapshot validation／Curve・Mixer owner拒否ではin-memory History ownerを解放し、失敗後にsessionが不用意にlockされないようにした。不明結果やreadback不一致は従来のdesynchronized／recovery境界を維持する。
 
 Indexed setが同値、indexed resetが既定値、全体resetが空配列の場合、A1b helperはNative mutationを省略する。Storeは従来どおり同じsnapshotを新stepにせず、`ack.changed=false`のreceiptを保存する。API focused testsでこのno-op、全5 kindのHistory metadata、永続Recipe/step snapshot整合、8件上限、不正index、revision、Curve/Mixer排他、同一save ID再利用、採色の保存失敗後retryを確認した。`test_raw_controls.py`、`test_raw_history_store.py`、`test_raw_category_operations.py`、`test_raw_history_api.py`の関連4 suiteは310件成功した。P1-A2c-3ではNative/SQLite間の不明結果、再open後の復元、receipt replayをPoint Color固有に追加確認し、旧Recipe互換処理の要否を扱う。
+
+## P1-A2c-3a — History保存・Recovery整合性
+
+状態遷移はrequest validation → document/generation/revision・Recipe revision確認 → pending owner `stage=readback` → Native readback／保存済みsnapshotとの一致確認 → `stage=applying` → A1b helperのNative command・完全readback・Session commit → `stage=save` → `_history_verify` → `append_raw_history` transaction（Recipe CAS、History step/cursor、recipe/history save receipts）→ SQLite commit → `stage=complete` → HTTP応答。SQLite commit後から応答までに所有権確認が失敗しても成功応答へ進まず`raw_history_save_unknown`とし、次の同一requestはreceiptから再生する。
+
+保存前のStore failureでは`stage=save`とimmutable request/fingerprintを保持し、成功応答せず別requestを保留中として拒否する。同じsave ID・payloadのretryは保存だけを再試行し、Point Color Native commandを再実行しない。Store commit後に例外を注入した場合も、retryは既存receiptを読み、History stepを重複追加せず`replayed=true`を返す。採色と削除の両方でtransaction前失敗・commit後応答不明を確認した。
+
+Native mutation後の例外では`_mutate`が送信attemptを数え、結果不明・readback失敗・不一致をdesynchronized/session-lostにする。監査で、`stage=applying`のPoint Color retryが通常のreadback/restore後に非冪等な採色を再実行し得ることを確認した。このstageではsame requestのretryも`raw_history_operation_outcome_unknown`で止め、明示`/recover`のみがdurable Recipeへ戻せるようにした。save receiptの照合はこのguardより先なので、commit済みrequestはreceipt replayできる。Mock障害注入では採色・削除それぞれのunknown-after-mutation、readback failure、不一致後に対象Native commandが1回だけであること、ownerが保持されること、別編集が拒否されること、明示Recovery後にNative/Recipeが一致しownerが解放されることを確認した。
+
+owner解放はPoint Color error codeの列挙だけでは判定しない。Native readback／helper実行の前後で既存`RawStatus.edits`とsession stateを比較し、mutation attemptが増えずsession stateが`synced`の場合だけ保留ownerを解放する。A1bの`_mutate`はNative command直前にattempt countを増やし、送信後の例外はsessionをdesynchronizedにするため、この2条件は「Native変更の可能性なし」を示す。invalid index、8件上限、control、revision、Curve／Mixer排他後は次の正常操作が開始でき、送信後の不明結果ではownerを維持する。
+
+no-op set/reset/array resetはNative mutationもHistory step/cursor変更も起こさず、`ack.changed=false`のreceiptを作り、同一save ID retryはreceipt replayする。既存Storeのreceipt/CAS契約によりRecipe revisionはno-op operationでも1進む一方、Recipe settingsとHistory cursorは変わらない。このrevision更新は本件だけの意味変更を避け、既存の全History no-op契約を維持した。recipe revisionまで据え置く新しいreceipt形式への変更は行っていない。
+
+Mock Native／SQLiteの障害注入・Curve/Mixer/WB regressionを含む関連5 suite（`test_raw_controls.py`、`test_raw_history_store.py`、`test_raw_category_operations.py`、`test_raw_history_api.py`、`test_lightcraft_raw.py`）は464件成功した。Native CLI試験、process restart後の再open、Undo/Redo/Jump復元、旧Recipeの欠落`point_colors`対応は本phaseでは未実施。P1-A2c-3bではこれらのrestore経路だけを確認する。

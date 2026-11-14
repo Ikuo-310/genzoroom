@@ -11,7 +11,7 @@ from tests.test_windows_local import local, client, authenticate
 from tests.test_windows_raw_api import setup, open_document, preview_body
 from tests.test_raw_recipe_api import headers
 from tests.test_raw_controls import identity
-from tests.test_raw_history_api import url, body, operation, rows
+from tests.test_raw_history_api import url, body, operation, recover, rows
 from tests.test_raw_recipe_restore import open_asset
 
 
@@ -578,12 +578,20 @@ def test_point_color_history_api_persists_all_five_operations_and_noops(local, t
                 settings = store.get_raw_recipe(recipe_identity)["recipe"]["settings"]
                 assert point_colors(settings)[0]["hue_shift"] == -12.375
                 before_noop = len(rows()["asset_raw_history_steps"])
+                before_revision, before_cursor = doc["recipeRevision"], doc["history"]["cursor"]
                 native_commands = list(children[0].commands)
-                doc = await edit(http, doc, "pointColorControl",
-                    {"control": "pointColor.0.hueShift", "value": -12.375})
+                noop_request = body(doc) | {"kind": "pointColorControl",
+                    "metadata": {"control": "pointColor.0.hueShift", "value": -12.375}}
+                doc = await operation(http, doc, "operate", noop_request)
                 assert doc["ack"]["changed"] is False
+                assert doc["recipeRevision"] == before_revision + 1 and doc["history"]["cursor"] == before_cursor
                 assert len(rows()["asset_raw_history_steps"]) == before_noop
                 assert point_color_mutations(children[0].commands) == point_color_mutations(native_commands)
+                noop_rows = rows()
+                replay = await operation(http, doc, "operate", noop_request)
+                assert replay["replayed"] and replay["recipeRevision"] == doc["recipeRevision"]
+                assert rows() == noop_rows
+                doc = replay
 
                 doc = await edit(http, doc, "pointColorControlReset", {"control": "pointColor.0.hueShift"})
                 assert point_colors(store.get_raw_recipe(recipe_identity)["recipe"]["settings"])[0]["hue_shift"] == 0.
@@ -619,43 +627,116 @@ def test_point_color_history_api_persists_all_five_operations_and_noops(local, t
     asyncio.run(run())
 
 
-def test_point_color_save_failure_retries_receipt_without_repeating_pick(local, tmp_path, monkeypatch):
+@pytest.mark.parametrize("kind,metadata", [
+    ("pointColorPick", {"x": .375, "y": .625}),
+    ("pointColorDelete", {"index": 0}),
+])
+@pytest.mark.parametrize("failure", ["before_commit", "after_commit"])
+def test_point_color_save_failure_retries_without_repeating_native_mutation(
+        local, tmp_path, monkeypatch, kind, metadata, failure):
     async def run():
         api, _, children, _ = await setup(tmp_path, local, monkeypatch)
         writer = store.append_raw_history
         try:
             async with client(local) as http:
                 doc = await open_history(http, local, api)
-                request = body(doc) | {"kind": "pointColorPick", "metadata": {"x": .375, "y": .625}}
+                if kind == "pointColorDelete":
+                    doc = await edit(http, doc, "pointColorPick", {"x": .375, "y": .625})
+                request = body(doc) | {"kind": kind, "metadata": metadata}
                 before = rows()
-                def fail_before_save(*args, **kwargs):
+                def fail_at_save(*args, **kwargs):
+                    if failure == "before_commit":
+                        raise StoreUnavailable()
+                    writer(*args, **kwargs)
                     raise StoreUnavailable()
-                monkeypatch.setattr(store, "append_raw_history", fail_before_save)
+                monkeypatch.setattr(store, "append_raw_history", fail_at_save)
                 failed = await http.post(url(doc, "operate"), json=request)
                 assert failed.status_code == 503 and failed.json()["code"] == "raw_history_save_failed"
-                assert api._history_save["stage"] == "save" and rows() == before
-                assert sum(command == "pointColor.pick" for command, _ in children[0].commands) == 1
+                assert api._history_save["stage"] == "save"
+                assert (rows() == before) is (failure == "before_commit")
+                native_command = "pointColor.pick" if kind == "pointColorPick" else "pointColor.delete"
+                assert sum(command == native_command for command, _ in children[0].commands) == 1
 
                 blocked = await http.post(url(doc, "operate"), json=body(doc) | {
                     "kind": "pointColorPick", "metadata": {"x": .5, "y": .5}})
                 assert blocked.status_code == 409 and blocked.json()["code"] == "raw_history_save_pending"
-                reused = await http.post(url(doc, "operate"), json=request | {
-                    "metadata": {"x": .375, "y": .5}})
+                other_metadata = ({"x": .375, "y": .5} if kind == "pointColorPick" else {"index": 1})
+                reused = await http.post(url(doc, "operate"), json=request | {"metadata": other_metadata})
                 assert reused.status_code == 409 and reused.json()["code"] == "raw_history_save_id_reused"
-                assert sum(command == "pointColor.pick" for command, _ in children[0].commands) == 1
+                assert sum(command == native_command for command, _ in children[0].commands) == 1
 
                 monkeypatch.setattr(store, "append_raw_history", writer)
                 saved = await http.post(url(doc, "operate"), json=request)
                 assert saved.status_code == 200, saved.text
                 result = saved.json()
-                assert result["history"]["length"] == 1 and result["nativeMatchesRecipe"]
-                assert sum(command == "pointColor.pick" for command, _ in children[0].commands) == 1
+                assert result["replayed"] is (failure == "after_commit")
+                assert result["history"]["length"] == (2 if kind == "pointColorDelete" else 1)
+                assert result["nativeMatchesRecipe"]
+                assert sum(command == native_command for command, _ in children[0].commands) == 1
                 recipe = store.get_raw_recipe(api._history_identity)["recipe"]["settings"]
                 history = store.get_raw_history(api._history_identity)["history"]
-                assert recipe["point_colors"] == history["steps"][0]["settings"]["point_colors"]
-                assert history["steps"][0]["metadata"] == {"x": .375, "y": .625}
+                assert recipe["point_colors"] == history["steps"][-1]["settings"]["point_colors"]
+                assert history["steps"][-1]["kind"] == kind
+                assert history["steps"][-1]["metadata"] == metadata
         finally:
             monkeypatch.setattr(store, "append_raw_history", writer)
+            await api.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("kind", ["pointColorPick", "pointColorDelete"])
+@pytest.mark.parametrize("fault", ["unknown_after_mutation", "readback_failure", "readback_mismatch"])
+def test_point_color_uncertain_native_result_retains_history_owner_without_retry(
+        local, tmp_path, monkeypatch, kind, fault):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        child = children[0]
+        try:
+            async with client(local) as http:
+                doc = await open_history(http, local, api)
+                if kind == "pointColorDelete":
+                    doc = await edit(http, doc, "pointColorPick", {"x": .2, "y": .4})
+                    doc = await edit(http, doc, "pointColorPick", {"x": .6, "y": .8})
+                child.point_mutated = False
+                if fault == "unknown_after_mutation":
+                    if kind == "pointColorPick":
+                        child.point_pick_fault = fault
+                    else:
+                        child.point_delete_fault = fault
+                elif fault == "readback_failure":
+                    child.fail_get_after_point_mutation = True
+                elif kind == "pointColorPick":
+                    child.point_pick_fault = "readback_count"
+                else:
+                    child.point_delete_fault = "readback_mismatch"
+                native_command = "pointColor.pick" if kind == "pointColorPick" else "pointColor.delete"
+                metadata = {"x": .375, "y": .625} if kind == "pointColorPick" else {"index": 0}
+                request = body(doc) | {"kind": kind, "metadata": metadata}
+                failed = await http.post(url(doc, "operate"), json=request)
+                assert failed.status_code >= 500
+                assert api._history_save["stage"] == "applying"
+                assert api.raw.status().state in ("lost", "desynchronized")
+                assert sum(command == native_command for command, _ in child.commands) == 1
+
+                retry = await http.post(url(doc, "operate"), json=request)
+                assert retry.status_code == 409 and retry.json()["code"] == "raw_history_operation_outcome_unknown"
+                assert sum(command == native_command for command, _ in child.commands) == 1
+                blocked = await http.post(url(doc, "operate"), json=body(doc) | {
+                    "kind": "pointColorPick", "metadata": {"x": .5, "y": .5}})
+                assert blocked.status_code == 409 and blocked.json()["code"] == "raw_history_save_pending"
+                assert api._history_save["stage"] == "applying"
+                child.point_pick_fault = None
+                child.point_delete_fault = None
+                child.fail_get_after_point_mutation = False
+                recovered = await recover(http, api, doc)
+                assert recovered["nativeMatchesRecipe"] and not recovered["historyPending"]
+                assert api._history_save is None
+                expected_count = 0 if kind == "pointColorPick" else 2
+                assert len(store.get_raw_recipe(api._history_identity)["recipe"]["settings"]["point_colors"]) == expected_count
+                assert sum(command == native_command for command, _ in child.commands) == 1
+        finally:
+            api._history_save = None
+            api._history_initialized = api._history_enabled = False
             await api.close()
     asyncio.run(run())
 

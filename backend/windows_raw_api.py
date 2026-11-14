@@ -33,6 +33,7 @@ HISTORY_CONFLICTS = {"raw_history_save_pending", "raw_history_commit_required", 
                      "raw_history_target_missing", "raw_history_readback_mismatch", "raw_history_baseline_mismatch",
                      "raw_history_step_id_reused", "raw_recipe_save_pending", "raw_history_requires_operation",
                      "raw_geometry_gesture_pending", "raw_geometry_outcome_unknown", "raw_geometry_request_conflict",
+                     "raw_history_operation_outcome_unknown",
                      "raw_curve_interaction_pending", "raw_mixer_interaction_pending",
                      "raw_curve_interaction_stale", "raw_mixer_interaction_stale", "raw_mixer_interaction_sequence",
                      "raw_mixer_interaction_conflict"}
@@ -1453,6 +1454,10 @@ class RawPreviewApi:
             state = await self._history_load(doc)
             if state["revision"] != body["expectedRecipeRevision"]:
                 raise LightCraftError("raw_history_revision_conflict")
+            if (pending["stage"] == "applying" and action == "operate" and body.get("kind") in (
+                    "pointColorPick", "pointColorDelete", "pointColorControl", "pointColorControlReset", "pointColorReset")):
+                # A retry cannot infer whether a non-replayable Native operation took effect.
+                raise LightCraftError("raw_history_operation_outcome_unknown")
             if pending['stage'] == 'applying' and action == 'operate' and body.get('kind') == 'geometry':
                 # A relative command may have run. No snapshot comparison proves execution count.
                 raise LightCraftError('raw_geometry_outcome_unknown')
@@ -1470,12 +1475,14 @@ class RawPreviewApi:
                     self._history_verify(doc)
                     pending["settings"] = interaction_result.settings
                 else:
+                    mutation_attempts = self.raw.status().edits
                     try:
                         snapshot = await self.raw.get_settings(self._raw_handle)
-                    except LightCraftError as error:
+                    except LightCraftError:
+                        status = self.raw.status()
                         if (action == "operate" and body["kind"] in ("pointColorPick", "pointColorDelete",
                                 "pointColorControl", "pointColorControlReset", "pointColorReset")
-                                and error.code in {"raw_curve_interaction_pending", "raw_mixer_interaction_pending"}):
+                                and status.edits == mutation_attempts and status.state == "synced"):
                             self._history_save = None
                         raise
                     self._history_verify(doc)
@@ -1513,18 +1520,16 @@ class RawPreviewApi:
                                 pending['stage'] = 'readback'
                             raise
                     else:
+                        mutation_attempts = self.raw.status().edits
                         try:
                             snapshot = await self.raw.apply_history_operation(self._raw_handle, body["kind"],
                                 body["metadata"], snapshot.revision, curve_points=body.get("curvePoints"))
-                        except LightCraftError as error:
-                            not_sent = error.code in {"raw_point_color_limit", "raw_invalid_point_color_index",
-                                "raw_invalid_point_color_control", "raw_invalid_controls",
-                                "raw_curve_interaction_pending", "raw_mixer_interaction_pending"}
-                            if error.code == "raw_invalid_point_colors":
-                                not_sent = self.raw.status().state == "synced"
-                            if body["kind"] in ("pointColorPick", "pointColorDelete", "pointColorControl",
-                                    "pointColorControlReset", "pointColorReset") and not_sent:
-                                # These errors arise during the helper's pre-command snapshot validation.
+                        except LightCraftError:
+                            status = self.raw.status()
+                            if (body["kind"] in ("pointColorPick", "pointColorDelete", "pointColorControl",
+                                    "pointColorControlReset", "pointColorReset")
+                                    and status.edits == mutation_attempts and status.state == "synced"):
+                                # No Native mutation attempt and a synced session prove the failure was pre-mutation.
                                 self._history_save = None
                             raise
                     self._history_verify(doc)
