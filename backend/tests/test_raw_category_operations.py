@@ -516,7 +516,10 @@ def test_as_shot_requires_every_reference_field(local, tmp_path, monkeypatch, fi
 
 @pytest.mark.parametrize("kind,metadata", [("command", {"command": "develop.reset"}),
     ("controlReset", {"control": "hdr.maxEv"}), ("sectionToggle", {"section": "enhance", "enabled": False}),
-    ("sectionToggle", {"section": "color", "enabled": 0}), ("allReset", {"settings": {}})])
+    ("sectionToggle", {"section": "color", "enabled": 0}), ("allReset", {"settings": {}}),
+    ("pointColorPick", {"x": .25, "y": .75}), ("pointColorDelete", {"index": 0}),
+    ("pointColorControl", {"control": "pointColor.0.hueShift", "value": 12.5}),
+    ("pointColorControlReset", {"control": "pointColor.0.range"}), ("pointColorReset", {})])
 def test_operation_endpoint_rejects_unallowlisted_intent(local, tmp_path, monkeypatch, kind, metadata):
     async def run():
         api, _, children, _ = await setup(tmp_path, local, monkeypatch)
@@ -527,6 +530,27 @@ def test_operation_endpoint_rejects_unallowlisted_intent(local, tmp_path, monkey
                 response = await http.post(url(doc, "operate"), json=body(doc) | {"kind": kind, "metadata": metadata})
                 assert response.status_code == 400 and children[0].commands == commands
                 assert api._history_save["stage"] == "complete"
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
+def test_history_save_id_fingerprint_includes_operation_metadata(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            async with client(local) as http:
+                doc = await open_history(http, local, api)
+                request = body(doc) | {"kind": "sectionToggle",
+                    "metadata": {"section": "light", "enabled": False}}
+                result = await operation(http, doc, "operate", request)
+                durable = rows()
+                commands = list(children[0].commands)
+                changed_metadata = request | {"metadata": {"section": "color", "enabled": False}}
+                response = await http.post(url(result, "operate"), json=changed_metadata)
+                assert response.status_code == 409
+                assert response.json()["code"] == "raw_history_save_id_reused"
+                assert rows() == durable and children[0].commands == commands
         finally:
             await api.close()
     asyncio.run(run())

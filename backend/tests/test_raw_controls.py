@@ -6,7 +6,8 @@ from lightcraft_mcp import LightCraftError
 from raw_controls import (CONTROLS, HISTORY_CONTROLS, complete_snapshot_for_merge, settings_snapshot_for_comparison,
                           mixer_target_readback, validate_controls, POINT_COLOR_FIELDS,
                           validate_point_colors, validate_point_color_control, validate_point_color_value,
-                          validate_point_color_coordinates, validate_point_color_delete, validate_point_color_append)
+                          validate_point_color_coordinates, validate_point_color_delete, validate_point_color_append,
+                          validate_point_color_history_operation)
 from tests.test_lightcraft_raw import DEFAULT
 from tests.test_windows_local import local, client, authenticate
 from tests.test_windows_raw_api import setup, open_document, preview_body
@@ -170,6 +171,68 @@ def test_mixer_controls_are_native_numeric_controls_and_legacy_defaults_are_zero
     assert normalized["mixer"]["orange"] == {"hue": 0., "sat": 0., "lum": 0.}
     assert settings_snapshot_for_comparison({"version": 1, "process": 1, "wb": {}})["mixer"]["red"] == {
         "hue": 0., "sat": 0., "lum": 0.}
+
+
+@pytest.mark.parametrize("kind,metadata", [
+    ("pointColorPick", {"x": .125, "y": .875}),
+    ("pointColorDelete", {"index": 999}),
+    ("pointColorControl", {"control": "pointColor.999.hueShift", "value": -12.375}),
+    ("pointColorControlReset", {"control": "pointColor.999.lumRange"}),
+    ("pointColorReset", {}),
+])
+def test_point_color_history_contract_accepts_request_only_metadata(kind, metadata):
+    normalized = validate_point_color_history_operation(kind, metadata)
+    assert normalized == metadata
+    if kind == "pointColorControl":
+        assert normalized["value"] == -12.375
+        assert type(normalized["value"]) is float
+
+
+@pytest.mark.parametrize("kind,metadata", [
+    ("unknown", {}), ("pointColorPick", {"x": .5}), ("pointColorPick", {"x": .5, "y": .5, "z": 1}),
+    ("pointColorDelete", {}), ("pointColorDelete", {"index": 0, "extra": 1}),
+    ("pointColorControl", {"control": "pointColor.0.hueShift"}),
+    ("pointColorControlReset", {"control": "pointColor.0.range", "value": 50}),
+    ("pointColorReset", {"index": 0}),
+    ("pointColorPick", {"x": True, "y": .5}), ("pointColorDelete", {"index": True}),
+    ("pointColorDelete", {"index": -1}), ("pointColorDelete", {"index": 1.5}),
+    ("pointColorPick", {"x": float("nan"), "y": .5}),
+    ("pointColorPick", {"x": .5, "y": float("inf")}),
+    ("pointColorPick", {"x": 1.01, "y": .5}),
+    ("pointColorControl", {"control": "mixer.red.hue", "value": 1}),
+    ("pointColorControlReset", {"control": "pointColor.0.unknown"}),
+    ("pointColorControl", {"control": "pointColor.0.range", "value": -0.1}),
+    ("pointColorControl", {"control": "pointColor.0.hueShift", "value": 100.1}),
+    ("pointColorControl", {"control": "pointColor.0.lumShift", "value": float("nan")}),
+    ("pointColorControl", {"control": "pointColor.0.lumShift", "value": float("inf")}),
+    ("pointColorControl", {"control": "pointColor.0.hueShift", "value": True}),
+])
+def test_point_color_history_contract_rejects_invalid_request_metadata(kind, metadata):
+    with pytest.raises(LightCraftError, match="raw_invalid_request"):
+        validate_point_color_history_operation(kind, metadata)
+
+
+def test_point_color_history_schema_is_not_enabled_in_store_validator():
+    from raw_recipe_store import InvalidRawHistory, _history_metadata
+    for kind, metadata in (
+        ("pointColorPick", {"x": .2, "y": .3}), ("pointColorDelete", {"index": 0}),
+        ("pointColorControl", {"control": "pointColor.0.hueShift", "value": 1.5}),
+        ("pointColorControlReset", {"control": "pointColor.0.range"}), ("pointColorReset", {}),
+    ):
+        with pytest.raises(InvalidRawHistory):
+            _history_metadata(kind, metadata)
+
+
+def test_existing_mixer_curve_and_wb_history_kind_validation_is_unchanged():
+    from raw_controls import validate_history_operation
+    for kind, metadata in (
+        ("controlReset", {"control": "mixer.red.hue"}),
+        ("mixerTarget", {"target": "sat"}),
+        ("curve", {"channel": "master"}),
+        ("curveReset", {"channel": "point"}),
+        ("wbReset", {}), ("wbAuto", {}), ("wbPick", {}),
+    ):
+        validate_history_operation(kind, metadata)
 
 
 def test_optics_numeric_and_boolean_settings_use_native_merge_and_readback(local, tmp_path, monkeypatch):

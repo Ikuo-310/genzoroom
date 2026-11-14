@@ -143,15 +143,21 @@ def validate_point_colors(settings):
     return values
 
 
-def validate_point_color_control(control_id, count):
-    """Return the field spec for a valid indexed control on an existing entry."""
+def validate_point_color_control(control_id, count=None):
+    """Validate indexed control syntax, optionally requiring an existing entry."""
     if type(control_id) is not str:
         raise LightCraftError("raw_invalid_point_color_control")
     match = re.fullmatch(r"pointColor\.(0|[1-9][0-9]*)\.([A-Za-z]+)", control_id)
-    if match is None or type(count) is not int or not 0 <= count <= MAX_POINT_COLORS:
+    if match is None:
         raise LightCraftError("raw_invalid_point_color_control")
-    index, field = int(match.group(1)), match.group(2)
-    if index >= count or field not in POINT_COLOR_FIELDS:
+    index_text, field = match.group(1), match.group(2)
+    if field not in POINT_COLOR_FIELDS:
+        raise LightCraftError("raw_invalid_point_color_control")
+    try:
+        index = int(index_text)
+    except ValueError:
+        raise LightCraftError("raw_invalid_point_color_control") from None
+    if count is not None and (type(count) is not int or not 0 <= count <= MAX_POINT_COLORS or index >= count):
         raise LightCraftError("raw_invalid_point_color_control")
     return index, POINT_COLOR_FIELDS[field]
 
@@ -169,8 +175,10 @@ def validate_point_color_coordinates(x, y):
     return x, y
 
 
-def validate_point_color_delete(index, count):
-    if type(count) is not int or not 0 <= count <= MAX_POINT_COLORS or type(index) is not int or not 0 <= index < count:
+def validate_point_color_delete(index, count=None):
+    if type(index) is not int or index < 0:
+        raise LightCraftError("raw_invalid_point_color_index")
+    if count is not None and (type(count) is not int or not 0 <= count <= MAX_POINT_COLORS or index >= count):
         raise LightCraftError("raw_invalid_point_color_index")
     return index
 
@@ -178,6 +186,45 @@ def validate_point_color_delete(index, count):
 def validate_point_color_append(count):
     if type(count) is not int or not 0 <= count < MAX_POINT_COLORS:
         raise LightCraftError("raw_point_color_limit")
+
+
+POINT_COLOR_HISTORY_SCHEMAS = {
+    "pointColorPick": frozenset(("x", "y")),
+    "pointColorDelete": frozenset(("index",)),
+    "pointColorControl": frozenset(("control", "value")),
+    "pointColorControlReset": frozenset(("control",)),
+    "pointColorReset": frozenset(),
+}
+
+
+def validate_point_color_history_operation(kind, metadata):
+    """Validate and canonicalize Point Color History metadata without consulting Native state."""
+    import json
+    if type(kind) is not str or kind not in POINT_COLOR_HISTORY_SCHEMAS or type(metadata) is not dict or \
+            set(metadata) != POINT_COLOR_HISTORY_SCHEMAS[kind]:
+        raise LightCraftError("raw_invalid_request")
+    try:
+        if kind == "pointColorPick":
+            x, y = validate_point_color_coordinates(metadata["x"], metadata["y"])
+            normalized = {"x": x, "y": y}
+        elif kind == "pointColorDelete":
+            normalized = {"index": validate_point_color_delete(metadata["index"])}
+        elif kind in ("pointColorControl", "pointColorControlReset"):
+            control = metadata["control"]
+            validate_point_color_control(control)
+            normalized = {"control": control}
+            if kind == "pointColorControl":
+                field = control.rsplit(".", 1)[1]
+                normalized["value"] = validate_point_color_value(field, metadata["value"])
+        else:
+            normalized = {}
+    except (LightCraftError, TypeError, ValueError, OverflowError):
+        raise LightCraftError("raw_invalid_request") from None
+    # Match the store's stable JSON normalization without rounding numeric metadata.
+    try:
+        return json.loads(json.dumps(normalized, sort_keys=True, separators=(",", ":"), allow_nan=False))
+    except (TypeError, ValueError, OverflowError):
+        raise LightCraftError("raw_invalid_request") from None
 
 
 def with_legacy_mixer_defaults(settings):

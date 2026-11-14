@@ -195,8 +195,10 @@ Index は DB ID ではなく各確定 snapshot 内で解決する。request に 
 
 1. **P1-A1a — データ検証**。`raw_controls.py` に配列・indexed control・座標・index・値の純粋validation helperを追加する。
 2. **P1-A1b-1／A1b-2 — 内部Native helper**。`lightcraft_runtime.py::_raw_command` の最小allowlistと `lightcraft_raw.py::LightCraftRawSession` の採色・削除・indexed set/reset・配列Resetを追加する。既存 `_mutate`／command queue／revision／owner 検査と完全snapshot readbackを使う。これらhelperはHTTPやHistoryに未接続で、公開APIを追加しない。
-3. **P1-A2 — Backend History operation 統合**。`raw_controls.py::validate_history_operation`、`raw_recipe_store.py::_history_metadata`／`_operation`、`windows_raw_api.py::_history_body`／`_history`、`lightcraft_raw.py::apply_history_operation` にPoint Color semantic kindとmetadataを通す。idempotencyは各History save IDとpending stageに委ね、同じIDに異なるpayloadを許さない。readback compareは配列全体を検証し、save failure後のrecoveryもこのownerへ接続する。
-4. **P1-A3 — API経由の統合回帰テスト**。既存 `/history/operate` 経由のrequest/response、identity/revision/save ID、拒否・競合・readback・store failure/recoveryをMock Nativeで確認する。新しい無履歴routeを追加しない。合成PNGの実CLIが使える環境ではNative契約を確認し、実RAWの受入はDesktop検証と分ける。
+3. **P1-A2a — History operation 契約**。Point Color kind、metadata schema、Request単体validationと正規化のみを定義する。実行／保存allowlistには加えない。
+4. **P1-A2b — Native operation bridge**。`lightcraft_raw.py::apply_history_operation` からA1b内部helperへ接続し、Native snapshot依存の配列・index・8件上限validationをmutation直前に実施する。API入口と永続化validatorは閉じたままにする。
+5. **P1-A2c — History／API接続**。既存 `windows_raw_api.py::_history_body`／`_history` と `raw_recipe_store.py::_history_metadata`／`_operation` に契約を接続し、immutable request fingerprint、History append、同じsave IDのrecoveryを有効化する。新しいHTTP routeは追加しない。
+6. **P1-A3 — API経由の統合回帰テスト**。既存 `/history/operate` 経由のrequest/response、identity/revision/save ID、拒否・競合・readback・store failure/recoveryをMock Nativeで確認する。合成PNGの実CLIが使える環境ではNative契約を確認し、実RAWの受入はDesktop検証と分ける。
 
 この分割で専用 lock、永続 Point Color ID、独立の変更保存系は不要。adapter を History 以外から呼べる形にする場合は internal module/service 境界で呼び出し元を制限し、未履歴 mutation を選べる公開 API にしない。
 
@@ -229,4 +231,14 @@ Mock Native focused tests は Point Color テスト 16 件が成功し、追加�
 
 Mock Nativeではindexed set 8項目、先頭／末尾 index、小数保持、他値保持、範囲・field・index拒否、成功応答のno-op検知を検証した。個別Reset 8項目、既定値復帰、他値保持、既定値no-op、不正ID、成功応答no-op検知、配列Resetの複数項目・空配列no-op・他設定保持・成功応答no-op検知、Native error／応答不明／readback失敗、revision・Curve／Mixer排他・lost／desynchronizedを確認した。Point Color focused 54件、RAW Session全体134件、固定control regression 2件、runtime世代guard 1件が成功。実Native CLIはこの環境に実行ファイルがなく未実施。
 
-P1-A2では本節の内部helperをBackend History operationへ接続し、保存済み完全snapshot、History append、save failure後の同一save ID Recoveryをまとめる。P1-A3は既存History API経由の統合回帰テストを担当する。indexed control／Reset・配列Resetの未保存mutationをAPIやExport経路から直接利用可能にしてはならない。
+P1-A2bでは本節の内部helperをHistory operation dispatcherへ接続し、保存済みsnapshotとNative snapshotの整合を確認してからmutationする。P1-A2cではHistory appendとsave failure後の同一save ID Recovery、および既存API validation／store metadata allowlistの接続を行う。P1-A3は既存History API経由の統合回帰テストを担当する。未保存mutationを通常APIやExport経路へ直接公開してはならない。
+
+## P1-A2a — History operation 契約
+
+Point Color operation kind は `pointColorPick`、`pointColorDelete`、`pointColorControl`、`pointColorControlReset`、`pointColorReset` とする。metadata schema は順に `{x,y}`、`{index}`、`{control,value}`、`{control}`、`{}`。既存camelCase History kind と衝突せず、各操作を個別に識別する。
+
+`raw_controls.py::validate_point_color_history_operation` は厳密なkind allowlist・metadata key集合・型・finite性・座標範囲・control構文／値範囲・非負整数indexをRequest単体で検証する。`validate_point_color_control` と `validate_point_color_delete` は `count=None` で構文・型だけを検証でき、Native snapshot取得後には既存のcount引数でindex存在を検査する。採色の8件上限と現在の配列正常性もsnapshot依存であり、P1-A2bで`validate_point_color_append`／`validate_point_colors`を使ってNative command直前に検証する。A2aの検証helperはNative Sessionを呼ばない。
+
+metadataは既存storeの `_json` と同じくkey sort・compact JSON round-tripで正規化する。数値型の変換・丸めはせず、座標とsliderの小数、index、controlを落とさない。既存History APIのrequest fingerprintはcanonical JSON化したbody全体から作られ、metadata差分も同じsave IDのimmutable receipt照合で衝突する。A2aではrecipe store、`validate_history_operation`、公開APIのallowlistを拡張していない。従ってこれらkindは純粋schema helperで認識されるだけで、`/history/operate` と `_history_metadata` では拒否され、Native mutation／History保存は実行できない。既存operationによる回帰testで同じsave IDのmetadataを変更したrequestが`raw_history_save_id_reused`となり、Native command／DB更新が起きないことも確認した。
+
+Mock validation／回帰testは正常metadata5 kind、欠落・余分key、不正kind／型、NaN／Infinity、座標範囲、index型・符号、小数保持、control/value検証、snapshot依存確認の延期を対象にした。Point Color／A1a／A1b・固定Mixer control focused selectionは103件、契約・既存Mixer／Curve／WB／公開API・store回帰selectionは52件、save ID metadata fingerprint確認は2件が成功した。P1-A2bはNative snapshot依存検証と内部helper dispatch、P1-A2cは既存History save／APIへ安全に開通する作業を残す。
