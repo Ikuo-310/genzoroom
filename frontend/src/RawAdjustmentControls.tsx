@@ -14,6 +14,13 @@ import { updateRawDevelopmentPanelUi, useAppSettings, type RawPanelCategory } fr
 
 type RawCategoryId = 'basic' | 'color' | 'curves' | 'effects' | 'detail';
 const mixerColors = ['red', 'orange', 'yellow', 'green', 'aqua', 'blue', 'purple', 'magenta'] as const;
+const mixerSwatches = ['#d7191c', '#e98200', '#d5c900', '#23a832', '#00aeb0', '#1765dc', '#7626b5', '#c00070'] as const;
+// LightCraft Desktop places the previous band at negative Hue and the next at positive Hue.
+const mixerHueTracks = mixerSwatches.map((center, index) => {
+  const previous = mixerSwatches[(index + mixerSwatches.length - 1) % mixerSwatches.length];
+  const next = mixerSwatches[(index + 1) % mixerSwatches.length];
+  return `linear-gradient(to right, ${previous} 0%, ${center} 50%, ${next} 100%)`;
+});
 const mixerFields = ['hue', 'sat', 'lum'] as const;
 const sections: Record<Exclude<RawCategoryId, 'curves'>, RawToggleSectionId> = { basic: 'light', color: 'color', effects: 'effects', detail: 'detail' };
 const wbErrors: Record<string, string> = {
@@ -261,7 +268,7 @@ function RawColorMixer({ raw, color, onColorChange, open, onOpenChange, locked, 
       <div role="radiogroup" aria-label={t('workspace.rawPreview.mixer.colorsLabel')} className="raw-color-mixer-swatches">
         {mixerColors.map((name, index) => <button key={name} type="button" role="radio" aria-checked={color === name}
           aria-label={t(`workspace.rawPreview.mixer.colorNames.${name}`)} title={t(`workspace.rawPreview.mixer.colorNames.${name}`)}
-          className={`raw-color-mixer-swatch${color === name ? ' is-selected' : ''}`} style={{ '--mixer-swatch': ['#d7191c', '#e98200', '#d5c900', '#23a832', '#00aeb0', '#1765dc', '#7626b5', '#c00070'][index] } as CSSProperties}
+          className={`raw-color-mixer-swatch${color === name ? ' is-selected' : ''}`} style={{ '--mixer-swatch': mixerSwatches[index] } as CSSProperties}
           tabIndex={color === name ? 0 : -1}
           onClick={() => { if (panel.current) commitAdjustmentEdits(panel.current); onColorChange(name); }}
           onFocus={focusAdjustmentCategory} onKeyDown={event => {
@@ -290,6 +297,7 @@ function RawColorMixer({ raw, color, onColorChange, open, onOpenChange, locked, 
         const control = `mixer.${color}.${field}` as RawControlId;
         const spec = settings.controls.find(item => item.id === control)!;
         return <AdjustmentSlider key={control} adjustmentId={control} commitPolicy="operation-boundary" hideToggle
+          trackGradient={field === 'hue' ? mixerHueTracks[mixerColors.indexOf(color)] : undefined}
           label={t(`workspace.rawPreview.mixer.colors.${color}.${field}`)}
           enabled={settings.sections.color} onToggle={() => {}} onReset={() => operate({ kind: 'controlReset', metadata: { control } })}
           onBegin={() => raw.beginControls(control)} value={raw.mixerTargetValues?.[control] ?? raw.desired?.[control] ?? settings.values[control]}

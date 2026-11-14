@@ -23,7 +23,9 @@ P2-B後の修正は、History GETの `mixerTarget` 検証漏れ（`c746c47`）�
 
 P2-CではFrontend 709件、模擬Nativeを含むBackend 257件、実Native CLIのJPEG検証3件が成功した。Windows Desktopでのターゲット操作・複数帯反映・History再読込・Undo/Redo・Preview・ルーペはユーザー確認済み。実RAWでのP2操作と、RAW／非RAWそれぞれのターゲット編集からRecipe再オープン・JPEG書き出しまでの一連の実画像確認は今回未実施。
 
-将来検討では、Hueのみ8色別の変化方向をNativeと揃えたグラデーションを検討する。Mixer／Grading／将来のPoint Colorの独立ON/OFFはmanaged patchを避ける案を優先し、ResetとUndo/Redoで比較できるため優先度は低い。方式と保存形式は未決定。Point Colorは別フェーズでNative API契約の調査から始める。
+MixerのHueトラックは、既存スウォッチの前の帯（−100）、選択帯（0、50%）、次の帯（+100）をつなぐ。RedとMagentaの間も循環する。LightCraft v0.20.0の `pipeline/src/colorops.rs` では、帯のHue値を `hue / 100 × 0.5` radに変換し、帯の重みと彩度に応じた係数を掛けてOkLChの色相角に加える。正値は色相角を増やす。Desktopの `ui-egui/src/widgets.rs` にある `Track::Hue` も前帯→自帯→次帯の順で表示する。GenzoRoomではこの方向を示す代表色として既存スウォッチを使い、共通 `AdjustmentSlider.trackGradient` でHueだけを描画する。
+
+Mixer／Grading／将来のPoint Colorの独立ON/OFFはmanaged patchを避ける案を優先し、ResetとUndo/Redoで比較できるため優先度は低い。方式と保存形式は未決定。Point Colorは別フェーズでNative API契約の調査から始める。
 
 ## 調査と段階別実装の記録
 

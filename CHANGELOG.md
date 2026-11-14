@@ -12,6 +12,8 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
+- Windows Desktop Color Mixer Hue sliders show a gradient for each color band to indicate the direction of the hue shift.
+
 - Windows Desktop LightCraft development adds Hue, Saturation and Luminance targeted adjustment for the Color Mixer, with shared Viewer magnification and one History step per drag.
 - Windows Desktop Native development preserves the adjustment-panel categories, Mixer/Grading/Lens Corrections/Defringe folds, selected Mixer color, and selected Grading band across photos and app restarts.
 - Windows Desktop LightCraft development adds a Camera Local Tone Mapping toggle for images with supported camera tone-map data.

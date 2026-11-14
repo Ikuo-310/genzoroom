@@ -740,6 +740,20 @@ it('keeps the Mixer subsection local, exposes eight independent colors, and uses
   expect(redHue.value).toBe('12.375');
   expect(redHue.closest('.adjustment-control')!.querySelector<HTMLInputElement>('input[type="number"]')!.value).toBe('12');
   expect(redHue.closest('.adjustment-control')!.textContent).not.toContain('°');
+  const bands = ['red', 'orange', 'yellow', 'green', 'aqua', 'blue', 'purple', 'magenta'];
+  const colors = swatches.map(swatch => swatch.style.getPropertyValue('--mixer-swatch'));
+  for (const [index, band] of bands.entries()) {
+    act(() => swatches[index].click()); await flush();
+    const track = (field: string) => mixer.querySelector<HTMLInputElement>(`[data-adjustment-id="mixer.${band}.${field}"]`)!
+      .style.getPropertyValue('--adjustment-track-gradient');
+    expect(track('hue')).toBe(`linear-gradient(to right, ${colors[(index + 7) % 8]} 0%, ${colors[index]} 50%, ${colors[(index + 1) % 8]} 100%)`);
+    expect(track('sat')).toBe('');
+    expect(track('lum')).toBe('');
+  }
+  act(() => swatches[0].click()); await flush();
+  expect(mixer.querySelector<HTMLInputElement>('[data-adjustment-id="mixer.red.hue"]')!.value).toBe('12.375');
+  expect(commitHistory).toHaveBeenCalledTimes(operationsBeforeOpen);
+  expect(rawApi.setRawControls).not.toHaveBeenCalled();
   act(() => swatches[5].click()); await flush();
   expect(swatches[5].getAttribute('aria-checked')).toBe('true');
   act(() => swatches[5].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })));
