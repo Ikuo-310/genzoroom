@@ -1,5 +1,13 @@
 # GenzoRoom 開発ノート
 
+## Color Mixer P2-B History GETの `mixerTarget` 検証修正（2026-11-14）
+
+Historyの保存形式はBackendとNative連携で既に `mixerTarget` と `{ target: hue|sat|lum }` を使用していたが、Frontendの `readRawHistory()` がこのkindを許可リストに含めておらず、操作後のHistory再取得を `raw_invalid_response` で拒否していた。`RawRecipeSave.loadHistory()` はこの検証失敗を `historyError` として保持し、History一覧・Undo／Redo／Jump、およびMixerターゲットBeginなどを停止する。正しいkindとtargetだけを追加し、既存のstep ID・changes・cursor等の検証は維持する。Historyの再取得は一覧metadataだけを読むため、再取得自体でHistory stepやNative再適用は発生しない。
+
+添付ログはユーザーが編集をリセットした後の新規取得である。そこではBackendが01:32:56.204に`operate`を開始し、revision 22／Recipe revision 5、History cursor 4／length 4で01:32:56.241に保存成功を記録した。Frontendは同時刻のHistory GETで`raw_invalid_response`を記録した後、保存応答を受領し、revision 22のFull Previewを01:32:56.461にBackend完了、01:32:56.485にFrontend decode成功として記録した。これは保存、History一覧検証、Preview表示が別経路であることを示す。いずれもリセット後のログであり、最初の障害時の保存可否や内部cursor／lengthを示す証拠ではない。画面の`71 / 71`とこのログの`4 / 4`も異なる時点の状態として扱う。Mixer Begin／Update／End／Cancelの専用ログはこの添付データ内で確認できず、最初の障害時にNative操作がどこまで進んだかは未確認である。
+
+Frontend APIとHistory ownerのfocused testでは、Hue／Sat／LumそれぞれのMixer step、複数色帯と小数changes、厳密なmetadata拒否、History read error後の再取得・Undo／Redo／Jumpを検証する。Native実機操作はこのテストには含まれない。
+
 ## Color Mixer P2-B ターゲット調整Viewer統合（2026-11-14）
 
 Color Mixer内に色相・彩度・輝度の相互排他的な一時モードを追加し、共通Viewerのpointer lifecycleへ接続した。ターゲットボタンはスウォッチ行と選択色スライダーの間に置き、スポイト表示は既存 `RawEyedropperIcon` を操作なしで再利用する。同じモードの再クリック、Escape、Mixer／Color折り畳み、Before／Crop／Space Pan、Color OFF、写真・Documentの切替でViewer所有状態を解除する。RAW Nativeの色判定はLightCraftへ委譲する。

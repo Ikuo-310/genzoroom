@@ -408,6 +408,40 @@ describe('RAW History transport', () => {
     if (invalid) return expect(readRawHistory(result)).rejects.toMatchObject({ code: 'raw_invalid_response' });
     return expect(readRawHistory(result)).resolves.toMatchObject({ steps: [{ kind, metadata: {} }] });
   });
+  it.each(['hue', 'sat', 'lum'] as const)('reads a %s Mixer target step with multi-band full-precision changes', async target => {
+    const request = historyRequest('commit');
+    const result = rawHistoryResult(request, { history: { initialized: true, cursor: 1, length: 1, selectedStepId: request.saveId } });
+    const data = rawHistoryData(result);
+    data.steps[0] = { ...data.steps[0], kind: 'mixerTarget', metadata: { target }, changes: [
+      { control: `mixer.red.${target === 'hue' ? 'hue' : target === 'sat' ? 'sat' : 'lum'}`, before: 0.125, after: 1.23456789012345 },
+      { control: `mixer.orange.${target === 'hue' ? 'hue' : target === 'sat' ? 'sat' : 'lum'}`, before: -0.625, after: 0.987654321098765 },
+      { control: `mixer.magenta.${target === 'hue' ? 'hue' : target === 'sat' ? 'sat' : 'lum'}`, before: 0, after: -2.3456789012345 },
+    ] };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })));
+    const history = await readRawHistory(result);
+    expect(history.steps[0]).toMatchObject({ kind: 'mixerTarget', metadata: { target }, changes: data.steps[0].changes });
+    expect(history.steps[0].changes?.map(change => change.after)).toEqual([1.23456789012345, 0.987654321098765, -2.3456789012345]);
+  });
+  it.each([
+    {},
+    { target: 'value' },
+    { target: 'hue', extra: true },
+  ])('rejects malformed Mixer target metadata %j', async metadata => {
+    const request = historyRequest('commit');
+    const result = rawHistoryResult(request, { history: { initialized: true, cursor: 1, length: 1, selectedStepId: request.saveId } });
+    const data = rawHistoryData(result);
+    data.steps[0] = { ...data.steps[0], kind: 'mixerTarget', metadata } as typeof data.steps[number];
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })));
+    await expect(readRawHistory(result)).rejects.toMatchObject({ code: 'raw_invalid_response' });
+  });
+  it('continues to reject an unknown History operation kind', async () => {
+    const request = historyRequest('commit');
+    const result = rawHistoryResult(request, { history: { initialized: true, cursor: 1, length: 1, selectedStepId: request.saveId } });
+    const data = rawHistoryData(result);
+    data.steps[0] = { ...data.steps[0], kind: 'mixerTargetTypo' } as unknown as typeof data.steps[number];
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })));
+    await expect(readRawHistory(result)).rejects.toMatchObject({ code: 'raw_invalid_response' });
+  });
   it.each([true, 1, 'true', null])('keeps Optics History flags boolean (%s)', async enabled => {
     const request = historyRequest('commit');
     const result = rawHistoryResult(request, { history: { initialized: true, cursor: 1, length: 1, selectedStepId: request.saveId } });

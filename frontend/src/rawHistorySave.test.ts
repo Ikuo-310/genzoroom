@@ -540,6 +540,46 @@ it('retries metadata loading without another save or move and refuses an unverif
   expect(saver.steps).toHaveLength(3); expect(saver.revision).toBe(11);
 });
 
+it('recovers a Mixer target History read error without another save, then allows History navigation', async () => {
+  const { saver } = owner(); await saver.save();
+  let targetStepId = '';
+  vi.mocked(api.saveRawHistory).mockImplementation(async request => {
+    const history = request.action === 'operate'
+      ? { initialized: true, cursor: 1, length: 1, selectedStepId: request.saveId }
+      : request.action === 'undo' || request.action === 'jump' && request.targetStepId === null
+        ? { initialized: true, cursor: 0, length: 1, selectedStepId: null }
+        : { initialized: true, cursor: 1, length: 1, selectedStepId: targetStepId };
+    if (request.action === 'operate') targetStepId = request.saveId;
+    return rawHistoryResult(request, { history });
+  });
+  vi.mocked(api.readRawHistory).mockRejectedValueOnce(new api.RawApiError('raw_invalid_response'))
+    .mockImplementation(async doc => ({ ...rawHistoryData(doc),
+      steps: [{ stepId: targetStepId, kind: 'mixerTarget', metadata: { target: 'hue' }, createdAt: '2026-10-23T00:00:00Z',
+        changes: [{ control: 'mixer.red.hue', before: 0, after: 1.25 },
+          { control: 'mixer.orange.hue', before: 0.5, after: 0.75 }] }] }));
+
+  await saver.operate({ kind: 'mixerTarget', metadata: { target: 'hue' } });
+  expect(saver.historyError).toBe('raw_invalid_response');
+  expect(saver.canUndo).toBe(true);
+  await expect(saver.move('undo')).resolves.toBeUndefined();
+  const savesBeforeRetry = vi.mocked(api.saveRawHistory).mock.calls.length;
+  const readsBeforeRetry = vi.mocked(api.readRawHistory).mock.calls.length;
+  saver.retryHistory(); await drain();
+  expect(saver.historyError).toBeUndefined();
+  expect(vi.mocked(api.saveRawHistory)).toHaveBeenCalledTimes(savesBeforeRetry);
+  expect(vi.mocked(api.readRawHistory)).toHaveBeenCalledTimes(readsBeforeRetry + 1);
+  expect(saver.steps).toMatchObject([{ kind: 'mixerTarget', metadata: { target: 'hue' }, changes: [
+    { control: 'mixer.red.hue', after: 1.25 }, { control: 'mixer.orange.hue', after: 0.75 }] }]);
+  expect(saver.canUndo).toBe(true); expect(saver.canRedo).toBe(false);
+
+  await saver.move('undo'); expect(saver.history?.cursor).toBe(0); expect(saver.canRedo).toBe(true);
+  await saver.move('redo'); expect(saver.history?.cursor).toBe(1); expect(saver.canUndo).toBe(true);
+  await saver.move('jump', null); expect(saver.history?.cursor).toBe(0);
+  expect(vi.mocked(api.saveRawHistory).mock.calls.slice(-3).map(([request]) => request.action)).toEqual(['undo', 'redo', 'jump']);
+  saver.change('light.exposure', 0.5);
+  expect(saver.dirty).toBe(true);
+});
+
 
 it.each(['wbAuto', 'wbPick'] as const)('keeps %s behind a slider and retries its frozen request after a lost reply', async kind => {
   const intent: api.RawHistoryOperation = kind === 'wbAuto' ? { kind, metadata: {} } : { kind, metadata: {},

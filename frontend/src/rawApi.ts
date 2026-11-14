@@ -540,6 +540,7 @@ export async function readRawHistory(doc: RawDocument): Promise<RawHistoryData> 
         : step.kind === 'vignetteStyle' ? Object.keys(m).length !== 1 || !RAW_VIGNETTE_STYLES.includes(m.style)
         : step.kind === 'curve' ? Object.keys(m).length !== 1 || !RAW_CURVE_CHANNELS.includes(m.channel as RawCurveChannel)
         : step.kind === 'curveReset' ? Object.keys(m).length !== 1 || ![...RAW_CURVE_CHANNELS, 'point'].includes(m.channel as RawCurveResetChannel)
+        : step.kind === 'mixerTarget' ? Object.keys(m).length !== 1 || !['hue', 'sat', 'lum'].includes(m.target as string)
         : !['allReset', 'wbAuto', 'wbReset', 'colorReset', 'wbPick'].includes(step.kind) || Object.keys(m).length !== 0)
       || !(step.changes === null || Array.isArray(step.changes) && step.changes.length <= RAW_HISTORY_CONTROL_IDS.length
         && step.changes.every((change: unknown, index: number, changes: unknown[]) => {

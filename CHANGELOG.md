@@ -6,6 +6,10 @@ Internal changes are omitted unless they affect users.
 
 ## [Unreleased]
 
+### Fixed
+
+- Windows Desktop Color Mixer target adjustments no longer make the edit History unavailable when the valid `mixerTarget` step is reloaded.
+
 ### Added
 
 - Windows Desktop LightCraft development adds Hue, Saturation and Luminance targeted adjustment for the Color Mixer, with shared Viewer magnification and one History step per drag.
