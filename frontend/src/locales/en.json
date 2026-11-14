@@ -398,8 +398,11 @@
       "wbUnavailable": "White balance capability could not be confirmed for this image, so WB controls are disabled.",
       "wbResetAsShot": "Reset both temperature and tint to As Shot",
       "wbReset": "Reset white balance",
+      "wbResetHistory": "Reset White Balance",
       "colorReset": "Reset Color adjustments",
+      "colorResetHistory": "Reset all Color adjustments",
       "gradingReset": "Reset Color Grading",
+      "sectionResetHistory": "Reset {{section}}",
       "colorCategory": "Color",
       "mixer": {
         "title": "Color Mixer", "reset": "Reset Color Mixer", "colorsLabel": "Color Mixer colors",

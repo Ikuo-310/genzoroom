@@ -3,7 +3,7 @@ import { HistoryList } from './HistoryList';
 import type { useRawDocument } from './useRawDocument';
 import { formatContrast, formatExposure, formatHighlights, formatShadows, formatWhites,
   formatBlacks, formatTint, formatVibrance, formatSaturation } from './editing';
-import type { RawHistoryControlId, RawOpticsFlagId, RawHistoryStep } from './rawApi';
+import type { RawHistoryControlId, RawOpticsFlagId, RawHistoryStep, RawResetSectionId } from './rawApi';
 import { displayTemperature, displayTint } from './rawWhiteBalance';
 
 const mixerColors = ['red', 'orange', 'yellow', 'green', 'aqua', 'blue', 'purple', 'magenta'] as const;
@@ -89,6 +89,12 @@ const flagResetLabels: Record<RawOpticsFlagId, string> = {
   'optics.lens_profile': 'workspace.rawPreview.enableProfileCorrectionsReset',
   'profile.camera_local_tone': 'workspace.rawPreview.cameraLocalTone',
 };
+const sectionLabels: Record<RawResetSectionId, string> = {
+  light: 'workspace.basic', color: 'workspace.rawPreview.colorCategory', grading: 'workspace.rawPreview.gradingCategory',
+  effects: 'workspace.rawPreview.basicEffects', detail: 'workspace.rawPreview.detailCategory',
+  optics: 'workspace.rawPreview.lensCorrections', vignette: 'workspace.rawPreview.vignette',
+  mixer: 'workspace.rawPreview.mixer.title',
+};
 
 function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t'], wbScale: string) {
   if (step.kind === 'geometry') return t(`workspace.rawPreview.cropHistory.${step.metadata.action ?? step.metadata.operation}`);
@@ -125,17 +131,18 @@ function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t'
     const change = step.changes?.find(item => item.control === control);
     return label + (change ? ` ${pair(change)}` : '');
   }
-  const opticsSection = step.metadata.section === 'optics';
-  const mixerSection = step.metadata.section === 'mixer';
-  const operation = step.kind === 'wbReset' ? t('workspace.rawPreview.wbReset')
-    : step.kind === 'colorReset' ? t('workspace.rawPreview.colorReset')
-      : step.kind === 'wbPick' ? t('workspace.rawPreview.wbPick') : step.kind === 'wbAuto' ? t('workspace.rawPreview.aw') : step.kind === 'allReset' ? t('workspace.allReset')
-    : opticsSection && step.kind === 'sectionReset' ? t('workspace.rawPreview.resetLensCorrections')
-      : mixerSection && step.kind === 'sectionReset' ? t('workspace.rawPreview.mixer.reset')
-      : t(step.metadata.section === 'grading' ? 'workspace.rawPreview.gradingCategory' : step.metadata.section === 'vignette' ? 'workspace.rawPreview.vignette'
-      : step.metadata.section === 'effects' ? step.kind === 'sectionReset' ? 'workspace.rawPreview.basicEffects' : 'workspace.rawPreview.effectsCategory'
-      : step.metadata.section === 'light' ? 'workspace.basic' : step.metadata.section === 'detail'
-      ? 'workspace.rawPreview.detailCategory' : opticsSection ? 'workspace.rawPreview.lensCorrections' : 'workspace.rawPreview.colorCategory')
+  const section = step.metadata.section as RawResetSectionId | undefined;
+  if (step.kind === 'wbReset') return t('workspace.rawPreview.wbResetHistory');
+  if (step.kind === 'colorReset') return t('workspace.rawPreview.colorResetHistory');
+  if (step.kind === 'allReset') return t('workspace.allReset');
+  if (step.kind === 'sectionReset' && section) {
+    if (section === 'mixer') return t('workspace.rawPreview.mixer.reset');
+    if (section === 'grading') return t('workspace.rawPreview.gradingReset');
+    if (section === 'optics') return t('workspace.rawPreview.resetLensCorrections');
+    return t('workspace.rawPreview.sectionResetHistory', { section: t(sectionLabels[section]) });
+  }
+  const operation = step.kind === 'wbPick' ? t('workspace.rawPreview.wbPick') : step.kind === 'wbAuto' ? t('workspace.rawPreview.aw')
+    : t(section ? sectionLabels[section] : 'workspace.rawPreview.colorCategory')
       + ' ' + t(step.kind === 'sectionToggle' ? step.metadata.enabled ? 'workspace.basicOn' : 'workspace.basicOff' : 'workspace.reset');
   const changes = step.changes;
   const numeric = changes?.map(change => `${name(change.control)} ${pair(change)}`) ?? [];

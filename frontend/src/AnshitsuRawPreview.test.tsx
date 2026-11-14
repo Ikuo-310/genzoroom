@@ -824,11 +824,11 @@ it('commits an open Mixer number draft before its single section Reset operation
   expect(requests[2].operation).toEqual({ kind: 'sectionReset', metadata: { section: 'mixer' } });
 });
 
-it.each(['ja', 'en'])('labels Mixer and color-specific History rows in %s', async language => {
+it.each(['ja', 'en'])('summarizes multi-control Reset History rows in %s without changing individual values', async language => {
   await i18n.changeLanguage(language);
   const doc = { workspaceId: 'workspace', assetId: base.id, handle: 'handle', generation: 1, documentToken: 'token', revision: 1 };
   const fakeRaw = { ...doc, settings: { ...rawSettings(doc), wb: { available: true, mode: 'custom', scale: 'kelvin' } },
-    history: { initialized: true, cursor: 4, length: 4, selectedStepId: '00000000-0000-4000-8000-000000000004' },
+    history: { initialized: true, cursor: 11, length: 11, selectedStepId: '00000000-0000-4000-8000-00000000000b' },
     historySteps: [
       { stepId: '00000000-0000-4000-8000-000000000001', kind: 'sectionReset', metadata: { section: 'mixer' },
         createdAt: '2026-11-14T00:00:00Z', changes: [{ control: 'mixer.red.hue', before: 12, after: 0 },
@@ -841,19 +841,39 @@ it.each(['ja', 'en'])('labels Mixer and color-specific History rows in %s', asyn
       { stepId: '00000000-0000-4000-8000-000000000004', kind: 'colorReset', metadata: {},
         createdAt: '2026-11-14T00:00:00Z', changes: [{ control: 'color.vibrance', before: 20, after: 0 },
           { control: 'mixer.red.hue', before: 12, after: 0 }, { control: 'grading.balance', before: -10, after: 0 }] },
+      ...(['grading', 'light', 'effects', 'detail', 'vignette', 'optics'] as const).map((section, index) => ({
+        stepId: `00000000-0000-4000-8000-${String(index + 5).padStart(12, '0')}`, kind: 'sectionReset' as const,
+        metadata: { section }, createdAt: '2026-11-14T00:00:00Z',
+        changes: [{ control: section === 'light' ? 'light.exposure' as const : 'grading.balance' as const, before: 12, after: 0 }],
+      })),
+      { stepId: '00000000-0000-4000-8000-00000000000b', kind: 'allReset', metadata: {},
+        createdAt: '2026-11-14T00:00:00Z', changes: [{ control: 'light.exposure', before: 1, after: 0 }] },
     ] };
   await act(async () => root.render(<RawEditHistory raw={fakeRaw as never} disabled={false} onReset={() => {}} />));
   const mixerReset = host.querySelector('li[value="1"]')?.textContent ?? '';
   const blueLuminance = host.querySelector('li[value="2"]')?.textContent ?? '';
   const wbReset = host.querySelector('li[value="3"]')?.textContent ?? '';
   const colorReset = host.querySelector('li[value="4"]')?.textContent ?? '';
+  const gradingReset = host.querySelector('li[value="5"]')?.textContent ?? '';
+  const basicReset = host.querySelector('li[value="6"]')?.textContent ?? '';
+  const effectsReset = host.querySelector('li[value="7"]')?.textContent ?? '';
+  const detailReset = host.querySelector('li[value="8"]')?.textContent ?? '';
+  const vignetteReset = host.querySelector('li[value="9"]')?.textContent ?? '';
+  const opticsReset = host.querySelector('li[value="10"]')?.textContent ?? '';
+  const allReset = host.querySelector('li[value="11"]')?.textContent ?? '';
   expect(mixerReset).toContain(language === 'ja' ? 'カラーミキサーをリセット' : 'Reset Color Mixer');
-  expect(mixerReset).toContain(language === 'ja' ? 'レッドの色相' : 'Red Hue');
-  expect(mixerReset).toContain(language === 'ja' ? 'ブルーの彩度' : 'Blue Saturation');
+  expect(wbReset).toContain(language === 'ja' ? 'ホワイトバランスをリセット' : 'Reset White Balance');
+  expect(colorReset).toContain(language === 'ja' ? 'カラー全体をリセット' : 'Reset all Color adjustments');
+  expect(gradingReset).toContain(language === 'ja' ? 'カラーグレーディングをリセット' : 'Reset Color Grading');
+  expect(basicReset).toContain(language === 'ja' ? '基本補正をリセット' : 'Reset Basic');
+  expect(effectsReset).toContain(language === 'ja' ? '基本エフェクトをリセット' : 'Reset Basic Effects');
+  expect(detailReset).toContain(language === 'ja' ? 'ディテールをリセット' : 'Reset Detail');
+  expect(vignetteReset).toContain(language === 'ja' ? '周辺光量補正をリセット' : 'Reset Vignette');
+  expect(opticsReset).toContain(language === 'ja' ? 'レンズ補正をリセット' : 'Reset lens corrections');
+  expect(allReset).toContain(language === 'ja' ? 'すべてリセット' : 'Reset all');
+  for (const summary of [mixerReset, wbReset, colorReset, gradingReset, basicReset, effectsReset,
+    detailReset, vignetteReset, opticsReset, allReset]) expect(summary).not.toContain(' → ');
   expect(blueLuminance).toContain(language === 'ja' ? 'ブルーの輝度' : 'Blue Luminance');
-  expect(wbReset).toContain(language === 'ja' ? '色温度と色かぶり補正をリセット' : 'Reset white balance');
-  expect(colorReset).toContain(language === 'ja' ? 'カラー全体をリセット' : 'Reset Color adjustments');
-  expect(colorReset).toContain(language === 'ja' ? 'レッドの色相' : 'Red Hue');
 });
 
 it('persists point additions and interior deletions through the existing curve History operation', async () => {

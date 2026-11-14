@@ -389,8 +389,11 @@
       "wbUnavailable": "この画像のWB能力を確認できないため、WBを操作できません。",
       "wbResetAsShot": "色温度と色かぶり補正の両方を撮影時のWBへ戻す",
       "wbReset": "色温度と色かぶり補正をリセット",
+      "wbResetHistory": "ホワイトバランスをリセット",
       "colorReset": "カラー全体をリセット",
+      "colorResetHistory": "カラー全体をリセット",
       "gradingReset": "カラーグレーディングをリセット",
+      "sectionResetHistory": "{{section}}をリセット",
       "colorCategory": "カラー",
       "mixer": {
         "title": "カラーミキサー", "reset": "カラーミキサーをリセット", "colorsLabel": "カラーミキサーの色",
