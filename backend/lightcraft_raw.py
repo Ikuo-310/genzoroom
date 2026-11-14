@@ -1906,6 +1906,92 @@ class LightCraftRawSession:
         return await self._mutate(handle, "pointColor.delete", {}, expected_revision,
                                   prepare=prepare, readback_check=validate_readback)
 
+    async def _set_point_color_control(self, handle, control, value, expected_revision):
+        from raw_controls import validate_point_color_control, validate_point_color_value, validate_point_colors
+        before = None
+        index = field = native_field = None
+
+        async def prepare(photo, deadline):
+            nonlocal before, index, field, native_field
+            settings = json.loads(await self._read_settings(photo, deadline))
+            colors = validate_point_colors(settings)
+            index, spec = validate_point_color_control(control, len(colors))
+            field = control.rsplit(".", 1)[1]
+            native_field, _low, _high, _default = spec
+            validated = validate_point_color_value(field, value)
+            before = copy.deepcopy(settings)
+            if colors[index][native_field] == validated:
+                # No-op returns the cached snapshot, so it must still match Native readback.
+                if _settings_json(settings) != photo.settings_json:
+                    photo.sync = "desynchronized"
+                    raise LightCraftError("raw_point_color_control_mismatch")
+                return None
+            return {"control": control, "value": validated}
+
+        def validate_readback(settings):
+            validate_point_colors(settings)
+            expected = copy.deepcopy(before)
+            expected["point_colors"][index][native_field] = value
+            if settings != expected:
+                raise LightCraftError("raw_point_color_control_mismatch")
+
+        return await self._mutate(handle, "develop.set", {}, expected_revision,
+                                  prepare=prepare, readback_check=validate_readback)
+
+    async def _reset_point_color_control(self, handle, control, expected_revision):
+        from raw_controls import validate_point_color_control, validate_point_colors
+        before = None
+        index = native_field = default = None
+
+        async def prepare(photo, deadline):
+            nonlocal before, index, native_field, default
+            settings = json.loads(await self._read_settings(photo, deadline))
+            colors = validate_point_colors(settings)
+            index, spec = validate_point_color_control(control, len(colors))
+            native_field, _low, _high, default = spec
+            before = copy.deepcopy(settings)
+            if colors[index][native_field] == default:
+                if _settings_json(settings) != photo.settings_json:
+                    photo.sync = "desynchronized"
+                    raise LightCraftError("raw_point_color_reset_mismatch")
+                return None
+            return {"control": control}
+
+        def validate_readback(settings):
+            validate_point_colors(settings)
+            expected = copy.deepcopy(before)
+            expected["point_colors"][index][native_field] = default
+            if settings != expected:
+                raise LightCraftError("raw_point_color_reset_mismatch")
+
+        return await self._mutate(handle, "develop.resetControl", {}, expected_revision,
+                                  prepare=prepare, readback_check=validate_readback)
+
+    async def _reset_point_colors(self, handle, expected_revision):
+        from raw_controls import validate_point_colors
+        before = None
+
+        async def prepare(photo, deadline):
+            nonlocal before
+            before = json.loads(await self._read_settings(photo, deadline))
+            colors = validate_point_colors(before)
+            if not colors:
+                if _settings_json(before) != photo.settings_json:
+                    photo.sync = "desynchronized"
+                    raise LightCraftError("raw_point_color_reset_mismatch")
+                return None
+            return {"settings": {"point_colors": []}}
+
+        def validate_readback(settings):
+            validate_point_colors(settings)
+            expected = copy.deepcopy(before)
+            expected["point_colors"] = []
+            if settings != expected:
+                raise LightCraftError("raw_point_color_reset_mismatch")
+
+        return await self._mutate(handle, "develop.merge", {}, expected_revision,
+                                  prepare=prepare, readback_check=validate_readback)
+
     async def set_controls(self, handle, values, expected_revision):
         values = json.loads(_object_json(values, MAX_PATCH_BYTES))
         if not values or any(not isinstance(k, str) or type(v) not in (float, int, bool) for k, v in values.items()):

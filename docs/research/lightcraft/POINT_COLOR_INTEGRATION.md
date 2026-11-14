@@ -98,7 +98,7 @@ RenderJob／CPU/GPU 描画機能は共通コードに存在し、CLI/MCP の公�
 
 [Backend](../../../backend/windows_raw_api.py) が History の readback と永続化を所有し、[Recipe store](../../../backend/raw_recipe_store.py) は未公開フィールドを含む Native JSON を保持して各 step の完全 snapshot を保存する。Undo/Redo/Jump は保存 snapshot を復元するので、index の再実行や各 step での Native `edit.undo` に依存する必要はない。現行 `_restore` は Native reset → `develop.merge` → readback 比較。[raw_controls.py](../../../backend/raw_controls.py) に完全復元／比較用の既定値補完がある。旧 snapshot の欠落を `[]` に正規化する候補箇所はここ。欠落のまま partial merge すると現在値が残り得るうえ、空配列付き readback と比較不一致になる。旧保存値・fingerprint・receipt は開いた時点で書き換えず、復元ペイロードと比較用の値にだけ既定を補う。Explicit malformed とキー省略は区別する。
 
-| 操作 | P1 以降の History 境界案 |
+| 操作 | P1-A2（Backend History operation 統合）の境界案 |
 | --- | --- |
 | 採色追加 | 完了したクリック 1 回につき `operate` 系の確定 1 件。Native readback による配列を保存。active source・frame・revision が変わっていた場合は送信を抑止する。保存失敗時は既存の immutable retry／recovery を利用し、採色を再送して重複を増やさない。 |
 | 選択・範囲表示 | UI 状態。History 件数、Recipe revision を増やさない。 |
@@ -191,11 +191,12 @@ Native mutation が完了してから SQLite append に失敗した場合、既�
 
 Index は DB ID ではなく各確定 snapshot 内で解決する。request に document identity、generation、document revision、settings fingerprint、save ID を含め、History 基準と Native active photo が一致する区間だけ mutation する。全 Native response は状態変更の十分条件にせず、完全 readback を確定 snapshot とする。
 
-### P1-A1〜A3 の実装分割案
+### P1-A1〜A3 の実装分割
 
-1. **P1-A1 — Native adapter と validation**。`raw_controls.py` に Point Color 配列・8 indexed control の allowlist、finite/range/readback 検査を加える。`lightcraft_runtime.py::_raw_command` に既存 `pointColor.pick` と `pointColor.delete` を許可する。`lightcraft_raw.py` に単発操作 helper を追加し、既存 `_mutate`／command queue／revision／owner 検査を使って完全 snapshot を返す。これらは History endpoint からだけ呼び、公開 API は追加しない。
-2. **P1-A2 — History operation**。`raw_controls.py::validate_history_operation`、`raw_recipe_store.py::_history_metadata`／`_operation`、`windows_raw_api.py::_history_body`／`_history`、`lightcraft_raw.py::apply_history_operation` に追加・削除・control/reset・全体 Reset の semantic kind と metadata を通す。idempotency は各 History save ID と pending stage に委ね、同じ ID に異なる payload を許さない。Readback compare は配列全体を厳密に検証する。
-3. **P1-A3 — API 有効化と focused test**。既存 `/history/operate` だけを入口として request/response に document identity、generation/revision、settings fingerprint、save ID、対象 index/control を含める。直接 `/controls` や新しい無履歴 route は追加しない。mock Native で拒否・競合・readback・store failure/recovery を試験し、fixture が使える場合に合成 PNG の実 CLI で既存 Native command 契約も確認する。実 RAW の確認は後続 Desktop 受入と分ける。
+1. **P1-A1a — データ検証**。`raw_controls.py` に配列・indexed control・座標・index・値の純粋validation helperを追加する。
+2. **P1-A1b-1／A1b-2 — 内部Native helper**。`lightcraft_runtime.py::_raw_command` の最小allowlistと `lightcraft_raw.py::LightCraftRawSession` の採色・削除・indexed set/reset・配列Resetを追加する。既存 `_mutate`／command queue／revision／owner 検査と完全snapshot readbackを使う。これらhelperはHTTPやHistoryに未接続で、公開APIを追加しない。
+3. **P1-A2 — Backend History operation 統合**。`raw_controls.py::validate_history_operation`、`raw_recipe_store.py::_history_metadata`／`_operation`、`windows_raw_api.py::_history_body`／`_history`、`lightcraft_raw.py::apply_history_operation` にPoint Color semantic kindとmetadataを通す。idempotencyは各History save IDとpending stageに委ね、同じIDに異なるpayloadを許さない。readback compareは配列全体を検証し、save failure後のrecoveryもこのownerへ接続する。
+4. **P1-A3 — API経由の統合回帰テスト**。既存 `/history/operate` 経由のrequest/response、identity/revision/save ID、拒否・競合・readback・store failure/recoveryをMock Nativeで確認する。新しい無履歴routeを追加しない。合成PNGの実CLIが使える環境ではNative契約を確認し、実RAWの受入はDesktop検証と分ける。
 
 この分割で専用 lock、永続 Point Color ID、独立の変更保存系は不要。adapter を History 以外から呼べる形にする場合は internal module/service 境界で呼び出し元を制限し、未履歴 mutation を選べる公開 API にしない。
 
@@ -217,6 +218,15 @@ P1-B は保存済み完全 snapshot を source of truth にして追加・削除
 
 mutation 後の Native error、応答不明、readback error／不一致は成功扱い・自動再送せず、既存 `_mutate` の desynchronized または `_submit` の session-lost 経路に委ねる。非冪等な採色・削除を独自 rollback しない。事前 validation・revision・document identity・generation、Native queue、Curve／Mixer owner 排他は既存境界を再利用する。History 統合まではこれら helper を通常編集・保存・Export 経路へ接続しない。
 
-Mock Native focused tests は Point Color テスト 16 件が成功し、追加・同一点の独立追加、先頭／中間／末尾削除、上限・空配列・不正 index、Native error／応答不明／readback不一致・失敗、応答 index、revision、Curve／Mixer 排他、lost／desynchronized を確認した。P1-A1b-2 では indexed `develop.set`／`develop.resetControl`、`point_colors: []` Reset と、History operation からの永続化接続を実装する。製品操作入口を追加する前に、History save failure と retry境界をその operation owner に統合する必要がある。
+Mock Native focused tests は Point Color テスト 16 件が成功し、追加・同一点の独立追加、先頭／中間／末尾削除、上限・空配列・不正 index、Native error／応答不明／readback不一致・失敗、応答 index、revision、Curve／Mixer 排他、lost／desynchronized を確認した。P1-A2 ではこれら内部helperをHistory operation ownerから呼び出し、History保存・同一save IDのRecoveryへ統合する。製品操作入口を追加する前に、History save failure とretry境界をそのoperation ownerで扱う。
 
-focused tests は正常・重複・8項目全て・順序・小数、型／field／範囲／非有限値、8件超過、indexed ID と存在index、座標・削除・追加境界、既存 Mixer 固定 control を対象にする。P1-A1b-1 で Native pick/delete の内部Session helper と allowlist は追加済み。P1-A1b-2 では indexed set/reset、配列全体Reset と History operation adapter の統合を行い、HTTP route、Recipe、Frontend 接続は後段とする。
+
+## P1-A1b-2 — Indexed control・Reset の内部接続
+
+`LightCraftRawSession` に `_set_point_color_control`、`_reset_point_color_control`、`_reset_point_colors` を追加した。いずれも `prepare`／`readback_check` を使う `_mutate` の内部helperで、公開Windows API、Frontend、History operation、Recipe、Exportからは呼び出さない。indexed helperはNative snapshotを取得して配列・control ID・値を検証し、完全snapshotのPoint Color配列に対する他要素・他fieldの保持をreadbackで照合する。数値はNativeの`develop.set {control,value}`、個別Resetは`develop.resetControl {control}`、全体Resetは`develop.merge {settings:{point_colors:[]}}`へ接続した。全体Resetでも配列以外の完全snapshotが維持されることを照合し、`develop.resetSection`は使わない。
+
+指定値が既存値と同じ個別操作、既定値へのReset、空配列Resetは正常なno-opとしてNative mutation commandを送らない。Nativeが成功応答しても readbackが期待値と異なれば成功扱いせず、`_mutate`のdesynchronized／`_submit`のsession-lost処理へ渡す。Native error・応答不明・readback失敗でも自動再送しない。revision、document/generation identity、Native queue、Curve／Mixer排他は既存機構を利用し、専用lockや永続IDは追加していない。
+
+Mock Nativeではindexed set 8項目、先頭／末尾 index、小数保持、他値保持、範囲・field・index拒否、成功応答のno-op検知を検証した。個別Reset 8項目、既定値復帰、他値保持、既定値no-op、不正ID、成功応答no-op検知、配列Resetの複数項目・空配列no-op・他設定保持・成功応答no-op検知、Native error／応答不明／readback失敗、revision・Curve／Mixer排他・lost／desynchronizedを確認した。Point Color focused 54件、RAW Session全体134件、固定control regression 2件、runtime世代guard 1件が成功。実Native CLIはこの環境に実行ファイルがなく未実施。
+
+P1-A2では本節の内部helperをBackend History operationへ接続し、保存済み完全snapshot、History append、save failure後の同一save ID Recoveryをまとめる。P1-A3は既存History API経由の統合回帰テストを担当する。indexed control／Reset・配列Resetの未保存mutationをAPIやExport経路から直接利用可能にしてはならない。
