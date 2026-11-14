@@ -504,6 +504,166 @@ def test_point_color_set_reset_and_array_reset_use_existing_owners(tmp_path):
     asyncio.run(run())
 
 
+def test_point_color_history_dispatch_uses_all_existing_native_helpers(tmp_path):
+    async def run():
+        raw, _, children, files = await create(tmp_path)
+        try:
+            handle, initial = await raw.open_raw("pixel", files[0])
+            picked = await raw.apply_history_operation(handle, "pointColorPick", {"x": .125, "y": .75}, initial.revision)
+            assert isinstance(picked, DevelopSnapshot)
+            assert len(picked.settings["point_colors"]) == 1
+
+            edited = await raw.apply_history_operation(handle, "pointColorControl",
+                {"control": "pointColor.0.hueShift", "value": -12.375}, picked.revision)
+            assert edited.settings["point_colors"][0]["hue_shift"] == -12.375
+            reset = await raw.apply_history_operation(handle, "pointColorControlReset",
+                {"control": "pointColor.0.hueShift"}, edited.revision)
+            assert reset.settings["point_colors"][0]["hue_shift"] == 0.
+
+            second = await raw.apply_history_operation(handle, "pointColorPick", {"x": .125, "y": .75}, reset.revision)
+            deleted = await raw.apply_history_operation(handle, "pointColorDelete", {"index": 0}, second.revision)
+            assert len(deleted.settings["point_colors"]) == 1
+            assert deleted.settings["point_colors"][0] == second.settings["point_colors"][1]
+
+            cleared = await raw.apply_history_operation(handle, "pointColorReset", {}, deleted.revision)
+            assert cleared.settings["point_colors"] == []
+            assert cleared.settings["light"] == initial.settings["light"]
+            point_commands = [(command, params) for command, params in children[0].commands
+                              if command.startswith("pointColor.") or command == "develop.set" and
+                              params.get("control", "").startswith("pointColor.") or
+                              command == "develop.resetControl" and params.get("control", "").startswith("pointColor.") or
+                              command == "develop.merge" and params.get("settings") == {"point_colors": []}]
+            assert [command for command, _ in point_commands] == ["pointColor.pick", "develop.set",
+                "develop.resetControl", "pointColor.pick", "pointColor.delete", "develop.merge"]
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("kind,metadata", [
+    ([], {}), ("pointColorPick", {"x": .5, "y": .5, "extra": 1}),
+    ("pointColorDelete", {"index": -1}), ("pointColorControl", {"control": "pointColor.0.unknown", "value": 1}),
+])
+def test_point_color_history_dispatch_rejects_invalid_kind_and_metadata_before_native(kind, metadata, tmp_path):
+    async def run():
+        raw, _, children, files = await create(tmp_path)
+        try:
+            handle, initial = await raw.open_raw("pixel", files[0])
+            with pytest.raises(LightCraftError, match="raw_invalid_request"):
+                await raw.apply_history_operation(handle, kind, metadata, initial.revision)
+            assert not any(command in ("pointColor.pick", "pointColor.delete") or
+                           command == "develop.set" and params.get("control", "").startswith("pointColor.") or
+                           command == "develop.resetControl" and params.get("control", "").startswith("pointColor.") or
+                           command == "develop.merge" and params.get("settings") == {"point_colors": []}
+                           for command, params in children[0].commands)
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+def test_point_color_history_dispatch_rejects_curve_payload(tmp_path):
+    async def run():
+        raw, _, children, files = await create(tmp_path)
+        try:
+            handle, initial = await raw.open_raw("pixel", files[0])
+            with pytest.raises(LightCraftError, match="raw_invalid_request"):
+                await raw.apply_history_operation(handle, "pointColorReset", {}, initial.revision,
+                                                  curve_points=[[0., 0.]])
+            assert not any(command == "develop.merge" and params.get("settings") == {"point_colors": []}
+                           for command, params in children[0].commands)
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+def test_point_color_history_dispatch_defers_snapshot_validation_to_native_helpers(tmp_path):
+    async def run():
+        raw, _, children, files = await create(tmp_path)
+        try:
+            handle, initial = await raw.open_raw("pixel", files[0])
+            child = children[0]
+            child.photos[1]["settings"]["point_colors"] = [point_color() for _ in range(8)]
+            full = await raw.get_settings(handle)
+            with pytest.raises(LightCraftError, match="raw_point_color_limit"):
+                await raw.apply_history_operation(handle, "pointColorPick", {"x": .5, "y": .5}, full.revision)
+            with pytest.raises(LightCraftError, match="raw_invalid_point_color_index"):
+                await raw.apply_history_operation(handle, "pointColorDelete", {"index": 8}, full.revision)
+            with pytest.raises(LightCraftError, match="raw_invalid_point_color_control"):
+                await raw.apply_history_operation(handle, "pointColorControl",
+                    {"control": "pointColor.8.hueShift", "value": 1.5}, full.revision)
+            assert not any(command in ("pointColor.pick", "pointColor.delete") or
+                           command == "develop.set" and params.get("control", "").startswith("pointColor.")
+                           for command, params in child.commands)
+            assert initial.revision <= full.revision
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+def test_point_color_history_dispatch_preserves_revision_and_interaction_fences(tmp_path):
+    async def run():
+        raw, _, children, files = await create(tmp_path, adaptive=True)
+        try:
+            handle, initial = await raw.open_raw("pixel", files[0])
+            child = children[0]
+            child.photos[1]["settings"]["point_colors"] = [point_color()]
+            current = await raw.get_settings(handle)
+            with pytest.raises(LightCraftError, match="raw_revision_conflict"):
+                await raw.apply_history_operation(handle, "pointColorControl",
+                    {"control": "pointColor.0.hueShift", "value": 1.5}, current.revision + 1)
+            curve_id = await raw.begin_curve_interaction(handle, "master", current.revision)
+            with pytest.raises(LightCraftError, match="raw_curve_interaction_pending"):
+                await raw.apply_history_operation(handle, "pointColorReset", {}, current.revision)
+            await raw.cancel_curve_interaction(handle, curve_id, current.revision)
+            mixer_id = await raw.begin_mixer_interaction(handle, "hue", .2, .3, current.revision)
+            with pytest.raises(LightCraftError, match="raw_mixer_interaction_pending"):
+                await raw.apply_history_operation(handle, "pointColorControlReset",
+                    {"control": "pointColor.0.hueShift"}, current.revision)
+            await raw.cancel_mixer_interaction(handle, mixer_id, current.revision)
+            assert not any(command in ("pointColor.pick", "pointColor.delete") or
+                           command == "develop.set" and params.get("control", "").startswith("pointColor.") or
+                           command == "develop.resetControl" and params.get("control", "").startswith("pointColor.") or
+                           command == "develop.merge" and params.get("settings") == {"point_colors": []}
+                           for command, params in child.commands)
+            raw._lost = True
+            with pytest.raises(LightCraftError, match="raw_session_lost"):
+                await raw.apply_history_operation(handle, "pointColorReset", {}, current.revision)
+            raw._lost = False
+            raw._desynchronized = True
+            with pytest.raises(LightCraftError, match="raw_session_desynchronized"):
+                await raw.apply_history_operation(handle, "pointColorReset", {}, current.revision)
+            assert initial.handle == handle
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("fault", ["native_error", "readback_mismatch", "readback_failure"])
+def test_point_color_history_dispatch_uses_existing_mutation_recovery(tmp_path, fault):
+    async def run():
+        raw, _, children, files = await create(tmp_path)
+        try:
+            handle, _ = await raw.open_raw("pixel", files[0])
+            child = children[0]
+            child.photos[1]["settings"]["point_colors"] = [point_color()]
+            before = await raw.get_settings(handle)
+            if fault == "native_error":
+                child.fail_commands.add("develop.set")
+            elif fault == "readback_mismatch":
+                child.point_control_noop = True
+            else:
+                child.fail_get_after_point_mutation = True
+            with pytest.raises((LightCraftError, MCPTransportError)):
+                await raw.apply_history_operation(handle, "pointColorControl",
+                    {"control": "pointColor.0.hueShift", "value": 12.5}, before.revision)
+            assert sum(command == "develop.set" and params.get("control") == "pointColor.0.hueShift"
+                       for command, params in child.commands) == 1
+            assert raw._photos["pixel"].sync == "desynchronized" or raw.status().state == "lost"
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
 def image_result(photo=1, data=None, w=16, h=12):
     return {"isError": False, "content": [
         {"type": "image", "data": base64.b64encode(data or png(w, h)).decode(), "mimeType": "image/png"},

@@ -2106,7 +2106,22 @@ class LightCraftRawSession:
     async def apply_history_operation(self, handle, kind, metadata, expected_revision, *, curve_points=None):
         from raw_controls import (CONTROLS, CONTROL_PATHS, control_location, DETAIL_RESET_DEFAULTS,
                                   HISTORY_FLAG_CONTROLS, with_legacy_profile_defaults,
-                                  validate_history_operation, validate_curve_input)
+                                  validate_history_operation, validate_curve_input,
+                                  validate_point_color_history_operation, POINT_COLOR_HISTORY_SCHEMAS)
+        if type(kind) is str and kind in POINT_COLOR_HISTORY_SCHEMAS:
+            if curve_points is not None:
+                raise LightCraftError("raw_invalid_request")
+            metadata = validate_point_color_history_operation(kind, metadata)
+            if kind == "pointColorPick":
+                return await self._pick_point_color(handle, metadata["x"], metadata["y"], expected_revision)
+            if kind == "pointColorDelete":
+                return await self._delete_point_color(handle, metadata["index"], expected_revision)
+            if kind == "pointColorControl":
+                return await self._set_point_color_control(handle, metadata["control"], metadata["value"],
+                                                           expected_revision)
+            if kind == "pointColorControlReset":
+                return await self._reset_point_color_control(handle, metadata["control"], expected_revision)
+            return await self._reset_point_colors(handle, expected_revision)
         if kind == "curveReset":
             validate_history_operation(kind, metadata)
             channel = metadata["channel"]
