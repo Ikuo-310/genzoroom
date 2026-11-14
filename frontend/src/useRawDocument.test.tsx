@@ -140,7 +140,7 @@ it('turns targeted mode off on hover Escape and cancels one active interaction w
   Object.defineProperty(down, 'pointerId', { value: 91 });
   act(() => viewport.dispatchEvent(down)); await flush();
   expect(api.beginRawCurveInteraction).toHaveBeenCalledOnce();
-  expect(host.querySelector<HTMLElement>('[data-testid="viewer-point-loupe"]')?.dataset.fixed).toBe('true');
+  expect(host.querySelector('[data-testid="viewer-point-loupe"]')).toBeNull();
 
   act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
   await flush();

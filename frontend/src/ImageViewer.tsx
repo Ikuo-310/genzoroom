@@ -822,7 +822,7 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
           onError={() => setLoadedImage({ identity: imageIdentity, status: 'error', size: EMPTY_IMAGE_SIZE })}
         /> : null}
       </div>
-      {((rawTargetedActive && !rawPickActive && !showBeforeAdjustments && !rawCrop?.active && imageState === 'ready'
+      {((rawTargetedActive && !rawPickActive && !targetDragging && !showBeforeAdjustments && !rawCrop?.active && imageState === 'ready'
         && !previewStatus) || pickReady) && targetLoupe && <ViewerPointLoupe key={imageIdentity} viewport={viewportSize} anchor={targetLoupe.anchor}
         imagePoint={targetLoupe.imagePoint} imageSize={imageSize} scale={scale} source={regionBase?.url ?? src} region={regionLayer}
         fixed={targetLoupe.fixed} />}
