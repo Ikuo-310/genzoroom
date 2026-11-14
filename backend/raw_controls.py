@@ -2,6 +2,7 @@
 
 import math
 import copy
+import re
 
 from lightcraft_mcp import LightCraftError
 
@@ -58,6 +59,18 @@ CURVE_NUMERIC_FIELDS = ("highlights", "lights", "darks", "shadows", "split_shado
 MAX_CURVE_POINTS = 4096
 MAX_CURVE_BYTES = 64 * 1024
 VIGNETTE_STYLES = ("highlightPriority", "colorPriority", "paintOverlay")
+POINT_COLOR_FIELDS = {
+    "hueShift": ("hue_shift", -100.0, 100.0, 0.0),
+    "satShift": ("sat_shift", -100.0, 100.0, 0.0),
+    "lumShift": ("lum_shift", -100.0, 100.0, 0.0),
+    "variance": ("variance", -100.0, 100.0, 0.0),
+    "range": ("range", 0.0, 100.0, 50.0),
+    "hueRange": ("hue_range", 0.0, 100.0, 50.0),
+    "satRange": ("sat_range", 0.0, 100.0, 50.0),
+    "lumRange": ("lum_range", 0.0, 100.0, 50.0),
+}
+POINT_COLOR_CENTER_FIELDS = ("lum", "chroma", "hue")
+MAX_POINT_COLORS = 8
 # Native command IDs are not JSON field names; every readback and History delta uses this mapping.
 CONTROL_PATHS = {control: tuple(control.split(".")) for control in CONTROLS} | {
     "detail.sharpenAmount": ("detail", "sharpen_amount"),
@@ -109,6 +122,62 @@ def complete_snapshot_for_merge(settings):
 def settings_snapshot_for_comparison(settings):
     """Treat Native's omitted serde-default false as equal to an explicit false snapshot value."""
     return with_legacy_mixer_defaults(with_legacy_profile_defaults(complete_snapshot_for_merge(settings)))
+
+
+def validate_point_colors(settings):
+    """Validate Native Point Color data without normalizing it or changing its order."""
+    values = settings.get("point_colors") if type(settings) is dict else None
+    if type(values) is not list or len(values) > MAX_POINT_COLORS:
+        raise LightCraftError("raw_invalid_point_colors")
+    fields = set(POINT_COLOR_CENTER_FIELDS) | {spec[0] for spec in POINT_COLOR_FIELDS.values()}
+    for item in values:
+        if type(item) is not dict or set(item) != fields:
+            raise LightCraftError("raw_invalid_point_colors")
+        if any(type(value) not in (int, float) or not math.isfinite(value) for value in item.values()):
+            raise LightCraftError("raw_invalid_point_colors")
+        if not 0 <= item["lum"] <= 1 or item["chroma"] < 0 or not 0 <= item["hue"] < 360:
+            raise LightCraftError("raw_invalid_point_colors")
+        for field, low, high, _default in POINT_COLOR_FIELDS.values():
+            if not low <= item[field] <= high:
+                raise LightCraftError("raw_invalid_point_colors")
+    return values
+
+
+def validate_point_color_control(control_id, count):
+    """Return the field spec for a valid indexed control on an existing entry."""
+    if type(control_id) is not str:
+        raise LightCraftError("raw_invalid_point_color_control")
+    match = re.fullmatch(r"pointColor\.(0|[1-9][0-9]*)\.([A-Za-z]+)", control_id)
+    if match is None or type(count) is not int or not 0 <= count <= MAX_POINT_COLORS:
+        raise LightCraftError("raw_invalid_point_color_control")
+    index, field = int(match.group(1)), match.group(2)
+    if index >= count or field not in POINT_COLOR_FIELDS:
+        raise LightCraftError("raw_invalid_point_color_control")
+    return index, POINT_COLOR_FIELDS[field]
+
+
+def validate_point_color_value(field, value):
+    spec = POINT_COLOR_FIELDS.get(field)
+    if spec is None or type(value) not in (int, float) or not math.isfinite(value) or not spec[1] <= value <= spec[2]:
+        raise LightCraftError("raw_invalid_controls")
+    return value
+
+
+def validate_point_color_coordinates(x, y):
+    if any(type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1 for value in (x, y)):
+        raise LightCraftError("raw_invalid_point_color_coordinates")
+    return x, y
+
+
+def validate_point_color_delete(index, count):
+    if type(count) is not int or not 0 <= count <= MAX_POINT_COLORS or type(index) is not int or not 0 <= index < count:
+        raise LightCraftError("raw_invalid_point_color_index")
+    return index
+
+
+def validate_point_color_append(count):
+    if type(count) is not int or not 0 <= count < MAX_POINT_COLORS:
+        raise LightCraftError("raw_point_color_limit")
 
 
 def with_legacy_mixer_defaults(settings):

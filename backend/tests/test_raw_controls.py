@@ -4,7 +4,9 @@ import pytest
 
 from lightcraft_mcp import LightCraftError
 from raw_controls import (CONTROLS, HISTORY_CONTROLS, complete_snapshot_for_merge, settings_snapshot_for_comparison,
-                          mixer_target_readback, validate_controls)
+                          mixer_target_readback, validate_controls, POINT_COLOR_FIELDS,
+                          validate_point_colors, validate_point_color_control, validate_point_color_value,
+                          validate_point_color_coordinates, validate_point_color_delete, validate_point_color_append)
 from tests.test_lightcraft_raw import DEFAULT
 from tests.test_windows_local import local, client, authenticate
 from tests.test_windows_raw_api import setup, open_document, preview_body
@@ -31,6 +33,79 @@ def identity(doc):
 def test_invalid_control_values(values):
     with pytest.raises(LightCraftError, match="raw_invalid_controls"):
         validate_controls(values, True)
+
+
+def point_color(**overrides):
+    value = {"lum": 0.62, "chroma": 0.14, "hue": 207.5}
+    value.update({spec[0]: spec[3] for spec in POINT_COLOR_FIELDS.values()})
+    value.update(overrides)
+    return value
+
+
+def test_point_color_readback_validation_preserves_order_duplicates_and_fractional_values():
+    first = point_color(hue_shift=12.375, range=33.625)
+    second = point_color(hue_shift=12.375, range=33.625)
+    values = validate_point_colors({"point_colors": [first, second]})
+    assert values == [first, second]
+    assert values[0] is first and values[1] is second
+    assert values[0]["hue_shift"] == 12.375 and values[0]["range"] == 33.625
+    assert len(validate_point_colors({"point_colors": [point_color() for _ in range(8)]})) == 8
+
+
+@pytest.mark.parametrize("entry", [
+    {**point_color(), "unknown": 1},
+    {key: value for key, value in point_color().items() if key != "hue"},
+    {**point_color(), "lum": True},
+    {**point_color(), "chroma": float("nan")},
+    {**point_color(), "hue": float("inf")},
+    {**point_color(), "lum": -0.01},
+    {**point_color(), "lum": 1.01},
+    {**point_color(), "chroma": -0.01},
+    {**point_color(), "hue": 360},
+    {**point_color(), "hue_shift": 100.01},
+    {**point_color(), "variance": float("-inf")},
+    "not an entry",
+])
+def test_point_color_readback_rejects_malformed_entries(entry):
+    with pytest.raises(LightCraftError, match="raw_invalid_point_colors"):
+        validate_point_colors({"point_colors": [entry]})
+
+
+@pytest.mark.parametrize("settings", [{}, {"point_colors": None}, {"point_colors": tuple()},
+                                      {"point_colors": [point_color() for _ in range(9)]}])
+def test_point_color_readback_rejects_missing_wrong_shape_and_over_limit(settings):
+    with pytest.raises(LightCraftError, match="raw_invalid_point_colors"):
+        validate_point_colors(settings)
+
+
+def test_point_color_indexed_controls_validate_shape_index_field_and_fractional_value():
+    assert validate_point_color_control("pointColor.0.hueShift", 1) == (0, POINT_COLOR_FIELDS["hueShift"])
+    assert validate_point_color_control("pointColor.7.lumRange", 8) == (7, POINT_COLOR_FIELDS["lumRange"])
+    assert validate_point_color_value("hueShift", 12.375) == 12.375
+    assert validate_controls({"mixer.red.hue": 12.375}, True) == {"mixer.red.hue": 12.375}
+    for control, count in [("pointColor.1.hueShift", 1), ("pointColor.0.feather", 1),
+                           ("pointColor.-1.range", 1), ("pointColor.00.range", 1),
+                           ("pointColor.0.range.extra", 1), ("pointColor.8.range", 8)]:
+        with pytest.raises(LightCraftError, match="raw_invalid_point_color_control"):
+            validate_point_color_control(control, count)
+    for value in [True, float("nan"), float("inf"), -100.01, 100.01]:
+        with pytest.raises(LightCraftError, match="raw_invalid_controls"):
+            validate_point_color_value("hueShift", value)
+
+
+def test_point_color_coordinate_append_and_delete_validation():
+    assert validate_point_color_coordinates(0.0, 1) == (0.0, 1)
+    assert validate_point_color_delete(0, 1) == 0
+    validate_point_color_append(7)
+    with pytest.raises(LightCraftError, match="raw_invalid_point_color_coordinates"):
+        validate_point_color_coordinates(float("nan"), .5)
+    with pytest.raises(LightCraftError, match="raw_invalid_point_color_coordinates"):
+        validate_point_color_coordinates(-.01, .5)
+    with pytest.raises(LightCraftError, match="raw_point_color_limit"):
+        validate_point_color_append(8)
+    for index, count in [(-1, 1), (1, 1), (0, 0), (True, 1)]:
+        with pytest.raises(LightCraftError, match="raw_invalid_point_color_index"):
+            validate_point_color_delete(index, count)
 
 
 def test_mixer_target_readback_keeps_fractional_values_and_rejects_other_controls_or_modes():

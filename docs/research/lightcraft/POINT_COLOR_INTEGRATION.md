@@ -158,7 +158,7 @@ GenzoRoom 側の既存設計は [Color Mixer 調査](COLOR_MIXER_INTEGRATION.md)
 
 ## P1-A0 — Backend mutation と保存境界の調査
 
-**調査範囲**。現在の `main` `cd6d165` の [lightcraft_raw.py](../../../backend/lightcraft_raw.py)、[windows_raw_api.py](../../../backend/windows_raw_api.py)、[raw_controls.py](../../../backend/raw_controls.py)、[raw_recipe_store.py)、[lightcraft_runtime.py](../../../backend/lightcraft_runtime.py) を確認した。Native command は呼び出しておらず、製品コード、テスト、Recipe／History／DB は変更していない。
+**調査範囲**。現在の `main` `cd6d165` の [lightcraft_raw.py](../../../backend/lightcraft_raw.py)、[windows_raw_api.py](../../../backend/windows_raw_api.py)、[raw_controls.py](../../../backend/raw_controls.py)、[raw_recipe_store.py](../../../backend/raw_recipe_store.py)、[lightcraft_runtime.py](../../../backend/lightcraft_runtime.py) を確認した。Native command は呼び出しておらず、製品コード、テスト、Recipe／History／DB は変更していない。
 
 ### 既存の mutation と History 保存経路
 
@@ -204,3 +204,11 @@ Index は DB ID ではなく各確定 snapshot 内で解決する。request に 
 P1-B は保存済み完全 snapshot を source of truth にして追加・削除・8 control・Reset を `operate` へ結線し、各操作の可視ラベルと metadata schema を確定する。P1-A の各 method を直接 UI から呼ばず、UI は History save が完了した response snapshot だけを採用する。採色中に写真が切り替わる競合は document/generation/revision check で拒否し、Native command を再送せず同じ save ID の Recovery に回す。
 
 残るリスクは、Native の Point Color index が削除後に移動すること、`develop.set` が存在しない index を成功応答の no-op にすること、`develop.merge` が8件上限や indexed slider clamp を保証しないこと、Native mutation 成功後の store 障害で Native と Recipe が一時的に乖離すること。完全 readback、入力境界、immutable History request/recovery によって扱い、8件超 snapshot は切り捨てず拒否・回復対象にする。DB migration や Native patch はこの接続に必要ない。
+
+## P1-A1a — Point Color データ検証基盤
+
+`backend/raw_controls.py` に純粋な検証 helper を追加した。`validate_point_colors` は snapshot の `point_colors` 配列と各要素の正確な11 Native field、数値の finite 性、L 0–1、C の非負、hue 0–360未満、8つの調整値の各Native control範囲、通常操作上限8件を検証する。入力配列を変更せず、順番・重複・f64相当の小数値を保持する。Native の serde が配列長を8件に制限せず、9件超を保持できる点と、GenzoRoomの通常操作で許容する上限を区別した。既存snapshotが上限を超える場合はこの検証でエラーになり、呼び出し側で削除・切り詰めを判断しない。
+
+`validate_point_color_control` は厳密な `pointColor.<index>.<field>` 形式、8項目の allowlist、既存要素の index を確認する。`validate_point_color_value` はbooleanを除く finite numeric と項目範囲を検証し、整数化・clampを行わない。採色座標、削除 index、追加上限には `validate_point_color_coordinates`、`validate_point_color_delete`、`validate_point_color_append` を用意した。これらは P1-A1a 時点では既存 operation/API から未呼出で、固定 control validation も変更していない。
+
+focused tests は正常・重複・8項目全て・順序・小数、型／field／範囲／非有限値、8件超過、indexed ID と存在index、座標・削除・追加境界、既存 Mixer 固定 control を対象にする。P1-A1b に残る作業は、この純粋検証を History operation adapter と Native response/readback 検証へ接続し、Native command allowlist を更新してから Session 操作を実装すること。HTTP route、History operation、Recipe、Frontend 接続はさらに後段。
