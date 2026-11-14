@@ -21,6 +21,7 @@ const wbErrors: Record<string, string> = {
   raw_wb_point_outside_source: 'wbPointOutside', raw_wb_source_unavailable: 'wbSourceUnavailable',
   raw_wb_settings_mismatch: 'wbSettingsMismatch', raw_wb_invalid_response: 'wbInvalidResponse',
   raw_wb_connection_failed: 'wbConnectionFailed', raw_wb_timeout: 'wbTimeout',
+  raw_mixer_target_unavailable: 'mixerTargetUnavailable',
 };
 const bindings: { category: RawCategoryId; controls: RawControlId[]; ids: SliderAdjustmentId[] }[] = [
   { category: 'basic', controls: ['light.exposure', 'light.contrast', 'light.highlights', 'light.whites', 'light.shadows', 'light.blacks'],
@@ -74,7 +75,7 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
       <span>{t('workspace.rawPreview.cameraLocalTone')}</span>
     </label>
     {settings && bindings.map(({ category, controls, ids }) => <RawCategory key={category} category={category}
-      expanded={panelUi.categories[category]} onExpandedChange={open => setCategoryOpen(category, open)}
+      expanded={panelUi.categories[category]} onExpandedChange={open => { if (category === 'color' && !open) raw.toggleMixerTarget(null); setCategoryOpen(category, open); }}
       enabled={category === 'curves' || settings.sections[sections[category]]} disabled={actionsLocked}
       resetDisabled={actionsLocked || category === 'color' && !settings.wb.available}
       onToggle={() => { if (category !== 'curves') operate({ kind: 'sectionToggle', metadata: { section: sections[category],
@@ -116,7 +117,7 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
           ...(raw.targetedCurvePoints?.channel ? { [raw.targetedCurvePoints.channel]: raw.targetedCurvePoints.points } : {}) }}
           channel={raw.curveChannel} onChannelChange={raw.setCurveChannel}
           targetedActive={raw.targetedCurveActive} onToggleTargeted={raw.toggleTargetedCurve}
-        editDisabled={actionsLocked} syncKey={raw.operationError ?? raw.editError ?? raw.saveError}
+          editDisabled={actionsLocked || !!raw.mixerTargetActive} syncKey={raw.operationError ?? raw.editError ?? raw.saveError}
         onReset={channel => operate({ kind: 'curveReset', metadata: { channel } })}
         onPointEdit={operateCurve} onDragStart={channel => raw.beginCurveInteraction(channel)}
         onDragChange={(_channel, points) => raw.updateCurveInteraction(points)}
@@ -165,9 +166,9 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
       })}</div>
       {category === 'color' && <RawColorMixer raw={raw} color={panelUi.selection.mixerColor} onColorChange={mixerColor =>
         updateRawDevelopmentPanelUi(current => ({ ...current, selection: { ...current.selection, mixerColor } }))}
-        open={panelUi.subcategories.mixer} onOpenChange={mixer => updateRawDevelopmentPanelUi(current => ({
+        open={panelUi.subcategories.mixer} onOpenChange={mixer => { if (!mixer) raw.toggleMixerTarget(null); updateRawDevelopmentPanelUi(current => ({
           ...current, subcategories: { ...current.subcategories, mixer },
-        }))} locked={actionsLocked || !settings.sections.color}
+        })); }} locked={actionsLocked || !settings.sections.color}
         onReset={() => operate({ kind: 'sectionReset', metadata: { section: 'mixer' } })} operate={operate} panel={panel} />}
       {category === 'color' && <RawColorGrading raw={raw} band={panelUi.selection.gradingBand} onBandChange={gradingBand =>
         updateRawDevelopmentPanelUi(current => ({ ...current, selection: { ...current.selection, gradingBand } }))}
@@ -275,17 +276,27 @@ function RawColorMixer({ raw, color, onColorChange, open, onOpenChange, locked, 
             event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[nextIndex]?.focus();
           }} />)}
       </div>
+      <div className="raw-mixer-target-tools" role="group" aria-label={t('workspace.rawPreview.mixer.targetTools')}>
+        <span className="raw-curve-channel raw-curve-target raw-mixer-target-icon" aria-hidden="true"><RawEyedropperIcon /></span>
+        {(['hue', 'sat', 'lum'] as const).map(target => <button key={target} type="button"
+          className={`raw-curve-channel raw-mixer-target-button${raw.mixerTargetActive === target ? ' is-selected' : ''}`}
+          aria-label={t(`workspace.rawPreview.mixer.targets.${target}`)} title={t(`workspace.rawPreview.mixer.targets.${target}`)}
+          aria-pressed={raw.mixerTargetActive === target} disabled={locked || raw.status !== 'ready' || !!raw.locked || raw.beforeRequested}
+          onClick={() => { if (panel.current) commitAdjustmentEdits(panel.current); raw.toggleMixerTarget(target); }}
+          onFocus={focusAdjustmentCategory} onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>
+          {t(`workspace.rawPreview.mixer.targetLabels.${target}`)}</button>)}
+      </div>
       {mixerFields.map(field => {
         const control = `mixer.${color}.${field}` as RawControlId;
         const spec = settings.controls.find(item => item.id === control)!;
         return <AdjustmentSlider key={control} adjustmentId={control} commitPolicy="operation-boundary" hideToggle
           label={t(`workspace.rawPreview.mixer.colors.${color}.${field}`)}
           enabled={settings.sections.color} onToggle={() => {}} onReset={() => operate({ kind: 'controlReset', metadata: { control } })}
-          onBegin={() => raw.beginControls(control)} value={raw.desired?.[control] ?? settings.values[control]}
+          onBegin={() => raw.beginControls(control)} value={raw.mixerTargetValues?.[control] ?? raw.desired?.[control] ?? settings.values[control]}
           min={spec.min} max={spec.max} step={spec.step} precision={spec.precision} defaultValue={spec.default}
           resetLabel={t(`workspace.rawPreview.mixer.colors.${color}.${field}Reset`)}
           valueLabel={t(`workspace.rawPreview.mixer.colors.${color}.${field}Value`)}
-          valueText={(raw.desired?.[control] ?? settings.values[control]).toFixed(spec.precision)}
+          valueText={(raw.mixerTargetValues?.[control] ?? raw.desired?.[control] ?? settings.values[control]).toFixed(spec.precision)}
           disabled={locked} resetDisabled={locked}
           onChange={value => raw.changeControls({ [control]: value })} onCommit={() => raw.flushControls(control)} />;
       })}

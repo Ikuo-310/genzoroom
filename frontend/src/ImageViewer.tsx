@@ -255,12 +255,12 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
     if (keyboardBlocked) onRawPickCancel?.();
   }, [rawPickActive, imageIdentity, keyboardBlocked, pickReady]);
   useEffect(() => {
-    if (!rawTargetedActive || rawPickActive || showBeforeAdjustments || rawCrop?.active || keyboardBlocked || imageState !== 'ready') {
+    if (!rawTargetedActive || rawPickActive || showBeforeAdjustments || rawCrop?.active || spaceHand || keyboardBlocked || imageState !== 'ready') {
       if (targetDragRef.current) { targetDragRef.current = null; setTargetDragging(false); onRawTargetCancel?.(); }
       targetPointerRef.current = undefined;
       publishTargetLoupe();
     }
-  }, [rawTargetedActive, rawPickActive, showBeforeAdjustments, rawCrop?.active, keyboardBlocked, imageIdentity, imageState]);
+  }, [rawTargetedActive, rawPickActive, showBeforeAdjustments, rawCrop?.active, spaceHand, keyboardBlocked, imageIdentity, imageState]);
   useEffect(() => {
     if (targetDragRef.current || targetLoupeRef.current?.fixed) return;
     if (targetPointerRef.current) refreshTargetLoupe(targetPointerRef.current);

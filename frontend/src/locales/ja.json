@@ -357,6 +357,7 @@
       "wbInvalidResponse": "WB推定結果が不正でした。設定は変更されていません。",
       "wbConnectionFailed": "推定中にLightCraftとの接続が切れました。写真を開き直してください。",
       "wbTimeout": "WB推定がタイムアウトしました。再試行できない場合は写真を開き直してください。",
+      "mixerTargetUnavailable": "この画像ではカラーミキサーのターゲット調整を使用できません。",
       "cropHistory": {"drag": "切り抜き移動・サイズ変更", "straighten": "水平補正", "set": "切り抜き", "aspect": "切り抜き比率", "swap": "切り抜き比率の入替", "reset": "切り抜きをリセット", "rotateLeft": "左へ90°回転", "rotateRight": "右へ90°回転", "flipHorizontal": "左右反転", "flipVertical": "上下反転", "move": "切り抜き移動", "resize": "切り抜きサイズ変更", "lock": "縦横比の固定", "unlock": "縦横比の固定解除"},
       "wbPick": "WBスポイト",
       "awNoSamples": "自動ホワイトバランスに適した標本がありませんでした。設定は変更されていません。",
@@ -399,6 +400,9 @@
         "title": "カラーミキサー", "reset": "カラーミキサーをリセット", "colorsLabel": "カラーミキサーの色",
         "colorNames": {"red": "レッド", "orange": "オレンジ", "yellow": "イエロー", "green": "グリーン", "aqua": "アクア", "blue": "ブルー", "purple": "パープル", "magenta": "マゼンタ"},
         "hue": "色相", "sat": "彩度", "lum": "輝度",
+        "targetTools": "カラーミキサーのターゲット調整",
+        "targets": { "hue": "色相ターゲット調整", "sat": "彩度ターゲット調整", "lum": "輝度ターゲット調整" },
+        "targetLabels": { "hue": "色相", "sat": "彩度", "lum": "輝度" },
         "colors": {
           "red": {"hue": "レッドの色相", "hueValue": "レッドの色相の値", "hueReset": "レッドの色相をリセット", "sat": "レッドの彩度", "satValue": "レッドの彩度の値", "satReset": "レッドの彩度をリセット", "lum": "レッドの輝度", "lumValue": "レッドの輝度の値", "lumReset": "レッドの輝度をリセット"},
           "orange": {"hue": "オレンジの色相", "hueValue": "オレンジの色相の値", "hueReset": "オレンジの色相をリセット", "sat": "オレンジの彩度", "satValue": "オレンジの彩度の値", "satReset": "オレンジの彩度をリセット", "lum": "オレンジの輝度", "lumValue": "オレンジの輝度の値", "lumReset": "オレンジの輝度をリセット"},

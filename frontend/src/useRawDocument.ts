@@ -59,6 +59,9 @@ async function decodeFrame(frame: RawFrame, signal: AbortSignal, urls: RawPrevie
 export function useRawDocument(assetId: string | null, beforeRequested = false) {
   const [curveChannel, setCurveChannel] = useState<import('./rawApi').RawCurveChannel>('master');
   const [targetedCurveActive, setTargetedCurveActive] = useState(false);
+  const [mixerTargetActive, setMixerTargetActive] = useState<import('./rawApi').RawMixerTarget | null>(null);
+  const mixerTargetMode = useRef<import('./rawApi').RawMixerTarget | null>(null);
+  const [mixerTargetValues, setMixerTargetValues] = useState<Partial<Record<import('./rawApi').RawControlId, number>>>({});
   // The pointer-down channel is fixed for the complete Native interaction even if UI state changes later.
   const targetedChannel = useRef(curveChannel);
   // Temporary Native readback is displayed here and only enters History on the existing finish path.
@@ -99,6 +102,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   const [overlay,setOverlay]=useState<import('./rawCropOverlay').CropOverlay>('thirds');
   useEffect(()=>{setStraightenTool(false);},[assetId]);
   useEffect(()=>{setTargetedCurveActive(false);setTargetedCurvePoints(undefined);setCurveChannel('master');},[assetId]);
+  useEffect(()=>{mixerTargetMode.current=null;setMixerTargetActive(null);setMixerTargetValues({});},[assetId]);
   useEffect(()=>{if(beforeRequested)cancelTargetedCurve();},[beforeRequested]);
   const cropSnapshotRef=useRef<CropSnapshot|null>(null);
   const cropVisualRef=useRef<{snapshot:CropSnapshot;start:NonNullable<RawSettings['crop']>;latest:NonNullable<RawSettings['crop']>;owner:RawRecipeSave}|null>(null);
@@ -621,6 +625,44 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
               setState(previous => previous && ({ ...previous, displayError: code }));
             }
           });
+        },
+        mixerReadback: changes => { if (current()) setMixerTargetValues(changes); },
+        mixerPreviewError: cause => {
+          const code = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
+          if (current()) { curvePresentation.current.active = false; setState(previous => previous && ({ ...previous, displayError: code })); }
+        },
+        mixerSettled: cancelled => {
+          mixerTargetMode.current = null;
+          setMixerTargetActive(null);
+          setMixerTargetValues({});
+          settleCurvePresentation(cancelled);
+        },
+        mixerPreview: (frame, doc, sequence, target) => {
+          const owner = curvePresentation.current;
+          if (!owner.active || sequence <= owner.displayedSequence || !current()) return;
+          void decodeFrame(frame, controller.signal, urls).then(candidate => {
+            if (!owner.active || sequence <= owner.displayedSequence || !current()
+              || doc.generation !== editor?.confirmed.generation || doc.documentToken !== editor?.confirmed.documentToken) {
+              urls.release(candidate); return;
+            }
+            owner.displayedSequence = sequence;
+            if (owner.url) urls.release(owner.url);
+            owner.url = candidate;
+            if (frame.frame) {
+              publishedFrame = { revision: doc.revision, quality: frame.quality ?? 'draft', frame: frame.frame };
+              wholeSurfaces.current.after = { url: candidate, doc: { ...doc }, frame: frame.frame,
+                quality: frame.quality ?? 'draft', maxSide: target.maxSide };
+            }
+            setState(previous => previous && previous.assetId === assetId ? { ...previous, url: candidate,
+              width: frame.width, height: frame.height, frame: frame.frame, quality: frame.quality ?? 'draft',
+              imageRevision: doc.revision, displayError: undefined } : previous);
+            overlay.refresh();
+          }).catch(cause => {
+            if (owner.active && sequence > owner.displayedSequence) {
+              const code = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
+              setState(previous => previous && ({ ...previous, displayError: code }));
+            }
+          });
         } });
       saverRef.current = saver;
       editorRef.current = editor;
@@ -638,6 +680,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       modeChanging = true; frozen.current = true; notify();
       const owner = saver;
       try {
+        if (owner.mixerInteracting) await owner.cancelMixerInteraction();
         await owner.save();
         if (!current() || saver !== owner) throw new RawApiError('raw_document_closed');
         if (cropMode === enabled) return;
@@ -857,14 +900,15 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       saver?.pause();
       // A late slider unmount cannot target a successor. Its old owner still finishes its
       // gesture on this same queue before cleanup, including transmitted native mutations.
-      const finalSave = discarded ? undefined : saver?.cropping ? saver.cancelGeometry() : saver?.save();
-      void finalSave?.catch(() => {});
+      const finalSave = discarded ? undefined : saver?.mixerInteracting ? saver.cancelMixerInteraction()
+        : saver?.cropping ? saver.cancelGeometry() : saver?.save();
       if (saverRef.current === saver) saverRef.current = null;
       if (editorRef.current === editor) editorRef.current = null;
       controller.abort();
       clearTimeout(timer); clearTimeout(viewTimer);
       revoke();
       enqueue(async () => {
+        try { await finalSave; } catch { return; }
         if(discarded)return;
         if (saver?.dirty || saver?.error || editor?.unsettled) {
           log('raw_save_unconfirmed', 'recipe.saveFailed');
@@ -974,6 +1018,16 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   // Whole switching owns an independent decoded image; shared Region geometry is checked separately.
   const beforeSizeMatches = beforeMatches && !visible?.cropMode && !visible?.pending
     && !!before?.url && (before.width ?? 0) > 0 && (before.height ?? 0) > 0;
+  useEffect(() => {
+    if (!visible?.settings?.sections.color || visible?.cropMode || beforeRequested || frozen.current) {
+      if (mixerTargetMode.current) {
+        curvePresentation.current.active = false;
+        mixerTargetMode.current = null;
+        setMixerTargetActive(null);
+        if (saverRef.current?.mixerInteracting) void saverRef.current.cancelMixerInteraction().catch(() => {});
+      }
+    }
+  }, [visible?.settings?.sections.color, visible?.cropMode, beforeRequested]);
   // A departing slider's commit callback must never flush the successor document's owner.
   const activeEditor = () => identity.current === assetId && editorRef.current?.confirmed.assetId === assetId ? editorRef.current : null;
   const callbackEditor = () => {
@@ -1021,6 +1075,37 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     }, target: { ...point } };
     return true;
   };
+  const beginMixerTarget = (point: {x:number;y:number}) => {
+    const editor = callbackEditor(), saver = saverRef.current, target = mixerTargetMode.current;
+    if (!target || !editor || !saver || frozen.current || pickActive || beforeRequested || visible?.cropMode
+      || saver.locked || !visible?.settings?.sections.color || !visible?.frame
+      || visible.imageRevision !== editor.confirmed.revision || !editor.confirmed.sourceWidth || !editor.confirmed.sourceHeight) return false;
+    if (!saver.beginMixerInteraction(target, point, curveTarget.current)) return false;
+    setMixerTargetValues({});
+    curvePresentation.current = { active: true, sequence: 0, displayedSequence: -1, baseline: {
+      url: visible.url, width: visible.width, height: visible.height, frame: visible.frame, quality: visible.quality,
+      imageRevision: visible.imageRevision, surface: wholeSurfaces.current.after ? { ...wholeSurfaces.current.after } : undefined,
+    }, target: { ...point } };
+    return true;
+  };
+  const updateMixerTarget = (delta: number) => {
+    const saver = saverRef.current;
+    if (delta && curvePresentation.current.active && !frozen.current && saver?.mixerInteracting)
+      saver.updateMixerInteraction(delta, curveTarget.current);
+  };
+  const finishMixerTarget = () => { void saverRef.current?.finishMixerInteraction().catch(cause => {
+    const code = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
+    setState(previous => previous && ({ ...previous, displayError: code }));
+  }); };
+  const cancelMixerTargetGesture = () => {
+    curvePresentation.current.active = false;
+    mixerTargetMode.current = null;
+    setMixerTargetActive(null);
+    void saverRef.current?.cancelMixerInteraction().catch(cause => {
+      const code = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
+      setState(previous => previous && ({ ...previous, displayError: code }));
+    });
+  };
   const updateTargetedCurve = (steps: number[]) => {
     const saver = saverRef.current;
     if (!steps.length || !curvePresentation.current.active || frozen.current || !saver) return;
@@ -1031,6 +1116,20 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     const code = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
     setState(previous => previous && ({ ...previous, displayError: code }));
   }); };
+  const toggleMixerTarget = (target: import('./rawApi').RawMixerTarget | null) => {
+    if (target === null && saverRef.current?.mixerInteracting) { cancelMixerTargetGesture(); return; }
+    if (saverRef.current?.mixerInteracting || frozen.current || visible?.cropMode || beforeRequested || !visible?.settings?.sections.color) return;
+    if (mixerTargetMode.current === target || target === null) {
+      mixerTargetMode.current = null;
+      setMixerTargetActive(null);
+      return;
+    }
+    if (!callbackEditor() || visible?.imageRevision !== visible?.document?.revision) return;
+    cancelPick();
+    cancelTargetedCurve();
+    mixerTargetMode.current = target;
+    setMixerTargetActive(target);
+  };
   const resume = () => {
     if (!activeEditor()) return;
     if (renewalLockedRef.current()) return;
@@ -1044,6 +1143,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     const editor = activeEditor(), saver = saverRef.current;
     if (!editor || !saver) return; // No editable document has been exposed yet.
     cancelPick();
+    if (saver.mixerInteracting) await saver.cancelMixerInteraction();
     frozen.current = true;
     suspendDisplayRef.current();
     saver.pause();
@@ -1136,14 +1236,16 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       end: finishCrop,
       cancel: () => {cropVisualRef.current=null;setCropPresentation(null);return cropSaver?.cancelGeometry() ?? Promise.resolve();},
       setMode: (enabled: boolean) => { cancelPick();if(!enabled)setStraightenTool(false); if (!callbackEditor() || !cropSaver || saverRef.current !== cropSaver) return Promise.reject(new RawApiError('raw_document_closed')); return cropModeRef.current(enabled); } },
-    beforeAvailable: !!beforeKey,
+    beforeAvailable: !!beforeKey, beforeRequested,
     pickActive, pickAvailable,
     cancelPick,
     curveChannel, setCurveChannel,
     targetedCurveActive, targetedCurvePoints,
+    mixerTargetActive, mixerTargetValues, toggleMixerTarget,
+    beginMixerTarget, updateMixerTarget, finishMixerTarget, cancelMixerTargetGesture,
     toggleTargetedCurve: () => {
       if (targetedCurveActive) { cancelTargetedCurve(); return; }
-      if (!callbackEditor() || frozen.current || visible?.cropMode || visible?.imageRevision !== visible?.document?.revision) return;
+      if (!callbackEditor() || frozen.current || visible?.cropMode || mixerTargetMode.current || visible?.imageRevision !== visible?.document?.revision) return;
       if (pickActive) cancelPick();
       setTargetedCurveActive(true);
     },
@@ -1153,6 +1255,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       const ticket = ++pickStart.current, editor = callbackEditor(), saver = saverRef.current;
       if (pickActive) { setPickOwner(null); return; }
       setTargetedCurveActive(false);
+      mixerTargetMode.current = null;
+      setMixerTargetActive(null);
       saver?.end();
       // Finish the existing gesture on its queue before enabling sampling; departure invalidates this owner.
       void saver?.save().then(() => {

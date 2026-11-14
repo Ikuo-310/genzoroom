@@ -761,6 +761,31 @@ it('keeps the Mixer subsection local, exposes eight independent colors, and uses
   expect(rawApi.setRawControls).not.toHaveBeenCalled();
 });
 
+it.each(['ja', 'en'])('shows mutually exclusive Mixer target mode toggles in %s without editing Native state', async language => {
+  await i18n.changeLanguage(language);
+  await mount();
+  const mixer = host.querySelector<HTMLElement>('.raw-color-mixer')!;
+  act(() => mixer.querySelector<HTMLButtonElement>('.raw-color-mixer-title')!.click()); await flush();
+  const controls = mixer.querySelector<HTMLElement>('.raw-mixer-target-tools')!;
+  expect(controls.firstElementChild?.tagName.toLowerCase()).toBe('span');
+  expect(controls.firstElementChild?.getAttribute('aria-hidden')).toBe('true');
+  const buttons = [...controls.querySelectorAll<HTMLButtonElement>('button')];
+  expect(buttons.map(button => button.textContent)).toEqual(language === 'ja' ? ['色相', '彩度', '輝度'] : ['Hue', 'Saturation', 'Luminance']);
+  expect(buttons.map(button => button.getAttribute('aria-label'))).toEqual(language === 'ja'
+    ? ['色相ターゲット調整', '彩度ターゲット調整', '輝度ターゲット調整']
+    : ['Hue targeted adjustment', 'Saturation targeted adjustment', 'Luminance targeted adjustment']);
+  expect(buttons.map(button => button.getAttribute('aria-pressed'))).toEqual(['false', 'false', 'false']);
+  const historyCount = vi.mocked(rawApi.saveRawHistory).mock.calls.length;
+  act(() => buttons[0].click()); await flush();
+  expect(buttons.map(button => button.getAttribute('aria-pressed'))).toEqual(['true', 'false', 'false']);
+  act(() => buttons[1].click()); await flush();
+  expect(buttons.map(button => button.getAttribute('aria-pressed'))).toEqual(['false', 'true', 'false']);
+  act(() => buttons[1].click()); await flush();
+  expect(buttons.map(button => button.getAttribute('aria-pressed'))).toEqual(['false', 'false', 'false']);
+  expect(vi.mocked(rawApi.saveRawHistory)).toHaveBeenCalledTimes(historyCount);
+  expect(vi.mocked(rawApi.setRawControls)).not.toHaveBeenCalled();
+});
+
 it('retains panel folds and Mixer/Grading selections across A-B-A without creating edit operations', async () => {
   vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => {
     const settings = rawSettings(doc);
@@ -834,6 +859,7 @@ it('resets the Mixer with one History operation and locks its controls when Colo
   const colorToggle = color.querySelector<HTMLButtonElement>('[data-category-switch]')!;
   act(() => colorToggle.click()); await flush();
   expect(mixer.querySelector<HTMLInputElement>('[data-adjustment-id="mixer.red.hue"]')!.disabled).toBe(true);
+  expect([...mixer.querySelectorAll<HTMLButtonElement>('.raw-mixer-target-button')].every(button => button.disabled)).toBe(true);
   const reset = mixer.querySelector<HTMLButtonElement>('.adjustment-category-reset')!;
   expect(reset.disabled).toBe(true);
   // Restore the native category before exercising the Mixer section reset.

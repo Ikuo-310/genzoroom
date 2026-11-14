@@ -533,6 +533,11 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .raw-color-mixer-swatches { display: flex; justify-content: space-between; gap: 4px; padding: 5px 0 8px; }
 .raw-color-mixer-swatch { width: 19px; height: 19px; flex: 0 0 19px; padding: 0; border: 1px solid #171719; border-radius: 50%; background: var(--mixer-swatch); cursor: pointer; }
 .raw-color-mixer-swatch.is-selected { outline: 2px solid #f4f4f5; outline-offset: 2px; }
+.raw-mixer-target-tools { display: flex; align-items: center; gap: 4px; margin: -4px 0 3px; }
+.raw-mixer-target-icon { display: inline-flex; align-items: center; justify-content: center; min-width: 19px; padding: 0; cursor: default; }
+.raw-mixer-target-icon svg { width: 16px; height: 16px; }
+.raw-mixer-target-button { min-width: 0; height: 23px; padding: 0 7px; font-weight: 500; }
+.raw-mixer-target-button:disabled { opacity: 0.5; cursor: default; }
 .raw-color-mixer-content .adjustment-control { grid-template-columns: minmax(0, clamp(40px, calc(50% - 55px), 90px)) minmax(0, 1fr) calc(var(--raw-number-field-width) + 30px); }
 .raw-color-grading { margin-top: 8px; padding: 0 6px 6px; border-radius: 5px; background: #242426; }
 .raw-color-grading-title { display: flex; min-width: 0; flex: 1; align-items: center; gap: 6px; padding: 4px 0; color: #e2e2e4; background: transparent; border: 0; text-align: left; font: inherit; font-size: 0.72rem; cursor: pointer; }

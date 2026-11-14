@@ -1,5 +1,13 @@
 # GenzoRoom 開発ノート
 
+## Color Mixer P2-B ターゲット調整Viewer統合（2026-11-14）
+
+Color Mixer内に色相・彩度・輝度の相互排他的な一時モードを追加し、共通Viewerのpointer lifecycleへ接続した。ターゲットボタンはスウォッチ行と選択色スライダーの間に置き、スポイト表示は既存 `RawEyedropperIcon` を操作なしで再利用する。同じモードの再クリック、Escape、Mixer／Color折り畳み、Before／Crop／Space Pan、Color OFF、写真・Documentの切替でViewer所有状態を解除する。RAW Nativeの色判定はLightCraftへ委譲する。
+
+座標は既存 `rawTargetCoordinates` で変換し、画像クリック地点と共通 `ViewerPointLoupe` の位置をドラッグ中固定する。Native Desktopに合わせて上ドラッグを正方向、0.5 CSS pxごとに1段として、50msの更新間隔に差分を単一累積値としてまとめる。`RawRecipeSave` のSession所有キューでMixer Updateを直列化し、Native readbackの複数色帯値を小数のまま一時表示する。Previewは既存Mixer Draft endpointとsequence fenceを使い、Endは既存P2-Aの`mixerTarget` Historyへ1件、成功後はFull Previewへ戻す。Escape／pointer cancelはNative Cancelと設定readbackで開始状態へ戻し、Historyを作らない。HSL操作状態は保存しない。Docker JPEG、Native上流・managed patch・実行ファイル、SQLite schemaは変更しない。
+
+関連Frontend test 363件が成功し、TypeScript／本番buildも成功。Buildは既存chunk-sizeおよびReact Router directive警告を出す。Windows DesktopでのRAW／非RAW実操作、Color OFF／Before／Crop／Space／Escape、Preview追従、Undo/Redoはユーザーの実機確認項目であり、今回未実施。
+
 ## Color Mixer P2-A NativeターゲットInteraction基盤（2026-11-14）
 
 GenzoRoom `fd748e3`を基準に、LightCraft v0.20.0のNative `develop.targeted`をWindows共通Native Sessionへ接続するBackend/APIを追加した。Hue／Saturation／LuminanceのBeginはモードと正規化座標を固定し、Updateは連番付き相対deltaを直列にNativeへ送り、Nativeの複数Mixer帯readbackを丸めず保持する。Nativeが返すcontrol IDは固定色帯とみなさず全て検証する。非Mixer controlや対象と異なるH/S/Lフィールドは拒否する。Native処理・色判定・帯の重み付けはLightCraftに委譲する。

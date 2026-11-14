@@ -37,9 +37,22 @@ Historyの複数項目Resetは操作名のみを表示する（`c633bff`）。5�
 - Endは`/history/operate`の`kind: mixerTarget`, `metadata: {target}`, `mixerInteractionId`として実行する。Native `develop.endInteraction`後の完全snapshotをHistory appendに使い、DB append成功後にだけInteractionを確定snapshotへ昇格する。変更なしなら既存append処理がstepを作らない。Undo/Redo/Jumpは既存Recipe snapshot restoreを使う。Recipe/Exportは確定Recipeから従来の`develop.merge`経路を使用する。
 - RAW／非RAWは同じWindows Native SessionとAPIを使用する。LightCraftはB&W treatmentまたは`lc.mono` profileでは`bw.*`を更新するため、Mixer H/S/L専用のBeginは拒否する。B&W Mixは今回の対象外。
 
-Frontend APIにはBegin/Update/Preview/Cancel/Endの関数と型を追加したが、P2-AではMixer UI・Viewerから呼び出さない。P2-BはAPIの直列sequenceを維持し、Updateを順にawaitしてDraftを受け取り、Pointer Up前にpending deltaをflushしてEnd APIへ渡す必要がある。Curveの独自point arraysはMixer stateへ流用しない。WB pickerとターゲットツールのpointer排他、ViewerLoupe固定位置、Escape、document departure処理もP2-Bの責務である。
+P2-A時点ではFrontend API型・関数までを追加し、Mixer UI・Viewerからは呼び出していなかった。当時のP2-B計画ではsequence順序、pending deltaのPointer Up flush、Curve point arraysとMixer状態の分離、WB pickerとの排他、共有ルーペ、Escape、Document departureを接続要件としていた。現在の確定実装は次節に記録する。
 
 P2-Aのテストはmock Native readbackによるBackend unit/API testと、固定v0.20.0実Native CLI testを分けて実施した。実Native CLIはHue/Saturation/Luminance各Interactionの複数control readback、Draft Preview、End/confirmまで成功。Desktop UI実機、RAW原本、および画素比較は未実施。今後のNative contract不整合に備えたmanaged patch追加は不要。
+
+## P2-B実装結果：H/S/LターゲットUI・Viewer統合
+
+実装状態: P2-A APIをWindows Native現像UIに接続した。LightCraft Native／managed patch／実行ファイル、SQLite schema、Docker JPEG経路は変更していない。モノクロB&W Mix、Point Color、Hue color bar、独立Subcategory ON/OFFは対象外のまま。
+
+- Mixer展開領域は8色スウォッチ、ターゲット操作列、選択色のH/S/L slider順。操作列は既存スポイトアイコンを案内として描画し、H/S/Lボタンのみがモード切替を行う。同一モード再クリックで解除し、モードはReactの一時状態でRecipe／History／UI設定へ保存しない。
+- H/S/Lモードは排他的で、Color OFF、編集ロック、Before、Crop、WB picker、curve target、Mixer subsectionまたはColor categoryの折り畳み、Space pan、Escape、写真・Document切替でpointer ownerを止める。曲線制御点編集はMixer target mode中に無効。Native Sessionのcurve／mixer interaction排他はP2-AのBackend lockに加え、Frontendでは`RawRecipeSave.locked`を共通編集境界に使う。
+- Viewerは既存`rawTargetCoordinates.ts`を使い、Whole表示画像から正規化Native座標を計算する。Native Desktop v0.20.0に合わせ、Pointer Moveの上方向を正deltaとし、0.5 CSS px単位を1段へ変換する。ドラッグ開始後は座標と共通`ViewerPointLoupe`位置を固定し、Crosshair／`ns-resize`カーソルを既存Viewerで切り替える。新しいルーペや色判定は追加していない。
+- `RawRecipeSave`が通常Control save fenceを通してからNative Beginし、50ms cadenceで更新要求を1本ずつ処理する。待機中の移動は単一の累積deltaへまとめ、順序付きNative sequenceを保つ。全Mixer controlの小数readbackを累積して一時UIへ反映し、選択色は変えない。各readbackのDraft Previewは既存mixer Preview API／ticketに接続し、interaction sequenceが現在値と一致する画像だけを採用する。
+- Pointer Upは待機中delta、in-flight Update、最終Draftを処理後、P2-Aの`mixerTarget` History Endへ渡す。Native最終snapshotがHistory/Recipeの正となり、History append成功後に既存Full Previewを更新する。変更なしはNative側no-op History契約に従う。Escape／pointer cancelはNative Cancel後のreadbackで開始値へ戻し、Historyを増やさない。Previewの遅延Decodeはowner無効化後に破棄する。
+- P2-B focused Frontend検証では`AnshitsuRawPreview.test.tsx`、`useRawDocument.test.tsx`、`ImageViewer.test.tsx`の363件が成功。TypeScriptと本番buildは成功し、既存のbundle-sizeおよびReact Router directive警告あり。Desktop実機、RAW／非RAW原本、Preview画質・追従、Undo/Redo/Jump、Before／Crop／Space／Escape組合せは未実施で、ユーザーによるWindows Desktop確認項目。
+
+P2-Bの主要な実装参照先は`frontend/src/RawAdjustmentControls.tsx`、`frontend/src/AnshitsuPage.tsx`、`frontend/src/ImageViewer.tsx`、`frontend/src/useRawDocument.ts`、`frontend/src/rawRecipeSave.ts`、`frontend/src/rawApi.ts`、`frontend/src/rawTargetCoordinates.ts`、`frontend/src/ViewerPointLoupe.tsx`。回帰テストは各ソースの`.test.tsx`を参照する。
 
 ## P1-B2時点の実装記録（履歴）
 

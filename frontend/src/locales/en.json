@@ -366,6 +366,7 @@
       "wbInvalidResponse": "The white balance estimate was invalid. Your settings have not changed.",
       "wbConnectionFailed": "The LightCraft connection was lost during estimation. Reopen the photo.",
       "wbTimeout": "White balance estimation timed out. Reopen the photo if retrying fails.",
+      "mixerTargetUnavailable": "Color Mixer targeted adjustment is unavailable for this image.",
       "cropHistory": {"drag": "Crop move / resize", "straighten": "Straighten", "set": "Crop", "aspect": "Crop aspect", "swap": "Swap crop aspect", "reset": "Reset Crop", "rotateLeft": "Rotate left", "rotateRight": "Rotate right", "flipHorizontal": "Flip horizontal", "flipVertical": "Flip vertical", "move": "Crop Move", "resize": "Crop Resize", "lock": "Aspect Lock", "unlock": "Aspect Unlock"},
       "wbPick": "White balance picker",
       "awNoSamples": "Auto white balance could not find suitable samples. Your settings have not changed.",
@@ -408,6 +409,9 @@
         "title": "Color Mixer", "reset": "Reset Color Mixer", "colorsLabel": "Color Mixer colors",
         "colorNames": {"red": "Red", "orange": "Orange", "yellow": "Yellow", "green": "Green", "aqua": "Aqua", "blue": "Blue", "purple": "Purple", "magenta": "Magenta"},
         "hue": "Hue", "sat": "Saturation", "lum": "Luminance",
+        "targetTools": "Color Mixer targeted adjustment",
+        "targets": { "hue": "Hue targeted adjustment", "sat": "Saturation targeted adjustment", "lum": "Luminance targeted adjustment" },
+        "targetLabels": { "hue": "Hue", "sat": "Saturation", "lum": "Luminance" },
         "colors": {
           "red": {"hue": "Red Hue", "hueValue": "Red Hue value", "hueReset": "Reset Red Hue", "sat": "Red Saturation", "satValue": "Red Saturation value", "satReset": "Reset Red Saturation", "lum": "Red Luminance", "lumValue": "Red Luminance value", "lumReset": "Reset Red Luminance"},
           "orange": {"hue": "Orange Hue", "hueValue": "Orange Hue value", "hueReset": "Reset Orange Hue", "sat": "Orange Saturation", "satValue": "Orange Saturation value", "satReset": "Reset Orange Saturation", "lum": "Orange Luminance", "lumValue": "Orange Luminance value", "lumReset": "Reset Orange Luminance"},

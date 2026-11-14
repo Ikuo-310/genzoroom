@@ -845,16 +845,16 @@ export function AnshitsuPage() {
           onRawPick={rawDocument?.pick}
           onRawPickCancel={rawDocument?.cancelPick}
           rawFrame={rawDocument?.frame}
-          rawTargetedActive={!!rawDocument?.targetedCurveActive}
+          rawTargetedActive={!!rawDocument?.targetedCurveActive || !!rawDocument?.mixerTargetActive}
           rawTargetCrop={rawDocument?.settings?.crop}
           rawTargetOrientation={rawDocument?.settings?.orientation}
           rawTargetSourceSize={rawDocument?.document?.sourceWidth && rawDocument?.document?.sourceHeight
             ? { x: rawDocument.document.sourceWidth, y: rawDocument.document.sourceHeight } : undefined}
-          onRawTargetBegin={rawDocument?.beginTargetedCurve}
-          onRawTargetMove={rawDocument?.updateTargetedCurve}
-          onRawTargetFinish={rawDocument?.finishTargetedCurve}
-          onRawTargetCancel={rawDocument?.cancelTargetedGesture}
-          onRawTargetEscape={rawDocument?.cancelTargetedCurve}
+          onRawTargetBegin={rawDocument?.mixerTargetActive ? rawDocument.beginMixerTarget : rawDocument?.beginTargetedCurve}
+          onRawTargetMove={rawDocument?.mixerTargetActive ? delta => rawDocument.updateMixerTarget(delta.reduce((sum, step) => sum + step, 0)) : rawDocument?.updateTargetedCurve}
+          onRawTargetFinish={rawDocument?.mixerTargetActive ? rawDocument.finishMixerTarget : rawDocument?.finishTargetedCurve}
+          onRawTargetCancel={rawDocument?.mixerTargetActive ? rawDocument.cancelMixerTargetGesture : rawDocument?.cancelTargetedGesture}
+          onRawTargetEscape={rawDocument?.mixerTargetActive ? rawDocument.cancelMixerTargetGesture : rawDocument?.cancelTargetedCurve}
           beforeFrame={rawDocument?.beforeFrame}
           rawCrop={rawDocument?.crop}
           rawRegionDisplay={rawDocument?.regionDisplay}

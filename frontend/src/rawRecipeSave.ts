@@ -1,7 +1,8 @@
 import { createEditStateSaveId } from './editStateApi';
 import { frontendLogger } from './frontendLogging';
 import { RawApiError, RawSaveError, RawSuperseded, beginRawGeometry, updateRawGeometry, beginRawCurveInteraction, cancelRawCurveInteraction,
-  rawPreview, readRawSettings, recoverRawGeometry, type RawGeometryAction, type RawGeometryOperation, type RawCurveChannel,
+  beginRawMixerInteraction, updateRawMixerInteraction, cancelRawMixerInteraction, endRawMixerInteraction,
+  rawPreview, readRawSettings, recoverRawGeometry, type RawGeometryAction, type RawGeometryOperation, type RawCurveChannel, type RawMixerTarget,
   updateRawTargetedCurve,
   type RawCurvePoint, type RawDisplayTarget, type RawFrame, readRawRecipe, saveRawRecipe, saveRawHistory, readRawHistory,
   type RawSettings, type RawRecipeRequest, type RawHistoryRequest, type RawHistoryControlId, type RawHistoryResult,
@@ -33,16 +34,21 @@ export class RawRecipeSave {
   moving = false;
   private historyOperation?: Promise<void>;
   private moveIntent?: { action: 'undo' | 'redo' | 'jump' | 'operate'; targetStepId?: string | null; operation?: RawHistoryOperation;
-    curveInteractionId?: string };
+    curveInteractionId?: string; mixerInteractionId?: string };
   private curveGesture?: { channel: RawCurveChannel; doc: RawSettings; started: Promise<string>; id?: string; latest?: RawCurvePoint[];
     sequence: number; displayedSequence: number; timer?: ReturnType<typeof setTimeout>; inFlight?: Promise<void>; ending: boolean; controller: AbortController;
     target?: RawDisplayTarget; cancelPromise?: Promise<void>; targeted?: { point: {x:number;y:number}; pending: number[]; points?: RawCurvePoint[];
       pump?: Promise<void>; preview?: Promise<void>; timer?: ReturnType<typeof setTimeout> } };
+  private mixerGesture?: { target: RawMixerTarget; doc: RawSettings; started: Promise<string>; id?: string; sequence: number;
+    displayedSequence: number; pendingDelta: number; ending: boolean; controller: AbortController; timer?: ReturnType<typeof setTimeout>;
+    pump?: Promise<void>; preview?: Promise<void>; display?: RawDisplayTarget; changes: Partial<Record<RawHistoryControlId, number>>;
+    cancelPromise?: Promise<void> };
   private cropGesture?: { id: string; type: 'drag' | 'straighten'; action?: RawGeometryAction; sequence: number; latest?: RawGeometryOperation; ending: boolean;
     started: Promise<void>; end?: Promise<void>; error?: unknown; cancelled?: boolean; updateDoc?: RawSettings; rejected?: boolean; commit?: RawHistoryRequest };
   get cropOperation() { return this.cropGesture?.type; }
   get cropping() { return !!this.cropGesture; }
   get curveInteracting() { return !!this.curveGesture; }
+  get mixerInteracting() { return !!this.mixerGesture; }
   private gesture?: { control: RawHistoryControlId; fingerprint: string };
   // One adjacent control's unsent intent is held until the preceding gesture is acknowledged.
   // It uses the same owner queue; no native mutation or second save queue starts here.
@@ -55,6 +61,10 @@ export class RawRecipeSave {
     curveReadback?: (channel: RawCurveChannel, points: RawCurvePoint[], sequence: number) => void;
     curveSettled?: (cancelled: boolean) => void;
     curveRecovery?: () => Promise<void>;
+    mixerReadback?: (changes: Partial<Record<RawHistoryControlId, number>>) => void;
+    mixerPreview?: (frame: RawFrame, doc: RawSettings, sequence: number, target: RawDisplayTarget) => void;
+    mixerPreviewError?: (cause: unknown) => void;
+    mixerSettled?: (cancelled: boolean) => void;
   }) {
     this.revision = confirmed.recipeRevision;
     this.savedFingerprint = confirmed.recipeFingerprint ?? confirmed.settingsFingerprint;
@@ -95,6 +105,159 @@ export class RawRecipeSave {
     if (!this.beginCurveInteraction(channel, 'targeted')) return false;
     this.curveGesture!.targeted = { point: { ...point }, pending: [] };
     return true;
+  }
+  beginMixerInteraction(target: RawMixerTarget, point: {x:number;y:number}, display: RawDisplayTarget) {
+    if (!this.active || this.locked || this.paused || this.historyLoading || this.historyError || !this.history || this.curveGesture) return false;
+    if (this.options.controls!.confirmed.mutationAttempts >= Math.min(this.options.controls!.confirmed.regenerationThreshold,
+      this.options.controls!.confirmed.mutationLimit - 1)) return false;
+    const preceding = this.save();
+    const gesture = { target, doc: structuredClone(this.options.controls!.confirmed), started: Promise.resolve(''),
+      sequence: 0, displayedSequence: 0, pendingDelta: 0, ending: false, controller: new AbortController(),
+      display: { ...display }, changes: {} } as NonNullable<typeof this.mixerGesture>;
+    this.mixerGesture = gesture;
+    gesture.started = preceding.then(async () => {
+      if (!this.active || this.mixerGesture !== gesture) throw new RawApiError('raw_document_closed');
+      gesture.doc = structuredClone(this.options.controls!.confirmed);
+      const id = await beginRawMixerInteraction(gesture.doc, target, point.x, point.y);
+      if (!this.active || this.mixerGesture !== gesture) {
+        await cancelRawMixerInteraction(gesture.doc, id);
+        throw new RawApiError('raw_document_closed');
+      }
+      gesture.id = id;
+      this.options.controls!.beginPreview();
+      return id;
+    }).catch(cause => {
+      if (this.mixerGesture === gesture) this.mixerGesture = undefined;
+      this.options.controls?.endPreview();
+      this.options.mixerSettled?.(true);
+      this.operationError = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
+      this.options.controls?.refreshPreview();
+      throw cause;
+    }).finally(() => this.options.changed());
+    this.options.changed();
+    return true;
+  }
+  updateMixerInteraction(delta: number, display: RawDisplayTarget) {
+    const gesture = this.mixerGesture;
+    if (!gesture || gesture.ending || !this.active || !Number.isFinite(delta) || delta === 0) return;
+    gesture.pendingDelta += delta;
+    gesture.display = { ...display, quality: 'draft', mode: 'whole', maxSide: Math.min(512, display.maxSide) };
+    this.scheduleMixerPump(gesture);
+  }
+  private scheduleMixerPump(gesture: NonNullable<typeof this.mixerGesture>, immediate = false) {
+    if (gesture.timer || gesture.pump || !gesture.pendingDelta || gesture.ending) return;
+    const start = () => {
+      gesture.timer = undefined;
+      const pump = this.pumpMixerInteraction(gesture);
+      gesture.pump = pump;
+      void pump.catch(cause => this.failMixerInteraction(gesture, cause)).finally(() => {
+        if (gesture.pump === pump) gesture.pump = undefined;
+        if (this.mixerGesture === gesture && gesture.pendingDelta && !gesture.ending) this.scheduleMixerPump(gesture);
+      });
+    };
+    if (immediate) start(); else gesture.timer = setTimeout(start, RAW_CURVE_PREVIEW_THROTTLE_MS);
+  }
+  private async pumpMixerInteraction(gesture: NonNullable<typeof this.mixerGesture>) {
+    while (gesture.pendingDelta && this.active && this.mixerGesture === gesture) {
+      const delta = gesture.pendingDelta;
+      gesture.pendingDelta = 0;
+      const id = await gesture.started;
+      const sequence = ++gesture.sequence;
+      const readback = await updateRawMixerInteraction(gesture.doc, sequence, gesture.controller.signal, gesture.display!,
+        { id, sequence, delta, target: gesture.target });
+      if (!this.active || this.mixerGesture !== gesture || readback.sequence <= gesture.displayedSequence) continue;
+      gesture.displayedSequence = readback.sequence;
+      Object.assign(gesture.changes, readback.changes);
+      this.options.mixerReadback?.({ ...gesture.changes });
+      const previewSerial = sequence;
+      const preview = rawPreview(gesture.doc, previewSerial, gesture.controller.signal, 'after', gesture.display,
+        undefined, undefined, { id, sequence: readback.sequence }).then(frame => {
+        if (this.active && this.mixerGesture === gesture && frame.interactionSequence === gesture.displayedSequence)
+          this.options.mixerPreview?.(frame, gesture.doc, gesture.displayedSequence, gesture.display!);
+      }).catch(cause => {
+        if (!(cause instanceof RawSuperseded) && this.active && this.mixerGesture === gesture && !gesture.ending)
+          this.options.mixerPreviewError?.(cause);
+      });
+      gesture.preview = preview;
+    }
+  }
+  private async failMixerInteraction(gesture: NonNullable<typeof this.mixerGesture>, cause: unknown) {
+    if (!this.active || this.mixerGesture !== gesture) return;
+    gesture.ending = true;
+    this.options.mixerPreviewError?.(cause);
+    await this.cancelMixerInteraction();
+  }
+  async finishMixerInteraction() {
+    const gesture = this.mixerGesture;
+    if (!gesture || gesture.ending) return;
+    gesture.ending = true;
+    clearTimeout(gesture.timer);
+    gesture.timer = undefined;
+    try {
+      await gesture.started;
+      await gesture.pump;
+      if (gesture.pendingDelta) {
+        const delta = gesture.pendingDelta;
+        gesture.pendingDelta = 0;
+        const id = gesture.id!;
+        const sequence = ++gesture.sequence;
+        const readback = await updateRawMixerInteraction(gesture.doc, sequence, gesture.controller.signal, gesture.display!,
+          { id, sequence, delta, target: gesture.target });
+        Object.assign(gesture.changes, readback.changes);
+        this.options.mixerReadback?.({ ...gesture.changes });
+        gesture.displayedSequence = readback.sequence;
+        gesture.preview = rawPreview(gesture.doc, sequence, gesture.controller.signal, 'after', gesture.display,
+          undefined, undefined, { id, sequence: readback.sequence }).then(frame => {
+          if (this.active && this.mixerGesture === gesture && frame.interactionSequence === gesture.displayedSequence)
+            this.options.mixerPreview?.(frame, gesture.doc, gesture.displayedSequence, gesture.display!);
+        }).catch(cause => {
+          if (!(cause instanceof RawSuperseded)) this.options.mixerPreviewError?.(cause);
+        });
+      }
+      await gesture.preview;
+    } catch (cause) {
+      if (this.mixerGesture === gesture && !this.moveIntent) await this.failMixerInteraction(gesture, cause);
+      throw cause;
+    }
+    if (this.mixerGesture !== gesture || gesture.controller.signal.aborted) return;
+    this.moving = true;
+    this.moveIntent = { action: 'operate', operation: { kind: 'mixerTarget', metadata: { target: gesture.target } }, mixerInteractionId: gesture.id };
+    const operation = this.save().finally(() => {
+      this.moving = false; this.historyOperation = undefined; if (this.active) this.options.changed();
+    });
+    this.historyOperation = operation;
+    await operation;
+  }
+  cancelMixerInteraction() {
+    const gesture = this.mixerGesture;
+    if (!gesture) return Promise.resolve();
+    if (gesture.cancelPromise) return gesture.cancelPromise;
+    gesture.ending = true;
+    clearTimeout(gesture.timer);
+    gesture.pendingDelta = 0;
+    gesture.controller.abort();
+    const cancellation = gesture.started.then(async id => {
+      if (this.mixerGesture !== gesture) return;
+      await gesture.pump?.catch(() => {});
+      await cancelRawMixerInteraction(gesture.doc, id);
+      const settings = await readRawSettings(gesture.doc);
+      if (this.mixerGesture !== gesture || !this.active) return;
+      this.options.controls!.confirmed = settings;
+      this.confirmed = settings;
+      this.mixerGesture = undefined;
+      this.options.controls?.endPreview();
+      this.options.controls?.refreshPreview();
+      this.options.mixerSettled?.(true);
+      this.operationError = undefined;
+    }).catch(cause => {
+      this.operationError = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
+      this.mixerGesture = undefined;
+      this.options.mixerSettled?.(true);
+      if (this.options.curveRecovery) void this.options.curveRecovery().catch(error => this.cropFailure(error));
+      throw cause;
+    }).finally(() => { if (this.active) this.options.changed(); });
+    gesture.cancelPromise = cancellation;
+    return cancellation;
   }
   updateCurveInteraction(points: RawCurvePoint[], target: RawDisplayTarget) {
     const gesture = this.curveGesture;
@@ -260,9 +423,9 @@ export class RawRecipeSave {
       }
     } finally { if (this.active) this.options.changed(); }
   }
-  get dirty() { return !!this.cropGesture || !!this.curveGesture || !!this.retryRequest || !!this.gesture || !!this.handoff || !!this.moveIntent
+  get dirty() { return !!this.cropGesture || !!this.curveGesture || !!this.mixerGesture || !!this.retryRequest || !!this.gesture || !!this.handoff || !!this.moveIntent
     || !!this.options.controls && !this.initialized || this.confirmed.settingsFingerprint !== this.savedFingerprint; }
-  get locked() { return !!this.cropGesture || !!this.curveGesture || !!this.options.controls && (!this.initialized || !!this.operation || !!this.error || this.moving); }
+  get locked() { return !!this.cropGesture || !!this.curveGesture || !!this.mixerGesture || !!this.options.controls && (!this.initialized || !!this.operation || !!this.error || this.moving); }
   get gesturing() { return !!this.gesture && !this.operation && !this.paused && !this.moving; }
   get canUndo() { return !!this.history && (this.history.cursor > 0 || !!this.gesture || !!this.cropGesture); }
   get canRedo() { return !!this.history && this.history.cursor < this.history.length; }
@@ -327,7 +490,7 @@ export class RawRecipeSave {
     if (!this.moveIntent) return;
     if (this.historyError) await this.loadHistory();
     if (this.historyError) throw new RawApiError(this.historyError);
-    const { action, targetStepId, operation } = this.moveIntent;
+    const { action, targetStepId, operation, mixerInteractionId } = this.moveIntent;
     // Cache refresh can hide a still-valid UUID. Let SQLite validate membership; never
     // infer deletion from a page miss or retarget a removed UUID by position.
     const available = action === 'operate' || (action === 'undo' ? this.canUndo : action === 'redo' ? this.canRedo
@@ -338,7 +501,7 @@ export class RawRecipeSave {
       ? await this.curveGesture.started : undefined;
     this.retryRequest = { doc: structuredClone(this.confirmed), expectedRecipeRevision: this.revision,
       saveId: createEditStateSaveId(), action, ...(action === 'jump' ? { targetStepId } : {}), ...(operation ? { operation } : {}),
-      ...(curveInteractionId ? { curveInteractionId } : {}) };
+      ...(curveInteractionId ? { curveInteractionId } : {}), ...(mixerInteractionId ? { mixerInteractionId } : {}) };
     try { await this.sendHistory(); }
     catch (cause) {
       if ((operation?.kind === 'wbAuto' || operation?.kind === 'wbPick') && cause instanceof RawSaveError && cause.outcome === 'rejected'
@@ -602,7 +765,9 @@ export class RawRecipeSave {
     if (this.retryRequest) {
       const request = this.retryRequest;
       if (!('action' in request)) throw new RawApiError('raw_save_unconfirmed');
-      const result = await saveRawHistory(request);
+      const result = request.mixerInteractionId && request.operation?.kind === 'mixerTarget'
+        ? await endRawMixerInteraction({ ...request, interactionId: request.mixerInteractionId, target: request.operation.metadata.target })
+        : await saveRawHistory(request);
       if (!this.active) throw new RawApiError('raw_document_closed');
       if (result.recipeRecoveryPending && result.ack === null) {
         this.confirmed = controls.confirmed = result;
@@ -643,6 +808,12 @@ export class RawRecipeSave {
         this.curveGesture = undefined;
         controls.endPreview();
         this.options.curveSettled?.(false);
+      }
+      if (request.mixerInteractionId && this.mixerGesture) {
+        this.mixerGesture.controller.abort();
+        this.mixerGesture = undefined;
+        controls.endPreview();
+        this.options.mixerSettled?.(false);
       }
       // Commits can prune or replace step IDs, while cursor moves preserve the complete list.
       if (!moving || request.action === 'operate' || this.historyError) await this.loadHistory();
@@ -685,6 +856,7 @@ export class RawRecipeSave {
     }
   }
   dispose() {
+    if (this.mixerGesture) void this.cancelMixerInteraction().catch(() => {});
     this.active = false; clearTimeout(this.timer);
     const gesture = this.curveGesture;
     if (gesture) {

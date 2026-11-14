@@ -12,7 +12,7 @@ import { ImageViewer } from './ImageViewer';
 import './i18n';
 
 vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(),
-  discardRawWorkspace:vi.fn(), beginRawGeometry:vi.fn(),updateRawGeometry:vi.fn(),recoverRawGeometry:vi.fn(), beginRawCurveInteraction: vi.fn(), cancelRawCurveInteraction: vi.fn(), updateRawTargetedCurve: vi.fn(), rawCapability: vi.fn(), createRawWorkspace: vi.fn(), openRawDocument: vi.fn(),
+  discardRawWorkspace:vi.fn(), beginRawGeometry: vi.fn(),updateRawGeometry: vi.fn(),recoverRawGeometry: vi.fn(), beginRawCurveInteraction: vi.fn(), cancelRawCurveInteraction: vi.fn(), updateRawTargetedCurve: vi.fn(), beginRawMixerInteraction: vi.fn(), updateRawMixerInteraction: vi.fn(), cancelRawMixerInteraction: vi.fn(), endRawMixerInteraction: vi.fn(), rawCapability: vi.fn(), createRawWorkspace: vi.fn(), openRawDocument: vi.fn(),
   rawRegionOwner: vi.fn(), rawRegion: vi.fn(), cancelRawRegion: vi.fn(async () => {}),
   rawPreview: vi.fn(), cancelRawPreview: vi.fn(async () => {}), readRawDocument: vi.fn(), readRawSettings: vi.fn(), setRawControls: vi.fn(), releaseRawWorkspace: vi.fn(), rawWorkspaceEmpty: vi.fn(),
   readRawHistory: vi.fn(), saveRawHistory: vi.fn(), saveRawRecipe: vi.fn(), readRawRecipe: vi.fn() }));
@@ -50,9 +50,17 @@ beforeEach(() => {
   vi.mocked(api.rawRegion).mockReset().mockRejectedValue(new api.RawApiError('raw_region_unsupported'));
   vi.mocked(api.createRawWorkspace).mockResolvedValue('workspace');
   vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => ({
-    workspaceId, assetId, handle: assetId, generation: 1, documentToken: assetId, revision: 1 }));
+    workspaceId, assetId, handle: assetId, generation: 1, documentToken: assetId, revision: 1, sourceWidth: 4000, sourceHeight: 3000 }));
   vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence: 1 });
   vi.mocked(api.beginRawCurveInteraction).mockResolvedValue('a'.repeat(32));
+  vi.mocked(api.beginRawMixerInteraction).mockResolvedValue('b'.repeat(32));
+  vi.mocked(api.updateRawMixerInteraction).mockImplementation(async (_doc, _serial, _signal, _target, interaction) => ({
+    sequence: interaction.sequence, changes: { [`mixer.red.${interaction.target}`]: 1.5, [`mixer.orange.${interaction.target}`]: .75 },
+  }));
+  vi.mocked(api.cancelRawMixerInteraction).mockResolvedValue();
+  vi.mocked(api.endRawMixerInteraction).mockImplementation(async request => commitHistory({ ...request,
+    action: 'operate', operation: { kind: 'mixerTarget', metadata: { target: request.target } },
+    mixerInteractionId: request.interactionId }));
   vi.mocked(api.cancelRawCurveInteraction).mockResolvedValue();
   vi.mocked(api.readRawDocument).mockImplementation(async doc => doc);
   vi.mocked(api.readRawSettings).mockImplementation(async doc => rawSettings(doc));
@@ -1206,6 +1214,66 @@ describe('bounded RAW session renewal', () => {
     expect(commitHistory).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'operate', operation: { kind: 'vignetteStyle', metadata: { style: 'paintOverlay' } } }));
   });
   async function drain() { await act(async () => { for (let i = 0; i < 150; i++) await Promise.resolve(); }); }
+  it('runs a Mixer target drag through ordered Draft updates and one Native History operation', async () => {
+    vi.useFakeTimers();
+    vi.mocked(api.rawPreview).mockImplementation(async (doc, sequence, _signal, kind = 'after', _target, _curve, _targeted, mixer) => ({
+      blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence, kind,
+      interactionSequence: mixer?.sequence,
+      frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000, aspect: 4/3, fullWidth: 16, fullHeight: 12, window: null },
+    }));
+    await render('mixer-target'); await drain();
+    expect(current?.frame).toBeTruthy();
+    act(() => current!.toggleMixerTarget('hue'));
+    expect(current?.mixerTargetActive).toBe('hue');
+    let began = false;
+    act(() => { began = current!.beginMixerTarget({ x: .25, y: .75 }); });
+    expect(began).toBe(true); await drain();
+    expect(api.beginRawMixerInteraction).toHaveBeenCalledWith(expect.objectContaining({ assetId: 'mixer-target' }), 'hue', .25, .75);
+    act(() => current!.updateMixerTarget(3));
+    await act(async () => { await vi.advanceTimersByTimeAsync(60); }); await drain();
+    expect(api.updateRawMixerInteraction).toHaveBeenCalledWith(expect.anything(), expect.any(Number), expect.any(AbortSignal),
+      expect.objectContaining({ quality: 'draft', mode: 'whole' }), expect.objectContaining({ target: 'hue', delta: 3, sequence: 1 }));
+    expect(current?.mixerTargetValues).toEqual({ 'mixer.red.hue': 1.5, 'mixer.orange.hue': .75 });
+    await act(async () => { current!.finishMixerTarget(); await drain(); });
+    expect({ calls: commitHistory.mock.calls.length, mode: current?.mixerTargetActive, locked: current?.locked, error: current?.operationError,
+      displayError: current?.displayError, saveError: current?.saveError, mixerPreviews: vi.mocked(api.rawPreview).mock.calls.filter(call => call[7]).length })
+      .toEqual({ calls: 1, mode: null, locked: false, error: undefined, displayError: undefined, saveError: undefined, mixerPreviews: 1 });
+    expect(commitHistory).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'operate',
+      operation: { kind: 'mixerTarget', metadata: { target: 'hue' } }, mixerInteractionId: 'b'.repeat(32) }));
+    expect(current?.mixerTargetActive).toBeNull();
+    expect(vi.mocked(api.rawPreview).mock.calls.some(call => call[3] === 'after' && call[7]?.sequence === 1)).toBe(true);
+  });
+  it('cancels a Mixer target drag through Native recovery without recording History', async () => {
+    vi.useFakeTimers();
+    vi.mocked(api.rawPreview).mockImplementation(async (doc, sequence, _signal, kind = 'after', _target, _curve, _targeted, mixer) => ({
+      blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence, kind, interactionSequence: mixer?.sequence,
+      frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000, aspect: 4/3, fullWidth: 16, fullHeight: 12, window: null },
+    }));
+    await render('mixer-cancel'); await drain();
+    act(() => current!.toggleMixerTarget('sat'));
+    act(() => { expect(current!.beginMixerTarget({ x: .5, y: .5 })).toBe(true); }); await drain();
+    act(() => current!.updateMixerTarget(2));
+    await act(async () => { await vi.advanceTimersByTimeAsync(60); }); await drain();
+    const historyCalls = vi.mocked(api.saveRawHistory).mock.calls.length;
+    await act(async () => { current!.cancelMixerTargetGesture(); await drain(); });
+    expect(api.cancelRawMixerInteraction).toHaveBeenCalledWith(expect.objectContaining({ assetId: 'mixer-cancel' }), 'b'.repeat(32));
+    expect(vi.mocked(api.saveRawHistory)).toHaveBeenCalledTimes(historyCalls);
+    expect(current?.mixerTargetActive).toBeNull(); expect(current?.mixerTargetValues).toEqual({}); expect(current?.locked).toBe(false);
+  });
+  it('cancels the active Mixer Native owner before switching photos', async () => {
+    vi.useFakeTimers();
+    vi.mocked(api.rawPreview).mockImplementation(async (doc, sequence, _signal, kind = 'after') => ({
+      blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence, kind,
+      frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000, aspect: 4/3, fullWidth: 16, fullHeight: 12, window: null },
+    }));
+    await render('mixer-depart'); await drain();
+    act(() => current!.toggleMixerTarget('lum'));
+    act(() => { expect(current!.beginMixerTarget({ x: .4, y: .6 })).toBe(true); }); await drain();
+    await render('next-photo'); await drain();
+    expect(api.cancelRawMixerInteraction).toHaveBeenCalledWith(expect.objectContaining({ assetId: 'mixer-depart' }), 'b'.repeat(32));
+    expect(vi.mocked(api.saveRawHistory).mock.calls.some(([request]) => request.operation?.kind === 'mixerTarget')).toBe(false);
+    expect(current?.document?.assetId).toBe('next-photo');
+  });
   it('reacquires native Before after renewal and revokes the previous generation URL', async () => {
     renewal();
     const readSettings = vi.mocked(api.readRawSettings).getMockImplementation()!;
