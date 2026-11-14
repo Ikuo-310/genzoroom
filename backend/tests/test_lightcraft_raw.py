@@ -21,6 +21,7 @@ from tests.test_lightcraft_runtime import FakeProcess, FAST, assert_reaped
 
 
 DEFAULT = {"version": 1, "process": 2, "wb": {"mode": "custom", "temp": 6500., "tint": 0., "scale": "kelvin"},
+           "point_colors": [],
            "crop": {"geometry": {"rect": {"x0": 0., "y0": 0., "x1": 1., "y1": 1.}, "angle": 0.},
                     "aspect": None, "flip_h": False, "flip_v": False}, "orientation": "Normal",
            "disabled_sections": [],
@@ -63,6 +64,184 @@ def png(w=16, h=12):
     buffer = io.BytesIO()
     Image.new("RGBA", (w, h), (30, 50, 80, 255)).save(buffer, "PNG")
     return buffer.getvalue()
+
+
+def point_color(hue_shift=0.):
+    return {"lum": .4, "chroma": .15, "hue": 42., "hue_shift": hue_shift, "sat_shift": 0.,
+            "lum_shift": 0., "variance": 0., "range": 50., "hue_range": 50., "sat_range": 50., "lum_range": 50.}
+
+
+def test_point_color_pick_and_delete_use_native_command_and_readback(tmp_path):
+    async def run():
+        raw, _, children, files = await create(tmp_path)
+        try:
+            handle, baseline = await raw.open_raw("pixel", files[0])
+            child = children[0]
+            picked = await raw._pick_point_color(handle, .25, .75, baseline.revision)
+            assert picked.settings["point_colors"] == [
+                {**point_color(), "lum": .51, "chroma": .12, "hue": 23.}]
+            assert child.commands.count(("pointColor.pick", {"x": .25, "y": .75})) == 1
+            duplicate = await raw._pick_point_color(handle, .25, .75, picked.revision)
+            assert duplicate.settings["point_colors"] == picked.settings["point_colors"] * 2
+            assert child.commands.count(("pointColor.pick", {"x": .25, "y": .75})) == 2
+            revision = duplicate.revision
+
+            child.photos[1]["settings"]["point_colors"] = [point_color(), point_color(), point_color()]
+            current = await raw.get_settings(handle)
+            # Native arrays have no stable IDs; deletion follows current ordered indexes.
+            removed = await raw._delete_point_color(handle, 1, current.revision)
+            assert removed.settings["point_colors"] == [point_color(), point_color()]
+            assert child.commands.count(("pointColor.delete", {"index": 1})) == 1
+            assert removed.revision > revision
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("fault,code", [
+    ("bad_reply_index", "raw_point_color_pick_mismatch"),
+    ("readback_count", "raw_point_color_pick_mismatch"),
+    ("existing_changed", "raw_point_color_pick_mismatch"),
+])
+def test_point_color_pick_readback_failures_desynchronize_without_retry(tmp_path, fault, code):
+    async def run():
+        raw, _, children, files = await create(tmp_path)
+        try:
+            handle, baseline = await raw.open_raw("pixel", files[0])
+            child = children[0]
+            child.photos[1]["settings"]["point_colors"] = [point_color()]
+            child.point_pick_fault = fault
+            with pytest.raises(LightCraftError, match=code):
+                await raw._pick_point_color(handle, .2, .3, baseline.revision)
+            assert sum(command == "pointColor.pick" for command, _ in child.commands) == 1
+            assert raw._photos["pixel"].sync == "desynchronized"
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("fault", ["native_error", "unknown_after_mutation", "readback_failure"])
+def test_point_color_pick_error_is_not_retried(tmp_path, fault):
+    async def run():
+        raw, _, children, files = await create(tmp_path)
+        try:
+            handle, baseline = await raw.open_raw("pixel", files[0])
+            child = children[0]
+            if fault == "native_error":
+                child.fail_commands.add("pointColor.pick")
+            elif fault == "unknown_after_mutation":
+                child.point_pick_fault = fault
+            else:
+                child.fail_get_after_point_mutation = True
+            with pytest.raises((LightCraftError, MCPTransportError)):
+                await raw._pick_point_color(handle, .2, .3, baseline.revision)
+            assert sum(command == "pointColor.pick" for command, _ in child.commands) == 1
+            if fault != "native_error":
+                assert raw._photos["pixel"].sync == "desynchronized" or raw.status().state == "lost"
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("index", [0, 1, 3, -1])
+def test_point_color_delete_preserves_remaining_order_and_rejects_bad_index(tmp_path, index):
+    async def run():
+        raw, _, children, files = await create(tmp_path)
+        try:
+            handle, baseline = await raw.open_raw("pixel", files[0])
+            child = children[0]
+            source = [point_color(n) for n in (1., 2., 3.)]
+            child.photos[1]["settings"]["point_colors"] = copy.deepcopy(source)
+            current = await raw.get_settings(handle)
+            if index == 3 or index == -1:
+                with pytest.raises(LightCraftError, match="raw_invalid_point_color_index"):
+                    await raw._delete_point_color(handle, index, current.revision)
+                assert not any(command == "pointColor.delete" for command, _ in child.commands)
+                return
+            deleted = await raw._delete_point_color(handle, index, current.revision)
+            assert deleted.settings["point_colors"] == source[:index] + source[index + 1:]
+            assert sum(command == "pointColor.delete" for command, _ in child.commands) == 1
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+def test_point_color_rejects_capacity_revision_and_interaction_owners(tmp_path):
+    async def run():
+        raw, _, children, files = await create(tmp_path, adaptive=True)
+        try:
+            handle, baseline = await raw.open_raw("pixel", files[0])
+            child = children[0]
+            child.photos[1]["settings"]["point_colors"] = [point_color() for _ in range(8)]
+            full = await raw.get_settings(handle)
+            with pytest.raises(LightCraftError, match="raw_point_color_limit"):
+                await raw._pick_point_color(handle, .5, .5, full.revision)
+            assert not any(command == "pointColor.pick" for command, _ in child.commands)
+            child.photos[1]["settings"]["point_colors"] = []
+            current = await raw.get_settings(handle)
+            with pytest.raises(LightCraftError, match="raw_revision_conflict"):
+                await raw._pick_point_color(handle, .5, .5, current.revision + 1)
+
+            curve_id = await raw.begin_curve_interaction(handle, "master", current.revision)
+            with pytest.raises(LightCraftError, match="raw_curve_interaction_pending"):
+                await raw._pick_point_color(handle, .5, .5, current.revision)
+            await raw.cancel_curve_interaction(handle, curve_id, current.revision)
+
+            mixer_id = await raw.begin_mixer_interaction(handle, "hue", .2, .3, current.revision)
+            with pytest.raises(LightCraftError, match="raw_mixer_interaction_pending"):
+                await raw._delete_point_color(handle, 0, current.revision)
+            await raw.cancel_mixer_interaction(handle, mixer_id, current.revision)
+            with pytest.raises(LightCraftError, match="raw_invalid_point_color_coordinates"):
+                await raw._pick_point_color(handle, 2, .5, current.revision)
+            assert not any(command.startswith("pointColor.") for command, _ in child.commands)
+
+            raw._lost = True
+            with pytest.raises(LightCraftError, match="raw_session_lost"):
+                await raw._pick_point_color(handle, .5, .5, current.revision)
+            raw._lost = False
+            raw._desynchronized = True
+            with pytest.raises(LightCraftError, match="raw_session_desynchronized"):
+                await raw._pick_point_color(handle, .5, .5, current.revision)
+            assert not any(command.startswith("pointColor.") for command, _ in child.commands)
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+def test_point_color_delete_rejects_empty_array_without_native_mutation(tmp_path):
+    async def run():
+        raw, _, children, files = await create(tmp_path)
+        try:
+            handle, baseline = await raw.open_raw("pixel", files[0])
+            with pytest.raises(LightCraftError, match="raw_invalid_point_color_index"):
+                await raw._delete_point_color(handle, 0, baseline.revision)
+            assert not any(command == "pointColor.delete" for command, _ in children[0].commands)
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("fault", ["native_error", "unknown_after_mutation", "readback_mismatch"])
+def test_point_color_delete_failure_is_not_retried(tmp_path, fault):
+    async def run():
+        raw, _, children, files = await create(tmp_path)
+        try:
+            handle, _ = await raw.open_raw("pixel", files[0])
+            child = children[0]
+            child.photos[1]["settings"]["point_colors"] = [point_color(), point_color(2.)]
+            current = await raw.get_settings(handle)
+            if fault == "native_error":
+                child.fail_commands.add("pointColor.delete")
+            else:
+                child.point_delete_fault = fault
+            with pytest.raises((LightCraftError, MCPTransportError)):
+                await raw._delete_point_color(handle, 0, current.revision)
+            assert sum(command == "pointColor.delete" for command, _ in child.commands) == 1
+            if fault != "native_error":
+                assert raw._photos["pixel"].sync == "desynchronized" or raw.status().state == "lost"
+        finally:
+            await raw.close()
+    asyncio.run(run())
 
 
 def image_result(photo=1, data=None, w=16, h=12):
@@ -131,6 +310,11 @@ class RawProcess(FakeProcess):
         self.interaction = None
         self.interaction_history = []
         self.curve_updates = []
+        self.point_pick_reply_index = None
+        self.point_pick_fault = None
+        self.point_delete_fault = None
+        self.fail_get_after_point_mutation = False
+        self.point_mutated = False
 
     def tool(self, message, value=None, error=False):
         result = {"isError": error, "content": [{"type": "text", "text": "PRIVATE C:/photo.raw API_KEY secret"}]}
@@ -214,7 +398,33 @@ class RawProcess(FakeProcess):
         self.commands.append((command, copy.deepcopy(params)))
         if command in self.fail_commands:
             return self.tool(message, error=True)
-        if command == "app.memoryBudget":
+        if command == "pointColor.pick":
+            settings = self.photos[self.active]["settings"]
+            settings["point_colors"].append({"lum": .51, "chroma": .12, "hue": 23.,
+                "hue_shift": 0., "sat_shift": 0., "lum_shift": 0., "variance": 0.,
+                "range": 50., "hue_range": 50., "sat_range": 50., "lum_range": 50.})
+            if self.point_pick_fault == "existing_changed" and len(settings["point_colors"]) > 1:
+                settings["point_colors"][0]["hue_shift"] = 1.
+            if self.point_pick_fault == "readback_count":
+                settings["point_colors"].pop()
+            self.point_mutated = True
+            value = {"index": (len(settings["point_colors"]) - 1 if self.point_pick_reply_index is None
+                                else self.point_pick_reply_index), "lum": .51, "chroma": .12, "hue": 23.}
+            if self.point_pick_fault == "unknown_after_mutation":
+                return self.tool(message, error=True)
+            if self.point_pick_fault == "bad_reply_index":
+                value["index"] += 1
+        elif command == "pointColor.delete":
+            settings = self.photos[self.active]["settings"]
+            settings["point_colors"].pop(params["index"])
+            if self.point_delete_fault == "readback_mismatch":
+                if settings["point_colors"]:
+                    settings["point_colors"][0]["hue_shift"] = 1.
+            self.point_mutated = True
+            if self.point_delete_fault == "unknown_after_mutation":
+                return self.tool(message, error=True)
+            value = {"ok": True}
+        elif command == "app.memoryBudget":
             value = {"budget": params["mb"] * 1024 * 1024}
         elif command == "library.import":
             path = params["paths"][0]
@@ -249,7 +459,7 @@ class RawProcess(FakeProcess):
             assert params == {"source": "import"}
             value = {"before": "import", **({"beforeFingerprint": "b" * 16} if self.before_supported else {})}
         elif command == "develop.get":
-            if self.fail_get:
+            if self.fail_get or self.fail_get_after_point_mutation and self.point_mutated:
                 return self.tool(message, error=True)
             value = self.photos[params["id"]]["settings"]
         elif command == "develop.beginInteraction":

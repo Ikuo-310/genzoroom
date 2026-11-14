@@ -563,7 +563,8 @@ class LightCraftManager:
                            "develop.endInteraction", "develop.cancelInteraction", "beforeAfter.setBefore", "app.memoryBudget", "library.memory",
                            "library.refreshLensProfiles", "lens.downloadDatabase", "lens.databaseStatus",
                            "crop.set", "crop.drag", "crop.aspect", "crop.rotateAspect", "crop.reset", "crop.straighten",
-                           "photo.rotateLeft", "photo.rotateRight", "photo.flipHorizontal", "photo.flipVertical"}:
+                           "photo.rotateLeft", "photo.rotateRight", "photo.flipHorizontal", "photo.flipVertical",
+                           "pointColor.pick", "pointColor.delete"}:
             raise LightCraftError("lightcraft_unsupported_raw_command")
         session = self._raw_session(generation)
         result = await session.client.call_tool("command_run", {"id": command, "params": params}, timeout=timeout)

@@ -211,4 +211,12 @@ P1-B は保存済み完全 snapshot を source of truth にして追加・削除
 
 `validate_point_color_control` は厳密な `pointColor.<index>.<field>` 形式、8項目の allowlist、既存要素の index を確認する。`validate_point_color_value` はbooleanを除く finite numeric と項目範囲を検証し、整数化・clampを行わない。採色座標、削除 index、追加上限には `validate_point_color_coordinates`、`validate_point_color_delete`、`validate_point_color_append` を用意した。これらは P1-A1a 時点では既存 operation/API から未呼出で、固定 control validation も変更していない。
 
-focused tests は正常・重複・8項目全て・順序・小数、型／field／範囲／非有限値、8件超過、indexed ID と存在index、座標・削除・追加境界、既存 Mixer 固定 control を対象にする。P1-A1b に残る作業は、この純粋検証を History operation adapter と Native response/readback 検証へ接続し、Native command allowlist を更新してから Session 操作を実装すること。HTTP route、History operation、Recipe、Frontend 接続はさらに後段。
+## P1-A1b-1 — Native 採色・削除の内部接続
+
+`LightCraftManager._raw_command` の既存 allowlist に `pointColor.pick` と `pointColor.delete` の2 commandだけを追加した。`LightCraftRawSession._pick_point_color` と `_delete_point_color` は内部用 helper として `_mutate`／`_submit` に接続し、HTTP・Frontend・History operation からは未公開・未呼出。操作前に Native `develop.get` で完全設定を読み、`validate_point_colors` と座標／上限／index helper を適用してから一度だけ変更 command を送る。採色応答の index は追加位置と照合し、完全 snapshot の readback で件数・既存全要素・追加 OkLCh 中心を検証する。削除は readback の全配列を削除対象以外の順序・値と照合する。採色や重複色の排除・計算は GenzoRoom では行わない。
+
+mutation 後の Native error、応答不明、readback error／不一致は成功扱い・自動再送せず、既存 `_mutate` の desynchronized または `_submit` の session-lost 経路に委ねる。非冪等な採色・削除を独自 rollback しない。事前 validation・revision・document identity・generation、Native queue、Curve／Mixer owner 排他は既存境界を再利用する。History 統合まではこれら helper を通常編集・保存・Export 経路へ接続しない。
+
+Mock Native focused tests は Point Color テスト 16 件が成功し、追加・同一点の独立追加、先頭／中間／末尾削除、上限・空配列・不正 index、Native error／応答不明／readback不一致・失敗、応答 index、revision、Curve／Mixer 排他、lost／desynchronized を確認した。P1-A1b-2 では indexed `develop.set`／`develop.resetControl`、`point_colors: []` Reset と、History operation からの永続化接続を実装する。製品操作入口を追加する前に、History save failure と retry境界をその operation owner に統合する必要がある。
+
+focused tests は正常・重複・8項目全て・順序・小数、型／field／範囲／非有限値、8件超過、indexed ID と存在index、座標・削除・追加境界、既存 Mixer 固定 control を対象にする。P1-A1b-1 で Native pick/delete の内部Session helper と allowlist は追加済み。P1-A1b-2 では indexed set/reset、配列全体Reset と History operation adapter の統合を行い、HTTP route、Recipe、Frontend 接続は後段とする。

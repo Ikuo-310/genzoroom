@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import copy
 from dataclasses import dataclass, field, replace
 import hashlib
 import io
@@ -1768,7 +1769,7 @@ class LightCraftRawSession:
         return actual
 
     async def _mutate(self, handle, command, params, expected_revision, restored=None, verify=None,
-                      *, commands=None, check=None, prepare=None, readback_check=None):
+                      *, commands=None, check=None, prepare=None, readback_check=None, command_result=None):
         self._ensure_curve_interaction_owner()
         photo = self._photo(handle, active=True)
         cost = len(commands) if commands is not None else 1
@@ -1823,7 +1824,9 @@ class LightCraftRawSession:
                     actual = await self._restore(photo, restored, deadline)
                 else:
                     self._edits += 1
-                    await self._command(command, params, deadline)
+                    result = await self._command(command, params, deadline)
+                    if command_result is not None:
+                        command_result(result)
                     actual = await self._read_settings(photo, deadline, validate=readback_check)
                 if check is not None:
                     check(json.loads(actual))
@@ -1851,6 +1854,57 @@ class LightCraftRawSession:
         finally:
             if photo.requested_revision == reserved:
                 photo.requested_revision = photo.applied_revision
+
+    async def _pick_point_color(self, handle, x, y, expected_revision):
+        from raw_controls import (validate_point_color_append, validate_point_color_coordinates,
+                                  validate_point_colors)
+        x, y = validate_point_color_coordinates(x, y)
+        before = None
+        picked = None
+
+        async def prepare(photo, deadline):
+            nonlocal before
+            settings = json.loads(await self._read_settings(photo, deadline))
+            before = copy.deepcopy(validate_point_colors(settings))
+            validate_point_color_append(len(before))
+            return {"x": x, "y": y}
+
+        def command_result(result):
+            nonlocal picked
+            if type(result) is not dict or type(result.get("index")) is not int or result["index"] != len(before):
+                raise LightCraftError("raw_point_color_pick_mismatch")
+            picked = result
+
+        def validate_readback(settings):
+            colors = validate_point_colors(settings)
+            if len(colors) != len(before) + 1 or colors[:-1] != before:
+                raise LightCraftError("raw_point_color_pick_mismatch")
+            if picked is None or any(colors[-1][key] != picked.get(key) for key in ("lum", "chroma", "hue")):
+                raise LightCraftError("raw_point_color_pick_mismatch")
+
+        return await self._mutate(handle, "pointColor.pick", {}, expected_revision,
+                                  prepare=prepare, command_result=command_result,
+                                  readback_check=validate_readback)
+
+    async def _delete_point_color(self, handle, index, expected_revision):
+        from raw_controls import validate_point_color_delete, validate_point_colors
+        before = None
+
+        async def prepare(photo, deadline):
+            nonlocal before
+            settings = json.loads(await self._read_settings(photo, deadline))
+            before = copy.deepcopy(validate_point_colors(settings))
+            validate_point_color_delete(index, len(before))
+            return {"index": index}
+
+        def validate_readback(settings):
+            colors = validate_point_colors(settings)
+            expected = before[:index] + before[index + 1:]
+            if len(colors) != len(before) - 1 or colors != expected:
+                raise LightCraftError("raw_point_color_delete_mismatch")
+
+        return await self._mutate(handle, "pointColor.delete", {}, expected_revision,
+                                  prepare=prepare, readback_check=validate_readback)
 
     async def set_controls(self, handle, values, expected_revision):
         values = json.loads(_object_json(values, MAX_PATCH_BYTES))
