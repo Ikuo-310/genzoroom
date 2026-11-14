@@ -117,6 +117,39 @@ def test_real_native_geometry_and_targeted_curve(tmp_path):
 
 
 @pytest.mark.skipif(not os.environ.get('GENZOROOM_TEST_LIGHTCRAFT_EXE'), reason='real Native executable not requested')
+def test_real_native_mixer_target_hsl_readback_and_interaction(tmp_path):
+    async def run():
+        source = tmp_path / 'sample.jpg'
+        shutil.copyfile(Path(__file__).resolve().parents[2] / 'docs/images/Anshitsu_Sakura.jpg', source)
+        manager = LightCraftManager(environment={**os.environ,
+            'GENZOROOM_LIGHTCRAFT_EXE': os.environ['GENZOROOM_TEST_LIGHTCRAFT_EXE']}, platform='win32', gpu_backend='off')
+        raw = LightCraftRawSession(manager)
+        try:
+            await manager.start()
+            async with asyncio.timeout(30):
+                while manager.status().state in ('starting', 'initializing'):
+                    await asyncio.sleep(.05)
+            handle, state = await raw.open_raw('mixer-target-live', str(source))
+            for target in ('hue', 'sat', 'lum'):
+                interaction = await raw.begin_mixer_interaction(handle, target, .5, .5, state.revision)
+                update = await raw.update_mixer_interaction(handle, interaction, state.revision, 1, 5.5, max_side=512)
+                assert update.changes and all(control.startswith('mixer.') and control.endswith(f'.{target}')
+                    for control in update.changes)
+                assert all(update.settings['mixer'][control.split('.')[1]][target] == value
+                    for control, value in update.changes.items())
+                preview = await update.preview_ticket
+                assert preview.quality in ('draft', 'full') and preview.interaction_id == interaction
+                result = await raw.end_mixer_interaction(handle, interaction, state.revision, target)
+                state = raw.confirm_mixer_interaction(handle, interaction, state.revision)
+                assert state.settings == result.settings
+        finally:
+            await raw.close()
+            await manager.close()
+
+    asyncio.run(run())
+
+
+@pytest.mark.skipif(not os.environ.get('GENZOROOM_TEST_LIGHTCRAFT_EXE'), reason='real Native executable not requested')
 def test_real_native_before_after_and_draft_full(tmp_path):
     async def run():
         source = tmp_path / 'sample.jpg'

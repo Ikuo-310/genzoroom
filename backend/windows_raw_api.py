@@ -32,7 +32,10 @@ HISTORY_CONFLICTS = {"raw_history_save_pending", "raw_history_commit_required", 
                      "raw_history_not_initialized", "raw_history_revision_conflict", "raw_history_save_id_reused",
                      "raw_history_target_missing", "raw_history_readback_mismatch", "raw_history_baseline_mismatch",
                      "raw_history_step_id_reused", "raw_recipe_save_pending", "raw_history_requires_operation",
-                     "raw_geometry_gesture_pending", "raw_geometry_outcome_unknown", "raw_geometry_request_conflict"}
+                     "raw_geometry_gesture_pending", "raw_geometry_outcome_unknown", "raw_geometry_request_conflict",
+                     "raw_curve_interaction_pending", "raw_mixer_interaction_pending",
+                     "raw_curve_interaction_stale", "raw_mixer_interaction_stale", "raw_mixer_interaction_sequence",
+                     "raw_mixer_interaction_conflict"}
 LEASE_SECONDS = 180
 LEASE_POLL_SECONDS = 15
 
@@ -112,6 +115,8 @@ class RawPreviewApi:
             Route("/documents/{handle}/geometry/begin", self.endpoint, methods=["POST"]),
             Route("/documents/{handle}/geometry", self.endpoint, methods=["POST"]),
             *[Route(f"/documents/{{handle}}/curve-interaction/{action}", self.endpoint, methods=["POST"])
+              for action in ("begin", "update", "preview", "cancel")],
+            *[Route(f"/documents/{{handle}}/mixer-interaction/{action}", self.endpoint, methods=["POST"])
               for action in ("begin", "update", "preview", "cancel")],
             Route("/documents/{handle}/recipe", self.endpoint, methods=["GET", "PUT"]),
             Route("/documents/{handle}/history", self.endpoint, methods=["GET"]),
@@ -257,8 +262,9 @@ class RawPreviewApi:
             if request.url.path.endswith("/region/cancel"):
                 return self._cancel_region(request, body)
             curve_interaction = "/curve-interaction/" in request.url.path
+            mixer_interaction = "/mixer-interaction/" in request.url.path
             region = request.url.path.endswith("/region") and request.method == "POST"
-            preview = request.url.path.endswith("/preview") or region or request.url.path.endswith("/curve-interaction/preview")
+            preview = request.url.path.endswith("/preview") or region or request.url.path.endswith(("/curve-interaction/preview", "/mixer-interaction/preview"))
             if region:
                 self._region_owner(request, body)
                 target = body["target"]
@@ -270,7 +276,7 @@ class RawPreviewApi:
             if self._closing or self._history_draining or self._discarding or (len(self._image_leases) >= 3 if preview else len(self._tasks) >= 2):
                 raise LightCraftError("raw_busy")
             # HTTP cancellation detaches the waiter, never a transmitted MCP operation.
-            handler = self._region if region else self._curve_interaction if curve_interaction else self._preview if preview else self._execute
+            handler = self._region if region else self._curve_interaction if curve_interaction else self._mixer_interaction if mixer_interaction else self._preview if preview else self._execute
             lease = object() if preview else None
             raw_owner_handle = self._raw_handle if region else None
             task = asyncio.create_task(handler(request, body, lease) if preview else handler(request, body), name="windows-raw-before"
@@ -289,7 +295,7 @@ class RawPreviewApi:
                 task.add_done_callback(image_done)
             else:
                 self._tasks.add(task)
-                if not curve_interaction:
+                if not curve_interaction and not mixer_interaction:
                     control_owner = self.raw
                     control_owner.reserve_control()
                     task.add_done_callback(lambda _: control_owner.release_control())
@@ -324,7 +330,8 @@ class RawPreviewApi:
                       409 if code in HISTORY_CONFLICTS or code in {"raw_busy", "raw_workspace_conflict", "raw_stale_handle", "raw_revision_conflict",
                                       "raw_workspace_releasing", "raw_workspace_cleanup_failed", "raw_cache_cleanup_pending",
                                       "raw_recipe_source_mismatch", "raw_recipe_engine_incompatible",
-                                      "raw_recipe_revision_conflict", "raw_recipe_save_id_reused"} else 502)
+                                      "raw_recipe_revision_conflict", "raw_recipe_save_id_reused",
+                                      "raw_mixer_target_unavailable"} else 502)
             if region_owner_get:
                 lightcraft_log('region.owner.failed', level='warn', errorCode=code, status=status)
             return JSONResponse({"code": code}, status_code=status, headers={"Cache-Control": "no-store"})
@@ -890,6 +897,72 @@ class RawPreviewApi:
                     response.headers["X-Raw-Curve-Points"] = json.dumps(update.settings["curve"][self.raw._curve_interaction.channel], separators=(",", ":"))
             return self._hold_image_response(response, lease)
 
+    async def _mixer_interaction(self, request, body, lease=None):
+        self._owner(body.get("workspaceId"))
+        doc = self._document(request.path_params["handle"], resync=True)
+        if any(type(body.get(key)) is not int for key in ("generation", "documentRevision")) or \
+                any(body.get(key) != doc[key] for key in ("generation", "documentToken")) or \
+                body["documentRevision"] != doc["revision"]:
+            raise LightCraftError("raw_stale_handle")
+        identity = {"workspaceId", "generation", "documentToken", "documentRevision"}
+        action = request.url.path.rsplit("/", 1)[1]
+        if action == "begin":
+            if set(body) != identity | {"target", "x", "y"} or body.get("target") not in ("hue", "sat", "lum") or \
+                    any(type(body.get(key)) not in (int, float) or not math.isfinite(body[key]) or not 0 <= body[key] <= 1 for key in ("x", "y")):
+                raise LightCraftError("raw_invalid_request")
+            async with self._lock:
+                self._history_unsettled()
+                interaction_id = await self.raw.begin_mixer_interaction(self._raw_handle, body["target"],
+                    body["x"], body["y"], doc["revision"])
+            return JSONResponse({**{key: doc[key] for key in ("workspaceId", "handle", "assetId", "generation", "documentToken")},
+                "revision": doc["revision"], "interactionId": interaction_id}, headers={"Cache-Control": "no-store"})
+        if action == "cancel":
+            if set(body) != identity | {"interactionId"} or type(body.get("interactionId")) is not str or \
+                    re.fullmatch(r"[a-f0-9]{32}", body["interactionId"]) is None:
+                raise LightCraftError("raw_invalid_request")
+            await self.raw.cancel_mixer_interaction(self._raw_handle, body["interactionId"], doc["revision"])
+            return Response(status_code=204, headers={"Cache-Control": "no-store"})
+        common = {"interactionId", "serial", "maxSide", "viewGeneration", "geometryId"}
+        if set(body) != identity | common | ({"interactionSequence"} if action == "preview" else {"sequence", "delta"}):
+            raise LightCraftError("raw_invalid_request")
+        if type(body.get("interactionId")) is not str or re.fullmatch(r"[a-f0-9]{32}", body["interactionId"]) is None or \
+                type(body.get("serial")) is not int or not 0 <= body["serial"] <= 2**31 - 1 or \
+                type(body.get("maxSide")) is not int or not 16 <= body["maxSide"] <= MAX_PREVIEW_SIDE or \
+                type(body.get("viewGeneration")) is not int or body["viewGeneration"] < 0 or \
+                not (body["geometryId"] is None or type(body["geometryId"]) is str and re.fullmatch(r"[a-f0-9]{64}", body["geometryId"])):
+            raise LightCraftError("raw_invalid_request")
+        if action == "update":
+            update = await self.raw.update_mixer_interaction(self._raw_handle, body["interactionId"], doc["revision"],
+                body["sequence"], body["delta"], max_side=body["maxSide"],
+                view_generation=body["viewGeneration"], geometry_id=body["geometryId"])
+            return JSONResponse({"interactionId": update.interaction_id, "interactionSequence": update.sequence,
+                "changes": update.changes}, headers={"Cache-Control": "no-store"})
+        if action != "preview" or type(body.get("interactionSequence")) is not int or not 1 <= body["interactionSequence"] <= 2**31 - 1:
+            raise LightCraftError("raw_invalid_request")
+        interaction = self.raw._ensure_mixer_interaction_owner(body["interactionId"])
+        if interaction is None or interaction.handle != self._raw_handle:
+            raise LightCraftError("raw_mixer_interaction_stale")
+        ticket = interaction.preview_tickets.pop(body["interactionSequence"], None)
+        if ticket is None:
+            if body["interactionSequence"] <= interaction.latest_sequence:
+                return Response(status_code=204, headers={"X-Raw-Superseded-Reason": "replaced", "Cache-Control": "no-store"})
+            raise LightCraftError("raw_mixer_interaction_stale")
+        frame = await ticket
+        if frame is SUPERSEDED:
+            return Response(status_code=204, headers={"X-Raw-Superseded-Reason": "replaced", "Cache-Control": "no-store"})
+        async with self._lock:
+            if self.document is not doc or self._document(doc["handle"]) is not doc or \
+                    frame.interaction_id != body["interactionId"] or frame.interaction_sequence != body["interactionSequence"]:
+                return Response(status_code=204, headers={"X-Raw-Superseded-Reason": "cancelled", "Cache-Control": "no-store"})
+            response = self._preview_response(frame, doc, {"revision": doc["revision"],
+                "serial": body["serial"], "quality": "draft", "mode": "whole",
+                "viewGeneration": body["viewGeneration"], "maxSide": body["maxSide"],
+                "geometryId": body["geometryId"]}, "after", self._raw_handle)
+            if isinstance(response, _ImageResponse):
+                response.headers["X-Raw-Interaction-Id"] = frame.interaction_id
+                response.headers["X-Raw-Interaction-Sequence"] = str(frame.interaction_sequence)
+            return self._hold_image_response(response, lease)
+
     def _preview_response(self, frame, doc, body, kind, handle):
         if frame is SUPERSEDED:
             return Response(status_code=204)
@@ -1181,6 +1254,8 @@ class RawPreviewApi:
                 required.add('curvePoints')
                 if 'curveInteractionId' in body:
                     required.add('curveInteractionId')
+            if action == 'operate' and body.get('kind') == 'mixerTarget':
+                required.add('mixerInteractionId')
         elif action == "jump":
             required.add("targetStepId")
         if action == 'operate' and body.get('kind') == 'wbPick':
@@ -1230,6 +1305,12 @@ class RawPreviewApi:
                 if 'curveInteractionId' in body and (type(body['curveInteractionId']) is not str
                         or re.fullmatch(r"[a-f0-9]{32}", body['curveInteractionId']) is None):
                     raise LightCraftError("raw_invalid_request")
+            elif body["kind"] == "mixerTarget":
+                if 'mixerInteractionId' not in body or type(body['mixerInteractionId']) is not str or \
+                        re.fullmatch(r"[a-f0-9]{32}", body['mixerInteractionId']) is None:
+                    raise LightCraftError("raw_invalid_request")
+            elif 'mixerInteractionId' in body:
+                raise LightCraftError("raw_invalid_request")
             elif 'curveInteractionId' in body:
                 raise LightCraftError("raw_invalid_request")
             kind, metadata = body["kind"], body["metadata"]
@@ -1270,6 +1351,7 @@ class RawPreviewApi:
             raise LightCraftError("raw_history_requires_operation")
         geometry_commit = action == 'commit' and body.get('kind') == 'geometry'
         curve_interaction = action == 'operate' and body.get('kind') == 'curve' and 'curveInteractionId' in body
+        mixer_target_interaction = action == 'operate' and body.get('kind') == 'mixerTarget'
         if self._geometry_gesture is not None and action != 'recover' and not geometry_commit:
             raise LightCraftError('raw_geometry_gesture_pending')
         fingerprint = hashlib.sha256(json.dumps([doc["handle"], action, body], sort_keys=True,
@@ -1295,6 +1377,11 @@ class RawPreviewApi:
                     if curve_interaction:
                         snapshot = self.raw.confirm_curve_interaction(self._raw_handle,
                             body["curveInteractionId"], body["documentRevision"])
+                        self._history_verify(doc)
+                        self._confirmed(doc, snapshot)
+                    if mixer_target_interaction:
+                        snapshot = self.raw.confirm_mixer_interaction(self._raw_handle,
+                            body["mixerInteractionId"], body["documentRevision"])
                         self._history_verify(doc)
                         self._confirmed(doc, snapshot)
                     self._history_enabled = True
@@ -1369,12 +1456,18 @@ class RawPreviewApi:
                         body["curveInteractionId"], body["documentRevision"], body["curvePoints"])
                     self._history_verify(doc)
                     pending["settings"] = interaction_result.settings
+                elif mixer_target_interaction:
+                    pending["stage"] = "ending"
+                    interaction_result = await self.raw.end_mixer_interaction(self._raw_handle,
+                        body["mixerInteractionId"], body["documentRevision"], body["metadata"]["target"])
+                    self._history_verify(doc)
+                    pending["settings"] = interaction_result.settings
                 else:
                     snapshot = await self.raw.get_settings(self._raw_handle)
                     self._history_verify(doc)
                     self._confirmed(doc, snapshot)
                 wb_operation = action == 'operate' and body['kind'] in ('wbAuto', 'wbPick')
-                if curve_interaction:
+                if curve_interaction or mixer_target_interaction:
                     pass
                 elif wb_operation:
                     snapshot = await self._history_wb(doc, pending, snapshot)
@@ -1395,7 +1488,7 @@ class RawPreviewApi:
                         {**pending["identity"], "settings": pending["selected"]}, snapshot.revision)
                     self._history_verify(doc)
                     self._confirmed(doc, snapshot)
-                if action == "operate" and not wb_operation and not curve_interaction:
+                if action == "operate" and not wb_operation and not curve_interaction and not mixer_target_interaction:
                     pending["stage"] = "applying"
                     if body['kind'] == 'geometry':
                         try:
@@ -1412,14 +1505,14 @@ class RawPreviewApi:
                     self._confirmed(doc, snapshot)
                 # Keep supported legacy omission of WB scale in saved snapshots; the adapter has
                 # verified their complete normalized engine representation, as in C3-B restore.
-                if not curve_interaction:
+                if not curve_interaction and not mixer_target_interaction:
                     pending["settings"] = pending["selected"] if pending["selected"] is not None and action != "operate" else snapshot.settings
                 if action == 'operate' and body.get('kind') == 'geometry' and self._fingerprint(snapshot.settings) == self._fingerprint(pending['selected']):
                     # Preserve a legacy snapshot's omitted serde defaults when the operation is a semantic no-op.
                     pending['settings'] = pending['selected']
                 pending["stage"] = "save"
             self._history_verify(doc)
-            if not curve_interaction and self._fingerprint(pending["settings"]) != doc["settingsFingerprint"]:
+            if not curve_interaction and not mixer_target_interaction and self._fingerprint(pending["settings"]) != doc["settingsFingerprint"]:
                 raise LightCraftError("raw_history_readback_mismatch")
             if pending.get("recovering") and self._fingerprint(pending["settings"]) == self._fingerprint(self._recipe_recovery_baseline):
                 # The initial Import state is only a transient History baseline; a no-op must not create rows.
@@ -1449,6 +1542,11 @@ class RawPreviewApi:
             if curve_interaction:
                 snapshot = self.raw.confirm_curve_interaction(self._raw_handle,
                     body["curveInteractionId"], body["documentRevision"])
+                self._history_verify(doc)
+                self._confirmed(doc, snapshot)
+            if mixer_target_interaction:
+                snapshot = self.raw.confirm_mixer_interaction(self._raw_handle,
+                    body["mixerInteractionId"], body["documentRevision"])
                 self._history_verify(doc)
                 self._confirmed(doc, snapshot)
             pending["stage"] = "complete"

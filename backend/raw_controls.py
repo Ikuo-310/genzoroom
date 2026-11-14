@@ -297,6 +297,31 @@ def controls_state(snapshot):
                    "mode": wb.get("mode", "asShot"), "scale": wb_scale}, "process": settings["process"]}
 
 
+def mixer_target_readback(value, target, *, snapshot=False):
+    """Validate Native's mixer-only changed-control map or full settings readback."""
+    if target not in ("hue", "sat", "lum") or type(target) is not str or type(value) is not dict:
+        raise LightCraftError("raw_invalid_settings" if snapshot else "raw_invalid_response")
+    result = {}
+    if snapshot:
+        for control, spec in CONTROLS.items():
+            if not control.startswith("mixer."):
+                continue
+            parent, key = control_location(value, control)
+            number = parent.get(key, spec[3])
+            if type(number) not in (int, float) or not math.isfinite(number) or not spec[0] <= number <= spec[1]:
+                raise LightCraftError("raw_invalid_settings")
+        return result
+    if not value or len(value) > 24:
+        raise LightCraftError("raw_invalid_response")
+    for control, number in value.items():
+        if type(control) is not str or not control.startswith("mixer.") or control not in CONTROLS or \
+                not control.endswith(f".{target}") or type(number) not in (int, float) or \
+                not math.isfinite(number) or not CONTROLS[control][0] <= number <= CONTROLS[control][1]:
+            raise LightCraftError("raw_invalid_response")
+        result[control] = number
+    return result
+
+
 def validate_controls(values, wb_available):
     if not isinstance(values, dict) or not 1 <= len(values) <= len(CONTROLS) + 2:
         raise LightCraftError("raw_invalid_controls")
@@ -344,6 +369,8 @@ def validate_history_operation(kind, metadata):
              and type(metadata["channel"]) is str and metadata["channel"] in CURVE_CHANNELS
              or kind == "curveReset" and set(metadata) == {"channel"}
              and type(metadata["channel"]) is str and metadata["channel"] in (*CURVE_CHANNELS, "point")
+             or kind == "mixerTarget" and set(metadata) == {"target"}
+             and type(metadata["target"]) is str and metadata["target"] in ("hue", "sat", "lum")
              or kind in ("colorReset", "wbReset") and not metadata
              or kind in ("allReset", "wbAuto", "wbPick") and not metadata)
     if not valid:

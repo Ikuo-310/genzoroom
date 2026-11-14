@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { LIGHTCRAFT_ENGINE } from './lightcraftEngine';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createRawWorkspace,abortRawWorkspaceRequests,discardRawWorkspace, rawCapability, rawPreview, beginRawCurveInteraction, cancelRawCurveInteraction, updateRawTargetedCurve, readRawSettings, setRawControls, saveRawRecipe, saveRawHistory, readRawHistory, readRawRecipe, rawWorkspaceEmpty,
+import { createRawWorkspace,abortRawWorkspaceRequests,discardRawWorkspace, rawCapability, rawPreview, beginRawCurveInteraction, cancelRawCurveInteraction, updateRawTargetedCurve, beginRawMixerInteraction, updateRawMixerInteraction, cancelRawMixerInteraction, endRawMixerInteraction, readRawSettings, setRawControls, saveRawRecipe, saveRawHistory, readRawHistory, readRawRecipe, rawWorkspaceEmpty,
   RAW_CONTROL_IDS, RAW_HISTORY_CONTROL_IDS, RawSaveError, type RawDocument, type RawHistoryRequest, type RawHistoryOperation, validRawCurve, validRawCurveInput } from './rawApi';
 import { downloadRawLensDatabase, readRawLensDatabaseStatus } from './rawApi';
 import { rawSettings } from './test/rawSettings';
@@ -50,6 +50,41 @@ it('returns targeted curve readback before requesting the matching interaction p
   expect(frame.interactionSequence).toBe(7);
   expect(fetch.mock.calls[1][0]).toBe(`/api/raw/documents/${doc.handle}/curve-interaction/preview`);
   expect(JSON.parse((fetch.mock.calls[1][1] as RequestInit).body as string)).toMatchObject({ interactionId, interactionSequence: 7, serial: 5 });
+});
+it('exposes Mixer targeted begin/update/preview/cancel and one History end API', async () => {
+  const interactionId = 'e'.repeat(32), changes = { 'mixer.red.sat': 1.25, 'mixer.orange.sat': .625 };
+  const fetch = vi.fn<typeof globalThis.fetch>()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ ...doc, interactionId }), { headers: { 'Content-Type': 'application/json' } }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ interactionId, interactionSequence: 1, changes }), { headers: { 'Content-Type': 'application/json' } }))
+    .mockResolvedValueOnce(response({ ...adaptiveHeaders(), 'X-Raw-Serial': '3',
+      'X-Raw-Interaction-Id': interactionId, 'X-Raw-Interaction-Sequence': '1' }))
+    .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify(rawHistoryResult({ doc: rawSettings(doc), action: 'operate',
+      expectedRecipeRevision: 4, saveId: '00000000-0000-4000-8000-000000000001' })),
+      { headers: { 'Content-Type': 'application/json' } }));
+  vi.stubGlobal('fetch', fetch);
+  expect(await beginRawMixerInteraction(rawSettings(doc), 'sat', .2, .7)).toBe(interactionId);
+  const update = await updateRawMixerInteraction(doc, 2, new AbortController().signal, adaptiveTarget,
+    { id: interactionId, sequence: 1, delta: 1.25, target: 'sat' });
+  expect(update).toEqual({ sequence: 1, changes });
+  const frame = await rawPreview(doc, 3, new AbortController().signal, 'after', adaptiveTarget,
+    undefined, undefined, { id: interactionId, sequence: update.sequence });
+  expect(frame.interactionSequence).toBe(1);
+  expect(fetch.mock.calls[2]![0]).toBe(`/api/raw/documents/${doc.handle}/mixer-interaction/preview`);
+  await cancelRawMixerInteraction(doc, interactionId);
+  await endRawMixerInteraction({ doc: rawSettings(doc), expectedRecipeRevision: 4,
+    saveId: '00000000-0000-4000-8000-000000000001', interactionId, target: 'sat' });
+  expect(JSON.parse(String(fetch.mock.calls[4]![1]?.body))).toMatchObject({ kind: 'mixerTarget',
+    metadata: { target: 'sat' }, mixerInteractionId: interactionId });
+});
+it.each([
+  { 'color.saturation': 1 }, { 'mixer.red.hue': 1 }, { 'mixer.red.sat': NaN }, { 'mixer.red.sat': 101 },
+])('rejects Mixer target readback outside the fixed H/S/L control map: %o', async changes => {
+  const interactionId = 'f'.repeat(32);
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+    interactionId, interactionSequence: 1, changes }), { headers: { 'Content-Type': 'application/json' } })));
+  await expect(updateRawMixerInteraction(doc, 2, new AbortController().signal, adaptiveTarget,
+    { id: interactionId, sequence: 1, delta: 1, target: 'sat' })).rejects.toThrow('raw_invalid_response');
 });
 describe('RAW point curve Native input contract', () => {
   it('accepts pair arrays for each supported channel', () => {

@@ -22,7 +22,24 @@ Historyの複数項目Resetは操作名のみを表示する（`c633bff`）。5�
 
 関連Frontend 320件、Backend 304件が成功。Backend件数はExport修正後の再実行61件と初回の他5ファイル243件の合計。TypeScript、本番ビルド、`git diff --check`も成功した。
 
-**将来検討**。P2はViewerでのH/S/Lターゲット操作、共通ルーペ、複数帯readback、操作単位のHistoryを扱う。MixerのHueカラーバーは8色別にNative OkLChの正負方向と合わせる。Saturation／Luminanceはモノクロバーを維持し、Recipe／Native契約に追加は不要。Point Colorは未実装の独立フェーズ。サブカテゴリの独立ON/OFF案は下記を参照。
+**当時の将来計画**。P2はViewerでのH/S/Lターゲット操作、共通ルーペ、複数帯readback、操作単位のHistoryを扱う計画だった。P2-AでBackend/API/History基盤を追加済み。P2-BでViewer操作を接続する。MixerのHueカラーバー、Point Color、サブカテゴリ独立ON/OFFは今回の実装範囲外。
+
+## P2-A実装結果：Native MixerターゲットInteraction基盤
+
+実装基準: GenzoRoom `fd748e3a15547573f6e5d12502bfe5dcc9a3e3b2`、LightCraft manifest固定commit `192ff72923c39e6623f2c7ff67ab3a119deb8071`。P2-AではLightCraft source、managed patch、manifest、既存Native executable、SQLite schemaを変更していない。P1-Cまでの調査結果と区別して、以下をGenzoRoom側の現在のAPI契約とする。
+
+- `/documents/{handle}/mixer-interaction/begin|update|preview|cancel`を追加。Beginはdocument handle/token/generation/revision、`target: hue|sat|lum`、0〜1の正規化`x`,`y`を検証して座標とモードをInteractionへ固定する。Native `develop.beginInteraction`を呼び、基準設定をreadbackする。
+- Updateは単一の有限`delta`（0以外）と単調な`sequence`（1始まり）を受ける。要求はInteraction内lockで直列化し、sequence飛越・逆転を拒否する。Native `develop.targeted`へ固定座標とdeltaを渡す。毎回のRelative deltaを統合・間引きしない。deltaの解釈・調整量のclampはNativeに委ねる。
+- `develop.targeted`応答の変更mapは全control IDを検証する。許可するのは`mixer.<8色>.<Beginで固定したH/S/L>`のみで、数値・有限性・−100〜+100の範囲を確認する。Native `develop.get`の完全設定を別途readbackし、Mixerの24 control値を検証、応答mapと一致する各変更値を確かめる。readbackの小数は保持し、GenzoRoomで色判定や帯重み計算を行わない。
+- Previewは既存のPreview worker/ticketを用いるDraft。Interaction IDとsequenceをresponse headerで照合する。Cancelled/古いsequence/古いticketは既存のticket generation・sequence fenceで破棄する。Full Previewは確定後の既存呼び出し側が要求する。専用rendererはない。
+- CurveとMixerは同じNative Sessionで`develop.beginInteraction`を使う。Beginを同一`_curve_state_lock`で直列化し、Sessionのcontrol reservation・通常操作フェンスにも同じ所有権を加える。Interactionごとのpayload/readback stateは別構造で保持する。Active中の二重Begin、他Interaction開始、通常control edit、写真選択変更は拒否する。
+- CancelはNative `develop.cancelInteraction`後に完全設定readbackを開始状態と照合し、Historyを作らない。Native transport/応答不明や適用後readback異常ではdesynchronizedとして通常編集を止め、既存Session Recoveryへ渡す。
+- Endは`/history/operate`の`kind: mixerTarget`, `metadata: {target}`, `mixerInteractionId`として実行する。Native `develop.endInteraction`後の完全snapshotをHistory appendに使い、DB append成功後にだけInteractionを確定snapshotへ昇格する。変更なしなら既存append処理がstepを作らない。Undo/Redo/Jumpは既存Recipe snapshot restoreを使う。Recipe/Exportは確定Recipeから従来の`develop.merge`経路を使用する。
+- RAW／非RAWは同じWindows Native SessionとAPIを使用する。LightCraftはB&W treatmentまたは`lc.mono` profileでは`bw.*`を更新するため、Mixer H/S/L専用のBeginは拒否する。B&W Mixは今回の対象外。
+
+Frontend APIにはBegin/Update/Preview/Cancel/Endの関数と型を追加したが、P2-AではMixer UI・Viewerから呼び出さない。P2-BはAPIの直列sequenceを維持し、Updateを順にawaitしてDraftを受け取り、Pointer Up前にpending deltaをflushしてEnd APIへ渡す必要がある。Curveの独自point arraysはMixer stateへ流用しない。WB pickerとターゲットツールのpointer排他、ViewerLoupe固定位置、Escape、document departure処理もP2-Bの責務である。
+
+P2-Aのテストはmock Native readbackによるBackend unit/API testと、固定v0.20.0実Native CLI testを分けて実施した。実Native CLIはHue/Saturation/Luminance各Interactionの複数control readback、Draft Preview、End/confirmまで成功。Desktop UI実機、RAW原本、および画素比較は未実施。今後のNative contract不整合に備えたmanaged patch追加は不要。
 
 ## P1-B2時点の実装記録（履歴）
 

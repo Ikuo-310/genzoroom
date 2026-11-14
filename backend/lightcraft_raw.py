@@ -153,6 +153,51 @@ class CurveInteractionResult:
         return json.loads(self._settings_json)
 
 
+@dataclass(frozen=True)
+class MixerInteractionUpdate:
+    interaction_id: str
+    sequence: int
+    changes: dict
+    _settings_json: str = field(repr=False)
+    preview_ticket: object = field(repr=False)
+
+    @property
+    def settings(self):
+        return json.loads(self._settings_json)
+
+
+@dataclass(frozen=True)
+class MixerInteractionResult:
+    handle: RawHandle
+    interaction_id: str
+    baseline_revision: int
+    target: str
+    _settings_json: str = field(repr=False)
+
+    @property
+    def settings(self):
+        return json.loads(self._settings_json)
+
+
+@dataclass
+class _MixerInteraction:
+    handle: RawHandle
+    interaction_id: str
+    baseline_revision: int
+    target: str
+    x: float
+    y: float
+    baseline_settings_json: str
+    working_settings_json: str
+    state: str = "opening"
+    latest_sequence: int = 0
+    applied_sequence: int = 0
+    preview_tickets: dict = field(default_factory=dict, repr=False)
+    update_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+    final_result: MixerInteractionResult | None = None
+    committed_snapshot: DevelopSnapshot | None = None
+
+
 @dataclass
 class _CurveUpdateRequest:
     sequence: int
@@ -548,6 +593,7 @@ class LightCraftRawSession:
         self._lock = asyncio.Lock()
         self._curve_state_lock = asyncio.Lock()
         self._curve_interaction = None
+        self._mixer_interaction = None
         self._control_reservations = 0
         self._control_idle = asyncio.Event()
         self._control_idle.set()
@@ -621,6 +667,9 @@ class LightCraftRawSession:
             if interaction is not None and interaction.state not in ("cancelled", "confirmed"):
                 interaction.state = "failed"
                 self._fail_curve_pending(interaction, "raw_session_lost")
+            mixer = self._mixer_interaction
+            if mixer is not None and mixer.state not in ("cancelled", "confirmed"):
+                mixer.state = "failed"
         return status
 
     def status(self):
@@ -666,6 +715,13 @@ class LightCraftRawSession:
 
     def _ensure_curve_interaction_owner(self, interaction_id=None):
         interaction = self._curve_interaction
+        mixer = self._mixer_interaction
+        if mixer is not None and mixer.state not in ("cancelled", "confirmed"):
+            if interaction_id is None:
+                raise LightCraftError("raw_mixer_interaction_pending")
+            if interaction_id == mixer.interaction_id:
+                return None
+            raise LightCraftError("raw_mixer_interaction_pending")
         if interaction is None:
             return None
         if interaction.state in ("cancelled", "confirmed"):
@@ -676,6 +732,20 @@ class LightCraftRawSession:
             return interaction
         if interaction_id != interaction.interaction_id:
             raise LightCraftError("raw_curve_interaction_pending")
+        if interaction.state in ("failed", "unknown"):
+            raise LightCraftError("raw_session_desynchronized")
+        return interaction
+
+    def _ensure_mixer_interaction_owner(self, interaction_id=None):
+        interaction = self._mixer_interaction
+        if interaction is None or interaction.state in ("cancelled", "confirmed"):
+            if interaction_id is None:
+                return None
+            if interaction is None or interaction_id != interaction.interaction_id:
+                raise LightCraftError("raw_mixer_interaction_stale")
+            return interaction
+        if interaction_id != interaction.interaction_id:
+            raise LightCraftError("raw_mixer_interaction_pending")
         if interaction.state in ("failed", "unknown"):
             raise LightCraftError("raw_session_desynchronized")
         return interaction
@@ -1037,6 +1107,9 @@ class LightCraftRawSession:
             raise LightCraftError("raw_session_edit_limit")
 
         async with self._curve_state_lock:
+            mixer = self._mixer_interaction
+            if mixer is not None and mixer.state not in ("cancelled", "confirmed"):
+                raise LightCraftError("raw_mixer_interaction_pending")
             previous = self._curve_interaction
             if previous is not None and previous.state not in ("cancelled", "confirmed"):
                 raise LightCraftError("raw_curve_interaction_pending")
@@ -1435,6 +1508,239 @@ class LightCraftRawSession:
         if interaction.state == "confirmed":
             if interaction.committed_snapshot is None:
                 raise LightCraftError("raw_curve_interaction_stale")
+            return interaction.committed_snapshot
+        if interaction.state != "finalized" or photo.applied_revision != baseline_revision or \
+                photo.requested_revision != baseline_revision or interaction.final_result is None:
+            raise LightCraftError("raw_revision_conflict")
+        snapshot = self._commit(photo, interaction.final_result._settings_json)
+        interaction.committed_snapshot = snapshot
+        interaction.state = "confirmed"
+        self._invalidate()
+        return snapshot
+
+    async def begin_mixer_interaction(self, handle, target, x, y, expected_revision):
+        from raw_controls import mixer_target_readback
+        if target not in ("hue", "sat", "lum") or type(target) is not str or any(
+                type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1
+                for value in (x, y)):
+            raise LightCraftError("raw_invalid_request")
+        photo = self._photo(handle, active=True)
+        if type(expected_revision) is not int or expected_revision != photo.applied_revision or \
+                photo.requested_revision != photo.applied_revision:
+            raise LightCraftError("raw_revision_conflict")
+        if self._control_reservations or any(not task.done() for task in self._operations):
+            raise LightCraftError("raw_busy")
+        if self._edits >= MAX_EDITS:
+            raise LightCraftError("raw_session_edit_limit")
+        self._ensure_curve_interaction_owner()
+        async with self._curve_state_lock:
+            curve = self._curve_interaction
+            if curve is not None and curve.state not in ("cancelled", "confirmed"):
+                raise LightCraftError("raw_curve_interaction_pending")
+            existing = self._mixer_interaction
+            if existing is not None and existing.state not in ("cancelled", "confirmed"):
+                raise LightCraftError("raw_mixer_interaction_pending")
+            interaction = _MixerInteraction(handle, uuid.uuid4().hex, expected_revision, target,
+                float(x), float(y), photo.settings_json, photo.settings_json)
+            self._mixer_interaction = interaction
+            self._invalidate()
+
+        async def action(deadline):
+            current = self._photo(handle, active=True)
+            if current.applied_revision != expected_revision or current.requested_revision != expected_revision:
+                raise LightCraftError("raw_revision_conflict")
+            native = await self._read_settings(current, deadline)
+            if native != interaction.baseline_settings_json:
+                current.sync = "desynchronized"
+                raise LightCraftError("raw_revision_conflict")
+            try:
+                settings = json.loads(native)
+                mixer_target_readback(settings, target, snapshot=True)
+            except LightCraftError:
+                current.sync = "desynchronized"
+                raise
+            profile = settings.get("profile", {})
+            if settings.get("treatment", "color") == "bw" or type(profile) is dict and profile.get("id") == "lc.mono":
+                raise LightCraftError("raw_mixer_target_unavailable")
+            interaction.baseline_settings_json = native
+            await self._command("develop.beginInteraction", {"label": "Color Mixer"}, deadline)
+            interaction.state = "open"
+            return interaction.interaction_id
+
+        try:
+            return await self._submit(action, self._timeouts.command, interaction_id=interaction.interaction_id)
+        except MCPTransportError:
+            interaction.state = "unknown"
+            self._desynchronized = True
+            raise
+        except BaseException as error:
+            if isinstance(error, LightCraftError) and error.code == "raw_operation_timeout":
+                interaction.state = "unknown"
+                self._desynchronized = True
+            elif self._lost or self._desynchronized or photo.sync != "synced":
+                interaction.state = "failed"
+            else:
+                interaction.state = "cancelled"
+            raise
+
+    async def update_mixer_interaction(self, handle, interaction_id, expected_revision, sequence, delta, *,
+                                       max_side=DEFAULT_PREVIEW_SIDE, view_generation=0, geometry_id=None):
+        from raw_controls import mixer_target_readback
+        interaction = self._ensure_mixer_interaction_owner(interaction_id)
+        if interaction is None or interaction.handle != handle or interaction.state != "open":
+            raise LightCraftError("raw_mixer_interaction_stale")
+        if type(expected_revision) is not int or expected_revision != interaction.baseline_revision:
+            raise LightCraftError("raw_revision_conflict")
+        if type(delta) not in (int, float) or not math.isfinite(delta) or delta == 0:
+            raise LightCraftError("raw_invalid_request")
+        async with interaction.update_lock:
+            if interaction.state != "open":
+                raise LightCraftError("raw_mixer_interaction_stale")
+            if type(sequence) is not int or sequence != interaction.latest_sequence + 1 or sequence > 2**31 - 1:
+                raise LightCraftError("raw_mixer_interaction_sequence")
+            sent = False
+            async def action(deadline):
+                nonlocal sent
+                photo = self._photo(handle, active=True)
+                if photo.applied_revision != interaction.baseline_revision or \
+                        photo.requested_revision != interaction.baseline_revision:
+                    raise LightCraftError("raw_revision_conflict")
+                response = await self._command("develop.targeted", {"target": interaction.target,
+                    "x": interaction.x, "y": interaction.y, "delta": float(delta)}, deadline)
+                sent = True
+                changes = mixer_target_readback(response, interaction.target)
+                encoded = await self._read_settings(photo, deadline,
+                    validate=lambda settings: mixer_target_readback(settings, interaction.target, snapshot=True))
+                final = json.loads(encoded)
+                from raw_controls import control_location
+                for control, number in changes.items():
+                    values, key = control_location(final, control)
+                    if values.get(key) != number:
+                        raise LightCraftError("raw_invalid_response")
+                return changes, encoded
+            try:
+                changes, encoded = await self._submit(action, self._timeouts.command, interaction_id=interaction_id)
+            except BaseException as error:
+                if sent or isinstance(error, (MCPTransportError,)) or \
+                        isinstance(error, LightCraftError) and error.code == "raw_operation_timeout" or self._lost:
+                    interaction.state = "failed"
+                    self._desynchronized = True
+                raise
+            interaction.latest_sequence = interaction.applied_sequence = sequence
+            interaction.working_settings_json = encoded
+            ticket = self.request_mixer_interaction_preview(handle, interaction_id, sequence,
+                max_side, view_generation, geometry_id)
+            interaction.preview_tickets[sequence] = ticket
+            for old_sequence in sorted(interaction.preview_tickets)[:-2]:
+                interaction.preview_tickets.pop(old_sequence, None)
+            return MixerInteractionUpdate(interaction_id, sequence, changes, encoded, ticket)
+
+    def request_mixer_interaction_preview(self, handle, interaction_id, sequence, max_side=DEFAULT_PREVIEW_SIDE,
+                                          view_generation=0, geometry_id=None):
+        interaction = self._ensure_mixer_interaction_owner(interaction_id)
+        if interaction is None or interaction.handle != handle or interaction.state != "open" or \
+                sequence != interaction.latest_sequence or sequence != interaction.applied_sequence:
+            raise LightCraftError("raw_mixer_interaction_stale")
+        return self.request_preview(handle, interaction.baseline_revision, max_side, kind="after", quality="draft",
+            view_generation=view_generation, geometry_id=geometry_id, interaction_id=interaction_id,
+            interaction_sequence=sequence)
+
+    async def end_mixer_interaction(self, handle, interaction_id, expected_revision, target):
+        from raw_controls import mixer_target_readback
+        interaction = self._ensure_mixer_interaction_owner(interaction_id)
+        if interaction is None or interaction.handle != handle:
+            raise LightCraftError("raw_mixer_interaction_stale")
+        if type(expected_revision) is not int or expected_revision != interaction.baseline_revision:
+            raise LightCraftError("raw_revision_conflict")
+        if target != interaction.target:
+            raise LightCraftError("raw_mixer_interaction_conflict")
+        if interaction.state == "finalized":
+            return interaction.final_result
+        async with interaction.update_lock:
+            if interaction.state != "open":
+                raise LightCraftError("raw_mixer_interaction_stale")
+            interaction.state = "ending"
+            ended = False
+            async def action(deadline):
+                nonlocal ended
+                photo = self._photo(handle, active=True)
+                if photo.applied_revision != interaction.baseline_revision or photo.requested_revision != photo.applied_revision:
+                    raise LightCraftError("raw_revision_conflict")
+                await self._command("develop.endInteraction", {}, deadline)
+                ended = True
+                return await self._read_settings(photo, deadline,
+                    validate=lambda settings: mixer_target_readback(settings, interaction.target, snapshot=True))
+            try:
+                encoded = await self._submit(action, self._timeouts.command, interaction_id=interaction_id)
+            except MCPTransportError:
+                interaction.state = "unknown"
+                self._desynchronized = True
+                raise
+            except LightCraftError as error:
+                if error.code == "raw_operation_timeout":
+                    interaction.state = "unknown"
+                    self._desynchronized = True
+                elif not ended and not self._lost:
+                    interaction.state = "open"
+                else:
+                    interaction.state = "failed"
+                    self._desynchronized = True
+                raise
+        if encoded != interaction.baseline_settings_json:
+            self._edits += 1
+        interaction.final_result = MixerInteractionResult(handle, interaction_id,
+            interaction.baseline_revision, interaction.target, encoded)
+        interaction.state = "finalized"
+        self._invalidate()
+        return interaction.final_result
+
+    async def cancel_mixer_interaction(self, handle, interaction_id, expected_revision):
+        interaction = self._ensure_mixer_interaction_owner(interaction_id)
+        if interaction is None or interaction.handle != handle or type(expected_revision) is not int or \
+                expected_revision != interaction.baseline_revision:
+            raise LightCraftError("raw_mixer_interaction_stale")
+        if interaction.state == "cancelled":
+            return self._snapshot(self._photo(handle, active=True))
+        async with interaction.update_lock:
+            if interaction.state != "open":
+                raise LightCraftError("raw_mixer_interaction_stale")
+            interaction.state = "canceling"
+            cancelled = False
+            async def action(deadline):
+                nonlocal cancelled
+                photo = self._photo(handle, active=True)
+                await self._command("develop.cancelInteraction", {}, deadline)
+                cancelled = True
+                return await self._read_settings(photo, deadline)
+            try:
+                encoded = await self._submit(action, self._timeouts.command, interaction_id=interaction_id)
+            except MCPTransportError:
+                interaction.state = "unknown"
+                self._desynchronized = True
+                raise
+            except LightCraftError as error:
+                interaction.state = "failed" if cancelled or self._lost or error.code == "raw_operation_timeout" else "open"
+                if interaction.state == "failed":
+                    self._desynchronized = True
+                raise
+        if encoded != interaction.baseline_settings_json:
+            interaction.state = "failed"
+            self._desynchronized = True
+            self._invalidate()
+            raise LightCraftError("raw_mixer_interaction_cancel_mismatch")
+        interaction.state = "cancelled"
+        self._invalidate()
+        return self._snapshot(self._photo(handle, active=True))
+
+    def confirm_mixer_interaction(self, handle, interaction_id, baseline_revision):
+        interaction = self._mixer_interaction
+        photo = self._photo(handle, active=True)
+        if interaction is None or interaction.interaction_id != interaction_id or interaction.handle != handle or \
+                interaction.baseline_revision != baseline_revision:
+            raise LightCraftError("raw_mixer_interaction_stale")
+        if interaction.state == "confirmed":
+            if interaction.committed_snapshot is None:
+                raise LightCraftError("raw_mixer_interaction_stale")
             return interaction.committed_snapshot
         if interaction.state != "finalized" or photo.applied_revision != baseline_revision or \
                 photo.requested_revision != baseline_revision or interaction.final_result is None:
@@ -1989,10 +2295,15 @@ class LightCraftRawSession:
                         interaction_id=None, interaction_sequence=None):
         photo = self._photo(handle, active=True)
         interaction = self._ensure_curve_interaction_owner(interaction_id)
+        mixer = self._mixer_interaction
+        mixer = mixer if mixer is not None and mixer.interaction_id == interaction_id else None
         if interaction_id is None and self._curve_interaction is not None and \
                 self._curve_interaction.state not in ("cancelled", "confirmed"):
             raise LightCraftError("raw_curve_interaction_pending")
-        if interaction_id is not None and (interaction is None or interaction.handle != handle or kind != "after"
+        if interaction_id is None and self._mixer_interaction is not None and \
+                self._mixer_interaction.state not in ("cancelled", "confirmed"):
+            raise LightCraftError("raw_mixer_interaction_pending")
+        if interaction_id is not None and mixer is None and (interaction is None or interaction.handle != handle or kind != "after"
                 or quality != "draft" or interaction.state != "open"
                 or type(interaction_sequence) is not int
                 or interaction_sequence != interaction.latest_sequence
@@ -2000,6 +2311,11 @@ class LightCraftRawSession:
                 or photo.applied_revision != interaction.baseline_revision
                 or photo.requested_revision != photo.applied_revision):
             raise LightCraftError("raw_curve_interaction_stale")
+        if mixer is not None and (mixer.handle != handle or kind != "after" or quality != "draft"
+                or mixer.state != "open" or type(interaction_sequence) is not int
+                or interaction_sequence != mixer.latest_sequence or interaction_sequence != mixer.applied_sequence
+                or photo.applied_revision != mixer.baseline_revision or photo.requested_revision != photo.applied_revision):
+            raise LightCraftError("raw_mixer_interaction_stale")
         if mode not in ('whole', 'crop-edit') or mode == 'crop-edit' and (kind != 'after' or quality is None):
             raise LightCraftError('raw_invalid_preview_request')
         if quality not in (None, "draft", "full"):
@@ -2084,6 +2400,12 @@ class LightCraftRawSession:
         try:
             photo = self._photo(ticket.handle, active=True)
             if ticket.interaction_id is not None:
+                mixer = self._mixer_interaction
+                if mixer is not None and mixer.interaction_id == ticket.interaction_id:
+                    return mixer.handle == ticket.handle and mixer.state == "open" and \
+                        ticket.interaction_sequence == mixer.latest_sequence == mixer.applied_sequence and \
+                        not ticket.abandoned and ticket.epoch == self._epoch and ticket.sequence == self._sequence and \
+                        ticket.revision == photo.applied_revision == photo.requested_revision == mixer.baseline_revision
                 interaction = self._ensure_curve_interaction_owner(ticket.interaction_id)
                 return interaction is not None and interaction.handle == ticket.handle and \
                     interaction.state == "open" and ticket.interaction_sequence == interaction.latest_sequence == \
@@ -2349,7 +2671,15 @@ class LightCraftRawSession:
             raise
         if ticket.interaction_id is not None:
             # This readback describes temporary Native working state at the durable baseline revision.
-            from raw_controls import curve_readback
+            from raw_controls import curve_readback, mixer_target_readback
+            mixer = self._mixer_interaction
+            if mixer is not None and mixer.interaction_id == ticket.interaction_id:
+                if mixer.state == "open" and ticket.interaction_sequence == mixer.latest_sequence == mixer.applied_sequence:
+                    mixer_target_readback(json.loads(settings), mixer.target, snapshot=True)
+                    mixer.working_settings_json = settings
+                else:
+                    ticket.abandoned, ticket.reason = True, "mixer_sequence"
+                return
             interaction = self._ensure_curve_interaction_owner(ticket.interaction_id)
             if interaction is not None and interaction.state == "open" and \
                     ticket.interaction_sequence == interaction.latest_sequence == interaction.applied_sequence:
@@ -2372,15 +2702,19 @@ class LightCraftRawSession:
         if self._worker is not None and not self._worker.done():
             tasks.append(self._worker)
         interaction = self._curve_interaction
+        mixer = self._mixer_interaction
         if interaction is not None:
             self._fail_curve_pending(interaction, "raw_session_lost")
             if interaction.update_task is not None and not interaction.update_task.done():
                 tasks.append(interaction.update_task)
+        if mixer is not None and mixer.state not in ("cancelled", "confirmed"):
+            mixer.state = "failed"
         for task in tasks:
             task.cancel()
         for task in tasks:
             await _await_task_resilient(task)
         self._curve_interaction = None
+        self._mixer_interaction = None
 
     async def reset_session(self, restore_active=True):
         if self._stop.is_set():

@@ -1,5 +1,13 @@
 # GenzoRoom 開発ノート
 
+## Color Mixer P2-A NativeターゲットInteraction基盤（2026-11-14）
+
+GenzoRoom `fd748e3`を基準に、LightCraft v0.20.0のNative `develop.targeted`をWindows共通Native Sessionへ接続するBackend/APIを追加した。Hue／Saturation／LuminanceのBeginはモードと正規化座標を固定し、Updateは連番付き相対deltaを直列にNativeへ送り、Nativeの複数Mixer帯readbackを丸めず保持する。Nativeが返すcontrol IDは固定色帯とみなさず全て検証する。非Mixer controlや対象と異なるH/S/Lフィールドは拒否する。Native処理・色判定・帯の重み付けはLightCraftに委譲する。
+
+CurveとMixerはNativeの単一Interaction所有権を共有するため、Beginを同じsession lockで排他する。Draft Previewは既存Preview workerとsequence fenceを再利用する。Endは`mixerTarget` History操作1件として完全Native snapshotを保存し、History保存成功後にSessionを確定する。CancelはNative復元readbackを確認してHistoryを作らない。APIのRAW／非RAW共通Sessionは維持し、Docker JPEG、上流LightCraft、managed patch、Native executable、SQLiteは変更しない。B&W treatmentのNative `bw.*`ターゲット結果はMixer APIの対象外としてBeginを拒否する。
+
+Frontend API型・関数をP2-B用に追加したが、今回UI・Viewerから呼び出さない。UIは未実装で、Pointer／ルーペ／Escape／画面離脱はP2-Bへ引き継ぐ。Backend/APIのmock test 7件と、固定LightCraft v0.20.0 CLIによるH/S/L実Interaction 1件が成功した。画素比較とDesktopでの操作受入は未実施。
+
 ## Color Mixer P1-C 統合監査（2026-11-14）
 
 `c9e84e6`を基準に、Windows NativeのMixer数値契約、Color UI、Reset、Recipe／History復元、Draft／Full Preview、Export、UI設定を監査した。関連Frontend 4ファイル320件、Backend 6ファイル304件が成功（Backendは初回成功済み243件と修正後のExport 61件）。TypeScript、本番ビルド、差分チェックも成功。Backendは既知のWindows asyncio socketpair制約を避けてsandbox外のリポジトリ仮想環境で実行した。

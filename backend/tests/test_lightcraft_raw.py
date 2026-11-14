@@ -328,6 +328,19 @@ class RawProcess(FakeProcess):
             from bisect import bisect_left
             from math import isfinite
             settings = self.photos[self.active]["settings"]
+            if params.get("target", "curve") in ("hue", "sat", "lum"):
+                target = params["target"]
+                changes = {}
+                # Exercise the published multi-band contract without duplicating Native colour analysis.
+                for color, weight in (("red", 1.), ("orange", .5)):
+                    key = f"mixer.{color}.{target}"
+                    value = settings["mixer"][color][target] + params["delta"] * weight
+                    value = max(-100., min(100., value))
+                    settings["mixer"][color][target] = value
+                    changes[key] = value
+                value = changes
+                return reply(self.stdout, message, {"isError": False,
+                    "content": [{"type": "text", "text": json.dumps(changes)}], "structuredContent": changes})
             channel = params["channel"]
             points = settings["curve"][channel]
             x, delta = params["x"], params["delta"] / 255
@@ -634,6 +647,63 @@ def test_targeted_curve_steps_preserve_order_and_finalize_without_reapplying(tmp
             assert len([x for x in child.interaction_history]) == 1
             committed = raw.confirm_curve_interaction(handle, interaction_id, baseline.revision)
             assert committed.settings == result.settings
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("target", ["hue", "sat", "lum"])
+def test_mixer_target_interaction_reads_all_bands_and_commits_once(tmp_path, target):
+    async def run():
+        raw, _, children, files = await create(tmp_path, adaptive=True)
+        try:
+            handle, baseline = await raw.open_raw("mixer", files[0])
+            interaction_id = await raw.begin_mixer_interaction(handle, target, .25, .75, baseline.revision)
+            with pytest.raises(LightCraftError, match="raw_mixer_interaction_pending"):
+                await raw.begin_mixer_interaction(handle, target, .25, .75, baseline.revision)
+            with pytest.raises(LightCraftError, match="raw_mixer_interaction_pending"):
+                await raw.begin_curve_interaction(handle, "master", baseline.revision)
+            update = await raw.update_mixer_interaction(handle, interaction_id, baseline.revision,
+                1, 1.5, max_side=512)
+            assert update.changes == {f"mixer.red.{target}": 1.5, f"mixer.orange.{target}": .75}
+            assert update.settings["mixer"]["red"][target] == 1.5
+            assert update.settings["mixer"]["orange"][target] == .75
+            frame = await update.preview_ticket
+            assert frame.interaction_id == interaction_id and frame.interaction_sequence == 1
+            assert raw._photos["mixer"].settings_json == _settings_json(baseline.settings)
+            with pytest.raises(LightCraftError, match="raw_mixer_interaction_sequence"):
+                await raw.update_mixer_interaction(handle, interaction_id, baseline.revision, 3, 1.)
+            update = await raw.update_mixer_interaction(handle, interaction_id, baseline.revision, 2, -0.25)
+            await update.preview_ticket
+            result = await raw.end_mixer_interaction(handle, interaction_id, baseline.revision, target)
+            assert result.settings["mixer"]["red"][target] == 1.25
+            assert result.settings["mixer"]["orange"][target] == .625
+            assert len(children[0].interaction_history) == 1
+            committed = raw.confirm_mixer_interaction(handle, interaction_id, baseline.revision)
+            assert committed.settings == result.settings and committed.revision > baseline.revision
+            assert raw.status().edits == 1
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+def test_mixer_target_cancel_restores_all_bands_and_blocks_unrelated_changes(tmp_path):
+    async def run():
+        raw, _, children, files = await create(tmp_path, adaptive=True)
+        try:
+            handle, baseline = await raw.open_raw("mixer", files[0])
+            other, _ = await raw.open_raw("other", files[1])
+            baseline = await raw.select(handle)
+            interaction_id = await raw.begin_mixer_interaction(handle, "hue", .4, .6, baseline.revision)
+            with pytest.raises(LightCraftError, match="raw_mixer_interaction_pending"):
+                await raw.set_controls(handle, {"light.exposure": 1}, baseline.revision)
+            with pytest.raises(LightCraftError, match="raw_mixer_interaction_pending"):
+                await raw.select(other)
+            update = await raw.update_mixer_interaction(handle, interaction_id, baseline.revision, 1, 5.)
+            await update.preview_ticket
+            await raw.cancel_mixer_interaction(handle, interaction_id, baseline.revision)
+            assert (await raw.get_settings(handle)).settings == baseline.settings
+            assert children[0].interaction is None and not children[0].interaction_history
         finally:
             await raw.close()
     asyncio.run(run())

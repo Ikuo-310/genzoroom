@@ -4,7 +4,7 @@ import pytest
 
 from lightcraft_mcp import LightCraftError
 from raw_controls import (CONTROLS, HISTORY_CONTROLS, complete_snapshot_for_merge, settings_snapshot_for_comparison,
-                          validate_controls)
+                          mixer_target_readback, validate_controls)
 from tests.test_lightcraft_raw import DEFAULT
 from tests.test_windows_local import local, client, authenticate
 from tests.test_windows_raw_api import setup, open_document, preview_body
@@ -31,6 +31,23 @@ def identity(doc):
 def test_invalid_control_values(values):
     with pytest.raises(LightCraftError, match="raw_invalid_controls"):
         validate_controls(values, True)
+
+
+def test_mixer_target_readback_keeps_fractional_values_and_rejects_other_controls_or_modes():
+    changes = {"mixer.red.hue": 1.25, "mixer.orange.hue": .625}
+    assert mixer_target_readback(changes, "hue") == changes
+    settings = {**DEFAULT, "mixer": {**DEFAULT["mixer"],
+        "red": {**DEFAULT["mixer"]["red"], "hue": 1.25},
+        "orange": {**DEFAULT["mixer"]["orange"], "hue": .625}}}
+    assert mixer_target_readback(settings, "hue", snapshot=True) == {}
+    for invalid, mode in [({"color.saturation": 1}, "hue"), ({"mixer.red.sat": 1}, "hue"),
+                          ({"mixer.red.hue": True}, "hue"), ({"mixer.red.hue": float("nan")}, "hue"),
+                          ({"mixer.red.hue": 101}, "hue")]:
+        with pytest.raises(LightCraftError, match="raw_invalid_response"):
+            mixer_target_readback(invalid, mode)
+    with pytest.raises(LightCraftError, match="raw_invalid_settings"):
+        mixer_target_readback({**settings, "mixer": {**settings["mixer"],
+            "red": {**settings["mixer"]["red"], "hue": float("inf")}}}, "hue", snapshot=True)
 
 
 def test_optics_specs_and_typed_switches_match_lightcraft():

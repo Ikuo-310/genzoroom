@@ -268,7 +268,7 @@ def test_curve_interaction_preview_cancel_and_single_history_confirmation(local,
                 preview = await http.post(f'/api/raw/documents/{doc["handle"]}/curve-interaction/preview', json=identity_body | {
                     "interactionId": interaction_id, "interactionSequence": 1, "serial": 1, "maxSide": 1024,
                     "viewGeneration": 0, "geometryId": None})
-                assert preview.status_code == 200
+                assert preview.status_code == 200, preview.text
                 assert preview.headers["x-raw-quality"] == ("draft" if adaptive else "full")
                 assert preview.headers["x-raw-interaction-id"] == interaction_id
                 assert preview.headers["x-raw-interaction-sequence"] == "1"
@@ -310,6 +310,76 @@ def test_curve_interaction_preview_cancel_and_single_history_confirmation(local,
                 assert doc["curve"]["master"] == baseline_curve and doc["history"]["cursor"] == 0
                 doc = await operation(http, doc, "redo")
                 assert doc["curve"]["master"] == curve_points
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("target", ["hue", "sat", "lum"])
+def test_mixer_target_interaction_readback_history_undo_redo_and_cancel(local, tmp_path, monkeypatch, target):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        children[0].adaptive_supported = True
+        children[0].frame_supported = False
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                _, doc = await open_document(http)
+                doc = await operation(http, doc, "initialize")
+                baseline = copy.deepcopy(doc["values"])
+                identity_body = identity(doc) | {"documentRevision": doc["revision"]}
+                url_base = f'/api/raw/documents/{doc["handle"]}/mixer-interaction'
+                started = await http.post(f"{url_base}/begin", json=identity_body | {
+                    "target": target, "x": .25, "y": .75})
+                assert started.status_code == 200, started.text
+                interaction_id = started.json()["interactionId"]
+                duplicate = await http.post(f"{url_base}/begin", json=identity_body | {
+                    "target": target, "x": .25, "y": .75})
+                assert duplicate.status_code == 409
+                update = await http.post(f"{url_base}/update", json=identity_body | {
+                    "interactionId": interaction_id, "sequence": 1, "delta": 1.5, "serial": 1,
+                    "maxSide": 1024, "viewGeneration": 0, "geometryId": None})
+                assert update.status_code == 200, update.text
+                assert update.json()["changes"] == {f"mixer.red.{target}": 1.5, f"mixer.orange.{target}": .75}
+                update = await http.post(f"{url_base}/update", json=identity_body | {
+                    "interactionId": interaction_id, "sequence": 2, "delta": -.25, "serial": 2,
+                    "maxSide": 1024, "viewGeneration": 0, "geometryId": None})
+                assert update.status_code == 200, update.text
+                assert update.json()["changes"] == {f"mixer.red.{target}": 1.25, f"mixer.orange.{target}": .625}
+                preview = await http.post(f"{url_base}/preview", json=identity_body | {
+                    "interactionId": interaction_id, "interactionSequence": 2, "serial": 2,
+                    "maxSide": 1024, "viewGeneration": 0, "geometryId": None})
+                assert preview.status_code == 200, preview.text
+                assert preview.headers["x-raw-interaction-sequence"] == "2"
+                assert preview.content.startswith(b"\x89PNG\r\n\x1a\n")
+                request = body(doc) | {"kind": "mixerTarget", "metadata": {"target": target},
+                    "mixerInteractionId": interaction_id}
+                doc = await operation(http, doc, "operate", request)
+                assert doc["values"][f"mixer.red.{target}"] == 1.25
+                assert doc["values"][f"mixer.orange.{target}"] == .625
+                assert doc["history"]["length"] == 1
+                listing = (await http.get(url(doc), headers=headers(doc))).json()
+                assert listing["steps"][0]["kind"] == "mixerTarget"
+                assert {change["control"] for change in listing["steps"][0]["changes"]} == {
+                    f"mixer.red.{target}", f"mixer.orange.{target}"}
+                doc = await operation(http, doc, "undo")
+                assert doc["values"] == baseline and doc["history"]["cursor"] == 0
+                doc = await operation(http, doc, "redo")
+                assert doc["values"][f"mixer.red.{target}"] == 1.25
+                started = await http.post(f"{url_base}/begin", json=identity(doc) | {
+                    "documentRevision": doc["revision"], "target": target, "x": .5, "y": .5})
+                assert started.status_code == 200
+                interaction_id = started.json()["interactionId"]
+                cancelled = await http.post(f"{url_base}/cancel", json=identity(doc) | {
+                    "documentRevision": doc["revision"], "interactionId": interaction_id})
+                assert cancelled.status_code == 204
+                assert len(store.get_raw_history(api._history_identity)["history"]["steps"]) == 1
+                started = await http.post(f"{url_base}/begin", json=identity(doc) | {
+                    "documentRevision": doc["revision"], "target": target, "x": .5, "y": .5})
+                interaction_id = started.json()["interactionId"]
+                no_op = await operation(http, doc, "operate", body(doc) | {"kind": "mixerTarget",
+                    "metadata": {"target": target}, "mixerInteractionId": interaction_id})
+                assert no_op["history"]["length"] == 1 and no_op["history"]["cursor"] == 1
         finally:
             await api.close()
     asyncio.run(run())
