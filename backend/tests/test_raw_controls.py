@@ -25,6 +25,29 @@ def test_nr_outliers_snapshot_conversion_isolated_from_partial_merge():
         complete_snapshot_for_merge({"detail": {"nr_outliers": "false"}})
 
 
+def test_legacy_point_colors_default_only_at_restore_and_comparison_boundaries():
+    legacy = {"version": 1, "detail": {"nr_luminance": 0}}
+    restore = complete_snapshot_for_merge(legacy, restore_point_colors=True)
+    assert restore["point_colors"] == []
+    assert "point_colors" not in legacy
+    assert "point_colors" not in complete_snapshot_for_merge(legacy)
+    assert settings_snapshot_for_comparison(legacy) == settings_snapshot_for_comparison(
+        {**legacy, "point_colors": []})
+
+
+@pytest.mark.parametrize("point_colors", [None, {}, ["bad"], [
+    {"lum": .5, "chroma": .1, "hue": 2., "hue_shift": 0., "sat_shift": 0., "lum_shift": 0.,
+     "variance": 0., "range": 50., "hue_range": 50., "sat_range": 50., "lum_range": float("nan")}],
+    [{"lum": .5, "chroma": .1, "hue": 2., "hue_shift": 0., "sat_shift": 0., "lum_shift": 0.,
+      "variance": 0., "range": 50., "hue_range": 50., "sat_range": 50., "lum_range": 50.}] * 9])
+def test_explicit_invalid_point_colors_are_not_defaulted_or_truncated(point_colors):
+    settings = {"version": 1, "detail": {}, "point_colors": point_colors}
+    with pytest.raises(LightCraftError, match="^raw_invalid_point_colors$"):
+        complete_snapshot_for_merge(settings, restore_point_colors=True)
+    with pytest.raises(LightCraftError, match="^raw_invalid_point_colors$"):
+        settings_snapshot_for_comparison(settings)
+
+
 def identity(doc):
     return {key: doc[key] for key in ("workspaceId", "generation", "documentToken")}
 

@@ -121,6 +121,53 @@ def test_legacy_and_full_curve_recipes_restore_without_rewriting_persisted_rows(
     asyncio.run(run())
 
 
+def test_legacy_recipe_missing_point_colors_clears_native_without_rewriting_storage(tmp_path, monkeypatch):
+    monkeypatch.setattr(edit_store, "DB_PATH", tmp_path / "recipes.db")
+    async def run():
+        raw, _, children, files = await create(tmp_path)
+        try:
+            handle, initial = await raw.open_raw(str(uuid4()), files[0])
+            old_settings = changed_settings()
+            old_settings.pop("point_colors", None)
+            saved = store.put_raw_recipe(raw.recipe_identity(handle), 0, uuid4(), old_settings)
+            before = database_rows()
+
+            current = await raw._pick_point_color(handle, .25, .75, initial.revision)
+            assert len(current.settings["point_colors"]) == 1
+            restore_start = len(children[0].commands)
+            restored = await raw.restore_persisted_settings(handle, saved["recipe"], current.revision)
+
+            assert restored.settings["point_colors"] == []
+            assert children[0].photos[1]["settings"]["point_colors"] == []
+            assert any(command == "develop.merge" and params["settings"]["point_colors"] == []
+                       for command, params in children[0].commands[restore_start:])
+            assert store.get_raw_recipe(raw.recipe_identity(handle))["recipe"]["settings"] == old_settings
+            assert database_rows() == before
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("point_colors", [None, ["bad"], [
+    {"lum": .5, "chroma": .1, "hue": 2., "hue_shift": 0., "sat_shift": 0., "lum_shift": 0.,
+     "variance": 0., "range": 50., "hue_range": 50., "sat_range": 50., "lum_range": 50.}] * 9])
+def test_invalid_point_colors_in_recipe_are_rejected_before_native_restore(tmp_path, point_colors):
+    async def run():
+        raw, _, children, files = await create(tmp_path)
+        try:
+            handle, initial = await raw.open_raw(str(uuid4()), files[0])
+            recipe = raw.recipe_identity(handle) | {"settings": changed_settings() | {"point_colors": point_colors}}
+            commands = list(children[0].commands)
+            with pytest.raises(LightCraftError):
+                await raw.restore_persisted_settings(handle, recipe, initial.revision)
+            assert children[0].commands == commands
+            assert (await raw.get_settings(handle)).revision == initial.revision
+            assert raw.status().state == "synced"
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
 def seed(asset_id, *, include_curve=True, **identity_changes):
     identity = {"assetId": str(asset_id), "sourceContentHash": hashlib.sha256(Original().data).hexdigest(),
                 "engineName": "lightcraft", "engineVersion": ENGINE_VERSION, "engineCommit": ENGINE_COMMIT,

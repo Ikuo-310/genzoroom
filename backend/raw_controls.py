@@ -95,8 +95,8 @@ DETAIL_RESET_DEFAULTS = dict(sharpen_amount=0, sharpen_radius=1, sharpen_detail=
     nr_luminance=0, nr_detail=50, nr_contrast=0, nr_color=0, nr_color_detail=50, nr_color_smoothness=50)
 
 
-def complete_snapshot_for_merge(settings):
-    """State false explicitly when restoring a full snapshot; partial merges keep omission semantics."""
+def complete_snapshot_for_merge(settings, *, restore_point_colors=False):
+    """Complete defaults for full restores; partial merges and stored snapshots keep omissions."""
     if type(settings) is not dict:
         raise LightCraftError("raw_invalid_settings")
     result = copy.deepcopy(settings)
@@ -116,12 +116,21 @@ def complete_snapshot_for_merge(settings):
         detail["nr_outliers"] = False
     elif type(detail["nr_outliers"]) is not bool:
         raise LightCraftError("raw_invalid_settings")
+    if "point_colors" in result:
+        validate_point_colors(result)
+    elif restore_point_colors:
+        # Older full snapshots omit this serde-default array; a partial Native merge would retain it.
+        result["point_colors"] = []
     return result
 
 
 def settings_snapshot_for_comparison(settings):
-    """Treat Native's omitted serde-default false as equal to an explicit false snapshot value."""
-    return with_legacy_mixer_defaults(with_legacy_profile_defaults(complete_snapshot_for_merge(settings)))
+    """Compare legacy omissions as Native serde defaults without changing stored snapshots."""
+    result = complete_snapshot_for_merge(settings)
+    if "point_colors" not in result:
+        result["point_colors"] = []
+    validate_point_colors(result)
+    return with_legacy_mixer_defaults(with_legacy_profile_defaults(result))
 
 
 def validate_point_colors(settings):

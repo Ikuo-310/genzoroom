@@ -1756,11 +1756,11 @@ class LightCraftRawSession:
         from raw_controls import complete_snapshot_for_merge, settings_snapshot_for_comparison
         if count_attempts:
             self._edits += 1
+        snapshot = json.loads(encoded)
+        payload = complete_snapshot_for_merge(snapshot, restore_point_colors=True)
         await self._command("develop.reset", {"ids": [photo.photo_id]}, deadline)
         if count_attempts:
             self._edits += 1
-        snapshot = json.loads(encoded)
-        payload = complete_snapshot_for_merge(snapshot)
         await self._command("develop.merge", {"settings": payload}, deadline)
         actual = await self._read_settings(photo, deadline)
         if _settings_json(settings_snapshot_for_comparison(json.loads(actual))) != \
@@ -2375,7 +2375,8 @@ class LightCraftRawSession:
         photo = self._photo(handle, active=True)
         if engine_snapshot._fingerprint != photo.fingerprint or engine_snapshot._content_hash != photo.content_hash:
             raise LightCraftError("raw_source_changed")
-        encoded = _settings_json(complete_snapshot_for_merge(engine_snapshot.settings))
+        encoded = _settings_json(complete_snapshot_for_merge(
+            engine_snapshot.settings, restore_point_colors=True))
         return await self._mutate(handle, "develop.merge", {}, expected_revision, restored=encoded)
 
     def recipe_identity(self, handle):
@@ -2413,7 +2414,8 @@ class LightCraftRawSession:
 
         verify()
         # Preserve the native adapter's explicit legacy-scale normalization, not JPEG WB conversion.
-        encoded = _settings_json(complete_snapshot_for_merge(recipe["settings"]))
+        encoded = _settings_json(complete_snapshot_for_merge(
+            recipe["settings"], restore_point_colors=True))
         try:
             return await self._mutate(handle, "develop.merge", {}, expected_revision,
                                       restored=encoded, verify=verify)

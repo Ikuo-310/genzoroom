@@ -19,7 +19,8 @@ from tests.test_windows_raw_api import setup, open_document
 from tests.test_raw_recipe_api import change, save_body, headers
 from tests.test_raw_recipe_restore import open_asset
 from tests.test_raw_recipe_restore import hold_merge, seed
-from tests.test_raw_controls import identity
+from tests.test_raw_controls import identity, point_color
+from raw_controls import settings_snapshot_for_comparison
 from tests.test_lightcraft_mcp import until
 from tests import test_lightcraft_raw as fake_native
 from tests.test_windows_raw_api import preview_body
@@ -234,6 +235,155 @@ def test_confirmed_gesture_undo_redo_jump_noop_and_replay(local, tmp_path, monke
                 assert old["replayed"] and old["ack"]["revision"] < old["recipeRevision"]
                 assert old["values"]["light.exposure"] == 3. and old["history"]["cursor"] == 2
                 assert all(command not in {"edit.undo", "edit.redo", "history.restore"} for command, _ in children[0].commands)
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
+def test_point_color_history_snapshots_undo_redo_jump_and_reopen(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        asset_id = uuid4()
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                workspace, opened = await open_asset(http, asset_id)
+                assert opened.status_code == 200, opened.text
+                doc = opened.json()
+                doc = await operation(http, doc, "initialize", body(doc))
+                baseline = (await api.raw.get_settings(api._raw_handle)).settings
+
+                async def point_operation(kind, metadata):
+                    nonlocal doc
+                    request = body(doc) | {"kind": kind, "metadata": metadata}
+                    doc = await operation(http, doc, "operate", request)
+                    native = await api.raw.get_settings(api._raw_handle)
+                    recipe = store.get_raw_recipe(api._history_identity)["recipe"]["settings"]
+                    assert native.settings == recipe
+                    assert native.settings["point_colors"] == recipe["point_colors"]
+                    assert {key: value for key, value in native.settings.items() if key != "point_colors"} == \
+                        {key: value for key, value in baseline.items() if key != "point_colors"}
+
+                await point_operation("pointColorPick", {"x": .25, "y": .75})
+                first_step = doc["ack"]["stepId"]
+                await point_operation("pointColorPick", {"x": .25, "y": .75})
+                assert doc["ack"]["changed"] and len((await api.raw.get_settings(api._raw_handle)).settings["point_colors"]) == 2
+                await point_operation("pointColorControl", {"control": "pointColor.0.hueShift", "value": -12.375})
+                edit_step = doc["ack"]["stepId"]
+                assert (await api.raw.get_settings(api._raw_handle)).settings["point_colors"][0]["hue_shift"] == -12.375
+                await point_operation("pointColorDelete", {"index": 0})
+                assert (await api.raw.get_settings(api._raw_handle)).settings["point_colors"][0] == \
+                    store.get_raw_history(api._history_identity)["history"]["steps"][1]["settings"]["point_colors"][1]
+                await point_operation("pointColorReset", {})
+                assert (await api.raw.get_settings(api._raw_handle)).settings["point_colors"] == []
+
+                pick_commands = sum(name == "pointColor.pick" for name, _ in children[0].commands)
+                delete_commands = sum(name == "pointColor.delete" for name, _ in children[0].commands)
+                doc = await operation(http, doc, "undo")
+                assert (await api.raw.get_settings(api._raw_handle)).settings["point_colors"]
+                doc = await operation(http, doc, "undo")
+                after_delete = (await api.raw.get_settings(api._raw_handle)).settings["point_colors"]
+                assert len(after_delete) == 2 and after_delete[0]["hue_shift"] == -12.375
+                doc = await operation(http, doc, "undo")
+                before_edit = (await api.raw.get_settings(api._raw_handle)).settings["point_colors"]
+                assert len(before_edit) == 2 and before_edit[0]["hue_shift"] == 0.
+                doc = await operation(http, doc, "undo")
+                assert len((await api.raw.get_settings(api._raw_handle)).settings["point_colors"]) == 1
+                doc = await operation(http, doc, "jump", body(doc) | {"targetStepId": first_step})
+                assert len((await api.raw.get_settings(api._raw_handle)).settings["point_colors"]) == 1
+                doc = await operation(http, doc, "jump", body(doc) | {"targetStepId": edit_step})
+                jumped = (await api.raw.get_settings(api._raw_handle)).settings["point_colors"]
+                assert len(jumped) == 2 and jumped[0]["hue_shift"] == -12.375
+                saved_history = store.get_raw_history(api._history_identity)["history"]
+                rows_before_reopen = rows()
+                await http.delete(f"/api/raw/workspaces/{workspace}")
+                workspace, reopened = await open_asset(http, asset_id)
+                assert reopened.status_code == 200, reopened.text
+                doc = reopened.json()
+                history_response = await http.get(url(doc), headers=headers(doc))
+                assert history_response.json()["history"]["cursor"] == saved_history["cursor"] == 3
+                assert history_response.json()["history"]["length"] == len(saved_history["steps"]) == 5
+                restored = await api.raw.get_settings(api._raw_handle)
+                assert restored.settings["point_colors"] == jumped
+                assert restored.settings == store.get_raw_recipe(api._history_identity)["recipe"]["settings"]
+                assert rows() == rows_before_reopen
+                assert sum(name == "pointColor.pick" for name, _ in children[0].commands) == pick_commands
+                assert sum(name == "pointColor.delete" for name, _ in children[0].commands) == delete_commands
+                doc = await operation(http, doc, "redo")
+                assert len((await api.raw.get_settings(api._raw_handle)).settings["point_colors"]) == 1
+                doc = await operation(http, doc, "redo")
+                assert (await api.raw.get_settings(api._raw_handle)).settings["point_colors"] == []
+                assert sum(name == "pointColor.pick" for name, _ in children[0].commands) == pick_commands == 2
+                assert sum(name == "pointColor.delete" for name, _ in children[0].commands) == delete_commands == 1
+                final_history = store.get_raw_history(api._history_identity)["history"]
+                final_rows = rows()
+                await http.delete(f"/api/raw/workspaces/{workspace}")
+                workspace, reopened = await open_asset(http, asset_id)
+                assert reopened.status_code == 200, reopened.text
+                doc = reopened.json()
+                history_response = await http.get(url(doc), headers=headers(doc))
+                assert history_response.json()["history"]["cursor"] == final_history["cursor"] == 5
+                assert history_response.json()["history"]["length"] == len(final_history["steps"]) == 5
+                restored_empty = await api.raw.get_settings(api._raw_handle)
+                assert restored_empty.settings["point_colors"] == []
+                assert restored_empty.settings == store.get_raw_recipe(api._history_identity)["recipe"]["settings"]
+                assert rows() == final_rows
+                assert sum(name == "pointColor.pick" for name, _ in children[0].commands) == pick_commands
+                assert sum(name == "pointColor.delete" for name, _ in children[0].commands) == delete_commands
+                await http.delete(f"/api/raw/workspaces/{workspace}")
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
+def test_legacy_history_snapshot_missing_point_colors_clears_and_replays_array(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        asset_id = uuid4()
+        try:
+            seeded = seed(asset_id)
+            identity_data = {key: seeded["recipe"][key] for key in store.IDENTITY_FIELDS}
+            legacy = copy.deepcopy(seeded["recipe"]["settings"])
+            legacy.pop("point_colors", None)
+            legacy_recipe = store.put_raw_recipe(identity_data, seeded["revision"], uuid4(), legacy)
+            initialized = store.initialize_raw_history(identity_data, legacy_recipe["revision"], uuid4(), legacy)
+            point_snapshot = copy.deepcopy(legacy)
+            point_snapshot["point_colors"] = [point_color(hue_shift=19.25)]
+            saved = store.append_raw_history(identity_data, initialized["current"]["revision"], uuid4(), point_snapshot,
+                kind="pointColorPick", metadata={"x": .5, "y": .5})
+            old_history = store.get_raw_history(identity_data)["history"]
+            point_step_id = old_history["steps"][0]["stepId"]
+            old_baseline = copy.deepcopy(old_history["baselineSettings"])
+            assert "point_colors" not in old_baseline
+            assert store.get_raw_recipe(identity_data)["recipe"]["settings"]["point_colors"] == [point_color(hue_shift=19.25)]
+
+            async with client(local) as http:
+                await authenticate(http, local)
+                workspace, opened = await open_asset(http, asset_id)
+                assert opened.status_code == 200, opened.text
+                doc = opened.json()
+                assert doc["recipeRevision"] == saved["current"]["revision"]
+                assert (await api.raw.get_settings(api._raw_handle)).settings["point_colors"] == [point_color(hue_shift=19.25)]
+                pick_count = sum(name == "pointColor.pick" for name, _ in children[0].commands)
+
+                doc = await operation(http, doc, "undo")
+                native = await api.raw.get_settings(api._raw_handle)
+                assert native.settings["point_colors"] == []
+                assert settings_snapshot_for_comparison(native.settings) == settings_snapshot_for_comparison(old_baseline)
+                assert "point_colors" not in store.get_raw_recipe(identity_data)["recipe"]["settings"]
+                assert store.get_raw_history(identity_data)["history"]["baselineSettings"] == old_baseline
+                assert sum(name == "pointColor.pick" for name, _ in children[0].commands) == pick_count
+                doc = await operation(http, doc, "redo")
+                native = await api.raw.get_settings(api._raw_handle)
+                assert native.settings["point_colors"] == [point_color(hue_shift=19.25)]
+                assert native.settings == store.get_raw_recipe(identity_data)["recipe"]["settings"]
+                doc = await operation(http, doc, "jump", body(doc) | {"targetStepId": None})
+                assert (await api.raw.get_settings(api._raw_handle)).settings["point_colors"] == []
+                doc = await operation(http, doc, "jump", body(doc) | {"targetStepId": point_step_id})
+                assert (await api.raw.get_settings(api._raw_handle)).settings["point_colors"] == [point_color(hue_shift=19.25)]
+                assert sum(name == "pointColor.pick" for name, _ in children[0].commands) == pick_count
+                assert store.get_raw_history(identity_data)["history"]["baselineSettings"] == old_baseline
+                await http.delete(f"/api/raw/workspaces/{workspace}")
         finally:
             await api.close()
     asyncio.run(run())

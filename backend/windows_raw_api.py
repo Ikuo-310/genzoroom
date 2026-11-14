@@ -1024,6 +1024,9 @@ class RawPreviewApi:
 
     @staticmethod
     def _fingerprint(settings):
+        if type(settings) is dict and "point_colors" not in settings:
+            # Legacy snapshots omit this serde-default array; compare them as the empty Native value.
+            settings = {**settings, "point_colors": []}
         return hashlib.sha256(_settings_json(settings).encode("utf-8")).hexdigest()
 
     async def _recipe(self, request, body, doc):

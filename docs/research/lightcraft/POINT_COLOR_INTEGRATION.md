@@ -284,3 +284,15 @@ owner解放はPoint Color error codeの列挙だけでは判定しない。Nativ
 no-op set/reset/array resetはNative mutationもHistory step/cursor変更も起こさず、`ack.changed=false`のreceiptを作り、同一save ID retryはreceipt replayする。既存Storeのreceipt/CAS契約によりRecipe revisionはno-op operationでも1進む一方、Recipe settingsとHistory cursorは変わらない。このrevision更新は本件だけの意味変更を避け、既存の全History no-op契約を維持した。recipe revisionまで据え置く新しいreceipt形式への変更は行っていない。
 
 Mock Native／SQLiteの障害注入・Curve/Mixer/WB regressionを含む関連5 suite（`test_raw_controls.py`、`test_raw_history_store.py`、`test_raw_category_operations.py`、`test_raw_history_api.py`、`test_lightcraft_raw.py`）は464件成功した。Native CLI試験、process restart後の再open、Undo/Redo/Jump復元、旧Recipeの欠落`point_colors`対応は本phaseでは未実施。P1-A2c-3bではこれらのrestore経路だけを確認する。
+
+## P1-A2c-3b — History／Recipe復元整合性
+
+Undo／Redo／JumpはPoint Color専用処理を追加せず、既存Historyの完全snapshot選択と`restore_persisted_settings` → `_restore` → `develop.reset`／`develop.merge`を使用する。`_restore`はdevelop設定変更前に復元snapshotを解析し、`complete_snapshot_for_merge(..., restore_point_colors=True)`で欠落したserde-default配列だけを`[]`としてNative向け完全payloadへ補完する。明示された不正型・不正entry・非有限値・8件超過は`validate_point_colors`で拒否し、補正・切り詰めない。補完後の完全snapshotをmergeし、readbackと比較用snapshotを照合する。不一致やNative失敗は既存`_mutate`のdesynchronized／session-lost経路を維持する。
+
+Recipe／History保存JSON、save receipt、DB schemaは変更しない。`complete_snapshot_for_merge`の通常呼出しは欠落キーを補わず、保存payloadへの漏出を避ける。`settings_snapshot_for_comparison`は比較時に限って欠落を空配列として扱い、明示値は同じ8件・field・finite性validationに通す。Windows APIの揮発性settings fingerprintも、Point Color欠落を空配列相当として比較する。これは古いsnapshotと現在のNative defaultの照合用であり、Store receipt fingerprintや保存済みJSONの再計算・更新には使わない。
+
+Mock NativeのHistory API系列（空baseline → 採色2件〔重複含む〕 → 小数indexed edit → index 0削除 → 全体Reset）で、各履歴位置へのUndo、Redo、任意step／baselineへのJumpを行い、配列順序・重複・小数値とRecipe／Nativeの完全snapshot一致を確認する。History移動は保存済みsnapshot復元のみで、採色・削除Native commandの再実行はない。2件の編集snapshot位置でDocument close／reopenし、配列・History cursor/stepとDB行が維持されること、再openがHistory step／採色を追加しないことを確認する。
+
+別のMock History fixtureでは、過去のbaselineとRecipeに`point_colors`キーがなく、現在のstep／NativeにはPoint Color entryがある状態を作った。Undoは配列を明示的に空にし、Redo／Jumpで小数を含むentryを戻し、再度baselineへJumpしても配列が残留しない。元baseline JSONは欠落キーのまま不変。Recipe reopen試験もNativeに採色entryがある状態から旧Recipeへ復元し、空配列化とDB全行不変を確認した。`None`、不正entry、9件配列はNative commandを送る前に拒否し、同期状態・revisionを維持する。
+
+関連focused tests（`test_raw_controls.py`、`test_raw_recipe_restore.py`、`test_raw_history_api.py`、`test_lightcraft_raw.py`）320件が成功した。Undo／Redo／Jump、空・複数entryのclose／reopen、小数・重複保持、旧Recipe／History snapshot、明示不正値拒否、および既存Recipe restore regressionをMock Nativeで確認した。未実施の実Native CLI・GUI／Browser手動試験はユーザー側の実環境確認事項。Export、Frontend、Native patch、旧snapshotデータ自体の書換えは本phaseの対象外とした。
