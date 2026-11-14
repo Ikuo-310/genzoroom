@@ -323,7 +323,10 @@ class RawPreviewApi:
                           'raw_wb_no_valid_samples', 'raw_wb_invalid_response', 'raw_wb_settings_mismatch',
                           'raw_wb_estimation_failed', 'raw_wb_source_unavailable', 'raw_wb_unsupported', 'raw_wb_stale_result',
                           'raw_wb_geometry_mismatch', 'raw_wb_point_outside_source', 'raw_wb_connection_failed', 'raw_wb_timeout'} else
-                      400 if code in {"raw_invalid_region_request", "raw_invalid_preview_request", "raw_invalid_request", "raw_invalid_controls", "raw_wb_unavailable", "raw_recipe_invalid", "raw_history_invalid"} else
+                      400 if code in {"raw_invalid_region_request", "raw_invalid_preview_request", "raw_invalid_request",
+                                      "raw_invalid_controls", "raw_invalid_point_color_index",
+                                      "raw_invalid_point_color_control", "raw_point_color_limit",
+                                      "raw_wb_unavailable", "raw_recipe_invalid", "raw_history_invalid"} else
                       503 if code in {"raw_unavailable", "lightcraft_not_ready", "raw_recipe_unavailable", "raw_recipe_save_failed",
                                       "raw_history_unavailable", "raw_history_save_failed", "raw_edit_reset_database_failed",
                                       "raw_preview_unsupported", "raw_region_unsupported"} else
@@ -1298,7 +1301,11 @@ class RawPreviewApi:
                     or type(metadata["control"]) is not str or metadata["control"] not in CONTROLS):
                 raise LightCraftError("raw_invalid_request")
         elif action == "operate":
-            validate_history_operation(body["kind"], body["metadata"])
+            from raw_controls import POINT_COLOR_HISTORY_SCHEMAS, validate_point_color_history_operation
+            if type(body["kind"]) is str and body["kind"] in POINT_COLOR_HISTORY_SCHEMAS:
+                body["metadata"] = validate_point_color_history_operation(body["kind"], body["metadata"])
+            else:
+                validate_history_operation(body["kind"], body["metadata"])
             if body["kind"] == "curve":
                 from raw_controls import validate_curve_operation
                 validate_curve_operation("curve", {"channel": body["metadata"].get("channel"), "points": body.get("curvePoints")})
@@ -1463,7 +1470,14 @@ class RawPreviewApi:
                     self._history_verify(doc)
                     pending["settings"] = interaction_result.settings
                 else:
-                    snapshot = await self.raw.get_settings(self._raw_handle)
+                    try:
+                        snapshot = await self.raw.get_settings(self._raw_handle)
+                    except LightCraftError as error:
+                        if (action == "operate" and body["kind"] in ("pointColorPick", "pointColorDelete",
+                                "pointColorControl", "pointColorControlReset", "pointColorReset")
+                                and error.code in {"raw_curve_interaction_pending", "raw_mixer_interaction_pending"}):
+                            self._history_save = None
+                        raise
                     self._history_verify(doc)
                     self._confirmed(doc, snapshot)
                 wb_operation = action == 'operate' and body['kind'] in ('wbAuto', 'wbPick')
@@ -1499,8 +1513,20 @@ class RawPreviewApi:
                                 pending['stage'] = 'readback'
                             raise
                     else:
-                        snapshot = await self.raw.apply_history_operation(self._raw_handle, body["kind"], body["metadata"], snapshot.revision,
-                            curve_points=body.get("curvePoints"))
+                        try:
+                            snapshot = await self.raw.apply_history_operation(self._raw_handle, body["kind"],
+                                body["metadata"], snapshot.revision, curve_points=body.get("curvePoints"))
+                        except LightCraftError as error:
+                            not_sent = error.code in {"raw_point_color_limit", "raw_invalid_point_color_index",
+                                "raw_invalid_point_color_control", "raw_invalid_controls",
+                                "raw_curve_interaction_pending", "raw_mixer_interaction_pending"}
+                            if error.code == "raw_invalid_point_colors":
+                                not_sent = self.raw.status().state == "synced"
+                            if body["kind"] in ("pointColorPick", "pointColorDelete", "pointColorControl",
+                                    "pointColorControlReset", "pointColorReset") and not_sent:
+                                # These errors arise during the helper's pre-command snapshot validation.
+                                self._history_save = None
+                            raise
                     self._history_verify(doc)
                     self._confirmed(doc, snapshot)
                 # Keep supported legacy omission of WB scale in saved snapshots; the adapter has

@@ -32,6 +32,17 @@ async def edit(http, doc, kind, metadata):
     return await operation(http, doc, "operate", body(doc) | {"kind": kind, "metadata": metadata})
 
 
+def point_colors(settings):
+    return settings["point_colors"]
+
+
+def point_color_mutations(commands):
+    return [(command, params) for command, params in commands if command in ("pointColor.pick", "pointColor.delete")
+        or command == "develop.set" and params.get("control", "").startswith("pointColor.")
+        or command == "develop.resetControl" and params.get("control", "").startswith("pointColor.")
+        or command == "develop.merge" and params.get("settings") == {"point_colors": []}]
+
+
 @pytest.mark.parametrize("channel", ["master", "red", "green", "blue"])
 def test_point_curve_is_one_history_operation_with_snapshot_navigation(channel, local, tmp_path, monkeypatch):
     async def run():
@@ -517,9 +528,9 @@ def test_as_shot_requires_every_reference_field(local, tmp_path, monkeypatch, fi
 @pytest.mark.parametrize("kind,metadata", [("command", {"command": "develop.reset"}),
     ("controlReset", {"control": "hdr.maxEv"}), ("sectionToggle", {"section": "enhance", "enabled": False}),
     ("sectionToggle", {"section": "color", "enabled": 0}), ("allReset", {"settings": {}}),
-    ("pointColorPick", {"x": .25, "y": .75}), ("pointColorDelete", {"index": 0}),
-    ("pointColorControl", {"control": "pointColor.0.hueShift", "value": 12.5}),
-    ("pointColorControlReset", {"control": "pointColor.0.range"}), ("pointColorReset", {})])
+    ("pointColorPick", {"x": .25}), ("pointColorDelete", {"index": -1}),
+    ("pointColorControl", {"control": "pointColor.0.hueShift"}),
+    ("pointColorControlReset", {"control": "pointColor.0.unknown"}), ("pointColorReset", {"extra": 0})])
 def test_operation_endpoint_rejects_unallowlisted_intent(local, tmp_path, monkeypatch, kind, metadata):
     async def run():
         api, _, children, _ = await setup(tmp_path, local, monkeypatch)
@@ -530,6 +541,245 @@ def test_operation_endpoint_rejects_unallowlisted_intent(local, tmp_path, monkey
                 response = await http.post(url(doc, "operate"), json=body(doc) | {"kind": kind, "metadata": metadata})
                 assert response.status_code == 400 and children[0].commands == commands
                 assert api._history_save["stage"] == "complete"
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
+def test_point_color_history_api_persists_all_five_operations_and_noops(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            async with client(local) as http:
+                doc = await open_history(http, local, api)
+                recipe_identity = api._history_identity
+
+                first_request = body(doc) | {"kind": "pointColorPick", "metadata": {"x": .125, "y": .625}}
+                doc = await operation(http, doc, "operate", first_request)
+                duplicate_request = body(doc) | {"kind": "pointColorPick", "metadata": {"y": .625, "x": .125}}
+                doc = await operation(http, doc, "operate", duplicate_request)
+                expected_duplicate = point_colors(store.get_raw_recipe(recipe_identity)["recipe"]["settings"])
+                assert len(expected_duplicate) == 2 and expected_duplicate[0] == expected_duplicate[1]
+                assert doc["history"]["length"] == 2
+
+                command_snapshot = list(children[0].commands)
+                saved_rows = rows()
+                replay = await operation(http, doc, "operate", duplicate_request)
+                assert replay["replayed"] and children[0].commands == command_snapshot and rows() == saved_rows
+                altered = duplicate_request | {"metadata": {"x": .25, "y": .625}}
+                rejected = await http.post(url(doc, "operate"), json=altered)
+                assert rejected.status_code == 409 and rejected.json()["code"] == "raw_history_save_id_reused"
+                assert children[0].commands == command_snapshot and rows() == saved_rows
+
+                doc = await edit(http, doc, "pointColorDelete", {"index": 0})
+                assert len(point_colors(store.get_raw_recipe(recipe_identity)["recipe"]["settings"])) == 1
+                doc = await edit(http, doc, "pointColorControl",
+                    {"control": "pointColor.0.hueShift", "value": -12.375})
+                settings = store.get_raw_recipe(recipe_identity)["recipe"]["settings"]
+                assert point_colors(settings)[0]["hue_shift"] == -12.375
+                before_noop = len(rows()["asset_raw_history_steps"])
+                native_commands = list(children[0].commands)
+                doc = await edit(http, doc, "pointColorControl",
+                    {"control": "pointColor.0.hueShift", "value": -12.375})
+                assert doc["ack"]["changed"] is False
+                assert len(rows()["asset_raw_history_steps"]) == before_noop
+                assert point_color_mutations(children[0].commands) == point_color_mutations(native_commands)
+
+                doc = await edit(http, doc, "pointColorControlReset", {"control": "pointColor.0.hueShift"})
+                assert point_colors(store.get_raw_recipe(recipe_identity)["recipe"]["settings"])[0]["hue_shift"] == 0.
+                before_noop = len(rows()["asset_raw_history_steps"])
+                native_commands = list(children[0].commands)
+                doc = await edit(http, doc, "pointColorControlReset", {"control": "pointColor.0.hueShift"})
+                assert doc["ack"]["changed"] is False
+                assert len(rows()["asset_raw_history_steps"]) == before_noop
+                assert point_color_mutations(children[0].commands) == point_color_mutations(native_commands)
+
+                doc = await edit(http, doc, "pointColorReset", {})
+                assert point_colors(store.get_raw_recipe(recipe_identity)["recipe"]["settings"]) == []
+                before_noop = len(rows()["asset_raw_history_steps"])
+                native_commands = list(children[0].commands)
+                doc = await edit(http, doc, "pointColorReset", {})
+                assert doc["ack"]["changed"] is False
+                assert len(rows()["asset_raw_history_steps"]) == before_noop
+                assert point_color_mutations(children[0].commands) == point_color_mutations(native_commands)
+
+                history = store.get_raw_history(recipe_identity)["history"]
+                recipe = store.get_raw_recipe(recipe_identity)["recipe"]["settings"]
+                assert history["steps"][-1]["settings"] == recipe
+                assert [step["kind"] for step in history["steps"]] == ["pointColorPick", "pointColorPick",
+                    "pointColorDelete", "pointColorControl", "pointColorControlReset", "pointColorReset"]
+                assert history["steps"][0]["metadata"] == {"x": .125, "y": .625}
+                assert history["steps"][3]["metadata"] == {"control": "pointColor.0.hueShift", "value": -12.375}
+                listing = (await http.get(url(doc), headers=headers(doc))).json()
+                assert [step["kind"] for step in listing["steps"]] == [step["kind"] for step in history["steps"]]
+                assert listing["steps"][3]["metadata"] == history["steps"][3]["metadata"]
+                assert doc["nativeMatchesRecipe"]
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
+def test_point_color_save_failure_retries_receipt_without_repeating_pick(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        writer = store.append_raw_history
+        try:
+            async with client(local) as http:
+                doc = await open_history(http, local, api)
+                request = body(doc) | {"kind": "pointColorPick", "metadata": {"x": .375, "y": .625}}
+                before = rows()
+                def fail_before_save(*args, **kwargs):
+                    raise StoreUnavailable()
+                monkeypatch.setattr(store, "append_raw_history", fail_before_save)
+                failed = await http.post(url(doc, "operate"), json=request)
+                assert failed.status_code == 503 and failed.json()["code"] == "raw_history_save_failed"
+                assert api._history_save["stage"] == "save" and rows() == before
+                assert sum(command == "pointColor.pick" for command, _ in children[0].commands) == 1
+
+                blocked = await http.post(url(doc, "operate"), json=body(doc) | {
+                    "kind": "pointColorPick", "metadata": {"x": .5, "y": .5}})
+                assert blocked.status_code == 409 and blocked.json()["code"] == "raw_history_save_pending"
+                reused = await http.post(url(doc, "operate"), json=request | {
+                    "metadata": {"x": .375, "y": .5}})
+                assert reused.status_code == 409 and reused.json()["code"] == "raw_history_save_id_reused"
+                assert sum(command == "pointColor.pick" for command, _ in children[0].commands) == 1
+
+                monkeypatch.setattr(store, "append_raw_history", writer)
+                saved = await http.post(url(doc, "operate"), json=request)
+                assert saved.status_code == 200, saved.text
+                result = saved.json()
+                assert result["history"]["length"] == 1 and result["nativeMatchesRecipe"]
+                assert sum(command == "pointColor.pick" for command, _ in children[0].commands) == 1
+                recipe = store.get_raw_recipe(api._history_identity)["recipe"]["settings"]
+                history = store.get_raw_history(api._history_identity)["history"]
+                assert recipe["point_colors"] == history["steps"][0]["settings"]["point_colors"]
+                assert history["steps"][0]["metadata"] == {"x": .375, "y": .625}
+        finally:
+            monkeypatch.setattr(store, "append_raw_history", writer)
+            await api.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("kind,metadata", [
+    ("pointColorDelete", {"index": 0}),
+    ("pointColorControl", {"control": "pointColor.0.hueShift", "value": 1.5}),
+])
+def test_point_color_native_snapshot_rejection_clears_unmutated_history_owner(
+        local, tmp_path, monkeypatch, kind, metadata):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            async with client(local) as http:
+                doc = await open_history(http, local, api)
+                request = body(doc) | {"kind": kind, "metadata": metadata}
+                response = await http.post(url(doc, "operate"), json=request)
+                assert response.status_code == 400, response.text
+                assert response.json()["code"] in ("raw_invalid_point_color_index", "raw_invalid_point_color_control")
+                assert api._history_save is None
+                assert not any(command in ("pointColor.pick", "pointColor.delete") or
+                    command == "develop.set" and params.get("control", "").startswith("pointColor.")
+                    for command, params in children[0].commands)
+                result = await edit(http, doc, "pointColorPick", {"x": .25, "y": .75})
+                assert result["history"]["length"] == 1
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
+def test_point_color_eight_entry_limit_is_enforced_through_history_api(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            async with client(local) as http:
+                doc = await open_history(http, local, api)
+                for _ in range(8):
+                    doc = await edit(http, doc, "pointColorPick", {"x": .25, "y": .75})
+                response = await http.post(url(doc, "operate"), json=body(doc) | {
+                    "kind": "pointColorPick", "metadata": {"x": .25, "y": .75}})
+                assert response.status_code == 400 and response.json()["code"] == "raw_point_color_limit"
+                assert sum(command == "pointColor.pick" for command, _ in children[0].commands) == 8
+                assert api._history_save is None
+                assert len(store.get_raw_recipe(api._history_identity)["recipe"]["settings"]["point_colors"]) == 8
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("extra", [{"curvePoints": []}, {"mixerInteractionId": "0" * 32}])
+def test_point_color_history_api_rejects_unrelated_payload_without_native_or_store_change(
+        local, tmp_path, monkeypatch, extra):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            async with client(local) as http:
+                doc = await open_history(http, local, api)
+                before_rows = rows()
+                before_commands = list(children[0].commands)
+                response = await http.post(url(doc, "operate"), json=body(doc) | {
+                    "kind": "pointColorPick", "metadata": {"x": .25, "y": .75}} | extra)
+                assert response.status_code == 400 and response.json()["code"] == "raw_invalid_request"
+                assert rows() == before_rows and children[0].commands == before_commands
+                assert api._history_save["stage"] == "complete"
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
+def test_point_color_history_api_rejects_stale_document_revision_before_native_mutation(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            async with client(local) as http:
+                doc = await open_history(http, local, api)
+                request = body(doc) | {"kind": "pointColorPick", "metadata": {"x": .25, "y": .75}}
+                request["documentRevision"] += 1
+                before_commands, before_rows = list(children[0].commands), rows()
+                response = await http.post(url(doc, "operate"), json=request)
+                assert response.status_code == 409 and response.json()["code"] == "raw_revision_conflict"
+                assert children[0].commands == before_commands and rows() == before_rows
+                assert api._history_save["stage"] == "complete"
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
+def test_point_color_history_operation_respects_mixer_interaction_owner(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        children[0].adaptive_supported = True
+        children[0].frame_supported = False
+        try:
+            async with client(local) as http:
+                doc = await open_history(http, local, api)
+                mixer_url = f'/api/raw/documents/{doc["handle"]}/mixer-interaction'
+                identity_body = identity(doc) | {"documentRevision": doc["revision"]}
+                started = await http.post(f"{mixer_url}/begin", json=identity_body | {
+                    "target": "hue", "x": .25, "y": .75})
+                assert started.status_code == 200, started.text
+                interaction_id = started.json()["interactionId"]
+                commands = list(children[0].commands)
+                rejected = await http.post(url(doc, "operate"), json=body(doc) | {
+                    "kind": "pointColorReset", "metadata": {}})
+                assert rejected.status_code == 409 and rejected.json()["code"] == "raw_mixer_interaction_pending"
+                assert api._history_save is None
+                assert not any(command == "develop.merge" and params.get("settings") == {"point_colors": []}
+                    for command, params in children[0].commands[len(commands):])
+                cancelled = await http.post(f"{mixer_url}/cancel", json=identity_body | {
+                    "interactionId": interaction_id})
+                assert cancelled.status_code == 204
+
+                curve_url = f'/api/raw/documents/{doc["handle"]}/curve-interaction'
+                curve_started = await http.post(f"{curve_url}/begin", json=identity_body | {
+                    "channel": "master", "mode": "targeted"})
+                assert curve_started.status_code == 200, curve_started.text
+                curve_id = curve_started.json()["interactionId"]
+                rejected = await http.post(url(doc, "operate"), json=body(doc) | {
+                    "kind": "pointColorReset", "metadata": {}})
+                assert rejected.status_code == 409 and rejected.json()["code"] == "raw_curve_interaction_pending"
+                assert api._history_save is None
+                cancelled = await http.post(f"{curve_url}/cancel", json=identity_body | {
+                    "interactionId": curve_id})
+                assert cancelled.status_code == 204
         finally:
             await api.close()
     asyncio.run(run())

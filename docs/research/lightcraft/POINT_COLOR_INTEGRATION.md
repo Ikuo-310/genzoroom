@@ -260,3 +260,13 @@ focused Backend testsはdispatcher直接呼出し11件、RAW Session全体145件
 許可するschemaは `pointColorPick:{x,y}`、`pointColorDelete:{index}`、`pointColorControl:{control,value}`、`pointColorControlReset:{control}`、`pointColorReset:{}`。既存step/cursor、Recipe revision、save ID・fingerprint、immutable receipt、transaction、undo/redo/jumpの実装とDB schemaは変更していない。Storeのappend契約がmetadataを受け入れることとHTTP操作を公開することは別であり、`windows_raw_api.py`のkind allowlistは変更せず、`/history/operate`は5 kindを拒否しNative mutationを行わない。routeも追加していない。
 
 Store focused testsは5 kindの保存・readback、canonical JSON key順序、小数保持、不正kind／key／型／finite性／範囲／control拒否を確認する。既存History kindと公開API隔離・save ID fingerprintの関連テストも実行する。P1-A2c-2ではHistory operationの実行可否と保存契約を接続するが、API kind allowlistを開く前にrequest validation、Native操作、readback、Store receiptの境界を一体で扱う。
+
+## P1-A2c-2 — History API・永続化経路
+
+既存`POST /documents/{handle}/history/operate`のrequest validationが5 kindを`validate_point_color_history_operation`で検証するようにした。既存の厳密なrequest key集合により`curvePoints`やinteraction IDなど無関係payloadを拒否し、Document identity/generation、document revision、Recipe revision、save IDは従来の`_history_body`／`_history`契約で検査する。新しいrouteや別のNative実行経路は追加していない。
+
+History operationはP1-A2bの`LightCraftRawSession.apply_history_operation`へdispatchし、各A1b helperがNative snapshotを取得して配列正常性・上限・index・field/valueを検査し、mutation後に完全snapshotをreadbackする。API側ではNative snapshot依存のPoint Color validationを重複していない。完全snapshotを既存`append_raw_history`へ渡し、同じSQLite transactionでRecipe revision、History step/cursor、save receiptを更新する。Recipeとstep snapshotのPoint Color配列、順序・重複・小数をMock Native経由のHTTP統合で確認した。
+
+正規化metadataを含むimmutable request bodyから既存transport fingerprintを生成し、同じsave IDの異なるmetadata/payloadを拒否する。保存receiptがあればNative mutationを行わずresponseを再生する。Store保存前の失敗は成功応答せず`stage=save`を保持し、後続の別編集を`raw_history_save_pending`で拒否する。同じrequestのretryはStore保存を再試行し、採色を再送しない。Native未変更で確定できるPoint Color snapshot validation／Curve・Mixer owner拒否ではin-memory History ownerを解放し、失敗後にsessionが不用意にlockされないようにした。不明結果やreadback不一致は従来のdesynchronized／recovery境界を維持する。
+
+Indexed setが同値、indexed resetが既定値、全体resetが空配列の場合、A1b helperはNative mutationを省略する。Storeは従来どおり同じsnapshotを新stepにせず、`ack.changed=false`のreceiptを保存する。API focused testsでこのno-op、全5 kindのHistory metadata、永続Recipe/step snapshot整合、8件上限、不正index、revision、Curve/Mixer排他、同一save ID再利用、採色の保存失敗後retryを確認した。`test_raw_controls.py`、`test_raw_history_store.py`、`test_raw_category_operations.py`、`test_raw_history_api.py`の関連4 suiteは310件成功した。P1-A2c-3ではNative/SQLite間の不明結果、再open後の復元、receipt replayをPoint Color固有に追加確認し、旧Recipe互換処理の要否を扱う。
