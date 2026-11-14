@@ -1,5 +1,32 @@
 # Color Mixer Integration Research
 
+## 現行仕様とP2-C監査結果
+
+| 段階 | 到達点 |
+| --- | --- |
+| P0 | LightCraft v0.20.0のNative契約を調査 |
+| P1-A | 8色×H/S/Lの24数値コントロールを統合 |
+| P1-B1 | Color内にMixer UIを追加 |
+| P1-B2 | Color UIを再編し、親Color・Mixer・Grading・WB Resetを統合 |
+| P1-C | P1の統合検証とWindows Desktop受入 |
+| P2-A | Native Mixer Interaction、readback、Historyを統合（`a7433e0`） |
+| P2-B | H/S/LターゲットUIと共通Viewerを接続（`3e99d27`） |
+| P2-C | `06abae7` を基準に最終回帰検証と文書整理を実施 |
+
+CurveとMixerは同じViewer座標変換とNative Sessionの排他を使う。Beginで正規化座標とモードを固定し、上向きの移動を正deltaへ変換する。現行実装は1 CSS pxあたり0.5ステップを蓄積し、整数部分を送る（1ステップに2 CSS px）。過去の「0.5 CSS pxで1ステップ」は現行実装と異なる。ドラッグ感度の変更は別途判断する。
+
+共通ルーペはHoverに追従し、Begin成立後は非表示になる。Pointer Up後、モードが続いていれば再表示できる。直径120 CSS px、4倍、中央十字、配置gap 26 CSS px。WBスポイトは従来の採色経路を使う。
+
+Nativeが帯選択と重みを決め、GenzoRoomは同一モードの複数帯readbackを小数のまま扱う。Updateを直列化し、sequence付きDraftを表示する。Endは設定に差分があればHistory 1件を確定し、確定RecipeからFull PreviewとExportへつなぐ。Cancelは開始時の設定へ復元する。B&W treatmentのBeginは拒否する。パネル開閉・Mixer選択色はアプリ設定、ターゲットモードは一時状態とする。
+
+P2-B後の修正は、History GETの `mixerTarget` 検証漏れ（`c746c47`）、日英の操作名のみのHistory表示と未知kindの誤表示（`8848970`）、ドラッグ中に写真を覆うルーペ（`06abae7`）。以降の各節は当時の記録として残す。
+
+P2-CではFrontend 709件、模擬Nativeを含むBackend 257件、実Native CLIのJPEG検証3件が成功した。Windows Desktopでのターゲット操作・複数帯反映・History再読込・Undo/Redo・Preview・ルーペはユーザー確認済み。実RAWでのP2操作と、RAW／非RAWそれぞれのターゲット編集からRecipe再オープン・JPEG書き出しまでの一連の実画像確認は今回未実施。
+
+将来検討では、Hueのみ8色別の変化方向をNativeと揃えたグラデーションを検討する。Mixer／Grading／将来のPoint Colorの独立ON/OFFはmanaged patchを避ける案を優先し、ResetとUndo/Redoで比較できるため優先度は低い。方式と保存形式は未決定。Point Colorは別フェーズでNative API契約の調査から始める。
+
+## 調査と段階別実装の記録
+
 調査日: 2026-11-14
 対象: GenzoRoom `main` (`eda9c20`)、Managed LightCraft v0.20.0
 

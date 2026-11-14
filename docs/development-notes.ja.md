@@ -1,5 +1,13 @@
 # GenzoRoom 開発ノート
 
+## Color Mixer P2-C 最終統合監査（2026-11-14）
+
+P2-A/Bと後続3修正について、Native Interactionの所有権・H/S/L readback、共通Viewerと座標変換、Draft/Full Preview、History GET・表示・復元、RecipeとExportの設定引き渡し、Color関連Resetとパネル設定を確認した。現行の上向きドラッグ入力は1 CSS pxあたり0.5ステップであり、依頼文およびP2-B当時の記述の「0.5 CSS pxで1ステップ」と差がある。今回の監査では実機受入済みの感度を維持した。
+
+Frontend関連7ファイル709件、BackendのNative模擬・History/Controls・Recipe復元・Export 257件が成功。通常Backend実行でスキップされた実Native 6件のうち、receipt付き既存CLIを明示してMixer H/S/L、Curve/Geometry、Draft/FullのJPEG検証3件を再実行し、すべて成功した。実Nativeの残り3件は今回の選択外。TypeScript、本番ビルド、差分チェックも成功。
+
+ユーザーによるWindows Desktop受入では、H/S/L、複数帯反映、History再取得、Undo/Redo、Preview追従、Hover表示・ドラッグ中非表示を確認済み。今回のCLIはJPEGでの検証。実RAWおよび非RAWそれぞれで、対象編集からRecipe再オープン、History Jump、実画像Exportまで通した確認は残る。
+
 ## Color Mixer P2-B History GETの `mixerTarget` 検証修正（2026-11-14）
 
 Historyの保存形式はBackendとNative連携で既に `mixerTarget` と `{ target: hue|sat|lum }` を使用していたが、Frontendの `readRawHistory()` がこのkindを許可リストに含めておらず、操作後のHistory再取得を `raw_invalid_response` で拒否していた。`RawRecipeSave.loadHistory()` はこの検証失敗を `historyError` として保持し、History一覧・Undo／Redo／Jump、およびMixerターゲットBeginなどを停止する。正しいkindとtargetだけを追加し、既存のstep ID・changes・cursor等の検証は維持する。Historyの再取得は一覧metadataだけを読むため、再取得自体でHistory stepやNative再適用は発生しない。
