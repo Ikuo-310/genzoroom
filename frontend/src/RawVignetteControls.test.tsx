@@ -6,10 +6,65 @@ import i18n from './i18n';
 import { RawAdjustmentControls } from './RawAdjustmentControls';
 import { rawSettings } from './test/rawSettings';
 import { RAW_VIGNETTE_STYLES } from './rawApi';
+import { defaultRawDevelopmentPanelUi, RAW_DEVELOPMENT_PANEL_UI_KEY, updateSetting } from './appSettings';
 
 let host: HTMLDivElement, root: ReturnType<typeof createRoot>;
-beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); host = document.createElement('div'); document.body.append(host); root = createRoot(host); });
-afterEach(() => { act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
+beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); updateSetting('rawDevelopmentPanelUi', defaultRawDevelopmentPanelUi()); host = document.createElement('div'); document.body.append(host); root = createRoot(host); });
+afterEach(() => { act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); updateSetting('rawDevelopmentPanelUi', defaultRawDevelopmentPanelUi()); window.localStorage.removeItem(RAW_DEVELOPMENT_PANEL_UI_KEY); });
+it('persists independent RAW panel folds and selections across remount and asset changes without edit operations', async () => {
+  const asset = (id: string) => ({ workspaceId: 'workspace', assetId: id, handle: 'handle', documentToken: 'token', generation: 1, revision: 1 });
+  const raw = { assetId: 'asset-a', status: 'ready', settings: rawSettings(asset('asset-a')), history: {}, operate: vi.fn(),
+    beginControls: vi.fn(), changeControls: vi.fn(), flushControls: vi.fn(), desired: {} };
+  function draw() { act(() => root.render(<RawAdjustmentControls raw={raw as never} />)); }
+  const category = (name: string) => host.querySelector<HTMLButtonElement>(`.raw-adjustment-category.is-${name} > .adjustment-category-header .adjustment-category-title`)!;
+  const categoryOpen = (name: string) => category(name).getAttribute('aria-expanded') === 'true';
+  draw();
+  for (const name of ['basic', 'color', 'curves', 'effects', 'detail']) expect(categoryOpen(name)).toBe(true);
+  expect(host.querySelector('.raw-color-mixer-title')?.getAttribute('aria-expanded')).toBe('false');
+  expect(host.querySelector('.raw-color-grading-title')?.getAttribute('aria-expanded')).toBe('false');
+  expect(host.querySelector('.raw-optics-header .adjustment-category-title')?.getAttribute('aria-expanded')).toBe('true');
+  expect(host.querySelector('.raw-optics-fold-header button')?.getAttribute('aria-expanded')).toBe('false');
+  act(() => category('basic').click()); act(() => category('curves').click());
+  const mixer = host.querySelector<HTMLElement>('.raw-color-mixer')!;
+  const grading = host.querySelector<HTMLElement>('.raw-color-grading')!;
+  act(() => mixer.querySelector<HTMLButtonElement>('.raw-color-mixer-title')!.click());
+  act(() => grading.querySelector<HTMLButtonElement>('.raw-color-grading-title')!.click());
+  act(() => host.querySelector<HTMLButtonElement>('.raw-color-mixer-swatch[aria-label="Blue"]')!.click());
+  act(() => host.querySelectorAll<HTMLInputElement>('.raw-grading-band input')[2].click());
+  const lens = host.querySelector<HTMLElement>('.raw-optics-panel')!;
+  const lensToggle = lens.querySelector<HTMLButtonElement>('.raw-optics-header .adjustment-category-title')!;
+  act(() => lens.querySelector<HTMLButtonElement>('.raw-optics-fold-header button')!.click());
+  act(() => lensToggle.click());
+  act(() => category('detail').click());
+  expect(JSON.parse(localStorage.getItem(RAW_DEVELOPMENT_PANEL_UI_KEY)!)).toEqual({
+    version: 1,
+    categories: { basic: false, color: true, curves: false, effects: true, detail: false },
+    subcategories: { mixer: true, grading: true, lensCorrections: false, defringe: true },
+    selection: { mixerColor: 'blue', gradingBand: 'highlights' },
+  });
+  expect(raw.operate).not.toHaveBeenCalled();
+  expect(raw.beginControls).not.toHaveBeenCalled(); expect(raw.changeControls).not.toHaveBeenCalled();
+  const saved = JSON.parse(localStorage.getItem(RAW_DEVELOPMENT_PANEL_UI_KEY)!);
+  for (const assetId of ['asset-b', 'asset-a']) {
+    raw.assetId = assetId; raw.settings = rawSettings(asset(assetId)); draw();
+    expect(categoryOpen('basic')).toBe(false); expect(categoryOpen('color')).toBe(true);
+    expect(categoryOpen('curves')).toBe(false); expect(categoryOpen('effects')).toBe(true); expect(categoryOpen('detail')).toBe(false);
+    expect(host.querySelector('.raw-color-mixer-title')?.getAttribute('aria-expanded')).toBe('true');
+    expect(host.querySelector('.raw-color-grading-title')?.getAttribute('aria-expanded')).toBe('true');
+    expect(host.querySelector('.raw-color-mixer-swatch[aria-label="Blue"]')?.getAttribute('aria-checked')).toBe('true');
+    expect(host.querySelectorAll<HTMLInputElement>('.raw-grading-band input')[2].checked).toBe(true);
+    expect(localStorage.getItem(RAW_DEVELOPMENT_PANEL_UI_KEY)).toBe(JSON.stringify(saved));
+  }
+  act(() => root.unmount()); root = createRoot(host); raw.assetId = 'asset-a'; raw.settings = rawSettings(asset('asset-a')); draw();
+  expect(host.querySelector('.raw-color-mixer-title')?.getAttribute('aria-expanded')).toBe('true');
+  expect(host.querySelector('.raw-color-grading-title')?.getAttribute('aria-expanded')).toBe('true');
+  expect(host.querySelector('.raw-color-mixer-swatch[aria-label="Blue"]')?.getAttribute('aria-checked')).toBe('true');
+  act(() => category('detail').click());
+  expect(host.querySelector('.raw-optics-header .adjustment-category-title')?.getAttribute('aria-expanded')).toBe('false');
+  act(() => host.querySelector('.raw-optics-header .adjustment-category-title')?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  expect(host.querySelector('.raw-optics-fold-header button')?.getAttribute('aria-expanded')).toBe('true');
+  expect(raw.operate).not.toHaveBeenCalled();
+});
 it.each(['ja', 'en'])('uses desired amount for dependents and preserves values/mode while inactive in %s', async language => {
   await i18n.changeLanguage(language);
   const settings = rawSettings({ workspaceId: 'workspace', assetId: 'asset', handle: 'handle', documentToken: 'token', generation: 1, revision: 1 });
@@ -40,9 +95,10 @@ it.each(['ja', 'en'])('uses desired amount for dependents and preserves values/m
   expect(ranges().every(e => e.disabled)).toBe(true); expect(radios.every(e => e.disabled)).toBe(true);
   settings.sections.effects = true; raw.desired = {}; draw();
   expect(ranges().every(e => !e.disabled)).toBe(true);
-  const resets = [...host.querySelectorAll<HTMLButtonElement>('.raw-adjustment-subsection-header button')];
-  act(() => resets[1].click()); expect(operate).toHaveBeenLastCalledWith({ kind: 'sectionReset', metadata: { section: 'vignette' } });
-  act(() => resets[0].click()); expect(operate).toHaveBeenLastCalledWith({ kind: 'sectionReset', metadata: { section: 'effects' } });
+  const vignetteReset = host.querySelector<HTMLButtonElement>('.raw-adjustment-subsection-header.is-vignette button')!;
+  const effectsReset = host.querySelector<HTMLButtonElement>('.raw-adjustment-category.is-effects .raw-adjustment-subsection-header button')!;
+  act(() => vignetteReset.click()); expect(operate).toHaveBeenLastCalledWith({ kind: 'sectionReset', metadata: { section: 'vignette' } });
+  act(() => effectsReset.click()); expect(operate).toHaveBeenLastCalledWith({ kind: 'sectionReset', metadata: { section: 'effects' } });
   expect(host.textContent).not.toContain('workspace.');
   expect(host.querySelectorAll('.raw-adjustment-subcategory-divider')).toHaveLength(2);
 });

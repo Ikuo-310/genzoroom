@@ -15,6 +15,7 @@ import * as queueApi from './exportQueueApi';
 import { rawSettings } from './test/rawSettings';
 import { rawHistoryResult, rawHistoryData, fakeRawHistory } from './test/rawHistory';
 import { DesktopLifecycleProvider } from './DesktopLifecycle';
+import { defaultRawDevelopmentPanelUi, RAW_DEVELOPMENT_PANEL_UI_KEY, updateSetting } from './appSettings';
 
 const base: AssetDetail = { id: '12345678-1234-4234-9234-123456789abc', filename: 'a.DNG',
   date: '2026-10-22', thumbnail_url: '/thumb', preview_url: '/immich-viewing', format: 'DNG', is_raw: true, exif: {} };
@@ -57,6 +58,7 @@ async function mount(activeAssetId = base.id) {
 }
 beforeEach(async () => {
   developmentPolicy.engine = 'lightcraft'; developmentPolicy.loading = false;
+  updateSetting('rawDevelopmentPanelUi', defaultRawDevelopmentPanelUi());
   vi.mocked(rawApi.readRawHistory).mockReset().mockImplementation(async doc => rawHistoryData(doc));
   vi.clearAllMocks();
   vi.mocked(queueApi.listExportQueue).mockResolvedValue([]);
@@ -83,7 +85,7 @@ beforeEach(async () => {
     ? rawHistoryResult(request) : commitHistory(request));
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
-afterEach(async () => { act(() => root.unmount()); await flush(); host.remove(); delete window.__GENZOROOM_DESKTOP__; vi.useRealTimers(); vi.unstubAllGlobals(); });
+afterEach(async () => { act(() => root.unmount()); await flush(); host.remove(); delete window.__GENZOROOM_DESKTOP__; vi.useRealTimers(); vi.unstubAllGlobals(); updateSetting('rawDevelopmentPanelUi', defaultRawDevelopmentPanelUi()); window.localStorage.removeItem(RAW_DEVELOPMENT_PANEL_UI_KEY); });
 
 async function editRaw() {
   const number = host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')!.closest('.adjustment-control')!
@@ -443,7 +445,7 @@ it('places all RAW optics controls after NR, uses readback History flags and pre
   act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[2].click()); await flush();
   expect(host.querySelector('.raw-optics-panel')?.textContent).toContain('Profile information is unavailable');
   expect(host.querySelector('[data-adjustment-id="optics.profileDistortion"]')).toBeNull();
-  expect(host.querySelector('.raw-optics-fold-header button')?.getAttribute('aria-expanded')).toBe('false');
+  expect(host.querySelector('.raw-optics-fold-header button')?.getAttribute('aria-expanded')).toBe('true');
   act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[1].click()); await flush();
   expect(host.querySelector('.raw-optics-panel')?.textContent).toContain('Profile information is unavailable');
   act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[0].click()); await flush();
@@ -757,6 +759,45 @@ it('keeps the Mixer subsection local, exposes eight independent colors, and uses
   expect(commitHistory).toHaveBeenLastCalledWith(expect.objectContaining({ operation: {
     kind: 'controlReset', metadata: { control: 'mixer.blue.hue' } } }));
   expect(rawApi.setRawControls).not.toHaveBeenCalled();
+});
+
+it('retains panel folds and Mixer/Grading selections across A-B-A without creating edit operations', async () => {
+  vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => {
+    const settings = rawSettings(doc);
+    if (doc.assetId === jpeg.id) settings.values['mixer.blue.hue'] = 42.5;
+    return settings;
+  });
+  await mount();
+  const category = (name: string) => host.querySelector<HTMLButtonElement>(`.raw-adjustment-category.is-${name} .adjustment-category-title`)!;
+  act(() => category('basic').click()); act(() => category('curves').click());
+  act(() => category('effects').click()); act(() => category('detail').click());
+  const mixerTitle = host.querySelector<HTMLButtonElement>('.raw-color-mixer-title')!;
+  const gradingTitle = host.querySelector<HTMLButtonElement>('.raw-color-grading-title')!;
+  act(() => mixerTitle.click()); act(() => gradingTitle.click());
+  act(() => host.querySelector<HTMLButtonElement>('.raw-color-mixer-swatch[aria-label="Blue"]')!.click());
+  act(() => host.querySelectorAll<HTMLInputElement>('.raw-grading-band input')[2].click());
+  const historyWrites = vi.mocked(rawApi.saveRawHistory).mock.calls.filter(([request]) => request.action !== 'initialize').length;
+  expect(vi.mocked(rawApi.setRawControls)).not.toHaveBeenCalled();
+  expect(host.querySelector('.raw-color-mixer-swatch[aria-label="Blue"]')?.getAttribute('aria-checked')).toBe('true');
+  expect(host.querySelectorAll<HTMLInputElement>('.raw-grading-band input')[2].checked).toBe(true);
+
+  await act(async () => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[1].click()); await flush();
+  expect(host.querySelector('.raw-color-mixer-title')?.getAttribute('aria-expanded')).toBe('true');
+  expect(host.querySelector('.raw-color-grading-title')?.getAttribute('aria-expanded')).toBe('true');
+  expect(host.querySelector<HTMLInputElement>('[data-adjustment-id="mixer.blue.hue"]')?.value).toBe('42.5');
+  expect(host.querySelectorAll<HTMLInputElement>('.raw-grading-band input')[2].checked).toBe(true);
+  expect(category('basic').getAttribute('aria-expanded')).toBe('false');
+  expect(category('color').getAttribute('aria-expanded')).toBe('true');
+  expect(category('curves').getAttribute('aria-expanded')).toBe('false');
+  expect(category('effects').getAttribute('aria-expanded')).toBe('false');
+  expect(category('detail').getAttribute('aria-expanded')).toBe('false');
+
+  await act(async () => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[0].click()); await flush();
+  expect(host.querySelector('.raw-color-mixer-swatch[aria-label="Blue"]')?.getAttribute('aria-checked')).toBe('true');
+  expect(host.querySelector<HTMLInputElement>('[data-adjustment-id="mixer.blue.hue"]')?.value).toBe('0');
+  expect(host.querySelectorAll<HTMLInputElement>('.raw-grading-band input')[2].checked).toBe(true);
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls.filter(([request]) => request.action !== 'initialize')).toHaveLength(historyWrites);
+  expect(vi.mocked(rawApi.setRawControls)).not.toHaveBeenCalled();
 });
 
 it('routes Mixer slider changes through the shared Draft/Full preview and flush path', async () => {

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { Fragment, useEffect, useId, useRef, type CSSProperties, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AdjustmentSlider } from './AdjustmentSlider';
 import { commitAdjustmentEdits, focusAdjustmentCategory, navigateAdjustments, preserveAdjustmentNumberFocus,
@@ -10,6 +10,7 @@ import { RawEyedropperIcon } from './RawEyedropperIcon';
 import { RAW_VIGNETTE_STYLES, type RawControlId, type RawCurvePoint, type RawHistoryControlId, type RawHistoryOperation, type RawOpticsFlagId, type RawToggleSectionId, type RawVignetteStyle } from './rawApi';
 import type { useRawDocument } from './useRawDocument';
 import { displayTemperature, displayTint, nativeTemperature } from './rawWhiteBalance';
+import { updateRawDevelopmentPanelUi, useAppSettings, type RawPanelCategory } from './appSettings';
 
 type RawCategoryId = 'basic' | 'color' | 'curves' | 'effects' | 'detail';
 const mixerColors = ['red', 'orange', 'yellow', 'green', 'aqua', 'blue', 'purple', 'magenta'] as const;
@@ -46,10 +47,10 @@ const vignetteLabels: Partial<Record<RawControlId, string>> = {
 export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNullable<ReturnType<typeof useRawDocument>>; disabled?: boolean }) {
   const { t } = useTranslation();
   const settings = raw.settings;
-  const [gradingBand, setGradingBand] = useState<'shadows' | 'midtones' | 'highlights'>('shadows');
-  const [mixerOpen, setMixerOpen] = useState(false);
-  const [gradingOpen, setGradingOpen] = useState(false);
-  const [mixerColor, setMixerColor] = useState<typeof mixerColors[number]>('red');
+  const panelUi = useAppSettings().rawDevelopmentPanelUi;
+  const setCategoryOpen = (category: RawPanelCategory, open: boolean) => updateRawDevelopmentPanelUi(current => ({
+    ...current, categories: { ...current.categories, [category]: open },
+  }));
   const panel = useRef<HTMLDivElement>(null);
   const operate = (operation: RawHistoryOperation) => {
     if (panel.current) commitAdjustmentEdits(panel.current);
@@ -73,6 +74,7 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
       <span>{t('workspace.rawPreview.cameraLocalTone')}</span>
     </label>
     {settings && bindings.map(({ category, controls, ids }) => <RawCategory key={category} category={category}
+      expanded={panelUi.categories[category]} onExpandedChange={open => setCategoryOpen(category, open)}
       enabled={category === 'curves' || settings.sections[sections[category]]} disabled={actionsLocked}
       resetDisabled={actionsLocked || category === 'color' && !settings.wb.available}
       onToggle={() => { if (category !== 'curves') operate({ kind: 'sectionToggle', metadata: { section: sections[category],
@@ -161,13 +163,25 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
           onChange={value => raw.changeControls({ [control]: control === 'wb.temp' ? nativeTemperature(value, settings.wb.scale) : value })}
           onCommit={() => raw.flushControls(control)} /></Fragment>;
       })}</div>
-      {category === 'color' && <RawColorMixer raw={raw} color={mixerColor} onColorChange={setMixerColor}
-        open={mixerOpen} onOpenChange={setMixerOpen} locked={actionsLocked || !settings.sections.color}
+      {category === 'color' && <RawColorMixer raw={raw} color={panelUi.selection.mixerColor} onColorChange={mixerColor =>
+        updateRawDevelopmentPanelUi(current => ({ ...current, selection: { ...current.selection, mixerColor } }))}
+        open={panelUi.subcategories.mixer} onOpenChange={mixer => updateRawDevelopmentPanelUi(current => ({
+          ...current, subcategories: { ...current.subcategories, mixer },
+        }))} locked={actionsLocked || !settings.sections.color}
         onReset={() => operate({ kind: 'sectionReset', metadata: { section: 'mixer' } })} operate={operate} panel={panel} />}
-      {category === 'color' && <RawColorGrading raw={raw} band={gradingBand} onBandChange={setGradingBand}
-        open={gradingOpen} onOpenChange={setGradingOpen} locked={actionsLocked || !settings.sections.color}
+      {category === 'color' && <RawColorGrading raw={raw} band={panelUi.selection.gradingBand} onBandChange={gradingBand =>
+        updateRawDevelopmentPanelUi(current => ({ ...current, selection: { ...current.selection, gradingBand } }))}
+        open={panelUi.subcategories.grading} onOpenChange={grading => updateRawDevelopmentPanelUi(current => ({
+          ...current, subcategories: { ...current.subcategories, grading },
+        }))} locked={actionsLocked || !settings.sections.color}
         operate={operate} panel={panel} />}
-      {category === 'detail' && <RawLensCorrections key={raw.assetId} raw={raw} locked={actionsLocked} operate={operate} />}
+      {category === 'detail' && <RawLensCorrections key={raw.assetId} raw={raw} locked={actionsLocked} operate={operate}
+        expanded={panelUi.subcategories.lensCorrections} onExpandedChange={lensCorrections => updateRawDevelopmentPanelUi(current => ({
+          ...current, subcategories: { ...current.subcategories, lensCorrections },
+        }))}
+        defringeOpen={panelUi.subcategories.defringe} onDefringeOpenChange={defringe => updateRawDevelopmentPanelUi(current => ({
+          ...current, subcategories: { ...current.subcategories, defringe },
+        }))} />}
     </RawCategory>)}
     {raw.operationError && <p role="alert">{t(`workspace.rawPreview.${wbErrors[raw.operationError] ?? 'awFailed'}`)}</p>}
     {raw.regenerating && <p role="status">{t('workspace.rawPreview.regenerating')}</p>}
@@ -338,13 +352,12 @@ function RawColorGrading({ raw, band, onBandChange, open, onOpenChange, locked, 
   </section>;
 }
 
-function RawCategory({ category, enabled, disabled, resetDisabled, onToggle, onReset, resetLabel, showActions = true, headerActions, children }: {
-  category: RawCategoryId; enabled: boolean; disabled: boolean; resetDisabled: boolean;
+function RawCategory({ category, expanded, onExpandedChange, enabled, disabled, resetDisabled, onToggle, onReset, resetLabel, showActions = true, headerActions, children }: {
+  category: RawCategoryId; expanded: boolean; onExpandedChange: (expanded: boolean) => void; enabled: boolean; disabled: boolean; resetDisabled: boolean;
   onToggle: () => void; onReset?: () => void; resetLabel?: string; children: ReactNode;
   showActions?: boolean; headerActions?: ReactNode;
 }) {
   const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(true);
   const contentId = useId();
   const title = t(category === 'basic' ? 'workspace.basic' : `workspace.rawPreview.${category}Category`);
   const titleKey = category[0].toUpperCase() + category.slice(1);
@@ -352,7 +365,7 @@ function RawCategory({ category, enabled, disabled, resetDisabled, onToggle, onR
     <div className="adjustment-category-header">
       <h3><button type="button" className="adjustment-category-title" aria-expanded={expanded}
         aria-controls={contentId} aria-label={t(`workspace.${expanded ? 'collapse' : 'expand'}${titleKey}`)}
-        onClick={() => setExpanded(value => !value)} onFocus={focusAdjustmentCategory}
+        onClick={() => onExpandedChange(!expanded)} onFocus={focusAdjustmentCategory}
         onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>
         <span className="adjustment-category-chevron" aria-hidden="true">{expanded ? '▾' : '▸'}</span>
         <span className="adjustment-category-label">{title}</span>
@@ -374,13 +387,12 @@ function RawCategory({ category, enabled, disabled, resetDisabled, onToggle, onR
   </section>;
 }
 
-function RawLensCorrections({ raw, locked, operate }: {
+function RawLensCorrections({ raw, locked, operate, expanded, onExpandedChange, defringeOpen, onDefringeOpenChange }: {
   raw: NonNullable<ReturnType<typeof useRawDocument>>; locked: boolean; operate: (operation: RawHistoryOperation) => void;
+  expanded: boolean; onExpandedChange: (expanded: boolean) => void; defringeOpen: boolean; onDefringeOpenChange: (open: boolean) => void;
 }) {
   const { t } = useTranslation();
   const settings = raw.settings!;
-  const [defringeOpen, setDefringeOpen] = useState(false);
-  const [expanded, setExpanded] = useState(true);
   const contentId = useId();
   const baseDisabled = locked || !settings.sections.optics;
   const info = settings.lensProfileInfo;
@@ -415,7 +427,7 @@ function RawLensCorrections({ raw, locked, operate }: {
     <div className="adjustment-category-header raw-optics-header">
       <h3><button type="button" className="adjustment-category-title" aria-expanded={expanded} aria-controls={contentId}
         aria-label={t(`workspace.${expanded ? 'collapse' : 'expand'}LensCorrections`)}
-        onClick={() => setExpanded(value => !value)} onFocus={focusAdjustmentCategory}
+        onClick={() => onExpandedChange(!expanded)} onFocus={focusAdjustmentCategory}
         onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>
         <span className="adjustment-category-chevron" aria-hidden="true">{expanded ? '▾' : '▸'}</span>
         <span className="adjustment-category-label">{t('workspace.rawPreview.lensCorrections')}</span>
@@ -451,7 +463,7 @@ function RawLensCorrections({ raw, locked, operate }: {
       {slider('optics.vignettingMidpoint', 'vignettingMidpoint', value('optics.vignetting') === 0)}
       <div className="raw-optics-fold-header">
         <button type="button" className="adjustment-category-title" aria-expanded={defringeOpen}
-          onClick={() => setDefringeOpen(open => !open)} onFocus={focusAdjustmentCategory}
+          onClick={() => onDefringeOpenChange(!defringeOpen)} onFocus={focusAdjustmentCategory}
           onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>
           <span className="adjustment-category-chevron" aria-hidden="true">{defringeOpen ? '▾' : '▸'}</span>
           <span>{t('workspace.rawPreview.defringe')}</span>

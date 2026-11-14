@@ -1,5 +1,9 @@
 # GenzoRoom 開発ノート
 
+## Windows Native現像パネルUI設定（2026-11-14）
+
+現像パネルの開閉・選択状態を共通UI設定`genzoroom.rawDevelopmentPanelUi`へ保存する。version 1のJSONに、5親カテゴリ、Color Mixer／Color Grading／Lens Corrections／Defringeの開閉、Mixer色、Grading帯だけを含め、localStorageから初回描画前に読み込む。初期状態は親カテゴリとLens Correctionsが展開、Mixer／Grading／Defringeが折り畳み、MixerはRed、GradingはShadows。欠落項目は項目ごとの既定値へ、不正JSONや未知versionは全既定値へ戻す。写真IDと現像データには関連付けず、UI変更はRecipe／History／Nativeへ送らない。スライダー値、Draft、WBスポイト、カーブターゲット・ドラッグ、Historyカーソル、Preview／Export、Native Sessionは対象外。`appSettings.ts`の既存外部ストアを使い、Backend／SQLite／Docker JPEG現像は変更しない。
+
 ## LightCraft Color UI再編とReset（2026-11-14）
 
 Windows Native UIを基本補正、カラー、カーブ、エフェクト、ディテールの5カテゴリへ整理し、Color内にMixerとGradingの折り畳みサブカテゴリを配置する。Gradingの独立ON/OFF UIは撤去し、既存Recipe/Historyの`disabled_sections`値は復元時にそのまま保持する。WB Resetは専用History操作として色温度・色かぶり補正をまとめ、Color ResetはWB、Vibrance、Saturation、Mixer 24項目、公開Grading 11項目を1操作で初期化する。RAW WBはAs Shot、legacy非RAW WBはNativeの既定値6500/0で表示上の相対0/0に戻す。どちらも既存Recipe/History/Undo/Redo/Preview/Export経路を使用し、Native `resetSection(color)`契約、managed patch、Native binary、SQLite schema、Docker JPEG現像は変更しない。

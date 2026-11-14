@@ -10,6 +10,7 @@ export const RECENT_PHOTO_COUNT_KEY = 'genzoroom.recentPhotoCount';
 export const SHOW_KEYBOARD_SHORTCUTS_KEY = 'genzoroom.showKeyboardShortcuts';
 export const ANSHITSU_INITIAL_SELECTION_KEY = 'genzoroom.anshitsuInitialSelection';
 export const ZOOM_NAVIGATOR_POSITION_KEY = 'genzoroom.zoomNavigatorPosition';
+export const RAW_DEVELOPMENT_PANEL_UI_KEY = 'genzoroom.rawDevelopmentPanelUi';
 export const ANSHITSU_INITIAL_SELECTIONS = ['nonRaw', 'raw', 'both'] as const;
 export type AnshitsuInitialSelection = typeof ANSHITSU_INITIAL_SELECTIONS[number];
 export function effectiveAnshitsuSelection(saved: AnshitsuInitialSelection, rawAvailable: boolean): AnshitsuInitialSelection {
@@ -28,7 +29,63 @@ export const RECENT_PHOTO_COUNTS = [50, 100, 150, 200, 250, 300, 350, 400, 450, 
 export type RecentPhotoCount = typeof RECENT_PHOTO_COUNTS[number];
 export const ZOOM_NAVIGATOR_POSITIONS = ['off', 'top-left', 'top-right', 'bottom-left', 'bottom-right'] as const;
 export type ZoomNavigatorPosition = typeof ZOOM_NAVIGATOR_POSITIONS[number];
-export type Settings = { dateLocale: DateLocale; weekStart: WeekStart; initialImage: InitialImage; homeThumbnailWidth: HomeThumbnailWidth; recentPhotoCount: RecentPhotoCount; showKeyboardShortcuts: boolean; anshitsuInitialSelection: AnshitsuInitialSelection; zoomNavigatorPosition: ZoomNavigatorPosition };
+export const RAW_PANEL_CATEGORIES = ['basic', 'color', 'curves', 'effects', 'detail'] as const;
+export type RawPanelCategory = typeof RAW_PANEL_CATEGORIES[number];
+export const RAW_PANEL_MIXER_COLORS = ['red', 'orange', 'yellow', 'green', 'aqua', 'blue', 'purple', 'magenta'] as const;
+export type RawPanelMixerColor = typeof RAW_PANEL_MIXER_COLORS[number];
+export const RAW_PANEL_GRADING_BANDS = ['shadows', 'midtones', 'highlights'] as const;
+export type RawPanelGradingBand = typeof RAW_PANEL_GRADING_BANDS[number];
+export type RawDevelopmentPanelUi = {
+  version: 1;
+  categories: Record<RawPanelCategory, boolean>;
+  subcategories: { mixer: boolean; grading: boolean; lensCorrections: boolean; defringe: boolean };
+  selection: { mixerColor: RawPanelMixerColor; gradingBand: RawPanelGradingBand };
+};
+export type Settings = { dateLocale: DateLocale; weekStart: WeekStart; initialImage: InitialImage; homeThumbnailWidth: HomeThumbnailWidth; recentPhotoCount: RecentPhotoCount; showKeyboardShortcuts: boolean; anshitsuInitialSelection: AnshitsuInitialSelection; zoomNavigatorPosition: ZoomNavigatorPosition; rawDevelopmentPanelUi: RawDevelopmentPanelUi };
+
+export function defaultRawDevelopmentPanelUi(): RawDevelopmentPanelUi {
+  return {
+    version: 1,
+    categories: { basic: true, color: true, curves: true, effects: true, detail: true },
+    subcategories: { mixer: false, grading: false, lensCorrections: true, defringe: false },
+    selection: { mixerColor: 'red', gradingBand: 'shadows' },
+  };
+}
+
+function normalizeRawDevelopmentPanelUi(value: unknown): RawDevelopmentPanelUi {
+  const defaults = defaultRawDevelopmentPanelUi();
+  if (!value || typeof value !== 'object' || (value as { version?: unknown }).version !== 1) return defaults;
+  const saved = value as Partial<RawDevelopmentPanelUi>;
+  const categories = saved.categories && typeof saved.categories === 'object' ? saved.categories as Partial<Record<RawPanelCategory, unknown>> : {};
+  const subcategories = saved.subcategories && typeof saved.subcategories === 'object'
+    ? saved.subcategories as Partial<Record<'mixer' | 'grading' | 'lensCorrections' | 'defringe', unknown>> : {};
+  const selection = saved.selection && typeof saved.selection === 'object'
+    ? saved.selection as Partial<Record<'mixerColor' | 'gradingBand', unknown>> : {};
+  return {
+    version: 1,
+    categories: Object.fromEntries(RAW_PANEL_CATEGORIES.map(category => [category,
+      typeof categories[category] === 'boolean' ? categories[category] : defaults.categories[category]])) as RawDevelopmentPanelUi['categories'],
+    subcategories: {
+      mixer: typeof subcategories.mixer === 'boolean' ? subcategories.mixer : defaults.subcategories.mixer,
+      grading: typeof subcategories.grading === 'boolean' ? subcategories.grading : defaults.subcategories.grading,
+      lensCorrections: typeof subcategories.lensCorrections === 'boolean' ? subcategories.lensCorrections : defaults.subcategories.lensCorrections,
+      defringe: typeof subcategories.defringe === 'boolean' ? subcategories.defringe : defaults.subcategories.defringe,
+    },
+    selection: {
+      mixerColor: RAW_PANEL_MIXER_COLORS.includes(selection.mixerColor as RawPanelMixerColor)
+        ? selection.mixerColor as RawPanelMixerColor : defaults.selection.mixerColor,
+      gradingBand: RAW_PANEL_GRADING_BANDS.includes(selection.gradingBand as RawPanelGradingBand)
+        ? selection.gradingBand as RawPanelGradingBand : defaults.selection.gradingBand,
+    },
+  };
+}
+
+function readRawDevelopmentPanelUi(storage = browserStorage()): RawDevelopmentPanelUi {
+  try {
+    const raw = storage?.getItem(RAW_DEVELOPMENT_PANEL_UI_KEY);
+    return raw === null || raw === undefined ? defaultRawDevelopmentPanelUi() : normalizeRawDevelopmentPanelUi(JSON.parse(raw));
+  } catch { return defaultRawDevelopmentPanelUi(); }
+}
 
 export function browserStorage(): Storage | undefined {
   try { return typeof window === 'undefined' ? undefined : window.localStorage; }
@@ -81,6 +138,7 @@ export function readSettings(storage = browserStorage()): Settings {
     showKeyboardShortcuts,
     anshitsuInitialSelection,
     zoomNavigatorPosition,
+    rawDevelopmentPanelUi: readRawDevelopmentPanelUi(storage),
   };
 }
 let settings = readSettings();
@@ -88,10 +146,14 @@ const listeners = new Set<() => void>();
 export function updateSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
   if (key === 'zoomNavigatorPosition' && !ZOOM_NAVIGATOR_POSITIONS.includes(value as ZoomNavigatorPosition)) return;
   if (key === 'anshitsuInitialSelection' && !ANSHITSU_INITIAL_SELECTIONS.includes(value as AnshitsuInitialSelection)) return;
-  settings = { ...settings, [key]: value };
-  const storageKey = { dateLocale: DATE_LOCALE_KEY, weekStart: WEEK_START_KEY, initialImage: INITIAL_IMAGE_KEY, homeThumbnailWidth: HOME_THUMBNAIL_WIDTH_KEY, recentPhotoCount: RECENT_PHOTO_COUNT_KEY, showKeyboardShortcuts: SHOW_KEYBOARD_SHORTCUTS_KEY, anshitsuInitialSelection: ANSHITSU_INITIAL_SELECTION_KEY, zoomNavigatorPosition: ZOOM_NAVIGATOR_POSITION_KEY }[key];
-  try { browserStorage()?.setItem(storageKey, String(value)); } catch { /* Keep session preferences when storage is blocked. */ }
+  const nextValue = (key === 'rawDevelopmentPanelUi' ? normalizeRawDevelopmentPanelUi(value) : value) as Settings[K];
+  settings = { ...settings, [key]: nextValue };
+  const storageKey = { dateLocale: DATE_LOCALE_KEY, weekStart: WEEK_START_KEY, initialImage: INITIAL_IMAGE_KEY, homeThumbnailWidth: HOME_THUMBNAIL_WIDTH_KEY, recentPhotoCount: RECENT_PHOTO_COUNT_KEY, showKeyboardShortcuts: SHOW_KEYBOARD_SHORTCUTS_KEY, anshitsuInitialSelection: ANSHITSU_INITIAL_SELECTION_KEY, zoomNavigatorPosition: ZOOM_NAVIGATOR_POSITION_KEY, rawDevelopmentPanelUi: RAW_DEVELOPMENT_PANEL_UI_KEY }[key];
+  try { browserStorage()?.setItem(storageKey, key === 'rawDevelopmentPanelUi' ? JSON.stringify(nextValue) : String(nextValue)); } catch { /* Keep session preferences when storage is blocked. */ }
   listeners.forEach(listener => listener());
+}
+export function updateRawDevelopmentPanelUi(update: (current: RawDevelopmentPanelUi) => RawDevelopmentPanelUi) {
+  updateSetting('rawDevelopmentPanelUi', update(settings.rawDevelopmentPanelUi));
 }
 export function useAppSettings() {
   return useSyncExternalStore(listener => { listeners.add(listener); return () => { listeners.delete(listener); }; }, () => settings, () => settings);

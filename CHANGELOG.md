@@ -8,6 +8,7 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
+- Windows Desktop Native development preserves the adjustment-panel categories, Mixer/Grading/Lens Corrections/Defringe folds, selected Mixer color, and selected Grading band across photos and app restarts.
 - Windows Desktop LightCraft development adds a Camera Local Tone Mapping toggle for images with supported camera tone-map data.
 - Windows Desktop LightCraft development groups Color Grading and the Color Mixer under the Color category and adds separate WB-only and full Color Reset History actions.
 

@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ANSHITSU_INITIAL_SELECTION_KEY, DATE_LOCALE_KEY, HOME_THUMBNAIL_COLUMNS_KEY, HOME_THUMBNAIL_WIDTH_KEY, HOME_THUMBNAIL_WIDTHS, INITIAL_IMAGE_KEY, RECENT_PHOTO_COUNT_KEY, WEEK_START_KEY, ZOOM_NAVIGATOR_POSITION_KEY, ZOOM_NAVIGATOR_POSITIONS, prefersOriginal, readSettings, resolveDateLocale, resolveWeekStart, updateSetting } from './appSettings';
+import { ANSHITSU_INITIAL_SELECTION_KEY, DATE_LOCALE_KEY, HOME_THUMBNAIL_COLUMNS_KEY, HOME_THUMBNAIL_WIDTH_KEY, HOME_THUMBNAIL_WIDTHS, INITIAL_IMAGE_KEY, RAW_DEVELOPMENT_PANEL_UI_KEY, RECENT_PHOTO_COUNT_KEY, WEEK_START_KEY, ZOOM_NAVIGATOR_POSITION_KEY, ZOOM_NAVIGATOR_POSITIONS, defaultRawDevelopmentPanelUi, prefersOriginal, readSettings, resolveDateLocale, resolveWeekStart, updateSetting } from './appSettings';
 import i18n, { changeAppLanguage, currentLanguagePreference, detectLanguage, formatPhotoDate, LANGUAGE_STORAGE_KEY, readLanguagePreference } from './i18n';
 import { formatAlbumMonth } from './albums';
 import { SHOW_KEYBOARD_SHORTCUTS_KEY } from './appSettings';
 
-afterEach(() => { vi.unstubAllGlobals(); updateSetting('dateLocale', 'auto'); updateSetting('weekStart', 'auto'); updateSetting('initialImage', 'auto'); updateSetting('homeThumbnailWidth', 200); updateSetting('recentPhotoCount', 100); updateSetting('anshitsuInitialSelection', 'nonRaw'); updateSetting('zoomNavigatorPosition', 'bottom-right'); });
+afterEach(() => { vi.unstubAllGlobals(); updateSetting('dateLocale', 'auto'); updateSetting('weekStart', 'auto'); updateSetting('initialImage', 'auto'); updateSetting('homeThumbnailWidth', 200); updateSetting('recentPhotoCount', 100); updateSetting('anshitsuInitialSelection', 'nonRaw'); updateSetting('zoomNavigatorPosition', 'bottom-right'); updateSetting('rawDevelopmentPanelUi', defaultRawDevelopmentPanelUi()); if (typeof window !== 'undefined') window.localStorage.removeItem(RAW_DEVELOPMENT_PANEL_UI_KEY); });
 const memory = (initial: Record<string, string> = {}) => ({
   getItem: (key: string) => initial[key] ?? null,
   setItem: (key: string, value: string) => { initial[key] = value; },
@@ -37,6 +37,29 @@ describe('browser preferences', () => {
     expect(readSettings(storage as Storage).zoomNavigatorPosition).toBe('off');
     updateSetting('zoomNavigatorPosition', 'invalid' as never);
     expect(readSettings(storage as Storage).zoomNavigatorPosition).toBe('off');
+  });
+  it('loads versioned RAW panel UI state, merges safe defaults, rejects invalid data and persists updates', () => {
+    const defaults = defaultRawDevelopmentPanelUi();
+    expect(readSettings(memory() as Storage).rawDevelopmentPanelUi).toEqual(defaults);
+    const partial = memory({ [RAW_DEVELOPMENT_PANEL_UI_KEY]: JSON.stringify({ version: 1,
+      categories: { color: false }, subcategories: { mixer: true }, selection: { mixerColor: 'blue' } }) });
+    expect(readSettings(partial as Storage).rawDevelopmentPanelUi).toEqual({
+      ...defaults, categories: { ...defaults.categories, color: false },
+      subcategories: { ...defaults.subcategories, mixer: true },
+      selection: { ...defaults.selection, mixerColor: 'blue' },
+    });
+    for (const invalid of ['{', JSON.stringify({ version: 2 }), JSON.stringify({ version: 1,
+      categories: { color: 'closed' }, subcategories: { mixer: 'open' }, selection: { mixerColor: 'cyan', gradingBand: 'mid' } })]) {
+      expect(readSettings(memory({ [RAW_DEVELOPMENT_PANEL_UI_KEY]: invalid }) as Storage).rawDevelopmentPanelUi).toEqual(defaults);
+    }
+    const storage = memory();
+    vi.stubGlobal('window', { localStorage: storage });
+    const updated = { ...defaults, categories: { ...defaults.categories, basic: false, color: false },
+      subcategories: { ...defaults.subcategories, mixer: true, grading: true, defringe: true },
+      selection: { mixerColor: 'magenta' as const, gradingBand: 'highlights' as const } };
+    updateSetting('rawDevelopmentPanelUi', updated);
+    expect(storage.getItem(RAW_DEVELOPMENT_PANEL_UI_KEY)).toBe(JSON.stringify(updated));
+    expect(readSettings(storage as Storage).rawDevelopmentPanelUi).toEqual(updated);
   });
   it('preserves legacy browser Auto, restores language sync and falls back for invalid date preferences', () => {
     for (const value of ['auto', 'invalid', '']) {
@@ -86,9 +109,9 @@ describe('browser preferences', () => {
     expect(detectLanguage(storage, ['ja-JP'])).toBe('en');
   });
   it('defaults and reloads independent preferences, ignoring invalid saved values', () => {
-    expect(readSettings(memory() as Storage)).toEqual({ dateLocale: 'auto', weekStart: 'auto', initialImage: 'auto', homeThumbnailWidth: 200, recentPhotoCount: 100, showKeyboardShortcuts: true, anshitsuInitialSelection: 'nonRaw', zoomNavigatorPosition: 'bottom-right' });
+    expect(readSettings(memory() as Storage)).toEqual({ dateLocale: 'auto', weekStart: 'auto', initialImage: 'auto', homeThumbnailWidth: 200, recentPhotoCount: 100, showKeyboardShortcuts: true, anshitsuInitialSelection: 'nonRaw', zoomNavigatorPosition: 'bottom-right', rawDevelopmentPanelUi: defaultRawDevelopmentPanelUi() });
     const storage = memory({ [DATE_LOCALE_KEY]: 'en-GB', [WEEK_START_KEY]: 'sunday', [INITIAL_IMAGE_KEY]: 'original', [HOME_THUMBNAIL_WIDTH_KEY]: '180', [RECENT_PHOTO_COUNT_KEY]: '250' });
-    expect(readSettings(storage as Storage)).toEqual({ dateLocale: 'en-GB', weekStart: 'sunday', initialImage: 'original', homeThumbnailWidth: 180, recentPhotoCount: 250, showKeyboardShortcuts: true, anshitsuInitialSelection: 'nonRaw', zoomNavigatorPosition: 'bottom-right' });
+    expect(readSettings(storage as Storage)).toEqual({ dateLocale: 'en-GB', weekStart: 'sunday', initialImage: 'original', homeThumbnailWidth: 180, recentPhotoCount: 250, showKeyboardShortcuts: true, anshitsuInitialSelection: 'nonRaw', zoomNavigatorPosition: 'bottom-right', rawDevelopmentPanelUi: defaultRawDevelopmentPanelUi() });
     for (const width of HOME_THUMBNAIL_WIDTHS) {
       expect(readSettings(memory({ [HOME_THUMBNAIL_WIDTH_KEY]: String(width) }) as Storage).homeThumbnailWidth).toBe(width);
     }
@@ -98,14 +121,14 @@ describe('browser preferences', () => {
     for (const invalidCount of ['49', '51', '501', '225', '100.0', 'invalid']) {
       expect(readSettings(memory({ [RECENT_PHOTO_COUNT_KEY]: invalidCount }) as Storage).recentPhotoCount).toBe(100);
     }
-    expect(readSettings(memory({ [DATE_LOCALE_KEY]: 'invalid', [WEEK_START_KEY]: 'friday', [INITIAL_IMAGE_KEY]: 'raw', [HOME_THUMBNAIL_WIDTH_KEY]: '11', [RECENT_PHOTO_COUNT_KEY]: '225' }) as Storage)).toEqual({ dateLocale: 'auto', weekStart: 'auto', initialImage: 'auto', homeThumbnailWidth: 200, recentPhotoCount: 100, showKeyboardShortcuts: true, anshitsuInitialSelection: 'nonRaw', zoomNavigatorPosition: 'bottom-right' });
+    expect(readSettings(memory({ [DATE_LOCALE_KEY]: 'invalid', [WEEK_START_KEY]: 'friday', [INITIAL_IMAGE_KEY]: 'raw', [HOME_THUMBNAIL_WIDTH_KEY]: '11', [RECENT_PHOTO_COUNT_KEY]: '225' }) as Storage)).toEqual({ dateLocale: 'auto', weekStart: 'auto', initialImage: 'auto', homeThumbnailWidth: 200, recentPhotoCount: 100, showKeyboardShortcuts: true, anshitsuInitialSelection: 'nonRaw', zoomNavigatorPosition: 'bottom-right', rawDevelopmentPanelUi: defaultRawDevelopmentPanelUi() });
     vi.stubGlobal('window', { localStorage: storage });
     updateSetting('initialImage', 'preview'); updateSetting('weekStart', 'monday'); updateSetting('dateLocale', 'ja-JP');
     updateSetting('homeThumbnailWidth', 240);
     updateSetting('recentPhotoCount', 450);
     expect(storage.getItem(HOME_THUMBNAIL_WIDTH_KEY)).toBe('240');
     expect(storage.getItem(RECENT_PHOTO_COUNT_KEY)).toBe('450');
-    expect(readSettings(storage as Storage)).toEqual({ dateLocale: 'ja-JP', weekStart: 'monday', initialImage: 'preview', homeThumbnailWidth: 240, recentPhotoCount: 450, showKeyboardShortcuts: true, anshitsuInitialSelection: 'nonRaw', zoomNavigatorPosition: 'bottom-right' });
+    expect(readSettings(storage as Storage)).toEqual({ dateLocale: 'ja-JP', weekStart: 'monday', initialImage: 'preview', homeThumbnailWidth: 240, recentPhotoCount: 450, showKeyboardShortcuts: true, anshitsuInitialSelection: 'nonRaw', zoomNavigatorPosition: 'bottom-right', rawDevelopmentPanelUi: defaultRawDevelopmentPanelUi() });
     expect(readSettings(memory({ [ANSHITSU_INITIAL_SELECTION_KEY]: 'raw' }) as Storage).anshitsuInitialSelection).toBe('raw');
     expect(readSettings(memory({ [ANSHITSU_INITIAL_SELECTION_KEY]: 'both' }) as Storage).anshitsuInitialSelection).toBe('both');
     expect(readSettings(memory({ [ANSHITSU_INITIAL_SELECTION_KEY]: 'invalid' }) as Storage).anshitsuInitialSelection).toBe('nonRaw');
@@ -142,7 +165,7 @@ describe('browser preferences', () => {
   it('accepts changes for the current session when storage is blocked', async () => {
     const storage = { getItem: () => { throw new Error('Denied'); }, setItem: () => { throw new Error('Denied'); } };
     vi.stubGlobal('window', { localStorage: storage });
-    expect(readSettings()).toEqual({ dateLocale: 'auto', weekStart: 'auto', initialImage: 'auto', homeThumbnailWidth: 200, recentPhotoCount: 100, showKeyboardShortcuts: true, anshitsuInitialSelection: 'nonRaw', zoomNavigatorPosition: 'bottom-right' });
+    expect(readSettings()).toEqual({ dateLocale: 'auto', weekStart: 'auto', initialImage: 'auto', homeThumbnailWidth: 200, recentPhotoCount: 100, showKeyboardShortcuts: true, anshitsuInitialSelection: 'nonRaw', zoomNavigatorPosition: 'bottom-right', rawDevelopmentPanelUi: defaultRawDevelopmentPanelUi() });
     updateSetting('dateLocale', 'en-GB'); expect(resolveDateLocale()).toBe('en-GB');
     updateSetting('weekStart', 'sunday'); expect(resolveWeekStart()).toBe(0);
     await changeAppLanguage('ja', storage); expect(i18n.resolvedLanguage).toBe('ja'); expect(currentLanguagePreference()).toBe('ja');
