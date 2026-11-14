@@ -3,7 +3,28 @@
 調査日: 2026-11-14
 対象: GenzoRoom `main` (`eda9c20`)、Managed LightCraft v0.20.0
 
-## 実装到達点（P1-B2）
+## 現行実装とP1-C統合監査
+
+| 段階 | 到達点 |
+| --- | --- |
+| P0 | LightCraft v0.20.0のNative数値・ターゲット操作契約を調査 |
+| P1-A（`9c55bcd`） | 24項目を既存のNative数値コントロール経路へ接続 |
+| P1-B1（`0b89865`） | 8色選択とH/S/Lスライダー、Mixer専用Reset |
+| P1-B2（`4240c77`） | 5カテゴリ、Color内のGrading、WB専用Resetと親Color複合Reset |
+| P1-C（監査基準 `c9e84e6`） | 設定契約の回帰検証、RAW・非RAWのExport fixture拡張、現行仕様の整理 |
+
+Historyの複数項目Resetは操作名のみを表示する（`c633bff`）。5親カテゴリとMixer／Grading／レンズ補正／Defringeの開閉、Mixer色、Grading帯は写真に紐付かないversion 1のUI設定として復元する（`c9e84e6`）。保存値がないときMixer／Gradingは閉じている。
+
+- **数値と編集境界**。24 ID、−100〜+100、step 1、既定値0を確認。整数表示でもreadbackの小数は保持する。色切替・Reset・パネルの閉鎖・写真切替では既存の編集確定経路を使用する。Draft／Fullの更新と失敗・再試行の回帰を確認した。
+- **Resetと保存**。RAWのAs Shot、非RAWの相対WB 0/0、Mixer／Grading専用Reset、親ColorのON/OFFおよび複合Resetを確認。設定のreadbackをHistoryに反映し、既存のUndo／Redo／JumpとRecipe復元を通す。親Color Resetは未公開Grading Global、旧Grading bypass、他カテゴリを保持する。
+- **PreviewとExport**。Previewは編集Sessionの設定を使用し、Exportは保存設定を独立Sessionへreset→mergeで復元し、Export前後に照合する。RAW・非RAWのfixtureで小数Mixer値とGradingの引き渡し、欠落Mixerの0補完を確認した。対象原本での描画比較はWindows Desktop受入項目として残る。
+- **UI設定**。写真切替、再マウント、保存値の再読込、不正値の既定値復帰、編集値の写真間分離を自動検証。写真切替時のカテゴリ開閉保持はユーザーの実機確認済み。
+
+関連Frontend 320件、Backend 304件が成功。Backend件数はExport修正後の再実行61件と初回の他5ファイル243件の合計。TypeScript、本番ビルド、`git diff --check`も成功した。
+
+**将来検討**。P2はViewerでのH/S/Lターゲット操作、共通ルーペ、複数帯readback、操作単位のHistoryを扱う。MixerのHueカラーバーは8色別にNative OkLChの正負方向と合わせる。Saturation／Luminanceはモノクロバーを維持し、Recipe／Native契約に追加は不要。Point Colorは未実装の独立フェーズ。サブカテゴリの独立ON/OFF案は下記を参照。
+
+## P1-B2時点の実装記録（履歴）
 
 更新日: 2026-11-14。P0調査時点の事実、P1-B1時点の暫定UI、P1-B2で確定した実装を区別する。P1-AはGenzoRoom commit `9c55bcd`、P1-B1は親 commit `0b89865`を前提とする。P1-B2はこの作業で追加されるカラーUI再編とReset契約である。
 
@@ -11,7 +32,7 @@ Windows Nativeカテゴリは「基本補正→カラー→カーブ→エフェ
 
 親Color Resetは`colorReset`としてGenzoRoomの1 History操作にまとめ、WB・vibrance・saturation・Mixer 24項目・公開中のGrading 11項目を既定値へ戻す。WB Resetと同じNative WB初期化手順を共有し、RAWはAs Shot、非RAWはtemp 6500/tint 0でlegacy相対表示0/0とする。Mixer／GradingはNative readbackを照合し、未公開の`grading.global.*`やその他設定は維持する。親ResetではNative `resetSection(color)`の意味を変更せず、Mixer／Gradingの数値とWBのみを限定したNative更新で扱う。Grading固有のsection ON/OFF UIと操作は撤去し、Mixer／Grading／将来のPoint Colorに独立ON/OFFを置かない。Native v0.20.0では親`color` sectionがカラー処理全体（WB、Mixer、Grading、Point Colorを含む）を描画から除外する。Recipe/History内の既存`disabled_sections`に`grading`があっても消去・書換えせず、Recipe復元・Undo/Redoでその保存値を保持する。
 
-P1-B2の実装到達点は、5カテゴリ配置、カラー内にWB操作と折り畳みMixer／Grading、WB専用Reset・親Color Resetを統合したこと。既存のNative数値コントロール、Recipe形式、History append／Undo／Redo、Preview、Export経路を再利用する。変更した操作契約は本節とarchitectureに記載し、以下のP0調査結果は調査時点の記録として残す。次段階はP1-C（将来Point Color）とP2（ターゲットH/S/L調整）であり、どちらもP1-B2の対象外。
+P1-B2の実装到達点は、5カテゴリ配置、カラー内にWB操作と折り畳みMixer／Grading、WB専用Reset・親Color Resetを統合したこと。既存のNative数値コントロール、Recipe形式、History append／Undo／Redo、Preview、Export経路を再利用する。変更した操作契約は本節とarchitectureに記載し、以下のP0調査結果は調査時点の記録として残す。P1-Cは統合監査、P2はターゲットH/S/L調整、Point Colorは別フェーズとする。
 
 **将来検討：カラーサブカテゴリ独立ON/OFF。** 親Color OFFではWB・vibrance・saturation・Mixer・Gradingがまとめて描画対象外になるため、WB調整を保ったままMixer／Gradingの効果だけを比較できないケースがある。将来Mixer、Grading、Point Colorごとに独立ON/OFFを設ける案を検討する。第一候補は元の設定値を維持し、Preview／Exportに渡す設定のみ対象サブカテゴリを中立化する方式。managed patch追加を避けGenzoRoom側で実現することを優先するが、実装方式・保存形式・History境界は未決定であり、LightCraft契約とRecipe／Export経路を調査してから判断する。P1-B2では実装しない。
 
@@ -68,7 +89,7 @@ GenzoRoom P1は既存Colorカテゴリ内に8色選択とH/S/L数値スライダ
 
 **P2 — ターゲット調整。** H/S/Lの排他的なモード、Viewer pointer lifecycle、fixed-origin loupe、Native targeted update、readback、Draft Preview、Pointer Upで1件のHistory、Escape/cancelを実装する。既存Curve Interactionのsession ownership、順序保証、cancel/recoveryを必要な範囲で再利用し、WB pickerとの排他を保つ。Native APIの基本機能にmanaged patch追加は不要。モノクロB&W Mixは今回の範囲外。
 
-## 検証済み事項と未確認事項
+## P0時点の検証済み事項と未確認事項（履歴）
 
 検証済み: checkout commitとmanifest一致、managed patch SHAと逆適用、Native binary receipt/SHA一致。CLI/MCP上で24 Native controls、set/get/reset、H/S/L targeted readbackが複数色帯へ及ぶこと、Cancel復元、Interaction End後Undo、変更後のDraft/Full previewを確認した。これらは合成demo上のNative確認であり、GenzoRoomの新規統合テストやWindows Desktop実機確認ではない。
 

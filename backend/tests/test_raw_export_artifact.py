@@ -101,10 +101,18 @@ def test_isolated_session_cleanup(tmp_path, mode, monkeypatch):
     if mode in ('jpeg_legacy_wb', 'dng_kelvin_wb', 'kelvin_mismatch'):
         scale = 'legacy' if mode == 'jpeg_legacy_wb' else 'kelvin'
         settings['wb'] = {'mode': 'custom', 'temp': 6500, 'tint': 12, 'scale': scale}
+    if mode in ('jpeg_legacy_wb', 'dng_kelvin_wb'):
+        settings['mixer'] = {'red': {'hue': 12.375}, 'blue': {'sat': -40.25, 'lum': 7.5}}
     if mode == 'legacy_grading':
         settings.pop('grading')
     original_settings = copy.deepcopy(settings)
     native_settings = copy.deepcopy(settings)
+    expected_mixer = {color: dict.fromkeys(('hue', 'sat', 'lum'), 0.0)
+                      for color in ('red', 'orange', 'yellow', 'green', 'aqua', 'blue', 'purple', 'magenta')}
+    if 'mixer' in settings:
+        expected_mixer['red']['hue'] = 12.375
+        expected_mixer['blue'].update(sat=-40.25, lum=7.5)
+        native_settings['mixer'] = expected_mixer
     if mode == 'kelvin_mismatch':
         native_settings['wb']['scale'] = 'legacy'
     if mode == 'legacy_grading':
@@ -144,6 +152,7 @@ def test_isolated_session_cleanup(tmp_path, mode, monkeypatch):
             if name == 'command_run' and args['id'] == 'develop.merge':
                 expected_settings = copy.deepcopy(settings)
                 expected_settings.setdefault('detail', {}).setdefault('nr_outliers', False)
+                expected_settings['mixer'] = expected_mixer
                 assert args['params']['settings'] == expected_settings
             if name == 'get_develop':
                 value = {} if mode == 'mismatch' else native_settings

@@ -1,5 +1,11 @@
 # GenzoRoom 開発ノート
 
+## Color Mixer P1-C 統合監査（2026-11-14）
+
+`c9e84e6`を基準に、Windows NativeのMixer数値契約、Color UI、Reset、Recipe／History復元、Draft／Full Preview、Export、UI設定を監査した。関連Frontend 4ファイル320件、Backend 6ファイル304件が成功（Backendは初回成功済み243件と修正後のExport 61件）。TypeScript、本番ビルド、差分チェックも成功。Backendは既知のWindows asyncio socketpair制約を避けてsandbox外のリポジトリ仮想環境で実行した。
+
+既存Export fixtureはMixer欠落時に24項目が0で補完される送信契約を期待値に含めておらず、初回の11件の失敗はこの差分によるものだった。期待値を更新し、RAW／非RAWの両ケースで非ゼロの小数Mixer値とGradingを含む設定が独立Sessionへ渡されることを検証した。テストはNative応答を模擬しており、実原本での描画は未確認。Windows Desktop受入ではRAW・非RAW各1枚で、Mixer／Grading編集後の再オープンとHistory移動、WB Reset、Previewと書き出し画像の効果、再起動後のUI復元を確認する。写真切替後のカテゴリ開閉保持はユーザー確認済み。
+
 ## Windows Native現像パネルUI設定（2026-11-14）
 
 現像パネルの開閉・選択状態を共通UI設定`genzoroom.rawDevelopmentPanelUi`へ保存する。version 1のJSONに、5親カテゴリ、Color Mixer／Color Grading／Lens Corrections／Defringeの開閉、Mixer色、Grading帯だけを含め、localStorageから初回描画前に読み込む。初期状態は親カテゴリとLens Correctionsが展開、Mixer／Grading／Defringeが折り畳み、MixerはRed、GradingはShadows。欠落項目は項目ごとの既定値へ、不正JSONや未知versionは全既定値へ戻す。写真IDと現像データには関連付けず、UI変更はRecipe／History／Nativeへ送らない。スライダー値、Draft、WBスポイト、カーブターゲット・ドラッグ、Historyカーソル、Preview／Export、Native Sessionは対象外。`appSettings.ts`の既存外部ストアを使い、Backend／SQLite／Docker JPEG現像は変更しない。
