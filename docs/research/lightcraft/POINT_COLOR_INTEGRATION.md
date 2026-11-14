@@ -155,3 +155,52 @@ Viewer の crosshair と [ViewerPointLoupe](../../../frontend/src/ViewerPointLou
 | 関連検証ソース | `crates/engine/src/tests/color.rs`、`crates/develop/src/controls.rs`、`crates/pipeline/src/{colorops,visualize,tests_window}.rs`、`crates/gpu/tests/it/equivalence.rs` |
 
 GenzoRoom 側の既存設計は [Color Mixer 調査](COLOR_MIXER_INTEGRATION.md)、[WB Native 契約](WB_NATIVE_CONTRACT.md)、[Region 設計](RAW_REGION_PREVIEW_DESIGN.md) を参照。接続箇所は [Native runtime](../../../backend/lightcraft_runtime.py)、[Windows API](../../../backend/windows_raw_api.py)、[Recipe store](../../../backend/raw_recipe_store.py)、[rawApi](../../../frontend/src/rawApi.ts)、[useRawDocument](../../../frontend/src/useRawDocument.ts)、[ImageViewer](../../../frontend/src/ImageViewer.tsx)、[rawTargetCoordinates](../../../frontend/src/rawTargetCoordinates.ts)。
+
+## P1-A0 — Backend mutation と保存境界の調査
+
+**調査範囲**。現在の `main` `cd6d165` の [lightcraft_raw.py](../../../backend/lightcraft_raw.py)、[windows_raw_api.py](../../../backend/windows_raw_api.py)、[raw_controls.py](../../../backend/raw_controls.py)、[raw_recipe_store.py)、[lightcraft_runtime.py](../../../backend/lightcraft_runtime.py) を確認した。Native command は呼び出しておらず、製品コード、テスト、Recipe／History／DB は変更していない。
+
+### 既存の mutation と History 保存経路
+
+通常スライダーは Windows API `/documents/{handle}/controls` のみで適用する。`_execute` が workspace/documentToken/generation/expectedRevision と History 状態を検査し、History が初期化済みなら `_history_enabled` が false の直接編集を `raw_history_client_required` で拒否する。初期化前だけ `validate_controls` → `LightCraftRawSession.set_controls` → `_mutate` → Native `develop.set`／`develop.merge` → `develop.get` → `_commit` が通る。この経路は操作後 snapshot を即座に返すが History append は行わない。通常利用では先に History を初期化し、以後の編集を History endpoint へ集約する。
+
+History 経路は `POST /documents/{handle}/history/operate`。`_history_body` が action/kind/metadata と identity・revision・save ID を検証し、`_history_unsettled`、Recipe の未完了保存、History が見ている Recipe fingerprint と Native document fingerprint の一致を確認する。`_history_save` は immutable request と stage を保持する。既存 History／Recipe snapshot を Native readback と照合し、必要ならその基準 snapshot を復元してから操作を適用する。完了後に `develop.get` 由来の完全設定 snapshot を使い、Recipe revision の CAS と History step append を行う。
+
+Recipe は別の `/recipe` 経路で保存される。History の commit/operate は SQLite transaction 内で Recipe revision、History cursor/step、save receipt を更新し、通常はその Recipe snapshot が現在値となる。History が初期化されていない RAW では、最初の operate の `baseline_settings` に直前の保存値を渡して履歴 baseline を構成する。`mutate_raw_edits` が Immich thumbnail 更新との調整を行う。Point Color の追加・削除・調整は既存 `operate` の追加・削除境界に載せ、単なる Recipe save や直接 `/controls` へ接続しない。
+
+WB 採色は Native 候補計算を `prepare` 内で行い、同じ History operation 内で選択値を適用し readback する。`_history_wb` は Native が候補を適用済みか再確認するため、途中再試行で候補を二重適用しない。Mixer ターゲットは専用 interaction route がドラッグ中の Native updates と preview を管理し、Pointer-up の History `operate` が interaction を終了、最終 snapshot を読み、History transaction を確定してから interaction owner を `confirm_mixer_interaction` で解放する。Curve も対応する begin/update/end/cancel と History `operate` を使う。普通の Mixer 数値 control は indexed でないため `controls` → History metadata → `apply_history_operation` の固定 allowlist を通る。
+
+### 共有できる排他と Recovery
+
+`_history_unsettled` は未完了の History save と geometry gesture を拒否し、endpoint admission は `_history_draining`、discard/close と task/preview lease を確認する。`_history_verify` は document object、handle/generation と `recipe_identity` を再検証する。`LightCraftRawSession._submit` が command queue lock、active photo、session generation、lost/desynchronized、Curve/Mixer owner を確認する。`_mutate` は expected revision と pending revision を再確認し、送信前に `library.select` で Native active photo を対象 document に合わせる。従って Point Color 専用 lock は追加せず、History owner と既存 mutation queue を共有する。
+
+Native mutation 後の readback mismatch や設定取得失敗を成功とみなしてはならない。`_mutate` は送信前後の失敗を区別し、送信後に結果が不明なら session/photo を desynchronized 扱いにして通常操作を止め、既存の reset/reopen/recovery 経路へ渡す。追加は相対的・非冪等なので同じ pick を再送しない。History request/save ID と fingerprint は DB commit の再送を冪等にするが、Native pick の再送を安全にするものではない。Pending History は同じ immutable request の DB receipt を先に確認し、完了済みなら Native command を再実行せず応答を再生する。
+
+Native mutation が完了してから SQLite append に失敗した場合、既存実装は保存段階 `stage=save` と同じ save ID/request fingerprint を維持する。Recovery では Native 設定を再取得し、recipe/history receipt を照合して commit の再試行または操作復旧を判断する。History 未記録の結果を通常編集として成功応答せず、`raw_history_save_pending` 等で後続操作を止める。client retry は同じ request/save ID を使い、異なる操作を新規送信しない。Native の結果が不明、または保存状態を確定できない場合は desync/recovery を必要とし、正常な編集状態を仮定しない。
+
+### Point Color 操作の接続先
+
+| 操作 | Native command | 接続する既存 owner と検証 |
+| --- | --- | --- |
+| 設定取得 | `develop.get` | Native session の `get_settings`。完全 snapshot の `point_colors` を adapter で検査。 |
+| 採色・追加 | `pointColor.pick` | History `operate` の prepare/apply stage。保存済み snapshot と個数を確認後、座標を検証し一度だけ送信。append と初期値、戻り index を readback で照合。 |
+| 削除 | `pointColor.delete` | History operation adapter。対象 index と配列形を事前確認し、削除後配列が index のみを除いた snapshot と一致することを検査。 |
+| 8 controls 編集 | `develop.set` | 既存 `apply_history_operation` と `raw_controls.py` の control validation/location/readback 群へ index-aware control を追加。許可する8 suffix、存在 index、有限数・範囲、no-op を検査。 |
+| 個別 Reset | `develop.resetControl` | 同じ index-aware control adapter。対象値だけ既定値になり、他 fields と配列要素が保持されることを確認。 |
+| 全体 Reset | `develop.merge {settings:{point_colors:[]}}` | History operation adapter の専用 semantic operation から明示配列を送る。`develop.resetSection(pointColor)` は使わない。readback が空配列と一致することを確認。 |
+
+Index は DB ID ではなく各確定 snapshot 内で解決する。request に document identity、generation、document revision、settings fingerprint、save ID を含め、History 基準と Native active photo が一致する区間だけ mutation する。全 Native response は状態変更の十分条件にせず、完全 readback を確定 snapshot とする。
+
+### P1-A1〜A3 の実装分割案
+
+1. **P1-A1 — Native adapter と validation**。`raw_controls.py` に Point Color 配列・8 indexed control の allowlist、finite/range/readback 検査を加える。`lightcraft_runtime.py::_raw_command` に既存 `pointColor.pick` と `pointColor.delete` を許可する。`lightcraft_raw.py` に単発操作 helper を追加し、既存 `_mutate`／command queue／revision／owner 検査を使って完全 snapshot を返す。これらは History endpoint からだけ呼び、公開 API は追加しない。
+2. **P1-A2 — History operation**。`raw_controls.py::validate_history_operation`、`raw_recipe_store.py::_history_metadata`／`_operation`、`windows_raw_api.py::_history_body`／`_history`、`lightcraft_raw.py::apply_history_operation` に追加・削除・control/reset・全体 Reset の semantic kind と metadata を通す。idempotency は各 History save ID と pending stage に委ね、同じ ID に異なる payload を許さない。Readback compare は配列全体を厳密に検証する。
+3. **P1-A3 — API 有効化と focused test**。既存 `/history/operate` だけを入口として request/response に document identity、generation/revision、settings fingerprint、save ID、対象 index/control を含める。直接 `/controls` や新しい無履歴 route は追加しない。mock Native で拒否・競合・readback・store failure/recovery を試験し、fixture が使える場合に合成 PNG の実 CLI で既存 Native command 契約も確認する。実 RAW の確認は後続 Desktop 受入と分ける。
+
+この分割で専用 lock、永続 Point Color ID、独立の変更保存系は不要。adapter を History 以外から呼べる形にする場合は internal module/service 境界で呼び出し元を制限し、未履歴 mutation を選べる公開 API にしない。
+
+### P1-B への引き継ぎ条件とリスク
+
+P1-B は保存済み完全 snapshot を source of truth にして追加・削除・8 control・Reset を `operate` へ結線し、各操作の可視ラベルと metadata schema を確定する。P1-A の各 method を直接 UI から呼ばず、UI は History save が完了した response snapshot だけを採用する。採色中に写真が切り替わる競合は document/generation/revision check で拒否し、Native command を再送せず同じ save ID の Recovery に回す。
+
+残るリスクは、Native の Point Color index が削除後に移動すること、`develop.set` が存在しない index を成功応答の no-op にすること、`develop.merge` が8件上限や indexed slider clamp を保証しないこと、Native mutation 成功後の store 障害で Native と Recipe が一時的に乖離すること。完全 readback、入力境界、immutable History request/recovery によって扱い、8件超 snapshot は切り捨てず拒否・回復対象にする。DB migration や Native patch はこの接続に必要ない。
