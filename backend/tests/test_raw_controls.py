@@ -212,17 +212,6 @@ def test_point_color_history_contract_rejects_invalid_request_metadata(kind, met
         validate_point_color_history_operation(kind, metadata)
 
 
-def test_point_color_history_schema_is_not_enabled_in_store_validator():
-    from raw_recipe_store import InvalidRawHistory, _history_metadata
-    for kind, metadata in (
-        ("pointColorPick", {"x": .2, "y": .3}), ("pointColorDelete", {"index": 0}),
-        ("pointColorControl", {"control": "pointColor.0.hueShift", "value": 1.5}),
-        ("pointColorControlReset", {"control": "pointColor.0.range"}), ("pointColorReset", {}),
-    ):
-        with pytest.raises(InvalidRawHistory):
-            _history_metadata(kind, metadata)
-
-
 def test_existing_mixer_curve_and_wb_history_kind_validation_is_unchanged():
     from raw_controls import validate_history_operation
     for kind, metadata in (

@@ -502,7 +502,16 @@ def _history_metadata(kind, metadata):
     elif kind in ("colorReset", "wbReset"):
         valid = not metadata
     else:
-        valid = kind in ("allReset", "wbAuto", "wbPick") and not metadata
+        from raw_controls import POINT_COLOR_HISTORY_SCHEMAS, validate_point_color_history_operation
+        if kind in POINT_COLOR_HISTORY_SCHEMAS:
+            from lightcraft_mcp import LightCraftError
+            try:
+                metadata = validate_point_color_history_operation(kind, metadata)
+            except LightCraftError:
+                raise InvalidRawHistory() from None
+            valid = True
+        else:
+            valid = kind in ("allReset", "wbAuto", "wbPick") and not metadata
     if not valid:
         raise InvalidRawHistory()
     encoded = _json(metadata)

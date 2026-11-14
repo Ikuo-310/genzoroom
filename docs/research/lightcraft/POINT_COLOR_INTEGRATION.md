@@ -252,3 +252,11 @@ Mock validation／回帰testは正常metadata5 kind、欠落・余分key、不�
 接続先は内部Session dispatcherだけである。`windows_raw_api.py`の公開History kind validationと`raw_recipe_store.py`のmetadata allowlistはA2a時点のままPoint Color kindを拒否し、History step append、save ID／request fingerprint、Recipe、HTTP routeは変更していない。P1-A2bではHistory DB保存やsave failure後のretryを行わない。
 
 focused Backend testsはdispatcher直接呼出し11件、RAW Session全体145件、公開API／store拒否と既存Curve・WB・fingerprint回帰27件が成功した。P1-A2cでは既存`/history/operate` request validation、store metadata validation、保存receipt／Recoveryを一体で有効化する。A2c前に公開kind allowlistだけを先行して開かない。
+
+## P1-A2c-1 — History Store metadata契約
+
+`raw_recipe_store._history_metadata` はPoint Colorの5 kindを認識し、`raw_controls.validate_point_color_history_operation` にmetadata検証と正規化を委譲する。Store側にPoint Color専用のキー・型・範囲検証を重複実装せず、validation errorは既存契約の `InvalidRawHistory` に変換する。既存の`_json`によるkey sort・compact JSONとmetadata byte上限を維持し、座標・control値の小数、index、control IDを変更しない。
+
+許可するschemaは `pointColorPick:{x,y}`、`pointColorDelete:{index}`、`pointColorControl:{control,value}`、`pointColorControlReset:{control}`、`pointColorReset:{}`。既存step/cursor、Recipe revision、save ID・fingerprint、immutable receipt、transaction、undo/redo/jumpの実装とDB schemaは変更していない。Storeのappend契約がmetadataを受け入れることとHTTP操作を公開することは別であり、`windows_raw_api.py`のkind allowlistは変更せず、`/history/operate`は5 kindを拒否しNative mutationを行わない。routeも追加していない。
+
+Store focused testsは5 kindの保存・readback、canonical JSON key順序、小数保持、不正kind／key／型／finite性／範囲／control拒否を確認する。既存History kindと公開API隔離・save ID fingerprintの関連テストも実行する。P1-A2c-2ではHistory operationの実行可否と保存契約を接続するが、API kind allowlistを開く前にrequest validation、Native操作、readback、Store receiptの境界を一体で扱う。

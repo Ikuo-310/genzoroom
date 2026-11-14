@@ -349,6 +349,53 @@ def test_allowlisted_operation_metadata_roundtrips(db, kind, metadata):
     assert history()["history"]["steps"][0]["metadata"] == metadata
 
 
+@pytest.mark.parametrize("kind,metadata", [
+    ("pointColorPick", {"x": .125, "y": .875}),
+    ("pointColorDelete", {"index": 7}),
+    ("pointColorControl", {"control": "pointColor.7.hueShift", "value": -12.375}),
+    ("pointColorControlReset", {"control": "pointColor.0.lumRange"}),
+    ("pointColorReset", {}),
+])
+def test_point_color_history_metadata_roundtrips_through_store(db, kind, metadata):
+    raw.append_raw_history(identity(), 0, uuid4(), value(1), kind=kind, metadata=metadata,
+                           baseline_settings=value())
+    assert history()["history"]["steps"][0]["kind"] == kind
+    assert history()["history"]["steps"][0]["metadata"] == metadata
+
+
+def test_point_color_metadata_uses_canonical_json_without_rounding():
+    left = raw._history_metadata("pointColorControl", {"value": 1.23456789,
+        "control": "pointColor.3.range"})
+    right = raw._history_metadata("pointColorControl", {"control": "pointColor.3.range",
+        "value": 1.23456789})
+    assert raw._json(left) == raw._json(right)
+    assert left == {"control": "pointColor.3.range", "value": 1.23456789}
+    assert raw._history_metadata("pointColorPick", {"y": .625, "x": .125}) == {"x": .125, "y": .625}
+    assert raw._history_metadata("pointColorDelete", {"index": 4}) == {"index": 4}
+    assert raw._history_metadata("pointColorControlReset", {"control": "pointColor.4.range"}) == {
+        "control": "pointColor.4.range"}
+
+
+@pytest.mark.parametrize("kind,metadata", [
+    ("pointColorOther", {}),
+    ("pointColorPick", {"x": .5}), ("pointColorPick", {"x": .5, "y": .5, "extra": 1}),
+    ("pointColorPick", {"x": True, "y": .5}), ("pointColorPick", {"x": float("nan"), "y": .5}),
+    ("pointColorPick", {"x": .5, "y": float("inf")}), ("pointColorPick", {"x": 1.01, "y": .5}),
+    ("pointColorDelete", {}), ("pointColorDelete", {"index": -1}),
+    ("pointColorDelete", {"index": 1.5}), ("pointColorDelete", {"index": True}),
+    ("pointColorControl", {"control": "pointColor.0.hueShift"}),
+    ("pointColorControl", {"control": "pointColor.0.hueShift", "value": float("nan")}),
+    ("pointColorControl", {"control": "pointColor.0.hueShift", "value": float("inf")}),
+    ("pointColorControl", {"control": "pointColor.0.range", "value": 100.1}),
+    ("pointColorControl", {"control": "pointColor.0.unknown", "value": 0}),
+    ("pointColorControlReset", {"control": "pointColor.0.unknown"}),
+    ("pointColorReset", {"unexpected": 1}),
+])
+def test_invalid_point_color_history_metadata_is_rejected_by_store(kind, metadata):
+    with pytest.raises(raw.InvalidRawHistory):
+        raw._history_metadata(kind, metadata)
+
+
 @pytest.mark.parametrize("mutation", [
     "UPDATE asset_raw_histories SET history_cursor=999",
     "UPDATE asset_raw_histories SET baseline_settings_json='{}'",
