@@ -479,6 +479,47 @@ def test_point_color_array_reset_preserves_other_settings_and_noops_when_empty(t
     asyncio.run(run())
 
 
+def test_point_color_array_reset_normalizes_legacy_wb_scale_on_readback(tmp_path):
+    async def run():
+        raw, _, children, files = await create(tmp_path)
+        try:
+            handle, _ = await raw.open_raw("pixel", files[0])
+            child = children[0]
+            child.photos[1]["settings"]["wb"]["scale"] = "legacy"
+            child.photos[1]["settings"]["point_colors"] = [point_color(), point_color(12.)]
+            before = await raw.get_settings(handle)
+            child.omit_legacy_wb_scale = True
+
+            result = await raw._reset_point_colors(handle, before.revision)
+
+            assert result.settings["wb"]["scale"] == "legacy"
+            assert result.settings["point_colors"] == []
+            assert child.commands.count(("develop.merge", {"settings": {"point_colors": []}})) == 1
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+def test_point_color_array_reset_succeeds_with_kelvin_wb(tmp_path):
+    async def run():
+        raw, _, children, files = await create(tmp_path)
+        try:
+            handle, _ = await raw.open_raw("pixel", files[0])
+            child = children[0]
+            child.photos[1]["settings"]["wb"].update(scale="kelvin", mode="custom", temp=5200., tint=8.)
+            child.photos[1]["settings"]["point_colors"] = [point_color()]
+            before = await raw.get_settings(handle)
+
+            result = await raw._reset_point_colors(handle, before.revision)
+
+            assert result.settings["wb"] == before.settings["wb"]
+            assert result.settings["point_colors"] == []
+            assert child.commands.count(("develop.merge", {"settings": {"point_colors": []}})) == 1
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
 def test_point_color_array_reset_detects_noop_native_success(tmp_path):
     async def run():
         raw, _, children, files = await create(tmp_path)
@@ -491,6 +532,24 @@ def test_point_color_array_reset_detects_noop_native_success(tmp_path):
             with pytest.raises(LightCraftError, match="raw_point_color_reset_mismatch"):
                 await raw._reset_point_colors(handle, before.revision)
             assert child.commands.count(("develop.merge", {"settings": {"point_colors": []}})) == 1
+            assert raw._photos["pixel"].sync == "desynchronized"
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+def test_point_color_array_reset_rejects_unexpected_other_setting_change(tmp_path):
+    async def run():
+        raw, _, children, files = await create(tmp_path)
+        try:
+            handle, _ = await raw.open_raw("pixel", files[0])
+            child = children[0]
+            child.photos[1]["settings"]["point_colors"] = [point_color()]
+            before = await raw.get_settings(handle)
+            child.mismatch = True
+            with pytest.raises(LightCraftError, match="raw_point_color_reset_mismatch"):
+                await raw._reset_point_colors(handle, before.revision)
+            assert child.photos[1]["settings"]["point_colors"] == []
             assert raw._photos["pixel"].sync == "desynchronized"
         finally:
             await raw.close()

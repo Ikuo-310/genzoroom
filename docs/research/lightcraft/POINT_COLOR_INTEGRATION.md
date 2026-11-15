@@ -374,3 +374,7 @@ Point Colorサブセクション見出しの右側に、既存サブカテゴリ
 操作は`raw.operate({kind:'pointColorReset', metadata:{}})`のみを利用する。実行前にDocument identity／revision／配列を確認し、Point Color draftを破棄してスライダーを再mountし、削除と同じpending mutation refで二重実行を防ぐ。成功応答までは配列を楽観変更せず、確定snapshotが空配列なら選択を`null`にして既存スポイト案内へ戻る。失敗時は配列と選択を保ち既存History Recoveryへ委ねる。Undo／Redo／Jumpは既存History snapshotを正とし、配列と調整値を反映する。選択は有効indexへ通常補正し、Reset前のindexを永続化しない。
 
 Frontend History operation／step型とresponse validationへ`pointColorReset`を追加し、step metadataは空objectだけを許可する。History一覧は「ポイントカラーをリセット / Reset Point Color」と表示する。focused testsは複数／単一entryのReset、payload、空配列への確定反映、draft破棄、失敗時の非楽観表示、空・Color OFF・ロック時の無効化、重複要求防止、Document/revision変更、Undo／Redo／Jumpでの配列・値反映、metadata拒否を確認する。
+
+## Point Color全体ResetのNative比較修正
+
+`_reset_point_colors()`のreadback比較も、既存の数値変更／個別Resetと同じく、Native readbackと変更後の期待snapshotを双方`_settings_json()`で正規化して比較する。Legacy WBでNativeが`wb.scale`を省略しても同じ設定として扱い、Point Color配列が空にならない場合や他の設定値が変わった場合は従来の`raw_point_color_reset_mismatch`で拒否し、既存desynchronized／History Recovery契約を維持する。Mock NativeのLegacy WB scale省略、Kelvin WB、配列reset no-op、対象外設定変更と、採色・数値変更・個別Reset・削除を含む`test_lightcraft_raw.py` 151件が成功した。

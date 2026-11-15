@@ -1990,7 +1990,9 @@ class LightCraftRawSession:
             validate_point_colors(settings)
             expected = copy.deepcopy(before)
             expected["point_colors"] = []
-            if settings != expected:
+            actual_normalized = json.loads(_settings_json(settings))
+            expected_normalized = json.loads(_settings_json(expected))
+            if actual_normalized != expected_normalized:
                 raise LightCraftError("raw_point_color_reset_mismatch")
 
         return await self._mutate(handle, "develop.merge", {}, expected_revision,
