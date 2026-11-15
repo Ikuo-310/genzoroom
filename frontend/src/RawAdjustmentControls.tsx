@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useId, useRef, type CSSProperties, type ReactNode } from 'react';
+import { Fragment, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AdjustmentSlider } from './AdjustmentSlider';
 import { commitAdjustmentEdits, focusAdjustmentCategory, navigateAdjustments, preserveAdjustmentNumberFocus,
@@ -7,7 +7,7 @@ import type { SliderAdjustmentId } from './adjustmentSliderIds';
 import { TINT_TRACK_GRADIENT, TEMPERATURE_TRACK_GRADIENT } from './WhiteBalanceAdjustmentControls';
 import { RawPointCurveControls } from './RawPointCurveControls';
 import { RawEyedropperIcon } from './RawEyedropperIcon';
-import { RAW_VIGNETTE_STYLES, type RawControlId, type RawCurvePoint, type RawHistoryControlId, type RawHistoryOperation, type RawOpticsFlagId, type RawToggleSectionId, type RawVignetteStyle } from './rawApi';
+import { RAW_VIGNETTE_STYLES, type RawControlId, type RawCurvePoint, type RawHistoryControlId, type RawHistoryOperation, type RawOpticsFlagId, type RawPointColor, type RawToggleSectionId, type RawVignetteStyle } from './rawApi';
 import type { useRawDocument } from './useRawDocument';
 import { displayTemperature, displayTint, nativeTemperature } from './rawWhiteBalance';
 import { updateRawDevelopmentPanelUi, useAppSettings, type RawPanelCategory } from './appSettings';
@@ -56,6 +56,22 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
   const { t } = useTranslation();
   const settings = raw.settings;
   const panelUi = useAppSettings().rawDevelopmentPanelUi;
+  const pointColorDocument = settings
+    ? JSON.stringify([settings.workspaceId, settings.assetId, settings.handle, settings.generation, settings.documentToken]) : null;
+  const pointColorCount = settings?.point_colors.length ?? 0;
+  const [pointColorSelection, setPointColorSelection] = useState<{ document: string | null; index: number | null }>(
+    { document: pointColorDocument, index: pointColorCount ? 0 : null });
+  const selectedPointColorIndex = pointColorCount === 0 ? null
+    : pointColorSelection.document !== pointColorDocument ? 0
+      : Math.min(pointColorSelection.index ?? 0, pointColorCount - 1);
+  useEffect(() => {
+    setPointColorSelection(current => {
+      if (current.document !== pointColorDocument)
+        return { document: pointColorDocument, index: pointColorCount ? 0 : null };
+      const index = pointColorCount ? Math.min(current.index ?? 0, pointColorCount - 1) : null;
+      return index === current.index ? current : { ...current, index };
+    });
+  }, [pointColorDocument, pointColorCount]);
   const setCategoryOpen = (category: RawPanelCategory, open: boolean) => updateRawDevelopmentPanelUi(current => ({
     ...current, categories: { ...current.categories, [category]: open },
   }));
@@ -177,6 +193,11 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
           ...current, subcategories: { ...current.subcategories, mixer },
         })); }} locked={actionsLocked || !settings.sections.color}
         onReset={() => operate({ kind: 'sectionReset', metadata: { section: 'mixer' } })} operate={operate} panel={panel} />}
+      {category === 'color' && <RawPointColorPicker colors={settings.point_colors} selectedIndex={selectedPointColorIndex}
+        onSelect={index => setPointColorSelection({ document: pointColorDocument, index })}
+        open={panelUi.subcategories.pointColor} onOpenChange={pointColor => updateRawDevelopmentPanelUi(current => ({
+          ...current, subcategories: { ...current.subcategories, pointColor },
+        }))} />}
       {category === 'color' && <RawColorGrading raw={raw} band={panelUi.selection.gradingBand} onBandChange={gradingBand =>
         updateRawDevelopmentPanelUi(current => ({ ...current, selection: { ...current.selection, gradingBand } }))}
         open={panelUi.subcategories.grading} onOpenChange={grading => updateRawDevelopmentPanelUi(current => ({
@@ -367,6 +388,42 @@ function RawColorGrading({ raw, band, onBandChange, open, onOpenChange, locked, 
           onBegin={() => raw.beginControls(control)} onChange={next => raw.changeControls({ [control]: next })}
           onCommit={() => raw.flushControls(control)} onReset={() => operate({ kind: 'controlReset', metadata: { control } })} />;
       })}
+    </div>}
+  </section>;
+}
+
+function RawPointColorPicker({ colors, selectedIndex, onSelect, open, onOpenChange }: {
+  colors: RawPointColor[]; selectedIndex: number | null; onSelect: (index: number) => void;
+  open: boolean; onOpenChange: (open: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const contentId = useId();
+  return <section className="raw-point-color">
+    <div className="raw-adjustment-subsection-header">
+      <button type="button" className="raw-point-color-title" aria-expanded={open} aria-controls={contentId}
+        onClick={() => onOpenChange(!open)} onFocus={focusAdjustmentCategory}
+        onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>
+        <span className="adjustment-category-chevron" aria-hidden="true">{open ? '▾' : '▸'}</span>
+        <span>{t('workspace.rawPreview.pointColor.title')}</span>
+      </button>
+    </div>
+    {open && <div id={contentId} className="raw-point-color-content">
+      {colors.length === 0
+        ? <div className="raw-point-color-empty">
+          <button type="button" className="raw-point-color-pick" disabled
+            aria-label={t('workspace.rawPreview.pointColor.pick')} title={t('workspace.rawPreview.pointColor.pick')}>
+            <RawEyedropperIcon />
+          </button>
+          <span>{t('workspace.rawPreview.pointColor.empty')}</span>
+        </div>
+        : <div className="raw-point-color-swatches" role="group" aria-label={t('workspace.rawPreview.pointColor.entriesLabel')}>
+          {colors.map((_color, index) => <button key={index} type="button" className={`raw-point-color-swatch${selectedIndex === index ? ' is-selected' : ''}`}
+            style={{ '--point-color-swatch': '#b8b8b8' } as CSSProperties}
+            aria-pressed={selectedIndex === index} aria-label={t('workspace.rawPreview.pointColor.entry', { index: index + 1 })}
+            title={t('workspace.rawPreview.pointColor.entry', { index: index + 1 })} data-point-color-index={index}
+            onClick={() => onSelect(index)} onFocus={focusAdjustmentCategory}
+            onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)} />)}
+        </div>}
     </div>}
   </section>;
 }

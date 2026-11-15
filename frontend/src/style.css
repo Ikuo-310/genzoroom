@@ -543,6 +543,16 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .raw-color-grading-title { display: flex; min-width: 0; flex: 1; align-items: center; gap: 6px; padding: 4px 0; color: #e2e2e4; background: transparent; border: 0; text-align: left; font: inherit; font-size: 0.72rem; cursor: pointer; }
 .raw-color-grading-title:focus-visible { outline: 2px solid #f2f2f2; outline-offset: 2px; }
 .raw-color-grading-content .adjustment-control { grid-template-columns: minmax(0, clamp(40px, calc(50% - 55px), 90px)) minmax(0, 1fr) calc(var(--raw-number-field-width) + 30px); }
+.raw-point-color { margin-top: 8px; padding: 0 6px 6px; border-radius: 5px; background: #242426; }
+.raw-point-color-title { display: flex; min-width: 0; flex: 1; align-items: center; gap: 6px; padding: 4px 0; color: #e2e2e4; background: transparent; border: 0; text-align: left; font: inherit; font-size: 0.72rem; cursor: pointer; }
+.raw-point-color-title:focus-visible, .raw-point-color-swatch:focus-visible { outline: 2px solid #f2f2f2; outline-offset: 2px; }
+.raw-point-color-content { min-width: 0; }
+.raw-point-color-empty { display: flex; min-width: 0; align-items: center; gap: 8px; padding: 5px 0; color: #bdbdc0; font-size: 0.7rem; }
+.raw-point-color-pick { display: inline-flex; width: 24px; height: 24px; flex: 0 0 24px; align-items: center; justify-content: center; padding: 0; color: #aaa; border: 1px solid #454548; border-radius: 4px; background: #303033; }
+.raw-point-color-pick:disabled { cursor: default; opacity: 0.65; }
+.raw-point-color-swatches { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 8px; padding: 5px 0 7px; }
+.raw-point-color-swatch { width: 20px; height: 20px; flex: 0 0 20px; padding: 0; border: 1px solid #171719; border-radius: 4px; background: var(--point-color-swatch); cursor: pointer; }
+.raw-point-color-swatch.is-selected { outline: 2px solid #f4f4f5; outline-offset: 2px; }
 .raw-adjustment-subcategory-divider { height: 1px; margin: 8px 0; background: #353538; }
 :is(.raw-vignette-mode, .raw-grading-band) { margin: 0; gap: 6px; font-size: 0.7rem; }
 :is(.raw-vignette-mode, .raw-grading-band) > span { line-height: 1; }

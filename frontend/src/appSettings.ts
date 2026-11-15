@@ -38,7 +38,7 @@ export type RawPanelGradingBand = typeof RAW_PANEL_GRADING_BANDS[number];
 export type RawDevelopmentPanelUi = {
   version: 1;
   categories: Record<RawPanelCategory, boolean>;
-  subcategories: { mixer: boolean; grading: boolean; lensCorrections: boolean; defringe: boolean };
+  subcategories: { mixer: boolean; grading: boolean; pointColor: boolean; lensCorrections: boolean; defringe: boolean };
   selection: { mixerColor: RawPanelMixerColor; gradingBand: RawPanelGradingBand };
 };
 export type Settings = { dateLocale: DateLocale; weekStart: WeekStart; initialImage: InitialImage; homeThumbnailWidth: HomeThumbnailWidth; recentPhotoCount: RecentPhotoCount; showKeyboardShortcuts: boolean; anshitsuInitialSelection: AnshitsuInitialSelection; zoomNavigatorPosition: ZoomNavigatorPosition; rawDevelopmentPanelUi: RawDevelopmentPanelUi };
@@ -47,7 +47,7 @@ export function defaultRawDevelopmentPanelUi(): RawDevelopmentPanelUi {
   return {
     version: 1,
     categories: { basic: true, color: true, curves: true, effects: true, detail: true },
-    subcategories: { mixer: false, grading: false, lensCorrections: true, defringe: false },
+    subcategories: { mixer: false, grading: false, pointColor: false, lensCorrections: true, defringe: false },
     selection: { mixerColor: 'red', gradingBand: 'shadows' },
   };
 }
@@ -58,7 +58,7 @@ function normalizeRawDevelopmentPanelUi(value: unknown): RawDevelopmentPanelUi {
   const saved = value as Partial<RawDevelopmentPanelUi>;
   const categories = saved.categories && typeof saved.categories === 'object' ? saved.categories as Partial<Record<RawPanelCategory, unknown>> : {};
   const subcategories = saved.subcategories && typeof saved.subcategories === 'object'
-    ? saved.subcategories as Partial<Record<'mixer' | 'grading' | 'lensCorrections' | 'defringe', unknown>> : {};
+    ? saved.subcategories as Partial<Record<'mixer' | 'grading' | 'pointColor' | 'lensCorrections' | 'defringe', unknown>> : {};
   const selection = saved.selection && typeof saved.selection === 'object'
     ? saved.selection as Partial<Record<'mixerColor' | 'gradingBand', unknown>> : {};
   return {
@@ -68,6 +68,7 @@ function normalizeRawDevelopmentPanelUi(value: unknown): RawDevelopmentPanelUi {
     subcategories: {
       mixer: typeof subcategories.mixer === 'boolean' ? subcategories.mixer : defaults.subcategories.mixer,
       grading: typeof subcategories.grading === 'boolean' ? subcategories.grading : defaults.subcategories.grading,
+      pointColor: typeof subcategories.pointColor === 'boolean' ? subcategories.pointColor : defaults.subcategories.pointColor,
       lensCorrections: typeof subcategories.lensCorrections === 'boolean' ? subcategories.lensCorrections : defaults.subcategories.lensCorrections,
       defringe: typeof subcategories.defringe === 'boolean' ? subcategories.defringe : defaults.subcategories.defringe,
     },

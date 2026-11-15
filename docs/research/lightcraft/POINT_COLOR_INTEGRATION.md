@@ -310,3 +310,9 @@ Windows Export Queueは保存済み・freeze済みRecipeの`settings`を`ExportR
 `raw_controls.controls_state(snapshot)` はNative snapshotの `point_colors` を `validate_point_colors` で検証し、既存settings／History応答へそのまま投影する。旧snapshotでキーが省略される場合に限り `[]` を返す。明示的な不正値は `raw_invalid_point_colors` で拒否し、配列順序・重複・11フィールド・小数値を変更しない。settings response上限は16 KiBのままとした。最大8件分のPoint Color payloadは既存の設定・control仕様と合わせても余裕内であり、上限緩和は不要。
 
 Frontendの `RawSettings.point_colors` と `RawPointColor` はsnake_caseのNative 11フィールドを型付けし、既存settings decoderが件数、厳密なentry構造、有限値・範囲を検証する。応答配列はそのまま返し、専用API・cache・state更新経路は追加していない。Backend focused testsは6件、Frontend `rawApi.test.ts`は182件成功。TypeScript checkとVite production buildも成功した。buildでは既存bundle sizeと依存側`use client` directiveのwarningが出た。変更はBackend projection、Frontend contract/test fixture、focused tests、および本節の文書に限る。UI、Point Color操作、History／Recipe保存、Exportは変更していない。
+
+## P1-C1 — Point Color 表示・選択UI
+
+RAW編集パネルのColorカテゴリで、Color Mixerの後・Color Gradingの前に折りたたみ式Point Colorセクションを配置した。折りたたみ状態は既存の`rawDevelopmentPanelUi.subcategories`設定を利用する。空配列では無効化したスポイトアイコンと日本語／英語の案内だけを表示し、採色済みではNative配列順のスウォッチを表示する。FrontendにOkLCh→sRGB変換処理がないため、本工程のスウォッチは中立色とした。狭い幅では折り返す。
+
+選択indexは`RawAdjustmentControls`の一時React stateで、workspace／handle／generation／document tokenのidentityに結び付ける。初期はindex 0、空配列は選択なし、配列縮小時は末尾の有効indexへ補正し、Document identity変更時は先頭へ戻す。Recipe／Historyへは保存せず、選択クリックからNative mutationやHistory operationを呼ばない。focused UI／panel settings tests 21件、TypeScript check、Frontend build、`git diff --check`を実施した。次工程ではViewer採色や数値編集を接続する前にスウォッチ色表示の方式を決める。今回それらの操作・範囲表示は実装していない。

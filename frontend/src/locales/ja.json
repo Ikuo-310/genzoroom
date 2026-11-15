@@ -397,6 +397,10 @@
       "gradingReset": "カラーグレーディングをリセット",
       "sectionResetHistory": "{{section}}をリセット",
       "colorCategory": "カラー",
+      "pointColor": {
+        "title": "ポイントカラー", "pick": "写真から色を選択", "empty": "スポイトで写真の色を選択してください。",
+        "entriesLabel": "ポイントカラーの項目", "entry": "ポイントカラー {{index}}"
+      },
       "mixer": {
         "title": "カラーミキサー", "reset": "カラーミキサーをリセット", "colorsLabel": "カラーミキサーの色",
         "colorNames": {"red": "レッド", "orange": "オレンジ", "yellow": "イエロー", "green": "グリーン", "aqua": "アクア", "blue": "ブルー", "purple": "パープル", "magenta": "マゼンタ"},

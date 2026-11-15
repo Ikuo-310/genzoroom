@@ -406,6 +406,10 @@
       "gradingReset": "Reset Color Grading",
       "sectionResetHistory": "Reset {{section}}",
       "colorCategory": "Color",
+      "pointColor": {
+        "title": "Point Color", "pick": "Pick a color from the photo", "empty": "Use the eyedropper to pick a color from the photo.",
+        "entriesLabel": "Point Color entries", "entry": "Point Color {{index}}"
+      },
       "mixer": {
         "title": "Color Mixer", "reset": "Reset Color Mixer", "colorsLabel": "Color Mixer colors",
         "colorNames": {"red": "Red", "orange": "Orange", "yellow": "Yellow", "green": "Green", "aqua": "Aqua", "blue": "Blue", "purple": "Purple", "magenta": "Magenta"},

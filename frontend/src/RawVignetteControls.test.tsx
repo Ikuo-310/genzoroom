@@ -39,7 +39,7 @@ it('persists independent RAW panel folds and selections across remount and asset
   expect(JSON.parse(localStorage.getItem(RAW_DEVELOPMENT_PANEL_UI_KEY)!)).toEqual({
     version: 1,
     categories: { basic: false, color: true, curves: false, effects: true, detail: false },
-    subcategories: { mixer: true, grading: true, lensCorrections: false, defringe: true },
+    subcategories: { mixer: true, grading: true, pointColor: false, lensCorrections: false, defringe: true },
     selection: { mixerColor: 'blue', gradingBand: 'highlights' },
   });
   expect(raw.operate).not.toHaveBeenCalled();
