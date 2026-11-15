@@ -538,7 +538,7 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .raw-mixer-target-icon svg { width: 16px; height: 16px; }
 .raw-mixer-target-button { min-width: 0; height: 23px; padding: 0 7px; font-weight: 500; }
 .raw-mixer-target-button:disabled { opacity: 0.5; cursor: default; }
-.raw-color-mixer-content .adjustment-control { grid-template-columns: minmax(0, clamp(40px, calc(50% - 55px), 90px)) minmax(0, 1fr) calc(var(--raw-number-field-width) + 30px); }
+.raw-color-mixer-content .adjustment-control, .raw-point-color-adjustments .adjustment-control { grid-template-columns: minmax(0, clamp(40px, calc(50% - 55px), 90px)) minmax(0, 1fr) calc(var(--raw-number-field-width) + 30px); }
 .raw-color-grading { margin-top: 8px; padding: 0 6px 6px; border-radius: 5px; background: #242426; }
 .raw-color-grading-title { display: flex; min-width: 0; flex: 1; align-items: center; gap: 6px; padding: 4px 0; color: #e2e2e4; background: transparent; border: 0; text-align: left; font: inherit; font-size: 0.72rem; cursor: pointer; }
 .raw-color-grading-title:focus-visible { outline: 2px solid #f2f2f2; outline-offset: 2px; }

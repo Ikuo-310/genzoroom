@@ -34,6 +34,7 @@ function openPointColor() {
   act(() => host.querySelector<HTMLButtonElement>('.raw-point-color-title')!.click());
 }
 function swatches() { return [...host.querySelectorAll<HTMLButtonElement>('.raw-point-color-swatch')]; }
+function pointColorAdjustments() { return [...host.querySelectorAll<HTMLElement>('.raw-point-color-adjustments .adjustment-control')]; }
 
 it('shows an inactive eyedropper and localized prompt for an empty Point Color array', async () => {
   const raw = createRaw();
@@ -89,6 +90,62 @@ it('renders each center color as CSS OkLCh and ignores Point Color adjustments',
   expect(buttons[0].getAttribute('aria-pressed')).toBe('true');
 });
 
+it('shows eight disabled controls in order with localized labels, Native ranges and rounded display text', async () => {
+  await i18n.changeLanguage('ja');
+  const selected = point(42, { hue_shift: -100, sat_shift: -12.75, lum_shift: 17.6, variance: 0,
+    range: 25, hue_range: 50, sat_range: 75, lum_range: 100 });
+  const raw = createRaw([selected]);
+  draw(raw);
+  const fields = ['hue_shift', 'sat_shift', 'lum_shift', 'variance', 'range', 'hue_range', 'sat_range', 'lum_range'];
+  const labels = ['色相', '彩度', '輝度', 'ばらつき', '範囲', '色相範囲', '彩度範囲', '輝度範囲'];
+  const ranges = [-100, -100, -100, -100, 0, 0, 0, 0];
+  const maxima = [100, 100, 100, 100, 100, 100, 100, 100];
+  const displayedValues = ['-100', '-13', '18', '0', '25', '50', '75', '100'];
+  expect(pointColorAdjustments()).toHaveLength(0);
+  openPointColor();
+  const controls = pointColorAdjustments();
+  expect(controls).toHaveLength(8);
+  expect([...host.querySelector('.raw-point-color-content')!.children].map(element => element.className))
+    .toEqual(['raw-point-color-swatches', 'raw-point-color-adjustments']);
+  expect(controls.map(control => control.querySelector<HTMLInputElement>('.adjustment-range')?.dataset.adjustmentId))
+    .toEqual(fields.map(field => `pointColor.0.${field}`));
+  expect(controls.map(control => control.querySelector('label')?.textContent)).toEqual(labels);
+  expect(controls.map(control => control.querySelector<HTMLInputElement>('.adjustment-range')?.min)).toEqual(ranges.map(String));
+  expect(controls.map(control => control.querySelector<HTMLInputElement>('.adjustment-range')?.max)).toEqual(maxima.map(String));
+  expect(controls.map(control => control.querySelector<HTMLInputElement>('.adjustment-range')?.step)).toEqual(Array(8).fill('1'));
+  expect(controls.map(control => control.querySelector<HTMLInputElement>('.adjustment-number')?.value)).toEqual(displayedValues);
+  expect(controls.every(control => control.querySelector<HTMLInputElement>('.adjustment-range')?.disabled
+    && control.querySelector<HTMLInputElement>('.adjustment-number')?.disabled
+    && control.querySelector<HTMLButtonElement>('.adjustment-reset')?.disabled)).toBe(true);
+  expect(raw.settings.point_colors[0]).toEqual(selected);
+  expect(raw.operate).not.toHaveBeenCalled();
+  expect(raw.beginControls).not.toHaveBeenCalled();
+  expect(raw.changeControls).not.toHaveBeenCalled();
+  expect(raw.flushControls).not.toHaveBeenCalled();
+
+  await i18n.changeLanguage('en'); draw(raw);
+  expect(pointColorAdjustments().map(control => control.querySelector('label')?.textContent)).toEqual([
+    'Hue', 'Saturation', 'Luminance', 'Variance', 'Range', 'Hue Range', 'Saturation Range', 'Luminance Range',
+  ]);
+});
+
+it('switches read-only values with the selected swatch and follows array shrink and empty settings', () => {
+  const raw = createRaw([point(10, { hue_shift: -25 }), point(200, { hue_shift: 65, range: 80 })]);
+  draw(raw); openPointColor();
+  expect(pointColorAdjustments().map(control => control.querySelector<HTMLInputElement>('.adjustment-number')?.value))
+    .toEqual(['-25', '0', '0', '0', '50', '50', '50', '50']);
+  expect(pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-number')?.value).toBe('-25');
+  act(() => swatches()[1].click());
+  expect(pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-number')?.value).toBe('65');
+  expect(pointColorAdjustments()[4].querySelector<HTMLInputElement>('.adjustment-number')?.value).toBe('80');
+
+  raw.settings.point_colors = [point(10, { hue_shift: -25 })]; draw(raw);
+  expect(swatches()[0].getAttribute('aria-pressed')).toBe('true');
+  expect(pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-number')?.value).toBe('-25');
+  raw.settings.point_colors = []; draw(raw);
+  expect(pointColorAdjustments()).toHaveLength(0);
+});
+
 it('clamps selection after array shrink and clears it for an empty array', () => {
   const raw = createRaw([point(), point(100), point(220)]);
   draw(raw); openPointColor(); act(() => swatches()[2].click());
@@ -109,4 +166,5 @@ it('resets selection to the first entry when the RAW document changes', () => {
   raw.settings = { ...rawSettings(next), point_colors: [point(), point(120), point(240)] };
   draw(raw);
   expect(swatches().map(button => button.getAttribute('aria-pressed'))).toEqual(['true', 'false', 'false']);
+  expect(pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-number')?.value).toBe('0');
 });

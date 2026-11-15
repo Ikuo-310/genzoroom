@@ -399,7 +399,17 @@
       "colorCategory": "カラー",
       "pointColor": {
         "title": "ポイントカラー", "pick": "写真から色を選択", "empty": "スポイトで写真の色を選択してください。",
-        "entriesLabel": "ポイントカラーの項目", "entry": "ポイントカラー {{index}}"
+        "entriesLabel": "ポイントカラーの項目", "entry": "ポイントカラー {{index}}",
+        "adjustments": {
+          "hueShift": "色相", "hueShiftValue": "色相の値", "hueShiftReset": "色相をリセット",
+          "satShift": "彩度", "satShiftValue": "彩度の値", "satShiftReset": "彩度をリセット",
+          "lumShift": "輝度", "lumShiftValue": "輝度の値", "lumShiftReset": "輝度をリセット",
+          "variance": "ばらつき", "varianceValue": "ばらつきの値", "varianceReset": "ばらつきをリセット",
+          "range": "範囲", "rangeValue": "範囲の値", "rangeReset": "範囲をリセット",
+          "hueRange": "色相範囲", "hueRangeValue": "色相範囲の値", "hueRangeReset": "色相範囲をリセット",
+          "satRange": "彩度範囲", "satRangeValue": "彩度範囲の値", "satRangeReset": "彩度範囲をリセット",
+          "lumRange": "輝度範囲", "lumRangeValue": "輝度範囲の値", "lumRangeReset": "輝度範囲をリセット"
+        }
       },
       "mixer": {
         "title": "カラーミキサー", "reset": "カラーミキサーをリセット", "colorsLabel": "カラーミキサーの色",

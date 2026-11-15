@@ -408,7 +408,17 @@
       "colorCategory": "Color",
       "pointColor": {
         "title": "Point Color", "pick": "Pick a color from the photo", "empty": "Use the eyedropper to pick a color from the photo.",
-        "entriesLabel": "Point Color entries", "entry": "Point Color {{index}}"
+        "entriesLabel": "Point Color entries", "entry": "Point Color {{index}}",
+        "adjustments": {
+          "hueShift": "Hue", "hueShiftValue": "Hue value", "hueShiftReset": "Reset Hue",
+          "satShift": "Saturation", "satShiftValue": "Saturation value", "satShiftReset": "Reset Saturation",
+          "lumShift": "Luminance", "lumShiftValue": "Luminance value", "lumShiftReset": "Reset Luminance",
+          "variance": "Variance", "varianceValue": "Variance value", "varianceReset": "Reset Variance",
+          "range": "Range", "rangeValue": "Range value", "rangeReset": "Reset Range",
+          "hueRange": "Hue Range", "hueRangeValue": "Hue Range value", "hueRangeReset": "Reset Hue Range",
+          "satRange": "Saturation Range", "satRangeValue": "Saturation Range value", "satRangeReset": "Reset Saturation Range",
+          "lumRange": "Luminance Range", "lumRangeValue": "Luminance Range value", "lumRangeReset": "Reset Luminance Range"
+        }
       },
       "mixer": {
         "title": "Color Mixer", "reset": "Reset Color Mixer", "colorsLabel": "Color Mixer colors",

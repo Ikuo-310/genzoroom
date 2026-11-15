@@ -322,3 +322,9 @@ RAW編集パネルのColorカテゴリで、Color Mixerの後・Color Gradingの
 Native中心値の契約は`lum`が0〜1、`chroma`が0以上、`hue`が0以上360未満で、CSS Color 4の`oklch(L C H)`へそのまま渡せる。Frontend側でOkLCh→sRGB変換は行わず、各スウォッチのCSS custom propertyに`oklch(${lum} ${chroma} ${hue})`を設定し、ブラウザーに色域処理を任せる。CSS `@supports`非対応時は従来どおり中立色へfallbackする。
 
 スウォッチは採色した中心色の目印に限り、他のPoint Color調整値は色表示に使わない。明暗どちらでも選択を判別できるよう、選択outlineと濃色の境界を維持した。Recipe／History、Native操作、画像処理は変更していない。focused testは色差、同じ中心値の一致、lum/chroma/hue反映、調整値の無視、配列順序・選択状態を確認し、ブラウザーの画素変換結果は検証対象にしていない。
+
+## P1-C2a — 調整スライダー表示
+
+選択中の配列entryから8項目（`hue_shift`、`sat_shift`、`lum_shift`、`variance`、`range`、`hue_range`、`sat_range`、`lum_range`）を既存`AdjustmentSlider`で表示する。範囲は順に−100〜100を4項目、0〜100を4項目、stepは1。数値欄は既存規則に沿い整数表示するが、Nativeの小数値・settings stateは丸めず変更しない。slider、number input、Resetはdisabledとし、unmount時の`onCommit`を含むcallbackは空実装で、Native／History操作を起こさない。
+
+表示は既存`selectedPointColorIndex`相当の一時選択値と最新settings配列を参照し、選択変更、配列縮小、空配列、Document切替、History後のsettings更新に追従する。focused testsは項目順、日英ラベル、範囲・step、既定値相当の値、小数の表示丸めとsettings保持、選択切替、配列変化、disabled状態、操作callback未呼出しを確認する。P1-C2bでは表示専用制約を外す場合のNative History操作連携を扱うが、本節では数値編集・Resetを接続していない。

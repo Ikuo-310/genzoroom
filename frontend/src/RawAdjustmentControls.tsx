@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { AdjustmentSlider } from './AdjustmentSlider';
 import { commitAdjustmentEdits, focusAdjustmentCategory, navigateAdjustments, preserveAdjustmentNumberFocus,
   preservePendingAdjustmentFocus, restorePendingAdjustmentFocus } from './adjustmentFocus';
-import type { SliderAdjustmentId } from './adjustmentSliderIds';
+import type { RawPointColorAdjustmentField, SliderAdjustmentId } from './adjustmentSliderIds';
 import { TINT_TRACK_GRADIENT, TEMPERATURE_TRACK_GRADIENT } from './WhiteBalanceAdjustmentControls';
 import { RawPointCurveControls } from './RawPointCurveControls';
 import { RawEyedropperIcon } from './RawEyedropperIcon';
@@ -22,6 +22,16 @@ const mixerHueTracks = mixerSwatches.map((center, index) => {
   return `linear-gradient(to right, ${previous} 0%, ${center} 50%, ${next} 100%)`;
 });
 const mixerFields = ['hue', 'sat', 'lum'] as const;
+const pointColorAdjustments: readonly { field: RawPointColorAdjustmentField; label: string; min: number; max: number; defaultValue: number }[] = [
+  { field: 'hue_shift', label: 'hueShift', min: -100, max: 100, defaultValue: 0 },
+  { field: 'sat_shift', label: 'satShift', min: -100, max: 100, defaultValue: 0 },
+  { field: 'lum_shift', label: 'lumShift', min: -100, max: 100, defaultValue: 0 },
+  { field: 'variance', label: 'variance', min: -100, max: 100, defaultValue: 0 },
+  { field: 'range', label: 'range', min: 0, max: 100, defaultValue: 50 },
+  { field: 'hue_range', label: 'hueRange', min: 0, max: 100, defaultValue: 50 },
+  { field: 'sat_range', label: 'satRange', min: 0, max: 100, defaultValue: 50 },
+  { field: 'lum_range', label: 'lumRange', min: 0, max: 100, defaultValue: 50 },
+];
 const sections: Record<Exclude<RawCategoryId, 'curves'>, RawToggleSectionId> = { basic: 'light', color: 'color', effects: 'effects', detail: 'detail' };
 const wbErrors: Record<string, string> = {
   raw_wb_no_valid_samples: 'awNoSamples', raw_wb_geometry_mismatch: 'wbGeometryMismatch',
@@ -416,14 +426,29 @@ function RawPointColorPicker({ colors, selectedIndex, onSelect, open, onOpenChan
           </button>
           <span>{t('workspace.rawPreview.pointColor.empty')}</span>
         </div>
-        : <div className="raw-point-color-swatches" role="group" aria-label={t('workspace.rawPreview.pointColor.entriesLabel')}>
-          {colors.map((color, index) => <button key={index} type="button" className={`raw-point-color-swatch${selectedIndex === index ? ' is-selected' : ''}`}
-            style={{ '--point-color-swatch': `oklch(${color.lum} ${color.chroma} ${color.hue})` } as CSSProperties}
-            aria-pressed={selectedIndex === index} aria-label={t('workspace.rawPreview.pointColor.entry', { index: index + 1 })}
-            title={t('workspace.rawPreview.pointColor.entry', { index: index + 1 })} data-point-color-index={index}
-            onClick={() => onSelect(index)} onFocus={focusAdjustmentCategory}
-            onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)} />)}
-        </div>}
+        : <>
+          <div className="raw-point-color-swatches" role="group" aria-label={t('workspace.rawPreview.pointColor.entriesLabel')}>
+            {colors.map((color, index) => <button key={index} type="button" className={`raw-point-color-swatch${selectedIndex === index ? ' is-selected' : ''}`}
+              style={{ '--point-color-swatch': `oklch(${color.lum} ${color.chroma} ${color.hue})` } as CSSProperties}
+              aria-pressed={selectedIndex === index} aria-label={t('workspace.rawPreview.pointColor.entry', { index: index + 1 })}
+              title={t('workspace.rawPreview.pointColor.entry', { index: index + 1 })} data-point-color-index={index}
+              onClick={() => onSelect(index)} onFocus={focusAdjustmentCategory}
+              onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)} />)}
+          </div>
+          {selectedIndex !== null && colors[selectedIndex] && <div className="raw-point-color-adjustments">
+            {pointColorAdjustments.map(({ field, label, min, max, defaultValue }) => {
+              const value = colors[selectedIndex][field];
+              // AdjustmentSlider may call onCommit when unmounted; these rows must never commit edits.
+              return <AdjustmentSlider key={field} adjustmentId={`pointColor.${selectedIndex}.${field}`}
+                commitPolicy="operation-boundary" hideToggle label={t(`workspace.rawPreview.pointColor.adjustments.${label}`)}
+                value={value} min={min} max={max} step={1} precision={0} defaultValue={defaultValue} valueText={value.toFixed(0)}
+                valueLabel={t(`workspace.rawPreview.pointColor.adjustments.${label}Value`)}
+                resetLabel={t(`workspace.rawPreview.pointColor.adjustments.${label}Reset`)}
+                enabled onToggle={() => {}} disabled resetDisabled
+                onBegin={() => {}} onChange={() => {}} onCommit={() => {}} onReset={() => {}} />;
+            })}
+          </div>}
+        </>}
     </div>}
   </section>;
 }
