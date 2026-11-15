@@ -862,6 +862,7 @@ class RawProcess(FakeProcess):
         self.point_delete_fault = None
         self.point_control_noop = False
         self.point_control_fault = None
+        self.point_control_float_readback = False
         self.point_reset_noop = False
         self.point_all_reset_noop = False
         self.omit_legacy_wb_scale = False
@@ -984,7 +985,8 @@ class RawProcess(FakeProcess):
                 assert group == "pointColor"
                 from raw_controls import POINT_COLOR_FIELDS
                 native_field = POINT_COLOR_FIELDS[field][0]
-                self.photos[self.active]["settings"]["point_colors"][int(index)][native_field] = params["value"]
+                value = float(params["value"]) if self.point_control_float_readback else params["value"]
+                self.photos[self.active]["settings"]["point_colors"][int(index)][native_field] = value
                 if self.point_control_fault == "other_setting_changed":
                     self.photos[self.active]["settings"]["light"]["exposure"] += 1.
                 value = {"ok": True}
@@ -1535,6 +1537,59 @@ def test_point_color_interaction_previews_draft_and_promotes_only_after_history_
         finally:
             await raw.close()
     asyncio.run(run())
+
+
+def test_point_color_interaction_update_and_end_accept_integer_float_readback_but_keep_type_safety(tmp_path):
+    async def run():
+        raw, _, children, files = await create(tmp_path, adaptive=True)
+        try:
+            handle, baseline = await raw.open_raw("pixel", files[0])
+            child = children[0]
+            child.photos[1]["settings"]["point_colors"] = [point_color()]
+            child.point_control_float_readback = True
+            baseline = await raw.get_settings(handle)
+
+            interaction_id = await raw.begin_point_color_interaction(handle, "pointColor.0.hueShift", baseline.revision)
+            update = await raw.update_point_color_interaction(handle, interaction_id, baseline.revision, 1, 25)
+            await update.preview_ticket
+            assert json.loads(raw._point_color_interaction.working_settings_json)["point_colors"][0]["hue_shift"] == 25.
+            # Exercise end against a persisted draft using an integer JSON token, as if it came from an older caller.
+            working = json.loads(raw._point_color_interaction.working_settings_json)
+            working["point_colors"][0]["hue_shift"] = 25
+            raw._point_color_interaction.working_settings_json = json.dumps(working, separators=(",", ":"))
+            ended = await raw.end_point_color_interaction(handle, interaction_id, baseline.revision,
+                "pointColor.0.hueShift", 25)
+            committed = raw.confirm_point_color_interaction(handle, interaction_id, baseline.revision)
+            assert ended.settings["point_colors"][0]["hue_shift"] == 25.
+            assert committed.settings["point_colors"][0]["hue_shift"] == 25.
+
+            next_interaction = await raw.begin_point_color_interaction(handle, "pointColor.0.satShift", committed.revision)
+            zero_update = await raw.update_point_color_interaction(handle, next_interaction, committed.revision, 1, 0)
+            await zero_update.preview_ticket
+            assert json.loads(raw._point_color_interaction.working_settings_json)["point_colors"][0]["sat_shift"] == 0.
+            await raw.cancel_point_color_interaction(handle, next_interaction, committed.revision)
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+def test_point_color_settings_equality_is_structural_type_safe_and_finite():
+    equal = module._settings_values_equal
+    expected = copy.deepcopy(DEFAULT)
+    expected["point_colors"] = [point_color()]
+    expected["point_colors"][0].update(hue_shift=25, lum_shift=0)
+    native = copy.deepcopy(expected)
+    native["point_colors"][0].update(hue_shift=25.0, lum_shift=0.0)
+    assert _settings_json(expected) != _settings_json(native)
+    assert module._safe_settings_differences(expected, native) == []
+    assert equal(expected, native)
+    assert equal({"value": 0}, {"value": 0.0})
+    assert not equal({"x": True}, {"x": 1})
+    assert not equal({"x": 0}, {"x": False})
+    assert not equal({"x": 1}, {"x": 1, "extra": 2})
+    assert not equal({"x": [1, 2]}, {"x": [1.0]})
+    assert not equal({"x": "25"}, {"x": 25.0})
+    assert not equal({"x": float("nan")}, {"x": float("nan")})
 
 
 def test_point_color_interaction_cancel_restores_baseline_without_history(tmp_path):

@@ -177,7 +177,7 @@ def test_real_native_point_color_interaction_round_trip_on_synthetic_images(tmp_
             assert manager.status().state == 'ready'
             handle, state = await raw.open_raw('point-color-synthetic', str(source))
             state = await raw.apply_history_operation(handle, 'pointColorPick', {'x': .5, 'y': .5}, state.revision)
-            controls = [('hueShift', 23.5), ('satShift', -11.25), ('lumShift', 8.5), ('variance', -5.5),
+            controls = [('hueShift', 25), ('satShift', 0), ('lumShift', 8.5), ('variance', -5.5),
                 ('range', 63.25), ('hueRange', 45.5), ('satRange', 38.25), ('lumRange', 62.75)]
             for field, value in controls:
                 control = f'pointColor.0.{field}'
@@ -191,6 +191,8 @@ def test_real_native_point_color_interaction_round_trip_on_synthetic_images(tmp_
                 native_field = {'hueShift':'hue_shift','satShift':'sat_shift','lumShift':'lum_shift','hueRange':'hue_range',
                     'satRange':'sat_range','lumRange':'lum_range'}.get(field, field)
                 assert actual['point_colors'][0][native_field] == value
+                if type(value) is int:
+                    assert type(actual['point_colors'][0][native_field]) is float
                 result = await raw.end_point_color_interaction(handle, interaction, state.revision, control, value)
                 state = raw.confirm_point_color_interaction(handle, interaction, state.revision)
                 assert state.settings['point_colors'][0][native_field] == value

@@ -539,6 +539,7 @@ def test_point_color_slider_interaction_previews_then_commits_one_history_step(l
     async def run():
         api, _, children, _ = await setup(tmp_path, local, monkeypatch)
         children[0].adaptive_supported = True
+        children[0].point_control_float_readback = True
         try:
             async with client(local) as http:
                 await authenticate(http, local)
@@ -551,7 +552,7 @@ def test_point_color_slider_interaction_previews_then_commits_one_history_step(l
                 started = await http.post(f"{base}/begin", json=identity_body | {"control": "pointColor.0.hueShift"})
                 assert started.status_code == 200, started.text
                 interaction_id = started.json()["interactionId"]
-                for sequence, value in ((1, 12.5), (2, 27.25)):
+                for sequence, value in ((1, 25), (2, 27.25)):
                     updated = await http.post(f"{base}/update", json=identity_body | {"interactionId": interaction_id,
                         "sequence": sequence, "value": value, "serial": sequence, "maxSide": 512,
                         "viewGeneration": 0, "geometryId": None})

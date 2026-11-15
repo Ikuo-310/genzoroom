@@ -412,12 +412,28 @@ def _settings_json(value):
     return _object_json(value, MAX_SETTINGS_BYTES)
 
 
+def _settings_values_equal(left, right):
+    """Compare normalized JSON settings while treating only finite int/float pairs as equivalent."""
+    if type(left) in (int, float) and type(right) in (int, float):
+        try:
+            return math.isfinite(left) and math.isfinite(right) and left == right
+        except OverflowError:
+            return False
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict):
+        return left.keys() == right.keys() and all(_settings_values_equal(left[key], right[key]) for key in left)
+    if isinstance(left, list):
+        return len(left) == len(right) and all(_settings_values_equal(a, b) for a, b in zip(left, right))
+    return left == right
+
+
 def _safe_settings_differences(expected, actual, limit=12):
     """Return bounded field paths and scalar numbers without logging snapshot contents."""
     differences = []
 
     def visit(left, right, path, depth=0):
-        if len(differences) >= limit or left == right:
+        if len(differences) >= limit or _settings_values_equal(left, right):
             return
         if depth >= 8:
             differences.append({"field": path[:192], "expectedType": type(left).__name__,
@@ -1936,9 +1952,9 @@ class LightCraftRawSession:
                 expected["point_colors"][interaction.index][interaction.native_field] = validated
                 actual_normalized_json = _settings_json(json.loads(encoded))
                 expected_normalized_json = _settings_json(expected)
-                if actual_normalized_json != expected_normalized_json:
-                    actual_normalized = json.loads(actual_normalized_json)
-                    expected_normalized = json.loads(expected_normalized_json)
+                actual_normalized = json.loads(actual_normalized_json)
+                expected_normalized = json.loads(expected_normalized_json)
+                if not _settings_values_equal(actual_normalized, expected_normalized):
                     lightcraft_log("raw.pointColor.readbackMismatch", level="warn", generation=self._generation,
                         phase="update", control=interaction.control, sequence=sequence,
                         mismatchFields=_safe_settings_differences(expected_normalized, actual_normalized))
@@ -2006,9 +2022,9 @@ class LightCraftRawSession:
         expected = json.loads(interaction.working_settings_json)
         actual_normalized_json = _settings_json(json.loads(encoded))
         expected_normalized_json = _settings_json(expected)
-        if actual_normalized_json != expected_normalized_json:
-            actual_normalized = json.loads(actual_normalized_json)
-            expected_normalized = json.loads(expected_normalized_json)
+        actual_normalized = json.loads(actual_normalized_json)
+        expected_normalized = json.loads(expected_normalized_json)
+        if not _settings_values_equal(actual_normalized, expected_normalized):
             lightcraft_log("raw.pointColor.readbackMismatch", level="warn", generation=self._generation,
                 phase="end", control=interaction.control,
                 mismatchFields=_safe_settings_differences(expected_normalized, actual_normalized))

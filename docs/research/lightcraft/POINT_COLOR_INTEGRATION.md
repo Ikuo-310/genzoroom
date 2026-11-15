@@ -402,3 +402,11 @@ Mock Nativeの実API経路で、interaction中のworkspace release後に別works
 確認済みのLightCraft 0.20.0 managed binaryを使った実Native試験では、合成JPEGと合成DNGへ採色後、8項目すべてを小数値で`begin → update → Draft Preview → end → History確定`し、更新値のreadbackが一致した。これは報告された実機不一致の再現ではなく、JPEG／DNGの基本interaction契約の検証である。
 
 Frontendでは、interaction update失敗後のNative cancelも失敗した場合に`RawControls.endPreview()`を必ず呼んでから既存workspace Recoveryを開始する。これにより古いPreview ownerがpresentation stateを握り続けず、取消し結果不明時は耐久Recipeからworkspaceを再作成する。focused Frontend testでPreview owner解放、表示settle、Recovery開始を確認した。Backend focused interaction testsは6件、合成JPEG／DNGの実Native testsは2件、`RawRecipeSave.test.ts`は9件成功。Windows Desktopでの手動再現は未実施。
+
+#### 整数／浮動小数点数のreadback比較
+
+追加のDesktopログでは`phase=update`、`control=pointColor.0.hueShift`の`raw.pointColor.readbackMismatch`が`mismatchFields: []`を出した直後に同じ不一致エラーとなっていた。原因は、期待snapshotの整数JSON表現（例`25`）とNativeのserde `f64` readback（例`25.0`）を、`_settings_json()`後の文字列で比較していたこと。診断側のPython比較は`25 == 25.0`を真とするため、差分が空なのに文字列だけが異なる状態を説明する。
+
+`update`／`end`の両方で、既存`_settings_json()`正規化を維持した上で、JSON object／arrayの構造とkey・順序・非数値型を厳密に比較し、有限な`int`と`float`だけを数値的に比較する`_settings_values_equal()`を使用する。`bool`は数値と等価扱いせず、配列長・キー集合・文字列・その他型・非有限値の差は拒否する。Snapshotの保存JSONやHistory形式は変更しない。field差分診断は引き続き維持する。
+
+Mockで`25`対`25.0`、`0`対`0.0`をupdate／endの双方で検証し、bool／数値、追加key、配列長、文字列、不正数値、および対象値未反映／対象外設定変更を引き続き拒否することを確認した。修正前の実Native試験は合成JPEG／DNGとも整数25で`update`が同じ`raw_point_color_control_mismatch`となり失敗、修正後は両形式の8項目（整数25・0と小数値を含む）で`begin → update → Draft Preview → end → confirm`が成功した。Mock History API試験は整数値を含む操作を1 History stepとして保存し、Undo／Redoで復元した。実機の元ログには実際の`expected`／`actual`数値がなく、例の25／25.0は再現試験で確認した型差である。
