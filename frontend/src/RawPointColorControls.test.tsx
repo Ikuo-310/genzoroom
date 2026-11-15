@@ -32,6 +32,8 @@ function createRaw(colors: ReturnType<typeof point>[] = []) {
     operationError: undefined as string | undefined,
     pointColorPickActive: false, pointColorPickAvailable: colors.length < 8 && settings.sections.color,
     togglePointColorPick: vi.fn(), cancelPointColorPick: vi.fn(),
+    pointColorInteracting: false, pointColorInputEnabled: false, beginPointColorInteraction: vi.fn(() => true), updatePointColorInteraction: vi.fn(),
+    finishPointColorInteraction: vi.fn(), cancelPointColorInteraction: vi.fn(),
     operate: vi.fn(), beginControls: vi.fn(), changeControls: vi.fn(), flushControls: vi.fn(), desired: {} };
 }
 function draw(raw: ReturnType<typeof createRaw>, disabled = false) { act(() => root.render(<RawAdjustmentControls raw={raw as never} disabled={disabled} />)); }
@@ -195,10 +197,10 @@ it.each([
     number.dispatchEvent(new Event('input', { bubbles: true }));
     number.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
   });
-  expect(raw.operate).toHaveBeenCalledOnce();
-  expect(raw.operate).toHaveBeenCalledWith({ kind: 'pointColorControl', metadata: {
-    control: `pointColor.0.${controlField}`, value,
-  } });
+  expect(raw.beginPointColorInteraction).toHaveBeenCalledWith(`pointColor.0.${controlField}`, expect.any(Number));
+  expect(raw.updatePointColorInteraction).toHaveBeenLastCalledWith(value);
+  expect(raw.finishPointColorInteraction).toHaveBeenCalledOnce();
+  expect(raw.operate).not.toHaveBeenCalled();
   expect(raw.settings.point_colors[0][field]).toBe(['range', 'hue_range', 'sat_range', 'lum_range'].includes(field) ? 50 : 0);
   expect(pointColorAdjustments()[index].querySelector<HTMLInputElement>('.adjustment-number')?.value).toBe(String(value));
 });
@@ -559,10 +561,10 @@ it('groups slider drag changes until pointer release and applies them to the cap
   expect(raw.operate).not.toHaveBeenCalled();
   expect(pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-number')?.value).toBe('37');
   act(() => window.dispatchEvent(new Event('pointerup')));
-  expect(raw.operate).toHaveBeenCalledOnce();
-  expect(raw.operate).toHaveBeenCalledWith({ kind: 'pointColorControl', metadata: {
-    control: 'pointColor.1.hueShift', value: 37,
-  } });
+  expect(raw.beginPointColorInteraction).toHaveBeenCalledWith('pointColor.1.hueShift', 0);
+  expect(raw.updatePointColorInteraction).toHaveBeenLastCalledWith(37);
+  expect(raw.finishPointColorInteraction).toHaveBeenCalledOnce();
+  expect(raw.operate).not.toHaveBeenCalled();
   raw.settings = { ...raw.settings, revision: raw.settings.revision + 1,
     point_colors: [raw.settings.point_colors[0], { ...raw.settings.point_colors[1], hue_shift: 37 }] };
   draw(raw);
@@ -581,10 +583,10 @@ it('groups keyboard and wheel changes at the operation boundary before changing 
   expect(pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-number')?.value).toBe('11');
   expect(raw.operate).not.toHaveBeenCalled();
   act(() => swatches()[1].click());
-  expect(raw.operate).toHaveBeenCalledOnce();
-  expect(raw.operate).toHaveBeenCalledWith({ kind: 'pointColorControl', metadata: {
-    control: 'pointColor.0.hueShift', value: 11,
-  } });
+  expect(raw.beginPointColorInteraction).toHaveBeenCalledWith('pointColor.0.hueShift', 0);
+  expect(raw.updatePointColorInteraction).toHaveBeenLastCalledWith(11);
+  expect(raw.finishPointColorInteraction).toHaveBeenCalledOnce();
+  expect(raw.operate).not.toHaveBeenCalled();
 });
 
 it('commits the old index before swatch selection and does not apply stale edits after Document or revision changes', () => {
@@ -597,7 +599,9 @@ it('commits the old index before swatch selection and does not apply stale edits
     range.dispatchEvent(new Event('input', { bubbles: true }));
     swatches()[1].click();
   });
-  expect(raw.operate).toHaveBeenCalledWith({ kind: 'pointColorControl', metadata: { control: 'pointColor.0.hueShift', value: 24 } });
+  expect(raw.beginPointColorInteraction).toHaveBeenCalledWith('pointColor.0.hueShift', 0);
+  expect(raw.updatePointColorInteraction).toHaveBeenLastCalledWith(24);
+  expect(raw.finishPointColorInteraction).toHaveBeenCalledOnce();
 
   raw.operate.mockClear();
   const nextRange = pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-range')!;

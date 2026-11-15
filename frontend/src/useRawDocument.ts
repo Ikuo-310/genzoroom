@@ -24,7 +24,8 @@ type RawState = { cropSnapshot?: CropSnapshot; cropMode?: boolean; cropDisplay?:
   saving?: boolean; saveError?: string; locked?: boolean; regenerating?: boolean; regenerationError?: string;
   resetting?: boolean; resetError?: string;
   history?: RawHistoryResult['history']; historySteps?: RawHistoryStep[];
-  historyLoading?: boolean; historyError?: string; operationError?: string; canUndo?: boolean; canRedo?: boolean; movingHistory?: boolean };
+  historyLoading?: boolean; historyError?: string; operationError?: string; canUndo?: boolean; canRedo?: boolean; movingHistory?: boolean;
+  pointColorInteracting?: boolean; pointColorInputEnabled?: boolean };
 // Serialize ownership changes even when React unmounts during a transmitted import.
 let ownership = Promise.resolve();
 function enqueue(action: () => Promise<void>) { ownership = ownership.then(action, action).catch(() => {}); }
@@ -549,7 +550,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         historyLoading: saver?.historyLoading, historyError: saver?.historyError, operationError: saver?.operationError,
         canUndo: saver?.canUndo, canRedo: saver?.canRedo,
         movingHistory: saver?.moving,
-        locked: frozen.current || saver?.locked, regenerating: restarting, regenerationError }));
+    locked: frozen.current || saver?.locked, pointColorInteracting: saver?.pointColorInteracting,
+    pointColorInputEnabled: saver?.pointColorInputEnabled, regenerating: restarting, regenerationError }));
       if (confirmed.mutationAttempts >= confirmed.regenerationThreshold && saver?.initialized && !saver.dirty && !saver.locked
         && !frozen.current && !regenerationError && !editor.error) void restart().catch(() => {});
       pumpDisplay();
@@ -636,6 +638,38 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
           setMixerTargetActive(null);
           setMixerTargetValues({});
           settleCurvePresentation(cancelled);
+        },
+        pointColorSettled: settleCurvePresentation,
+        pointColorPreviewError: cause => {
+          const code = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
+          if (current()) { curvePresentation.current.active = false; setState(previous => previous && ({ ...previous, displayError: code })); }
+        },
+        pointColorPreview: (frame, doc, sequence, target) => {
+          const owner = curvePresentation.current;
+          if (!owner.active || sequence <= owner.displayedSequence || !current()) return;
+          void decodeFrame(frame, controller.signal, urls).then(candidate => {
+            if (!owner.active || sequence <= owner.displayedSequence || !current()
+              || doc.generation !== editor?.confirmed.generation || doc.documentToken !== editor?.confirmed.documentToken) {
+              urls.release(candidate); return;
+            }
+            owner.displayedSequence = sequence;
+            if (owner.url) urls.release(owner.url);
+            owner.url = candidate;
+            if (frame.frame) {
+              publishedFrame = { revision: doc.revision, quality: frame.quality ?? 'draft', frame: frame.frame };
+              wholeSurfaces.current.after = { url: candidate, doc: { ...doc }, frame: frame.frame,
+                quality: frame.quality ?? 'draft', maxSide: target.maxSide };
+            }
+            setState(previous => previous && previous.assetId === assetId ? { ...previous, url: candidate,
+              width: frame.width, height: frame.height, frame: frame.frame, quality: frame.quality ?? 'draft',
+              imageRevision: doc.revision, displayError: undefined } : previous);
+            overlay.refresh();
+          }).catch(cause => {
+            if (owner.active && sequence >= owner.displayedSequence) {
+              const code = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
+              setState(previous => previous && ({ ...previous, displayError: code }));
+            }
+          });
         },
         mixerPreview: (frame, doc, sequence, target) => {
           const owner = curvePresentation.current;
@@ -1374,6 +1408,35 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       saverRef.current?.finishCurveInteraction(channel, points, changed);
     },
     cancelCurveInteraction: () => { curvePresentation.current.active = false; void saverRef.current?.cancelCurveInteraction(); },
+    beginPointColorInteraction: (control: import('./rawApi').RawPointColorControlId, value: number) => {
+      const currentEditor = callbackEditor(), saver = saverRef.current;
+      if (!currentEditor || !saver || frozen.current || beforeRequested || visible?.cropMode || pickModeOwnsViewer()
+        || saver.locked || !visible?.settings?.sections.color || !visible.frame
+        || visible.imageRevision !== currentEditor.confirmed.revision) return false;
+      if (!saver.beginPointColorInteraction(control, value)) return false;
+      curvePresentation.current = { active: true, sequence: 0, displayedSequence: -1, baseline: {
+        url: visible.url, width: visible.width, height: visible.height, frame: visible.frame, quality: visible.quality,
+        imageRevision: visible.imageRevision, surface: wholeSurfaces.current.after ? { ...wholeSurfaces.current.after } : undefined,
+      } };
+      return true;
+    },
+    updatePointColorInteraction: (value: number) => {
+      const saver = saverRef.current;
+      if (callbackEditor() && saver?.pointColorInteracting && !frozen.current && curvePresentation.current.active)
+        saver.updatePointColorInteraction(value, curveTarget.current);
+    },
+    finishPointColorInteraction: () => {
+      const saver = saverRef.current;
+      if (!callbackEditor() || frozen.current || !saver?.pointColorInteracting) return;
+      void saver.finishPointColorInteraction().catch(cause => {
+        const code = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
+        setState(previous => previous && ({ ...previous, displayError: code }));
+      });
+    },
+    cancelPointColorInteraction: () => {
+      curvePresentation.current.active = false;
+      void saverRef.current?.cancelPointColorInteraction();
+    },
     operate: (operation: RawHistoryOperation) => {
       cancelPick();
       if (callbackEditor() && !frozen.current) void saverRef.current?.operate(operation).catch(cause =>

@@ -1507,6 +1507,56 @@ def test_mixer_target_cancel_restores_all_bands_and_blocks_unrelated_changes(tmp
     asyncio.run(run())
 
 
+def test_point_color_interaction_previews_draft_and_promotes_only_after_history_confirmation(tmp_path):
+    async def run():
+        raw, _, children, files = await create(tmp_path, adaptive=True)
+        try:
+            handle, baseline = await raw.open_raw("pixel", files[0])
+            child = children[0]
+            child.photos[1]["settings"]["point_colors"] = [point_color()]
+            baseline = await raw.get_settings(handle)
+            interaction_id = await raw.begin_point_color_interaction(handle, "pointColor.0.hueShift", baseline.revision)
+            update = await raw.update_point_color_interaction(handle, interaction_id, baseline.revision, 1, 18.5,
+                max_side=512)
+            frame = await update.preview_ticket
+            assert frame.interaction_id == interaction_id and frame.interaction_sequence == 1
+            assert child.preview_arguments[-1]["quality"] == "draft"
+            assert raw._photos["pixel"].settings_json == _settings_json(baseline.settings)
+            assert child.photos[1]["settings"]["point_colors"][0]["hue_shift"] == 18.5
+            result = await raw.end_point_color_interaction(handle, interaction_id, baseline.revision,
+                "pointColor.0.hueShift", 18.5)
+            assert result.settings["point_colors"][0]["hue_shift"] == 18.5
+            assert raw._photos["pixel"].settings_json == _settings_json(baseline.settings)
+            assert len(child.interaction_history) == 1
+            committed = raw.confirm_point_color_interaction(handle, interaction_id, baseline.revision)
+            assert committed.settings == result.settings and committed.revision > baseline.revision
+            assert raw.status().edits == 1
+            assert [command for command, _ in child.commands].count("develop.set") == 1
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+def test_point_color_interaction_cancel_restores_baseline_without_history(tmp_path):
+    async def run():
+        raw, _, children, files = await create(tmp_path, adaptive=True)
+        try:
+            handle, baseline = await raw.open_raw("pixel", files[0])
+            child = children[0]
+            child.photos[1]["settings"]["point_colors"] = [point_color()]
+            baseline = await raw.get_settings(handle)
+            interaction_id = await raw.begin_point_color_interaction(handle, "pointColor.0.range", baseline.revision)
+            update = await raw.update_point_color_interaction(handle, interaction_id, baseline.revision, 1, 63.25)
+            await update.preview_ticket
+            restored = await raw.cancel_point_color_interaction(handle, interaction_id, baseline.revision)
+            assert restored.settings == baseline.settings
+            assert child.interaction is None and child.interaction_history == []
+            assert raw.status().edits == 0
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
 def test_curve_interaction_coalesces_pending_updates_and_cancel_restores_baseline(tmp_path):
     async def run():
         raw, manager, children, files = await create(tmp_path, adaptive=True)

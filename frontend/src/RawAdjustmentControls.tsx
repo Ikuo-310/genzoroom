@@ -163,9 +163,10 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
     if (current?.document === pointColorDocument && current.revision === settings?.revision
       && current.index === index && current.field === field) return;
     const color = settings?.point_colors[index];
-    if (!pointColorDocument || !color || !settings?.sections.color || actionsLocked) return;
+    if (!pointColorDocument || !color || !settings?.sections.color || actionsLocked && !raw.pointColorInputEnabled) return;
     const value = color[field];
     const edit = { document: pointColorDocument, revision: settings.revision, index, field, original: value, value };
+    if (!raw.beginPointColorInteraction(`pointColor.${index}.${pointColorControlFields[field]}`, value)) return;
     pointColorDraftRef.current = edit;
     setPointColorDraft(edit);
   };
@@ -176,6 +177,7 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
     const next = { ...current, value };
     pointColorDraftRef.current = next;
     setPointColorDraft(next);
+    raw.updatePointColorInteraction(value);
   };
   const commitPointColorEdit = () => {
     const edit = pointColorDraftRef.current;
@@ -183,20 +185,22 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
     pointColorDraftRef.current = null;
     // Indexed Native controls are valid only for the document snapshot where this gesture began.
     if (edit.document !== pointColorDocument || edit.revision !== settings?.revision
-      || !settings?.point_colors[edit.index] || !settings.sections.color || actionsLocked || edit.value === edit.original) {
+      || !settings?.point_colors[edit.index] || !settings.sections.color || actionsLocked && !raw.pointColorInputEnabled) {
       setPointColorDraft(null);
+      raw.cancelPointColorInteraction();
       return;
     }
+    // Slider unmount cleanup treats a still-owned draft as cancellation; release it before a commit.
+    pointColorDraftRef.current = null;
     setPointColorDraft(edit);
-    raw.operate({ kind: 'pointColorControl', metadata: {
-      control: `pointColor.${edit.index}.${pointColorControlFields[edit.field]}`, value: edit.value,
-    } });
+    raw.finishPointColorInteraction();
   };
   const cancelPointColorEdit = (index: number, field: RawPointColorAdjustmentField) => {
     const edit = pointColorDraftRef.current;
     if (!edit || edit.index !== index || edit.field !== field) return;
     pointColorDraftRef.current = null;
     setPointColorDraft(null);
+    raw.cancelPointColorInteraction();
   };
   const resetPointColorControl = (index: number, field: RawPointColorAdjustmentField) => {
     const target = currentPointColorTarget.current;
@@ -358,6 +362,7 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
       {category === 'color' && <RawPointColorPicker colors={settings.point_colors} selectedIndex={selectedPointColorIndex}
         valueDraft={pointColorDraft} editEpoch={pointColorEditEpoch} document={pointColorDocument} revision={settings.revision}
         controlsDisabled={actionsLocked || !settings.sections.color}
+        sliderDisabled={(actionsLocked && !raw.pointColorInputEnabled) || !settings.sections.color}
         deletePending={!!pendingPointColorMutation.current}
         resetPending={pendingPointColorMutation.current?.kind === 'reset'}
         onResetAll={() => resetPointColors(pointColorDocument, settings.revision)}
@@ -571,11 +576,11 @@ function RawColorGrading({ raw, band, onBandChange, open, onOpenChange, locked, 
   </section>;
 }
 
-function RawPointColorPicker({ colors, selectedIndex, valueDraft, editEpoch, document, revision, controlsDisabled, deletePending, resetPending,
+function RawPointColorPicker({ colors, selectedIndex, valueDraft, editEpoch, document, revision, controlsDisabled, sliderDisabled = controlsDisabled, deletePending, resetPending,
   onResetAll, onDeleteSelected, onSwatchContextMenu, onAdjustmentBegin, onAdjustmentChange, onAdjustmentCommit, onAdjustmentCancel, onAdjustmentReset,
   pickActive, pickDisabled, onPickToggle, onPickCancel, onSelect, open, onOpenChange }: {
   colors: RawPointColor[]; selectedIndex: number | null; onSelect: (index: number) => void;
-  valueDraft: PointColorDraft | null; editEpoch: number; document: string | null; revision: number; controlsDisabled: boolean;
+  valueDraft: PointColorDraft | null; editEpoch: number; document: string | null; revision: number; controlsDisabled: boolean; sliderDisabled?: boolean;
   deletePending: boolean; resetPending: boolean; onResetAll: () => void;
   onDeleteSelected: (index: number) => void; onSwatchContextMenu: (index: number, event: ReactMouseEvent<HTMLButtonElement>) => void;
   onAdjustmentBegin: (index: number, field: RawPointColorAdjustmentField) => void;
@@ -640,7 +645,7 @@ function RawPointColorPicker({ colors, selectedIndex, valueDraft, editEpoch, doc
                 value={value} min={min} max={max} step={1} precision={0} defaultValue={defaultValue} valueText={value.toFixed(0)}
                 valueLabel={t(`workspace.rawPreview.pointColor.adjustments.${label}Value`)}
                 resetLabel={t(`workspace.rawPreview.pointColor.adjustments.${label}Reset`)}
-                enabled onToggle={() => {}} disabled={controlsDisabled || !document || selectedIndex >= colors.length}
+                enabled onToggle={() => {}} disabled={sliderDisabled || !document || selectedIndex >= colors.length}
                 resetDisabled={controlsDisabled || !document || selectedIndex >= colors.length || value === defaultValue}
                 cancelEditOnReset onCancel={() => onAdjustmentCancel(selectedIndex, field)}
                 onBegin={() => onAdjustmentBegin(selectedIndex, field)}

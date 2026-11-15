@@ -535,6 +535,51 @@ def test_mixer_target_interaction_readback_history_undo_redo_and_cancel(local, t
     asyncio.run(run())
 
 
+def test_point_color_slider_interaction_previews_then_commits_one_history_step(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        children[0].adaptive_supported = True
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                _, doc = await open_document(http)
+                doc = await operation(http, doc, "initialize")
+                doc = await operation(http, doc, "operate", body(doc) | {"kind": "pointColorPick", "metadata": {"x": .3, "y": .7}})
+                assert len(doc["point_colors"]) == 1 and doc["history"]["length"] == 1
+                base = f'/api/raw/documents/{doc["handle"]}/point-color-interaction'
+                identity_body = identity(doc) | {"documentRevision": doc["revision"]}
+                started = await http.post(f"{base}/begin", json=identity_body | {"control": "pointColor.0.hueShift"})
+                assert started.status_code == 200, started.text
+                interaction_id = started.json()["interactionId"]
+                for sequence, value in ((1, 12.5), (2, 27.25)):
+                    updated = await http.post(f"{base}/update", json=identity_body | {"interactionId": interaction_id,
+                        "sequence": sequence, "value": value, "serial": sequence, "maxSide": 512,
+                        "viewGeneration": 0, "geometryId": None})
+                    assert updated.status_code == 200 and updated.json()["value"] == value
+                preview = await http.post(f"{base}/preview", json=identity_body | {"interactionId": interaction_id,
+                    "interactionSequence": 2, "serial": 2, "maxSide": 512, "viewGeneration": 0, "geometryId": None})
+                assert preview.status_code == 200 and preview.headers["x-raw-quality"] == "draft"
+                assert preview.headers["x-raw-interaction-sequence"] == "2"
+                assert len(store.get_raw_history(api._history_identity)["history"]["steps"]) == 1
+                request = body(doc) | {"kind": "pointColorControl", "metadata": {
+                    "control": "pointColor.0.hueShift", "value": 27.25}, "pointColorInteractionId": interaction_id}
+                doc = await operation(http, doc, "operate", request)
+                assert doc["point_colors"][0]["hue_shift"] == 27.25
+                assert doc["history"]["length"] == 2
+                listing = (await http.get(url(doc), headers=headers(doc))).json()
+                assert listing["steps"][-1]["kind"] == "pointColorControl"
+                assert listing["steps"][-1]["metadata"] == {"control": "pointColor.0.hueShift", "value": 27.25}
+                recipe = store.get_raw_recipe(api._history_identity)["recipe"]["settings"]
+                assert recipe["point_colors"][0]["hue_shift"] == 27.25
+                doc = await operation(http, doc, "undo")
+                assert doc["point_colors"][0]["hue_shift"] == 0
+                doc = await operation(http, doc, "redo")
+                assert doc["point_colors"][0]["hue_shift"] == 27.25
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("field,value,code", [
     ("generation", 999, "raw_stale_handle"), ("documentToken", "wrong", "raw_stale_handle"),
     ("documentRevision", 999, "raw_revision_conflict"), ("settingsFingerprint", "0" * 64, "raw_revision_conflict"),

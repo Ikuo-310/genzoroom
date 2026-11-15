@@ -148,6 +148,7 @@ export type RawHistoryRequest = RawRecipeRequest & { action: 'initialize' | 'com
   control?: RawHistoryControlId; targetStepId?: string | null; operation?: RawHistoryOperation;
   curveInteractionId?: string;
   mixerInteractionId?: string;
+  pointColorInteractionId?: string;
   geometryCommit?: { gestureId: string; operation: 'set' | 'drag' | 'straighten'; action?: RawGeometryAction } };
 export type RawHistoryStep = { stepId: string; kind: 'control' | 'controlReset' | 'opticsFlag' | 'opticsFlagReset' | 'sectionToggle' | 'sectionReset' | 'vignetteStyle' | 'allReset' | 'wbAuto' | 'wbReset' | 'colorReset' | 'wbPick' | 'pointColorPick' | 'pointColorDelete' | 'pointColorReset' | 'pointColorControl' | 'pointColorControlReset' | 'geometry' | 'curve' | 'curveReset' | 'mixerTarget';
   metadata: { control?: RawHistoryControlId | RawOpticsFlagId | RawPointColorControlId; index?: number; section?: RawResetSectionId; enabled?: boolean; style?: RawVignetteStyle; operation?: RawGeometryOperationId; action?: RawGeometryAction; channel?: RawCurveResetChannel; target?: 'hue' | 'sat' | 'lum'; x?: number; y?: number; value?: number }; createdAt: string;
@@ -514,7 +515,8 @@ export async function saveRawRecipe(request: RawRecipeRequest): Promise<RawRecip
 }
 /** A retry keeps the exact document/body; current metadata is independent of the original ack. */
 export async function saveRawHistory(request: RawHistoryRequest): Promise<RawHistoryResult> {
-  const { doc, action, expectedRecipeRevision, saveId, control, targetStepId, operation, curveInteractionId, mixerInteractionId } = request;
+  const { doc, action, expectedRecipeRevision, saveId, control, targetStepId, operation, curveInteractionId, mixerInteractionId,
+    pointColorInteractionId } = request;
   if (action === 'operate' && operation?.kind === 'curve' && !validRawCurveInput(operation.metadata.channel, operation.points))
     throw new RawSaveError('raw_invalid_request', 'rejected', 422);
   let accepted = false;
@@ -527,6 +529,7 @@ export async function saveRawHistory(request: RawHistoryRequest): Promise<RawHis
         ...(operation.kind === 'geometry' ? { geometry: operation.geometry } : {}),
         ...(operation.kind === 'curve' ? { curvePoints: operation.points, ...(curveInteractionId ? { curveInteractionId } : {}) } : {}),
         ...(operation.kind === 'mixerTarget' && mixerInteractionId ? { mixerInteractionId } : {}),
+        ...(operation.kind === 'pointColorControl' && pointColorInteractionId ? { pointColorInteractionId } : {}),
         ...(operation.kind === 'wbPick' ? { frame: operation.frame } : {}) } : {}),
       ...(action === 'jump' ? { targetStepId } : {}) }), RAW_SETTINGS_RESPONSE_BYTES);
     accepted = true;
@@ -674,6 +677,38 @@ export async function cancelRawMixerInteraction(doc: RawDocument, interactionId:
   await request(`/documents/${doc.handle}/mixer-interaction/cancel`, post({ ...identityBody(doc),
     documentRevision: doc.revision, interactionId }));
 }
+export async function beginRawPointColorInteraction(doc: RawSettings, control: RawPointColorControlId): Promise<string> {
+  if (!validRawPointColorControlId(control)) throw new RawApiError('raw_invalid_request');
+  const value = await json(`/documents/${doc.handle}/point-color-interaction/begin`, post({ ...identityBody(doc),
+    documentRevision: doc.revision, control }));
+  document(value, doc.workspaceId, doc.assetId);
+  if (value.handle !== doc.handle || value.generation !== doc.generation || value.documentToken !== doc.documentToken
+    || value.revision !== doc.revision || typeof value.interactionId !== 'string' || !opaque(value.interactionId))
+    throw new RawApiError('raw_invalid_response');
+  return value.interactionId;
+}
+export async function updateRawPointColorInteraction(doc: RawSettings, serial: number, signal: AbortSignal,
+  target: RawDisplayTarget, interaction: { id: string; sequence: number; control: RawPointColorControlId; value: number }): Promise<number> {
+  if (!opaque(interaction.id) || !Number.isSafeInteger(interaction.sequence) || interaction.sequence < 1
+    || !validRawPointColorControlValue(interaction.control, interaction.value) || !Number.isSafeInteger(serial)
+    || target.mode !== 'whole') throw new RawApiError('raw_invalid_request');
+  const response = await request(`/documents/${doc.handle}/point-color-interaction/update`, { ...post({ ...identityBody(doc),
+    documentRevision: doc.revision, interactionId: interaction.id, sequence: interaction.sequence, value: interaction.value,
+    serial, maxSide: target.maxSide, viewGeneration: target.viewGeneration, geometryId: target.geometryId }),
+    signal: AbortSignal.any([signal, AbortSignal.timeout(90_000)]) });
+  if (response.status !== 200 || response.headers.get('content-type')?.split(';')[0] !== 'application/json') throw new RawApiError('raw_invalid_response');
+  let value: any;
+  try { value = JSON.parse(new TextDecoder().decode(await readBounded(response, 16 * 1024))); }
+  catch { throw new RawApiError('raw_invalid_response'); }
+  if (value?.interactionId !== interaction.id || value.interactionSequence !== interaction.sequence
+    || value.value !== interaction.value) throw new RawApiError('raw_invalid_response');
+  return value.interactionSequence;
+}
+export async function cancelRawPointColorInteraction(doc: RawDocument, interactionId: string) {
+  if (!opaque(interactionId)) throw new RawApiError('raw_invalid_request');
+  await request(`/documents/${doc.handle}/point-color-interaction/cancel`, post({ ...identityBody(doc),
+    documentRevision: doc.revision, interactionId }));
+}
 export async function endRawMixerInteraction(request: RawRecipeRequest & { interactionId: string; target: RawMixerTarget }): Promise<RawHistoryResult> {
   if (!opaque(request.interactionId) || !['hue', 'sat', 'lum'].includes(request.target)) throw new RawSaveError('raw_invalid_request', 'rejected', 422);
   return saveRawHistory({ ...request, action: 'operate', operation: { kind: 'mixerTarget', metadata: { target: request.target } },
@@ -716,7 +751,7 @@ export async function updateRawTargetedCurve(doc: RawDocument, serial: number, s
 export async function rawPreview(doc: RawDocument, serial: number, signal: AbortSignal, kind: 'before' | 'after' = 'after', target?: RawDisplayTarget,
   interaction?: { id: string; points: RawCurveCommandPoint[] },
   targetedInteraction?: { id: string; target: { x: number; y: number }; steps: number[] } | { id: string; sequence: number },
-  mixerInteraction?: { id: string; sequence: number }): Promise<RawFrame> {
+  mixerInteraction?: { id: string; sequence: number }, pointColorInteraction?: { id: string; sequence: number }): Promise<RawFrame> {
   if (target && (!Number.isInteger(target.maxSide) || target.maxSide < 16 || target.maxSide > RAW_PREVIEW_MAX_SIDE))
     throw new RawApiError('raw_invalid_preview_request');
   if (targetedInteraction && 'steps' in targetedInteraction) {
@@ -727,13 +762,14 @@ export async function rawPreview(doc: RawDocument, serial: number, signal: Abort
     return { ...frame, curvePoints: readback.points };
   }
   const started = performance.now();
-  const activeInteraction = mixerInteraction ?? targetedInteraction ?? interaction;
+  const activeInteraction = pointColorInteraction ?? mixerInteraction ?? targetedInteraction ?? interaction;
   const previewSequence = targetedInteraction && 'sequence' in targetedInteraction ? targetedInteraction.sequence : undefined;
-  const response = await request(`/documents/${doc.handle}/${mixerInteraction ? 'mixer-interaction/preview'
+  const response = await request(`/documents/${doc.handle}/${pointColorInteraction ? 'point-color-interaction/preview' : mixerInteraction ? 'mixer-interaction/preview'
     : activeInteraction ? `curve-interaction/${previewSequence ? 'preview' : 'update'}` : 'preview'}`, { ...post({ workspaceId: doc.workspaceId,
     generation: doc.generation, documentToken: doc.documentToken,
     ...(activeInteraction ? { documentRevision: doc.revision, interactionId: activeInteraction.id,
-      ...(mixerInteraction ? { interactionSequence: mixerInteraction.sequence }
+      ...(pointColorInteraction ? { interactionSequence: pointColorInteraction.sequence }
+        : mixerInteraction ? { interactionSequence: mixerInteraction.sequence }
         : previewSequence ? { interactionSequence: previewSequence } : { points: interaction!.points }),
       serial, maxSide: target?.maxSide ?? RAW_PREVIEW_MAX_SIDE, viewGeneration: target?.viewGeneration ?? 0,
       geometryId: target?.geometryId ?? null } : { revision: doc.revision, serial, ...target, ...(kind === 'before' ? { kind } : {}) }) }),

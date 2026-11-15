@@ -3,7 +3,9 @@ import * as api from './rawApi';
 import { RawRecipeSave, RAW_AUTOSAVE_MS } from './rawRecipeSave';
 import { rawSettings } from './test/rawSettings';
 
-vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(), saveRawRecipe: vi.fn(), readRawRecipe: vi.fn() }));
+vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(), saveRawRecipe: vi.fn(), readRawRecipe: vi.fn(),
+  saveRawHistory: vi.fn(), readRawHistory: vi.fn(), beginRawPointColorInteraction: vi.fn(), updateRawPointColorInteraction: vi.fn(),
+  cancelRawPointColorInteraction: vi.fn(), rawPreview: vi.fn() }));
 const fingerprint = (revision: number) => String(revision).padStart(64, '0');
 const settings = (revision = 1) => rawSettings({ workspaceId: 'workspace', handle: 'handle', assetId: 'raw', generation: 1,
   documentToken: 'token', revision, settingsFingerprint: fingerprint(revision), recipeFingerprint: fingerprint(1), recipeRevision: 0 });
@@ -93,6 +95,46 @@ it('does not accept an acknowledgement for a disposed document', async () => {
   c.dispose(); changed.mockClear(); gate.resolve(ack(vi.mocked(api.saveRawRecipe).mock.calls[0][0]));
   expect(await saving).toBeInstanceOf(api.RawApiError);
   expect(changed).not.toHaveBeenCalled(); expect(c.savedFingerprint).toBe(fingerprint(1));
+});
+
+it('coalesces Point Color interaction updates and saves one final History operation', async () => {
+  const point = { lum: .5, chroma: .1, hue: 20, hue_shift: 0, sat_shift: 0, lum_shift: 0, variance: 0,
+    range: 50, hue_range: 50, sat_range: 50, lum_range: 50 };
+  const initial = { ...settings(), point_colors: [point] };
+  const controls = { confirmed: initial, beginPreview: vi.fn(), endPreview: vi.fn(), refreshPreview: vi.fn(), flush: vi.fn(), unsettled: false } as any;
+  const c = new RawRecipeSave(initial, { schedule: action => { owner = owner.then(action); }, changed, controls });
+  c.initialized = true; c.history = { initialized: true, cursor: 0, length: 0, selectedStepId: null };
+  vi.mocked(api.beginRawPointColorInteraction).mockResolvedValueOnce('a'.repeat(32));
+  vi.mocked(api.updateRawPointColorInteraction).mockImplementation(async (_doc, _serial, _signal, _target, operation) => operation.sequence);
+  vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(), width: 10, height: 10, epoch: 1, sequence: 1,
+    kind: 'after', quality: 'draft', interactionId: 'a'.repeat(32), interactionSequence: 2 } as api.RawFrame);
+  vi.mocked(api.saveRawHistory).mockImplementation(async request => {
+    const stepId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', saved = { ...initial, settingsFingerprint: fingerprint(2), recipeFingerprint: fingerprint(2),
+      recipeRevision: request.expectedRecipeRevision + 1, history: { initialized: true, cursor: 1, length: 1, selectedStepId: stepId },
+      historyPending: false, nativeState: 'synced', nativeMatchesRecipe: true, replayed: false,
+      ack: { saveId: request.saveId, revision: request.expectedRecipeRevision + 1, settingsFingerprint: fingerprint(2),
+        updatedAt: '2026-10-22T00:00:00.000Z', historyCursor: 1, historyLength: 1, stepId } };
+    return saved as api.RawHistoryResult;
+  });
+  vi.mocked(api.readRawHistory).mockResolvedValue({ ...initial, recipeRevision: 1, recipeFingerprint: fingerprint(2),
+    history: { initialized: true, cursor: 1, length: 1, selectedStepId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' }, historyPending: false,
+    nativeState: 'synced', nativeMatchesRecipe: true, steps: [] } as api.RawHistoryData);
+
+  expect(c.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true);
+  await owner;
+  const target: api.RawDisplayTarget = { quality: 'draft', mode: 'whole', maxSide: 512, viewGeneration: 0, geometryId: null };
+  c.updatePointColorInteraction(12, target);
+  c.updatePointColorInteraction(25.5, target);
+  await vi.advanceTimersByTimeAsync(50);
+  expect(api.updateRawPointColorInteraction).toHaveBeenCalledOnce();
+  expect(vi.mocked(api.updateRawPointColorInteraction).mock.calls[0][4].value).toBe(25.5);
+  expect(api.saveRawHistory).not.toHaveBeenCalled();
+  await c.finishPointColorInteraction();
+  expect(api.saveRawHistory).toHaveBeenCalledOnce();
+  const request = vi.mocked(api.saveRawHistory).mock.calls[0][0];
+  expect(request.operation).toEqual({ kind: 'pointColorControl', metadata: { control: 'pointColor.0.hueShift', value: 25.5 } });
+  expect(request.pointColorInteractionId).toBe('a'.repeat(32));
+  expect(c.pointColorInteracting).toBe(false);
 });
 
 

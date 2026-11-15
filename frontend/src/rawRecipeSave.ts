@@ -2,15 +2,19 @@ import { createEditStateSaveId } from './editStateApi';
 import { frontendLogger } from './frontendLogging';
 import { RawApiError, RawSaveError, RawSuperseded, beginRawGeometry, updateRawGeometry, beginRawCurveInteraction, cancelRawCurveInteraction,
   beginRawMixerInteraction, updateRawMixerInteraction, cancelRawMixerInteraction, endRawMixerInteraction,
+  beginRawPointColorInteraction, updateRawPointColorInteraction, cancelRawPointColorInteraction,
   rawPreview, readRawSettings, recoverRawGeometry, type RawGeometryAction, type RawGeometryOperation, type RawCurveChannel, type RawMixerTarget,
   updateRawTargetedCurve,
   type RawCurvePoint, type RawDisplayTarget, type RawFrame, readRawRecipe, saveRawRecipe, saveRawHistory, readRawHistory,
-  type RawSettings, type RawRecipeRequest, type RawHistoryRequest, type RawHistoryControlId, type RawHistoryResult,
+  type RawSettings, type RawRecipeRequest, type RawHistoryRequest, type RawHistoryControlId, type RawHistoryResult, type RawPointColorControlId,
   type RawHistoryStep, type RawHistoryOperation } from './rawApi';
 import type { RawControls } from './rawControls';
 
 export const RAW_AUTOSAVE_MS = 5000;
 const RAW_CURVE_PREVIEW_THROTTLE_MS = 50;
+type PointColorGesture = { control: RawPointColorControlId; initial: number; value: number; pending?: number; doc: RawSettings;
+  started: Promise<string>; id?: string; sequence: number; displayedSequence: number; ending: boolean; timer?: ReturnType<typeof setTimeout>;
+  pump?: Promise<void>; preview?: Promise<void>; controller: AbortController; display?: RawDisplayTarget; cancelPromise?: Promise<void> };
 
 /** Current-document save owner. Unknown outcomes retain one immutable request ahead of newer edits. */
 export class RawRecipeSave {
@@ -34,7 +38,7 @@ export class RawRecipeSave {
   moving = false;
   private historyOperation?: Promise<void>;
   private moveIntent?: { action: 'undo' | 'redo' | 'jump' | 'operate'; targetStepId?: string | null; operation?: RawHistoryOperation;
-    curveInteractionId?: string; mixerInteractionId?: string };
+    curveInteractionId?: string; mixerInteractionId?: string; pointColorInteractionId?: string };
   private curveGesture?: { channel: RawCurveChannel; doc: RawSettings; started: Promise<string>; id?: string; latest?: RawCurvePoint[];
     sequence: number; displayedSequence: number; timer?: ReturnType<typeof setTimeout>; inFlight?: Promise<void>; ending: boolean; controller: AbortController;
     target?: RawDisplayTarget; cancelPromise?: Promise<void>; targeted?: { point: {x:number;y:number}; pending: number[]; points?: RawCurvePoint[];
@@ -43,12 +47,15 @@ export class RawRecipeSave {
     displayedSequence: number; pendingDelta: number; ending: boolean; controller: AbortController; timer?: ReturnType<typeof setTimeout>;
     pump?: Promise<void>; preview?: Promise<void>; display?: RawDisplayTarget; changes: Partial<Record<RawHistoryControlId, number>>;
     cancelPromise?: Promise<void> };
+  private pointColorGesture?: PointColorGesture;
   private cropGesture?: { id: string; type: 'drag' | 'straighten'; action?: RawGeometryAction; sequence: number; latest?: RawGeometryOperation; ending: boolean;
     started: Promise<void>; end?: Promise<void>; error?: unknown; cancelled?: boolean; updateDoc?: RawSettings; rejected?: boolean; commit?: RawHistoryRequest };
   get cropOperation() { return this.cropGesture?.type; }
   get cropping() { return !!this.cropGesture; }
   get curveInteracting() { return !!this.curveGesture; }
   get mixerInteracting() { return !!this.mixerGesture; }
+  get pointColorInteracting() { return !!this.pointColorGesture; }
+  get pointColorInputEnabled() { return !!this.pointColorGesture && !this.pointColorGesture.ending; }
   private gesture?: { control: RawHistoryControlId; fingerprint: string };
   // One adjacent control's unsent intent is held until the preceding gesture is acknowledged.
   // It uses the same owner queue; no native mutation or second save queue starts here.
@@ -65,6 +72,9 @@ export class RawRecipeSave {
     mixerPreview?: (frame: RawFrame, doc: RawSettings, sequence: number, target: RawDisplayTarget) => void;
     mixerPreviewError?: (cause: unknown) => void;
     mixerSettled?: (cancelled: boolean) => void;
+    pointColorPreview?: (frame: RawFrame, doc: RawSettings, sequence: number, target: RawDisplayTarget) => void;
+    pointColorSettled?: (cancelled: boolean) => void;
+    pointColorPreviewError?: (cause: unknown) => void;
   }) {
     this.revision = confirmed.recipeRevision;
     this.savedFingerprint = confirmed.recipeFingerprint ?? confirmed.settingsFingerprint;
@@ -136,6 +146,141 @@ export class RawRecipeSave {
     }).finally(() => this.options.changed());
     this.options.changed();
     return true;
+  }
+  beginPointColorInteraction(control: RawPointColorControlId, value: number) {
+    if (!this.active || this.locked || this.paused || this.historyLoading || this.historyError || !this.history || this.pointColorGesture) return false;
+    if (this.confirmed.mutationAttempts >= Math.min(this.confirmed.regenerationThreshold, this.confirmed.mutationLimit - 1)) return false;
+    const preceding = this.save();
+    const gesture: PointColorGesture = { control, initial: value, value, doc: structuredClone(this.options.controls!.confirmed), started: Promise.resolve(''),
+      sequence: 0, displayedSequence: 0, ending: false, controller: new AbortController() };
+    this.pointColorGesture = gesture;
+    gesture.started = preceding.then(async () => {
+      if (!this.active || this.pointColorGesture !== gesture) throw new RawApiError('raw_document_closed');
+      gesture.doc = structuredClone(this.options.controls!.confirmed);
+      const id = await beginRawPointColorInteraction(gesture.doc, control);
+      if (!this.active || this.pointColorGesture !== gesture) {
+        await cancelRawPointColorInteraction(gesture.doc, id);
+        throw new RawApiError('raw_document_closed');
+      }
+      gesture.id = id;
+      this.options.controls!.beginPreview();
+      return id;
+    }).catch(cause => {
+      if (this.pointColorGesture === gesture) this.pointColorGesture = undefined;
+      this.options.controls?.endPreview();
+      this.options.pointColorSettled?.(true);
+      this.operationError = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
+      throw cause;
+    }).finally(() => this.options.changed());
+    this.options.changed();
+    return true;
+  }
+  updatePointColorInteraction(value: number, display: RawDisplayTarget) {
+    const gesture = this.pointColorGesture;
+    if (!gesture || gesture.ending || !this.active || !Number.isFinite(value)) return;
+    gesture.value = value;
+    gesture.pending = value;
+    gesture.display = { ...display, quality: 'draft', mode: 'whole', maxSide: Math.min(512, display.maxSide) };
+    this.schedulePointColorPump(gesture);
+  }
+  private schedulePointColorPump(gesture: PointColorGesture, immediate = false) {
+    if (gesture.timer || gesture.pump || gesture.pending === undefined || gesture.ending && !immediate) return;
+    const start = () => {
+      gesture.timer = undefined;
+      const pump = this.pumpPointColorInteraction(gesture);
+      gesture.pump = pump;
+      void pump.catch(cause => this.failPointColorInteraction(gesture, cause)).finally(() => {
+        if (gesture.pump === pump) gesture.pump = undefined;
+        if (this.pointColorGesture === gesture && gesture.pending !== undefined && !gesture.ending)
+          this.schedulePointColorPump(gesture);
+      });
+    };
+    if (immediate) start(); else gesture.timer = setTimeout(start, RAW_CURVE_PREVIEW_THROTTLE_MS);
+  }
+  private async pumpPointColorInteraction(gesture: PointColorGesture) {
+    while (gesture.pending !== undefined && this.active && this.pointColorGesture === gesture) {
+      const value = gesture.pending;
+      gesture.pending = undefined;
+      const id = await gesture.started;
+      const sequence = ++gesture.sequence;
+      const applied = await updateRawPointColorInteraction(gesture.doc, sequence, gesture.controller.signal, gesture.display!,
+        { id, sequence, control: gesture.control, value });
+      if (!this.active || this.pointColorGesture !== gesture || applied <= gesture.displayedSequence) continue;
+      gesture.displayedSequence = applied;
+      const preview = rawPreview(gesture.doc, sequence, gesture.controller.signal, 'after', gesture.display,
+        undefined, undefined, undefined, { id, sequence: applied }).then(frame => {
+        if (this.active && this.pointColorGesture === gesture && frame.interactionSequence === gesture.displayedSequence)
+          this.options.pointColorPreview?.(frame, gesture.doc, applied, gesture.display!);
+      }).catch(cause => {
+        if (cause instanceof RawSuperseded) return;
+        throw cause;
+      });
+      gesture.preview = preview;
+    }
+  }
+  private async failPointColorInteraction(gesture: PointColorGesture, cause: unknown) {
+    if (!this.active || this.pointColorGesture !== gesture) return;
+    gesture.ending = true;
+    this.options.pointColorPreviewError?.(cause);
+    await this.cancelPointColorInteraction();
+  }
+  async finishPointColorInteraction() {
+    const gesture = this.pointColorGesture;
+    if (!gesture || gesture.ending) return;
+    gesture.ending = true;
+    clearTimeout(gesture.timer);
+    try {
+      await gesture.started;
+      await gesture.pump;
+      if (gesture.pending !== undefined) {
+        this.schedulePointColorPump(gesture, true);
+        await gesture.pump;
+      }
+      await gesture.preview;
+    } catch (cause) {
+      if (this.pointColorGesture === gesture && !this.moveIntent) await this.failPointColorInteraction(gesture, cause);
+      throw cause;
+    }
+    if (this.pointColorGesture !== gesture || gesture.controller.signal.aborted) return;
+    if (gesture.value === gesture.initial) { await this.cancelPointColorInteraction(); return; }
+    this.moving = true;
+    this.moveIntent = { action: 'operate', operation: { kind: 'pointColorControl', metadata: { control: gesture.control, value: gesture.value } },
+      pointColorInteractionId: gesture.id };
+    const operation = this.save().finally(() => {
+      this.moving = false; this.historyOperation = undefined; if (this.active) this.options.changed();
+    });
+    this.historyOperation = operation;
+    await operation;
+  }
+  cancelPointColorInteraction() {
+    const gesture = this.pointColorGesture;
+    if (!gesture) return Promise.resolve();
+    if (gesture.cancelPromise) return gesture.cancelPromise;
+    gesture.ending = true;
+    clearTimeout(gesture.timer);
+    gesture.pending = undefined;
+    const cancellation = gesture.started.then(async id => {
+      if (this.pointColorGesture !== gesture) return;
+      await gesture.pump?.catch(() => {});
+      await cancelRawPointColorInteraction(gesture.doc, id);
+      const settings = await readRawSettings(gesture.doc);
+      if (this.pointColorGesture !== gesture || !this.active) return;
+      this.options.controls!.confirmed = settings;
+      this.confirmed = settings;
+      this.pointColorGesture = undefined;
+      this.options.controls?.endPreview();
+      this.options.controls?.refreshPreview();
+      this.options.pointColorSettled?.(true);
+      this.operationError = undefined;
+    }).catch(cause => {
+      this.operationError = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
+      this.pointColorGesture = undefined;
+      this.options.pointColorSettled?.(true);
+      if (this.options.curveRecovery) void this.options.curveRecovery().catch(error => this.cropFailure(error));
+      throw cause;
+    }).finally(() => { if (this.active) this.options.changed(); });
+    gesture.cancelPromise = cancellation;
+    return cancellation;
   }
   updateMixerInteraction(delta: number, display: RawDisplayTarget) {
     const gesture = this.mixerGesture;
@@ -423,9 +568,9 @@ export class RawRecipeSave {
       }
     } finally { if (this.active) this.options.changed(); }
   }
-  get dirty() { return !!this.cropGesture || !!this.curveGesture || !!this.mixerGesture || !!this.retryRequest || !!this.gesture || !!this.handoff || !!this.moveIntent
+  get dirty() { return !!this.cropGesture || !!this.curveGesture || !!this.mixerGesture || !!this.pointColorGesture || !!this.retryRequest || !!this.gesture || !!this.handoff || !!this.moveIntent
     || !!this.options.controls && !this.initialized || this.confirmed.settingsFingerprint !== this.savedFingerprint; }
-  get locked() { return !!this.cropGesture || !!this.curveGesture || !!this.mixerGesture || !!this.options.controls && (!this.initialized || !!this.operation || !!this.error || this.moving); }
+  get locked() { return !!this.cropGesture || !!this.curveGesture || !!this.mixerGesture || !!this.pointColorGesture || !!this.options.controls && (!this.initialized || !!this.operation || !!this.error || this.moving); }
   get gesturing() { return !!this.gesture && !this.operation && !this.paused && !this.moving; }
   get canUndo() { return !!this.history && (this.history.cursor > 0 || !!this.gesture || !!this.cropGesture); }
   get canRedo() { return !!this.history && this.history.cursor < this.history.length; }
@@ -490,7 +635,7 @@ export class RawRecipeSave {
     if (!this.moveIntent) return;
     if (this.historyError) await this.loadHistory();
     if (this.historyError) throw new RawApiError(this.historyError);
-    const { action, targetStepId, operation, mixerInteractionId } = this.moveIntent;
+    const { action, targetStepId, operation, mixerInteractionId, pointColorInteractionId } = this.moveIntent;
     // Cache refresh can hide a still-valid UUID. Let SQLite validate membership; never
     // infer deletion from a page miss or retarget a removed UUID by position.
     const available = action === 'operate' || (action === 'undo' ? this.canUndo : action === 'redo' ? this.canRedo
@@ -501,7 +646,8 @@ export class RawRecipeSave {
       ? await this.curveGesture.started : undefined;
     this.retryRequest = { doc: structuredClone(this.confirmed), expectedRecipeRevision: this.revision,
       saveId: createEditStateSaveId(), action, ...(action === 'jump' ? { targetStepId } : {}), ...(operation ? { operation } : {}),
-      ...(curveInteractionId ? { curveInteractionId } : {}), ...(mixerInteractionId ? { mixerInteractionId } : {}) };
+      ...(curveInteractionId ? { curveInteractionId } : {}), ...(mixerInteractionId ? { mixerInteractionId } : {}),
+      ...(pointColorInteractionId ? { pointColorInteractionId } : {}) };
     try { await this.sendHistory(); }
     catch (cause) {
       if ((operation?.kind === 'wbAuto' || operation?.kind === 'wbPick') && cause instanceof RawSaveError && cause.outcome === 'rejected'
@@ -815,6 +961,12 @@ export class RawRecipeSave {
         controls.endPreview();
         this.options.mixerSettled?.(false);
       }
+      if (request.pointColorInteractionId && this.pointColorGesture) {
+        this.pointColorGesture.controller.abort();
+        this.pointColorGesture = undefined;
+        controls.endPreview();
+        this.options.pointColorSettled?.(false);
+      }
       // Commits can prune or replace step IDs, while cursor moves preserve the complete list.
       if (!moving || request.action === 'operate' || this.historyError) await this.loadHistory();
       if (moving) controls.refreshPreview();
@@ -856,6 +1008,7 @@ export class RawRecipeSave {
     }
   }
   dispose() {
+    if (this.pointColorGesture) void this.cancelPointColorInteraction().catch(() => {});
     if (this.mixerGesture) void this.cancelMixerInteraction().catch(() => {});
     this.active = false; clearTimeout(this.timer);
     const gesture = this.curveGesture;

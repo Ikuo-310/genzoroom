@@ -378,3 +378,11 @@ Frontend History operation／step型とresponse validationへ`pointColorReset`�
 ## Point Color全体ResetのNative比較修正
 
 `_reset_point_colors()`のreadback比較も、既存の数値変更／個別Resetと同じく、Native readbackと変更後の期待snapshotを双方`_settings_json()`で正規化して比較する。Legacy WBでNativeが`wb.scale`を省略しても同じ設定として扱い、Point Color配列が空にならない場合や他の設定値が変わった場合は従来の`raw_point_color_reset_mismatch`で拒否し、既存desynchronized／History Recovery契約を維持する。Mock NativeのLegacy WB scale省略、Kelvin WB、配列reset no-op、対象外設定変更と、採色・数値変更・個別Reset・削除を含む`test_lightcraft_raw.py` 151件が成功した。
+
+## P1-C4 — ドラッグ中のPreviewとHistory確定
+
+Point Color controlの操作中Previewには、既存LightCraft Native interaction（`develop.beginInteraction` → `develop.set` → `develop.endInteraction`／`develop.cancelInteraction`）を使い、Curve／Mixerと同じSession owner・command queue・Draft Preview worker・History receipt境界へ追加した。4つの`point-color-interaction` endpointは同一Windows RAW API内の操作で、Document identityとrevisionを毎回照合する。操作中のNative working snapshotはSessionのdurable snapshotへ昇格させず、最終`pointColorControl` metadataを含むSQLite History保存が成功してからSession snapshotをcommitする。保存結果が不明な場合は既存save ID／receiptを使い、Native endを自動再実行しない。
+
+Frontendは既存`AdjustmentSlider`のoperation boundaryを維持し、50ms cadenceで中間値を最新値へ集約する。Native updateは同時に1件、待機値は1件だけとし、各適用値に既存のDraft After Preview ticketを結び付ける。ドラッグ中はHistory／Recipeを書かず、Pointer Up／number／keyboard／wheelの確定時に最終値を1つの`pointColorControl`として保存する。値が開始値と同じ場合はNative interactionをcancelしHistory stepを作らない。pointer cancel、slider unmount、Document終了では確定前interactionをcancelし、読戻し後に通常Previewへ戻す。Native／Preview不明結果は再送せず、既存Session失敗・durable Recipe再読込Recoveryを用いる。
+
+JPEGとDNGはWindows LightCraft Session、Native interaction、Draft Preview、History経路を共有し、GenzoRoomはLightCraftの色演算を実装しない。Point Color interaction endpointは通常control reservationを取得しない。通常編集用reservationを取得すると、そのreservation自身がinteraction beginを`raw_busy`で拒否するためである。Mock NativeでDraft readback、cancel時のbaseline復帰、History保存後のRecipe snapshot、Undo／Redoを確認した。Backend Point Color focused testsは`test_lightcraft_raw.py`、`test_raw_history_api.py`、`test_raw_category_operations.py`から94件、Frontend Point Color controls／`RawRecipeSave` focused testsは58件が成功した。TypeScript checkとproduction buildは成功した（既存bundle sizeと依存directiveのwarningあり）。実Native・Windows Desktopでの手動確認は実施していない。
