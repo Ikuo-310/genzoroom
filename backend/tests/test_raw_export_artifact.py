@@ -207,6 +207,47 @@ def test_isolated_session_cleanup(tmp_path, mode, monkeypatch):
         assert failure['phase'] == 'settings_validation_before_export'
 
 
+def test_point_color_native_settings_apply_failure_keeps_existing_export_error_contract(tmp_path, monkeypatch):
+    import raw_export_artifact as module
+    from lightcraft_mcp import MCPToolError
+
+    diagnostics, events, commands = [], [], []
+    monkeypatch.setattr(module, 'lightcraft_log', lambda event, **context: diagnostics.append((event, context)))
+    settings = {'process': 1, 'version': 1, 'wb': {'mode': 'custom', 'temp': 6500., 'tint': 0., 'scale': 'legacy'},
+        'point_colors': [{'lum': .62, 'chroma': .14, 'hue': 207.5, 'hue_shift': 0., 'sat_shift': 0.,
+            'lum_shift': 0., 'variance': 0., 'range': 50., 'hue_range': 50., 'sat_range': 50., 'lum_range': 50.}]}
+
+    class Owned:
+        async def start(self): events.append('start')
+        def status(self): return SimpleNamespace(state='ready')
+        def artifact_info(self): return {'verified': True}
+        def _ready_client(self): return self
+        async def close(self): events.append('close')
+        async def call_tool_result(self, name, args, **kwargs):
+            if name == 'command_run':
+                commands.append(args['id'])
+                if args['id'] == 'develop.merge':
+                    assert args['params']['settings']['point_colors'] == settings['point_colors']
+                    raise MCPToolError()
+            if name == 'import':
+                return {'structuredContent': {'imported': [1]}}
+            return {'structuredContent': {}}
+
+    class Manager:
+        _gpu_backend = 'dx12'
+        def diagnostic_manager(self, backend):
+            assert backend == 'dx12'
+            return Owned()
+
+    request = module.RawExportInput(source(), 'point.dng', (), settings, datetime.now(timezone.utc))
+    with pytest.raises(RawExportError, match='^raw_export_native_failed$'):
+        asyncio.run(module.export_raw_artifact(request, manager=Manager(), temp_root=tmp_path))
+    assert commands == ['library.xmpPreferences', 'develop.reset', 'develop.merge']
+    failure = next(context for event, context in diagnostics if event == 'export.failed')
+    assert failure['phase'] == 'develop.merge' and failure['errorCode'] == 'raw_export_native_failed'
+    assert events == ['start', 'close'] and not list(tmp_path.iterdir())
+
+
 @pytest.mark.parametrize('curve_case', ['legacy', 'master', 'red', 'green', 'blue', 'multiple', 'identity'])
 def test_saved_curve_recipe_uses_existing_raw_export_native_path(tmp_path, curve_case):
     from raw_export_artifact import RawExportInput, export_raw_artifact

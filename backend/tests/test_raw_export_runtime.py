@@ -338,23 +338,31 @@ def test_raw_unknown_baseline_is_not_eligible(db):
     with pytest.raises(edit_store.QueueRejected):enqueue_export_assets([A])
 
 
-@pytest.mark.parametrize('curve_mode', ['legacy', 'multi_channel'])
-def test_raw_curve_export_keeps_saved_recipe_and_receipt_unchanged(db, tmp_path, curve_mode):
+@pytest.mark.parametrize('recipe_mode', ['legacy_curve', 'multi_channel_curve', 'point_colors', 'legacy_point_colors'])
+def test_raw_saved_recipe_keeps_frozen_settings_and_receipt_unchanged(db, tmp_path, recipe_mode):
     from pathlib import Path
-    from raw_controls import (complete_snapshot_for_merge, with_legacy_curve_defaults,
+    from raw_controls import (complete_snapshot_for_merge, settings_snapshot_for_comparison, with_legacy_curve_defaults,
                               with_legacy_grading_defaults)
     from raw_export_artifact import export_raw_artifact
     from tests.test_raw_export_artifact import jpeg
 
     saved = settings()
     saved['light']['exposure'] = .7
-    if curve_mode == 'legacy':
+    if recipe_mode == 'legacy_curve':
         saved.pop('curve')
-    else:
+    elif recipe_mode == 'multi_channel_curve':
         saved['curve']['master'] = [{'x': 0., 'y': .1}, {'x': 1., 'y': .9}]
         saved['curve']['red'] = [{'x': .25, 'y': .4}]
         saved['curve']['green'] = [{'x': .5, 'y': .6}]
         saved['curve']['blue'] = []
+    elif recipe_mode == 'point_colors':
+        saved['point_colors'] = [{
+            'lum': .625, 'chroma': .145, 'hue': 217.25, 'hue_shift': -12.375,
+            'sat_shift': 2.5, 'lum_shift': -3.75, 'variance': .625, 'range': 43.125,
+            'hue_range': 32.5, 'sat_range': 67.75, 'lum_range': 81.25,
+        }]
+    else:
+        saved.pop('point_colors', None)
     defaults = settings()
     saved_result = raw.put_raw_recipe(
         identity(), 0, uuid4(), saved,
@@ -389,7 +397,9 @@ def test_raw_curve_export_keeps_saved_recipe_and_receipt_unchanged(db, tmp_path,
             elif name == 'import':
                 return {'structuredContent': {'imported': [1]}}
             elif name == 'get_develop':
-                return {'structuredContent': copy.deepcopy(expected)}
+                readback = copy.deepcopy(expected)
+                readback.setdefault('point_colors', [])
+                return {'structuredContent': readback}
             elif name == 'export':
                 Path(args['path']).write_bytes(jpeg())
                 return {'structuredContent': {'width': 32, 'height': 24}}
@@ -415,9 +425,16 @@ def test_raw_curve_export_keeps_saved_recipe_and_receipt_unchanged(db, tmp_path,
     wire_settings = complete_snapshot_for_merge(saved)
     assert forwarded == [wire_settings]
     assert ('develop.merge', {'settings': wire_settings}) in commands
+    command_names = [name for name, _ in commands]
+    assert command_names.index('develop.reset') < command_names.index('develop.merge')
     assert wire_settings['detail']['nr_outliers'] is False
     assert saved_result['recipe']['settings'] == saved
     assert persisted_rows() == before_rows
+    if recipe_mode == 'point_colors':
+        assert forwarded[0]['point_colors'] == saved['point_colors']
+    elif recipe_mode == 'legacy_point_colors':
+        assert 'point_colors' not in forwarded[0]
+        assert settings_snapshot_for_comparison(expected)['point_colors'] == []
 
 
 @pytest.mark.parametrize('favorite',[True,False])

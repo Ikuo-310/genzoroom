@@ -140,7 +140,7 @@ Viewer の crosshair と [ViewerPointLoupe](../../../frontend/src/ViewerPointLou
 
 ## 14. P1 以降の段階的実装案
 
-1. **P1 — Point Color 編集と永続化**。既存 command/adaptor で配列取得、採色と削除、indexed set/reset、配列 Reset を接続。旧 snapshot 省略、復元比較、History operation、独立 Export の readback を処理。共通 Viewer と Color サブカテゴリを配線し、実 RAW・非RAW の位置確認と Undo/Redo/Jump・再オープン・保存失敗を確認する。
+1. **P1 — Point Color 編集と永続化**。BackendのNative操作・History／Recipe保存・旧snapshot復元・Windows Export設定引き渡しを実装・確認済み。残りは共通 Viewer と Color サブカテゴリのFrontend接続、および実 RAW・非RAWでの採色位置とHistory／再オープン操作の手動確認。
 2. **P2 — 範囲表示**。既存 Overlay を Whole Draft/Full へ公開する最小 managed patch と実 binary 検証。表示セッションの切替、Before/通常／診断の取り違え、slider 更新、Export 分離、CPU/DX12 を確認。高倍率の描画品質が必要なら Region を同じ段階で接続する。
 
 ## 15. 主要ソース
@@ -296,3 +296,11 @@ Mock NativeのHistory API系列（空baseline → 採色2件〔重複含む〕 �
 別のMock History fixtureでは、過去のbaselineとRecipeに`point_colors`キーがなく、現在のstep／NativeにはPoint Color entryがある状態を作った。Undoは配列を明示的に空にし、Redo／Jumpで小数を含むentryを戻し、再度baselineへJumpしても配列が残留しない。元baseline JSONは欠落キーのまま不変。Recipe reopen試験もNativeに採色entryがある状態から旧Recipeへ復元し、空配列化とDB全行不変を確認した。`None`、不正entry、9件配列はNative commandを送る前に拒否し、同期状態・revisionを維持する。
 
 関連focused tests（`test_raw_controls.py`、`test_raw_recipe_restore.py`、`test_raw_history_api.py`、`test_lightcraft_raw.py`）320件が成功した。Undo／Redo／Jump、空・複数entryのclose／reopen、小数・重複保持、旧Recipe／History snapshot、明示不正値拒否、および既存Recipe restore regressionをMock Nativeで確認した。未実施の実Native CLI・GUI／Browser手動試験はユーザー側の実環境確認事項。Export、Frontend、Native patch、旧snapshotデータ自体の書換えは本phaseの対象外とした。
+
+## P1-B — Windows LightCraft Export設定引き渡し
+
+Windows Export Queueは保存済み・freeze済みRecipeの`settings`を`ExportRuntime`から`RawExportInput`へ渡し、既存`export_raw_artifact`が分離Native processで`develop.reset` → `develop.merge {settings: complete_snapshot_for_merge(settings)}` → `get_develop` readback照合 → Native `export` → 再readback照合を行う。Point Color配列はsettings JSONの一部としてそのままmergeされ、専用Export経路やGenzoRoom側の色変換はない。Mock Nativeテストで小数を含む配列がQueueの保存Recipeからmerge payloadまで保持され、readback照合後に既存Export処理へ進むことを確認した。
+
+旧Recipeが`point_colors`を欠く場合も、Exportは新規の分離Native photoへimportした後、merge前に`develop.reset`する。省略フィールドはこのreset済みNative stateの空配列を保持し、`settings_snapshot_for_comparison`は欠落Recipe値を比較時のみ`[]`として扱う。既存JSONやreceiptは変更しない。Mock試験でlegacy payloadに配列キーがないこと、resetがmergeより先であること、readback比較が空配列と一致することを確認した。Native設定mergeが失敗した場合は既存`raw_export_native_failed`へ変換され、Export処理を進めずNative process／一時ファイルをcleanupする。
+
+担当境界は、GenzoRoomがfreeze済み編集設定をNativeへ渡し、保存済み意図との設定snapshot整合と失敗処理を担い、RAW現像演算・Point Color色変換・JPEG encode／quality／画素内容はLightCraftが担う。テストは設定引き渡し、既定値、readback、Native適用エラーだけを扱い、JPEG画素比較や画質評価はP1/P2のGenzoRoom受入条件・将来工程に含めない。製品コード変更は不要で、既存のreset／merge／readback経路がPoint Colorを含む完全Recipeに対応していたため、focused回帰テストと本節の記録のみ追加した。Frontend実装へ進めるBackend上の阻害要因はない。
