@@ -512,6 +512,37 @@ describe('bounded RAW binary contract', () => {
     expect((await readRawSettings(doc)).revision).toBe(result.revision);
     expect(fetch.mock.calls[1][0]).toBe(`/api/raw/documents/${doc.handle}/settings`);
   });
+  it('preserves Point Color settings order, duplicates and fractional values from the settings response', async () => {
+    const point = { lum: 0.4125, chroma: 0.15625, hue: 42.125, hue_shift: -12.375, sat_shift: 1.25,
+      lum_shift: 2.5, variance: 0.125, range: 38.625, hue_range: 50.5, sat_range: 40.25, lum_range: 60.75 };
+    const colors = [point, { ...point }, { ...point, hue: 199.875 }];
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ...rawSettings(doc), point_colors: colors }),
+      { headers: { 'Content-Type': 'application/json' } })));
+    const result = await readRawSettings(doc);
+    expect(result.point_colors).toEqual(colors);
+    expect(result.point_colors[0]).toEqual(result.point_colors[1]);
+    expect(result.point_colors[0].hue_shift).toBe(-12.375);
+
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ...rawSettings(doc), point_colors: [] }),
+      { headers: { 'Content-Type': 'application/json' } })));
+    expect((await readRawSettings(doc)).point_colors).toEqual([]);
+
+    const maximum = Array.from({ length: 8 }, (_, index) => ({ ...point, hue: index * 30 }));
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ...rawSettings(doc), point_colors: maximum }),
+      { headers: { 'Content-Type': 'application/json' } })));
+    expect((await readRawSettings(doc)).point_colors).toEqual(maximum);
+  });
+  it('rejects malformed Point Color settings in the settings response', async () => {
+    const point = { lum: 0.5, chroma: 0.1, hue: 30, hue_shift: 0, sat_shift: 0, lum_shift: 0, variance: 0,
+      range: 50, hue_range: 50, sat_range: 50, lum_range: 50 };
+    for (const point_colors of [undefined, null, [point, { ...point, extra: 1 }], [{ ...point, lum: Number.NaN }],
+      [{ ...point, hue: 360 }], Array.from({ length: 9 }, () => point)]) {
+      const payload = { ...rawSettings(doc), point_colors };
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(payload),
+        { headers: { 'Content-Type': 'application/json' } })));
+      await expect(readRawSettings(doc)).rejects.toThrow('raw_invalid_response');
+    }
+  });
   it('accepts Optics boolean settings in the existing controls request and validates flag readback', async () => {
     const fetch = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({
       ...rawSettings(doc), revision: doc.revision + 1, opticsFlags: { remove_ca: true, lens_profile: false },

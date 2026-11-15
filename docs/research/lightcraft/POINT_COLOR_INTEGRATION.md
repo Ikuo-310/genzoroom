@@ -304,3 +304,9 @@ Windows Export Queueは保存済み・freeze済みRecipeの`settings`を`ExportR
 旧Recipeが`point_colors`を欠く場合も、Exportは新規の分離Native photoへimportした後、merge前に`develop.reset`する。省略フィールドはこのreset済みNative stateの空配列を保持し、`settings_snapshot_for_comparison`は欠落Recipe値を比較時のみ`[]`として扱う。既存JSONやreceiptは変更しない。Mock試験でlegacy payloadに配列キーがないこと、resetがmergeより先であること、readback比較が空配列と一致することを確認した。Native設定mergeが失敗した場合は既存`raw_export_native_failed`へ変換され、Export処理を進めずNative process／一時ファイルをcleanupする。
 
 担当境界は、GenzoRoomがfreeze済み編集設定をNativeへ渡し、保存済み意図との設定snapshot整合と失敗処理を担い、RAW現像演算・Point Color色変換・JPEG encode／quality／画素内容はLightCraftが担う。テストは設定引き渡し、既定値、readback、Native適用エラーだけを扱い、JPEG画素比較や画質評価はP1/P2のGenzoRoom受入条件・将来工程に含めない。製品コード変更は不要で、既存のreset／merge／readback経路がPoint Colorを含む完全Recipeに対応していたため、focused回帰テストと本節の記録のみ追加した。Frontend実装へ進めるBackend上の阻害要因はない。
+
+## P1-C0 — Frontend向けsettings API契約
+
+`raw_controls.controls_state(snapshot)` はNative snapshotの `point_colors` を `validate_point_colors` で検証し、既存settings／History応答へそのまま投影する。旧snapshotでキーが省略される場合に限り `[]` を返す。明示的な不正値は `raw_invalid_point_colors` で拒否し、配列順序・重複・11フィールド・小数値を変更しない。settings response上限は16 KiBのままとした。最大8件分のPoint Color payloadは既存の設定・control仕様と合わせても余裕内であり、上限緩和は不要。
+
+Frontendの `RawSettings.point_colors` と `RawPointColor` はsnake_caseのNative 11フィールドを型付けし、既存settings decoderが件数、厳密なentry構造、有限値・範囲を検証する。応答配列はそのまま返し、専用API・cache・state更新経路は追加していない。Backend focused testsは6件、Frontend `rawApi.test.ts`は182件成功。TypeScript checkとVite production buildも成功した。buildでは既存bundle sizeと依存側`use client` directiveのwarningが出た。変更はBackend projection、Frontend contract/test fixture、focused tests、および本節の文書に限る。UI、Point Color操作、History／Recipe保存、Exportは変更していない。

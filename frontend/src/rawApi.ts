@@ -65,6 +65,8 @@ export type RawControlValues = Partial<RawValues> & Partial<Record<RawOpticsFlag
 export type RawCurveChannel = 'master' | 'red' | 'green' | 'blue';
 export type RawCurveResetChannel = RawCurveChannel | 'point';
 export type RawCurvePoint = { x: number; y: number };
+export type RawPointColor = { lum: number; chroma: number; hue: number; hue_shift: number; sat_shift: number;
+  lum_shift: number; variance: number; range: number; hue_range: number; sat_range: number; lum_range: number };
 export type RawCurveCommandPoint = [x: number, y: number];
 export const RAW_CURVE_CHANNELS: readonly RawCurveChannel[] = ['master', 'red', 'green', 'blue'];
 export const RAW_CURVE_MAX_POINTS = 4096;
@@ -82,6 +84,7 @@ export type RawGeometryOperation = { type: 'set'; params: { rect?: RawCropRect; 
   | { type: 'swap' | 'reset' | 'rotateLeft' | 'rotateRight' | 'flipHorizontal' | 'flipVertical'; params: Record<string, never> };
 export type RawSettings = RawDocument & { settingsFingerprint: string; recipeRevision: number; recipeFingerprint: string | null;
   curve: Record<RawCurveChannel, RawCurvePoint[]>;
+  point_colors: RawPointColor[];
   crop?: RawCrop; orientation?: string;
   importDefaultsFingerprint: string;
   recipeRecoveryPending?: boolean;
@@ -364,6 +367,7 @@ function settings(value: RawSettings, doc: RawDocument): RawSettings {
     || !value.sections || !RAW_SETTINGS_SECTION_IDS.every(section => typeof value.sections[section] === 'boolean')
     || !value.values || !RAW_SETTINGS_CONTROL_IDS.every(id => Number.isFinite(value.values[id]))
     || !validRawCurve(value.curve)
+    || !validRawPointColors(value.point_colors)
     || !Array.isArray(value.controls) || value.controls.length !== RAW_SETTINGS_CONTROL_IDS.length
     || new Set(value.controls.map(c => c.id)).size !== RAW_SETTINGS_CONTROL_IDS.length
     || value.controls.some(c => !RAW_SETTINGS_CONTROL_IDS.includes(c.id) || ![c.min, c.max, c.step, c.default].every(Number.isFinite)
@@ -387,6 +391,22 @@ export function validRawCurve(value: unknown): value is Record<RawCurveChannel, 
       && Number.isFinite((point as RawCurvePoint).x) && Number.isFinite((point as RawCurvePoint).y)
       && (point as RawCurvePoint).x >= 0 && (point as RawCurvePoint).x <= 1
       && (point as RawCurvePoint).y >= 0 && (point as RawCurvePoint).y <= 1);
+  });
+}
+const rawPointColorFields = ['lum', 'chroma', 'hue', 'hue_shift', 'sat_shift', 'lum_shift', 'variance', 'range',
+  'hue_range', 'sat_range', 'lum_range'] as const;
+export function validRawPointColors(value: unknown): value is RawPointColor[] {
+  return Array.isArray(value) && value.length <= 8 && value.every(point => {
+    if (!point || typeof point !== 'object' || Array.isArray(point)) return false;
+    const entry = point as Record<string, unknown>;
+    if (Object.keys(entry).length !== rawPointColorFields.length || rawPointColorFields.some(field => !(field in entry))
+      || rawPointColorFields.some(field => typeof entry[field] !== 'number' || !Number.isFinite(entry[field]))) return false;
+    return (entry.lum as number) >= 0 && (entry.lum as number) <= 1 && (entry.chroma as number) >= 0
+      && (entry.hue as number) >= 0 && (entry.hue as number) < 360
+      && (['hue_shift', 'sat_shift', 'lum_shift', 'variance'] as const).every(field =>
+        (entry[field] as number) >= -100 && (entry[field] as number) <= 100)
+      && (['range', 'hue_range', 'sat_range', 'lum_range'] as const).every(field =>
+        (entry[field] as number) >= 0 && (entry[field] as number) <= 100);
   });
 }
 export function validRawCurveInput(channel: unknown, points: unknown): points is RawCurveCommandPoint[] {

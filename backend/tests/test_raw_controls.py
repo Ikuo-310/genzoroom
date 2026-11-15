@@ -1,13 +1,16 @@
 import asyncio
+import copy
+import json
 
 import pytest
 
 from lightcraft_mcp import LightCraftError
+from lightcraft_raw import DevelopSnapshot, RawHandle
 from raw_controls import (CONTROLS, HISTORY_CONTROLS, complete_snapshot_for_merge, settings_snapshot_for_comparison,
                           mixer_target_readback, validate_controls, POINT_COLOR_FIELDS,
                           validate_point_colors, validate_point_color_control, validate_point_color_value,
                           validate_point_color_coordinates, validate_point_color_delete, validate_point_color_append,
-                          validate_point_color_history_operation)
+                          validate_point_color_history_operation, controls_state)
 from tests.test_lightcraft_raw import DEFAULT
 from tests.test_windows_local import local, client, authenticate
 from tests.test_windows_raw_api import setup, open_document, preview_body
@@ -74,6 +77,32 @@ def test_point_color_readback_validation_preserves_order_duplicates_and_fraction
     assert values[0] is first and values[1] is second
     assert values[0]["hue_shift"] == 12.375 and values[0]["range"] == 33.625
     assert len(validate_point_colors({"point_colors": [point_color() for _ in range(8)]})) == 8
+
+
+def test_controls_state_projects_point_colors_without_normalizing_or_defaulting_invalid_data():
+    settings = copy.deepcopy(DEFAULT)
+    settings.pop("point_colors")
+
+    def project(settings):
+        snapshot = DevelopSnapshot(RawHandle("pixel", "token", 1), 0, json.dumps(settings))
+        return controls_state(snapshot)["point_colors"]
+
+    assert project(settings) == []
+    first = point_color(lum=0.4125, chroma=0.15625, hue=42.125, hue_shift=-12.375)
+    second = point_color(lum=0.4125, chroma=0.15625, hue=42.125, hue_shift=-12.375)
+    settings["point_colors"] = [first]
+    assert project(settings) == [first]
+    colors = [first, second, point_color(hue=199.875, range=38.625)]
+    settings["point_colors"] = colors
+    projected = project(settings)
+    assert projected == colors
+    assert projected[0] == projected[1]
+    assert projected[0]["hue_shift"] == -12.375
+    assert projected[2]["range"] == 38.625
+
+    settings["point_colors"] = None
+    with pytest.raises(LightCraftError, match="^raw_invalid_point_colors$"):
+        project(settings)
 
 
 @pytest.mark.parametrize("entry", [

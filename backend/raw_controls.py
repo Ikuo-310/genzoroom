@@ -374,6 +374,7 @@ def curve_readback(settings):
 
 def controls_state(snapshot):
     settings = snapshot.settings
+    point_colors = validate_point_colors({"point_colors": settings.get("point_colors", [])})
     values = {}
     for control in CONTROLS:
         parent, key = control_location(settings, control)
@@ -412,7 +413,7 @@ def controls_state(snapshot):
     curve_points = curve_readback(settings)
     wb_scale = wb.get("scale", "legacy")
     wb_available = wb_scale in ("kelvin", "legacy")
-    return {**geometry_state(settings), "values": values, "curve": curve_points, "opticsFlags": flags,
+    return {**geometry_state(settings), "values": values, "curve": curve_points, "point_colors": point_colors, "opticsFlags": flags,
             "cameraLocalTone": camera_local_tone, "vignetteStyle": style, "wbAutoAvailable": snapshot.wb_auto and wb_available,
             "lensProfileInfo": public_lens_info,
             "sections": {section: section not in disabled for section in SETTINGS_SECTIONS},
