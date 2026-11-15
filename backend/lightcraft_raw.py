@@ -1932,7 +1932,9 @@ class LightCraftRawSession:
             validate_point_colors(settings)
             expected = copy.deepcopy(before)
             expected["point_colors"][index][native_field] = value
-            if settings != expected:
+            actual_normalized = json.loads(_settings_json(settings))
+            expected_normalized = json.loads(_settings_json(expected))
+            if actual_normalized != expected_normalized:
                 raise LightCraftError("raw_point_color_control_mismatch")
 
         return await self._mutate(handle, "develop.set", {}, expected_revision,
@@ -1961,7 +1963,9 @@ class LightCraftRawSession:
             validate_point_colors(settings)
             expected = copy.deepcopy(before)
             expected["point_colors"][index][native_field] = default
-            if settings != expected:
+            actual_normalized = json.loads(_settings_json(settings))
+            expected_normalized = json.loads(_settings_json(expected))
+            if actual_normalized != expected_normalized:
                 raise LightCraftError("raw_point_color_reset_mismatch")
 
         return await self._mutate(handle, "develop.resetControl", {}, expected_revision,

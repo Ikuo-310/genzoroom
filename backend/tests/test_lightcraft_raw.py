@@ -269,6 +269,30 @@ def test_point_color_indexed_control_set_preserves_other_values(tmp_path, field,
     asyncio.run(run())
 
 
+def test_point_color_indexed_set_normalizes_legacy_wb_scale_on_readback(tmp_path):
+    async def run():
+        raw, _, children, files = await create(tmp_path)
+        try:
+            handle, _ = await raw.open_raw("pixel", files[0])
+            child = children[0]
+            child.photos[1]["settings"]["wb"]["scale"] = "legacy"
+            child.photos[1]["settings"]["point_colors"] = [point_color()]
+            before = await raw.get_settings(handle)
+            child.omit_legacy_wb_scale = True
+
+            result = await raw._set_point_color_control(
+                handle, "pointColor.0.hueShift", 15.5, before.revision)
+
+            assert result.settings["wb"]["scale"] == "legacy"
+            assert result.settings["point_colors"][0]["hue_shift"] == 15.5
+            assert child.commands.count(("develop.set", {
+                "control": "pointColor.0.hueShift", "value": 15.5,
+            })) == 1
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("field,index", [(field, 1 if field.endswith("Range") or field == "range" else 0)
                                            for field in ("hueShift", "satShift", "lumShift", "variance", "range",
                                                          "hueRange", "satRange", "lumRange")])
@@ -290,6 +314,32 @@ def test_point_color_indexed_control_reset_uses_native_default(tmp_path, field, 
             expected["point_colors"][index][POINT_COLOR_FIELDS[field][0]] = POINT_COLOR_FIELDS[field][3]
             assert result.settings == expected
             assert child.commands.count(("develop.resetControl", {"control": f"pointColor.{index}.{field}"})) == 1
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+def test_point_color_indexed_reset_normalizes_legacy_wb_scale_on_readback(tmp_path):
+    async def run():
+        raw, _, children, files = await create(tmp_path)
+        try:
+            handle, _ = await raw.open_raw("pixel", files[0])
+            child = children[0]
+            child.photos[1]["settings"]["wb"]["scale"] = "legacy"
+            colors = [point_color()]
+            colors[0]["hue_shift"] = 15.5
+            child.photos[1]["settings"]["point_colors"] = colors
+            before = await raw.get_settings(handle)
+            child.omit_legacy_wb_scale = True
+
+            result = await raw._reset_point_color_control(
+                handle, "pointColor.0.hueShift", before.revision)
+
+            assert result.settings["wb"]["scale"] == "legacy"
+            assert result.settings["point_colors"][0]["hue_shift"] == 0
+            assert child.commands.count(("develop.resetControl", {
+                "control": "pointColor.0.hueShift",
+            })) == 1
         finally:
             await raw.close()
     asyncio.run(run())
@@ -347,6 +397,24 @@ def test_point_color_set_detects_native_success_without_readback_change(tmp_path
                 await raw._set_point_color_control(handle, "pointColor.0.hueShift", 15.5, before.revision)
             assert sum(command == "develop.set" and params.get("control") == "pointColor.0.hueShift"
                        for command, params in child.commands) == 1
+            assert raw._photos["pixel"].sync == "desynchronized"
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+def test_point_color_set_rejects_unexpected_other_setting_change(tmp_path):
+    async def run():
+        raw, _, children, files = await create(tmp_path)
+        try:
+            handle, _ = await raw.open_raw("pixel", files[0])
+            child = children[0]
+            child.photos[1]["settings"]["point_colors"] = [point_color()]
+            child.point_control_fault = "other_setting_changed"
+            before = await raw.get_settings(handle)
+            with pytest.raises(LightCraftError, match="raw_point_color_control_mismatch"):
+                await raw._set_point_color_control(handle, "pointColor.0.hueShift", 15.5, before.revision)
+            assert child.photos[1]["settings"]["point_colors"][0]["hue_shift"] == 15.5
             assert raw._photos["pixel"].sync == "desynchronized"
         finally:
             await raw.close()
@@ -737,6 +805,7 @@ class RawProcess(FakeProcess):
         self.point_control_fault = None
         self.point_reset_noop = False
         self.point_all_reset_noop = False
+        self.omit_legacy_wb_scale = False
         self.fail_get_after_point_mutation = False
         self.point_mutated = False
 
@@ -857,6 +926,8 @@ class RawProcess(FakeProcess):
                 from raw_controls import POINT_COLOR_FIELDS
                 native_field = POINT_COLOR_FIELDS[field][0]
                 self.photos[self.active]["settings"]["point_colors"][int(index)][native_field] = params["value"]
+                if self.point_control_fault == "other_setting_changed":
+                    self.photos[self.active]["settings"]["light"]["exposure"] += 1.
                 value = {"ok": True}
             self.point_mutated = True
             if self.point_control_fault == "unknown_after_mutation":
@@ -898,7 +969,9 @@ class RawProcess(FakeProcess):
         elif command == "develop.get":
             if self.fail_get or self.fail_get_after_point_mutation and self.point_mutated:
                 return self.tool(message, error=True)
-            value = self.photos[params["id"]]["settings"]
+            value = copy.deepcopy(self.photos[params["id"]]["settings"])
+            if self.omit_legacy_wb_scale and value.get("wb", {}).get("scale") == "legacy":
+                value["wb"].pop("scale")
         elif command == "develop.beginInteraction":
             if self.interaction is not None:
                 return self.tool(message, error=True)
