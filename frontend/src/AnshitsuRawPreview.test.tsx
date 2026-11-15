@@ -2276,6 +2276,39 @@ it('does not optimistically add a Point Color entry or resend after a failed His
   expect(host.querySelector('.raw-point-color-empty')?.textContent).toContain('Use the eyedropper');
 });
 
+it('saves Point Color slider edits through the History operation and adopts returned settings', async () => {
+  const point = { lum: .42, chroma: .13, hue: 207.5, hue_shift: 0, sat_shift: 0, lum_shift: 0, variance: 0,
+    range: 55, hue_range: 44, sat_range: 66, lum_range: 33 };
+  vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), point_colors: [point] }));
+  await mount();
+  const pointColorTitle = host.querySelector<HTMLButtonElement>('.raw-point-color-title')!;
+  if (pointColorTitle.getAttribute('aria-expanded') !== 'true') act(() => pointColorTitle.click());
+  commitHistory.mockImplementation(async request => {
+    const operation = request.operation;
+    if (operation?.kind !== 'pointColorControl') throw new Error('unexpected History operation');
+    const nextPoint = { ...request.doc.point_colors[0], hue_shift: operation.metadata.value };
+    return rawHistoryResult({ ...request, doc: { ...request.doc, revision: request.doc.revision + 1,
+      settingsFingerprint: 'c'.repeat(64), point_colors: [nextPoint] } },
+    { history: { initialized: true, cursor: 1, length: 1, selectedStepId: request.saveId } });
+  });
+  const number = host.querySelector<HTMLInputElement>('[data-adjustment-id="pointColor.0.hueShift"]')!
+    .closest('.adjustment-control')!.querySelector<HTMLInputElement>('.adjustment-number')!;
+  act(() => {
+    number.focus();
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(number, '38');
+    number.dispatchEvent(new Event('input', { bubbles: true }));
+    number.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  });
+  await flush();
+  expect(commitHistory).toHaveBeenCalledOnce();
+  expect(commitHistory.mock.calls[0][0].action).toBe('operate');
+  expect(commitHistory.mock.calls[0][0].operation).toEqual({ kind: 'pointColorControl', metadata: {
+    control: 'pointColor.0.hueShift', value: 38,
+  } });
+  expect(vi.mocked(rawApi.setRawControls)).not.toHaveBeenCalled();
+  expect(host.querySelector<HTMLInputElement>('[data-adjustment-id="pointColor.0.hueShift"]')?.value).toBe('38');
+});
+
 it('submits the WB-only Reset as one explicit History operation and keeps it out of the parent reset', async () => {
   await mount();
   const wbReset = host.querySelector<HTMLButtonElement>('.raw-wb-reset')!;

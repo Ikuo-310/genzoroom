@@ -7,6 +7,7 @@ import { RawAdjustmentControls } from './RawAdjustmentControls';
 import { RAW_DEVELOPMENT_PANEL_UI_KEY, defaultRawDevelopmentPanelUi, updateSetting } from './appSettings';
 import type { RawPointColor } from './rawApi';
 import { rawSettings } from './test/rawSettings';
+import { sliderAdjustmentId } from './adjustmentSliderIds';
 
 let host: HTMLDivElement, root: ReturnType<typeof createRoot>;
 beforeEach(() => {
@@ -28,6 +29,7 @@ function createRaw(colors: ReturnType<typeof point>[] = []) {
   const identity = documentInfo();
   const settings = { ...rawSettings(identity), point_colors: colors };
   return { assetId: identity.assetId, status: 'ready', settings, history: {},
+    operationError: undefined as string | undefined,
     pointColorPickActive: false, pointColorPickAvailable: colors.length < 8 && settings.sections.color,
     togglePointColorPick: vi.fn(), cancelPointColorPick: vi.fn(),
     operate: vi.fn(), beginControls: vi.fn(), changeControls: vi.fn(), flushControls: vi.fn(), desired: {} };
@@ -122,7 +124,7 @@ it('renders each center color as CSS OkLCh and ignores Point Color adjustments',
   expect(buttons[0].getAttribute('aria-pressed')).toBe('true');
 });
 
-it('shows eight disabled controls in order with localized labels, Native ranges and rounded display text', async () => {
+it('shows eight editable controls in order with localized labels, Native ranges and rounded display text', async () => {
   await i18n.changeLanguage('ja');
   const selected = point(42, { hue_shift: -100, sat_shift: -12.75, lum_shift: 17.6, variance: 0,
     range: 25, hue_range: 50, sat_range: 75, lum_range: 100 });
@@ -139,15 +141,20 @@ it('shows eight disabled controls in order with localized labels, Native ranges 
   expect(controls).toHaveLength(8);
   expect([...host.querySelector('.raw-point-color-content')!.children].map(element => element.className))
     .toEqual(['raw-point-color-empty', 'raw-point-color-swatches', 'raw-point-color-adjustments']);
+  const controlIds = ['hueShift', 'satShift', 'lumShift', 'variance', 'range', 'hueRange', 'satRange', 'lumRange'];
   expect(controls.map(control => control.querySelector<HTMLInputElement>('.adjustment-range')?.dataset.adjustmentId))
-    .toEqual(fields.map(field => `pointColor.0.${field}`));
+    .toEqual(controlIds.map(field => `pointColor.0.${field}`));
+  expect(controlIds.map(field => sliderAdjustmentId(`pointColor.0.${field}`)))
+    .toEqual(controlIds.map(field => `pointColor.0.${field}`));
+  expect(sliderAdjustmentId('pointColor.8.range')).toBeNull();
+  expect(sliderAdjustmentId('pointColor.0.hue_shift')).toBeNull();
   expect(controls.map(control => control.querySelector('label')?.textContent)).toEqual(labels);
   expect(controls.map(control => control.querySelector<HTMLInputElement>('.adjustment-range')?.min)).toEqual(ranges.map(String));
   expect(controls.map(control => control.querySelector<HTMLInputElement>('.adjustment-range')?.max)).toEqual(maxima.map(String));
   expect(controls.map(control => control.querySelector<HTMLInputElement>('.adjustment-range')?.step)).toEqual(Array(8).fill('1'));
   expect(controls.map(control => control.querySelector<HTMLInputElement>('.adjustment-number')?.value)).toEqual(displayedValues);
-  expect(controls.every(control => control.querySelector<HTMLInputElement>('.adjustment-range')?.disabled
-    && control.querySelector<HTMLInputElement>('.adjustment-number')?.disabled
+  expect(controls.every(control => !control.querySelector<HTMLInputElement>('.adjustment-range')?.disabled
+    && !control.querySelector<HTMLInputElement>('.adjustment-number')?.disabled
     && control.querySelector<HTMLButtonElement>('.adjustment-reset')?.disabled)).toBe(true);
   expect(raw.settings.point_colors[0]).toEqual(selected);
   expect(raw.operate).not.toHaveBeenCalled();
@@ -159,6 +166,136 @@ it('shows eight disabled controls in order with localized labels, Native ranges 
   expect(pointColorAdjustments().map(control => control.querySelector('label')?.textContent)).toEqual([
     'Hue', 'Saturation', 'Luminance', 'Variance', 'Range', 'Hue Range', 'Saturation Range', 'Luminance Range',
   ]);
+});
+
+it.each([
+  ['hue_shift', 'hueShift', -88], ['sat_shift', 'satShift', 72], ['lum_shift', 'lumShift', -31],
+  ['variance', 'variance', 19], ['range', 'range', 25], ['hue_range', 'hueRange', 36],
+  ['sat_range', 'satRange', 64], ['lum_range', 'lumRange', 91],
+] as const)('commits %s through one indexed History operation', (field, controlField, value) => {
+  const raw = createRaw([point(42)]);
+  draw(raw); openPointColor();
+  const index = ['hue_shift', 'sat_shift', 'lum_shift', 'variance', 'range', 'hue_range', 'sat_range', 'lum_range'].indexOf(field);
+  const number = pointColorAdjustments()[index].querySelector<HTMLInputElement>('.adjustment-number')!;
+  act(() => {
+    number.focus();
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(number, String(value));
+    number.dispatchEvent(new Event('input', { bubbles: true }));
+    number.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  });
+  expect(raw.operate).toHaveBeenCalledOnce();
+  expect(raw.operate).toHaveBeenCalledWith({ kind: 'pointColorControl', metadata: {
+    control: `pointColor.0.${controlField}`, value,
+  } });
+  expect(raw.settings.point_colors[0][field]).toBe(['range', 'hue_range', 'sat_range', 'lum_range'].includes(field) ? 50 : 0);
+  expect(pointColorAdjustments()[index].querySelector<HTMLInputElement>('.adjustment-number')?.value).toBe(String(value));
+});
+
+it('groups slider drag changes until pointer release and applies them to the captured selected index', () => {
+  const raw = createRaw([point(10), point(200)]);
+  draw(raw); openPointColor(); act(() => swatches()[1].click());
+  const range = pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-range')!;
+  act(() => {
+    range.dispatchEvent(Object.assign(new Event('pointerdown', { bubbles: true }), { button: 0 }));
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(range, '-12');
+    range.dispatchEvent(new Event('input', { bubbles: true }));
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(range, '37');
+    range.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  expect(raw.operate).not.toHaveBeenCalled();
+  expect(pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-number')?.value).toBe('37');
+  act(() => window.dispatchEvent(new Event('pointerup')));
+  expect(raw.operate).toHaveBeenCalledOnce();
+  expect(raw.operate).toHaveBeenCalledWith({ kind: 'pointColorControl', metadata: {
+    control: 'pointColor.1.hueShift', value: 37,
+  } });
+  raw.settings = { ...raw.settings, revision: raw.settings.revision + 1,
+    point_colors: [raw.settings.point_colors[0], { ...raw.settings.point_colors[1], hue_shift: 37 }] };
+  draw(raw);
+  expect(pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-number')?.value).toBe('37');
+});
+
+it('groups keyboard and wheel changes at the operation boundary before changing swatches', () => {
+  const raw = createRaw([point(10), point(200)]);
+  draw(raw); openPointColor();
+  const range = pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-range')!;
+  act(() => range.focus());
+  act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })));
+  expect(pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-number')?.value).toBe('1');
+  expect(raw.operate).not.toHaveBeenCalled();
+  act(() => range.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true, cancelable: true })));
+  expect(pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-number')?.value).toBe('11');
+  expect(raw.operate).not.toHaveBeenCalled();
+  act(() => swatches()[1].click());
+  expect(raw.operate).toHaveBeenCalledOnce();
+  expect(raw.operate).toHaveBeenCalledWith({ kind: 'pointColorControl', metadata: {
+    control: 'pointColor.0.hueShift', value: 11,
+  } });
+});
+
+it('commits the old index before swatch selection and does not apply stale edits after Document or revision changes', () => {
+  const raw = createRaw([point(10), point(200)]);
+  draw(raw); openPointColor();
+  const range = pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-range')!;
+  act(() => {
+    range.dispatchEvent(Object.assign(new Event('pointerdown', { bubbles: true }), { button: 0 }));
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(range, '24');
+    range.dispatchEvent(new Event('input', { bubbles: true }));
+    swatches()[1].click();
+  });
+  expect(raw.operate).toHaveBeenCalledWith({ kind: 'pointColorControl', metadata: { control: 'pointColor.0.hueShift', value: 24 } });
+
+  raw.operate.mockClear();
+  const nextRange = pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-range')!;
+  act(() => {
+    nextRange.dispatchEvent(Object.assign(new Event('pointerdown', { bubbles: true }), { button: 0 }));
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(nextRange, '63');
+    nextRange.dispatchEvent(new Event('input', { bubbles: true }));
+    raw.settings = { ...raw.settings, revision: raw.settings.revision + 1 };
+  });
+  draw(raw);
+  act(() => window.dispatchEvent(new Event('pointerup')));
+  expect(raw.operate).not.toHaveBeenCalled();
+  expect(pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-number')?.value).toBe('0');
+
+  const documentRange = pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-range')!;
+  act(() => {
+    documentRange.dispatchEvent(Object.assign(new Event('pointerdown', { bubbles: true }), { button: 0 }));
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(documentRange, '48');
+    documentRange.dispatchEvent(new Event('input', { bubbles: true }));
+    const next = documentInfo('asset-b', 'b');
+    raw.assetId = next.assetId;
+    raw.settings = { ...rawSettings(next), point_colors: [point(10), point(200)] };
+  });
+  draw(raw);
+  act(() => window.dispatchEvent(new Event('pointerup')));
+  expect(raw.operate).not.toHaveBeenCalled();
+  expect(pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-number')?.value).toBe('0');
+});
+
+it('discards an unconfirmed slider value when History reports a save error', () => {
+  const raw = createRaw([point()]);
+  draw(raw); openPointColor();
+  const number = pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-number')!;
+  act(() => {
+    number.focus();
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(number, '54');
+    number.dispatchEvent(new Event('input', { bubbles: true }));
+    number.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  });
+  expect(pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-number')?.value).toBe('54');
+  raw.operationError = 'raw_connection_failed'; draw(raw);
+  expect(pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-number')?.value).toBe('0');
+});
+
+it('keeps Point Color controls disabled when Color is off or editing is locked', () => {
+  const raw = createRaw([point()]);
+  raw.settings.sections.color = false;
+  draw(raw); openPointColor();
+  expect(pointColorAdjustments().every(control => control.querySelector<HTMLInputElement>('.adjustment-range')?.disabled)).toBe(true);
+  raw.settings.sections.color = true;
+  draw(raw, true);
+  expect(pointColorAdjustments().every(control => control.querySelector<HTMLInputElement>('.adjustment-range')?.disabled)).toBe(true);
 });
 
 it('switches read-only values with the selected swatch and follows array shrink and empty settings', () => {

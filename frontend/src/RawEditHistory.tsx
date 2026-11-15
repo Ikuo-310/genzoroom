@@ -3,7 +3,7 @@ import { HistoryList } from './HistoryList';
 import type { useRawDocument } from './useRawDocument';
 import { formatContrast, formatExposure, formatHighlights, formatShadows, formatWhites,
   formatBlacks, formatTint, formatVibrance, formatSaturation } from './editing';
-import type { RawHistoryControlId, RawOpticsFlagId, RawHistoryStep, RawResetSectionId } from './rawApi';
+import type { RawHistoryControlId, RawOpticsFlagId, RawHistoryStep, RawPointColorControlId, RawResetSectionId } from './rawApi';
 import { displayTemperature, displayTint } from './rawWhiteBalance';
 
 const mixerColors = ['red', 'orange', 'yellow', 'green', 'aqua', 'blue', 'purple', 'magenta'] as const;
@@ -105,6 +105,11 @@ function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t'
     return t(`workspace.rawPreview.curveHistory.${resetLabel}`);
   }
   if (step.kind === 'mixerTarget') return t(`workspace.rawPreview.mixer.targetHistory.${step.metadata.target}`);
+  if (step.kind === 'pointColorControl') {
+    const control = step.metadata.control as RawPointColorControlId;
+    const field = control.slice(control.lastIndexOf('.') + 1);
+    return `${t('workspace.rawPreview.pointColor.controlHistory')}: ${t(`workspace.rawPreview.pointColor.adjustments.${field}`)} ${step.metadata.value}`;
+  }
   if (step.kind === 'vignetteStyle')
     return `${t('workspace.rawPreview.vignetteMode')}: ${t(`workspace.rawPreview.vignetteStyles.${step.metadata.style}`)}`;
   if (step.kind === 'opticsFlag' || step.kind === 'opticsFlagReset') {

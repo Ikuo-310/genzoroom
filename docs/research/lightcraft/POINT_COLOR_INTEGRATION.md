@@ -342,3 +342,9 @@ WBとPoint Colorは`useRawDocument`内の同じ一時picker ownerを共有し、
 採色中のクリックで待機ownerを解除してから一度だけ既存History saveを行う。成功settingsは既存receipt確定後の応答で更新され、配列へ楽観追加しない。settings配列の増加を確認して新しい末尾indexを一時選択し、既存スウォッチと8つの表示専用スライダーへ反映する。失敗時は通常のHistory save error/recoveryに委ね、独自再送せず、確定前の配列・選択表示を維持する。Point Color History step metadata `{x,y}`をFrontend response validatorとHistory表示に追加した。
 
 Anshitsu RAW Previewのfocused testでAfterクリックの正規化座標、1回の`pointColorPick`、History経由の確定後にentry追加・末尾選択・スライダー表示、drag無操作、save失敗時の重複追加なしを確認する。`rawApi` focused testsはpayloadにframeを含めないこと、小数座標保持、history metadataの厳密validationを確認する。Space Pan／Escape／WB既存テストも維持する。Native色計算、JPEG画素、ブラウザー手動動作は対象外。次工程ではPoint Color数値編集・Resetを個別にHistory操作へ接続する。
+
+## P1-C2b-1 — 数値編集のHistory接続
+
+8項目の既存`AdjustmentSlider`を有効化し、通常RAWスライダーと同じoperation-boundaryで確定する。ドラッグ中・キーボード／ホイール連続操作・数値入力中はDocument identity、開始revision、選択index、field、開始値、draft値を一時保持し、PreviewやNativeへは送らない。確定時に対象identity／revision／配列indexがまだ有効でColorがONの場合のみ、既存`raw.operate`へ`pointColorControl`を一度送る。control IDはsnake_case設定名をNative契約のcamelCaseへ写し、例として`hue_shift`は`pointColor.<index>.hueShift`となる。スウォッチ切替時は既存`commitAdjustmentEdits`で先に確定し、Document／History状態が変わった未確定draftは破棄する。操作中の値は一時draftとして表示し、History応答後は返却settingsを正とする。失敗時も通常のoperation error/recoveryに従い、独自再送しない。Resetはdisabledのまま。
+
+`RawHistoryOperation`、History response validation、動的slider identityに`pointColor.<0..7>.<field>`を追加し、未知field、index、非有限値、各field範囲外を拒否する。History行は`ポイントカラー調整 / Point Color adjustment`と項目名・metadataの確定値を表示する。既存Backend History APIはindexed controlの変更前値を`changes`に出さずmetadataに新値を持つため、旧値は表示しない。focused testsで8 control IDとvalue range、number／drag／keyboard／wheelの確定境界、selection switch、Document/revision stale draft、settings readback、save error時のdraft破棄、History response validationと表示を確認した。Anshitsu Preview、Point Color controls、rawApi、History displayの4 suite・400件、TypeScript、production buildが成功した。P1-C2b-2には個別Reset等の未実装操作が残る。
