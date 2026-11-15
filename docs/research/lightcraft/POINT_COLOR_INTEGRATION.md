@@ -358,3 +358,11 @@ JPEGでの`raw_point_color_control_mismatch`は、Point Color control自体で�
 8項目のResetを既存`AdjustmentSlider`から`raw.operate({kind:'pointColorControlReset', metadata:{control}})`へ接続した。control IDは選択中の有効indexと項目のcamelCase名から作る。Document identity、revision、選択index、配列entry、Color ON、操作可能状態をReset送信時に確認する。Resetは楽観的に値を書き換えず、History応答のsettingsで表示を更新する。既定値の項目はResetを無効にし、Backend no-opで不要なHistory stepを作らない既存契約に従う。
 
 Reset操作では未確定のPoint Color draftを先に破棄し、Reset自体を単一History操作にする。これによりdraft commitとResetが同じHistory fenceへ競合することを避ける。Document／revision／selectionが変わった古いイベントは送信しない。History response validationはPoint Color indexed IDだけを持つ正確なmetadataを検証し、History一覧は対象項目とResetであることを日英表示する。focused testsは8項目のcontrol ID、2件目entryへの適用、数値draft／slider dragとの競合、ロック・Color OFF・既定値の無効化、成功後settings反映・失敗時の非楽観表示、History metadata validation／表示を確認する。Undo／Redo等の既存History経路と数値編集・WB／Mixer回帰も関連テストで確認する。
+
+## P1-C3a — スウォッチ削除
+
+Point Colorの8調整項目の下に、選択中のスウォッチを削除する「削除 / Delete」ボタンを追加した。右クリックメニューは共通`AdjustmentContextMenu`の位置補正・Escape・外側クリック・focus復帰を利用し、項目は削除1つだけとする。右クリックでは選択状態を変えず、メニューを開いた時点のDocument identity／revision／indexを削除時に再検証する。どちらの入口も`raw.operate({kind:'pointColorDelete', metadata:{index}})`を使用し、Nativeへ直接送らない。
+
+History応答を受けるまでは配列を変更しない。成功後は返却settingsの配列を正とし、削除対象が選択中なら同じindexへ繰り上がった色（末尾削除時は直前、最後の1色なら未選択）を選ぶ。非選択色の削除では現在の選択色を維持し、削除indexより後ろならindexを詰める。Undo／Redo／Jumpによる配列長変化もHistory cursorと配列を見て有効indexへ補正する。
+
+削除時は保留中のPoint Color draftを破棄し、sliderを再mountして古いindexを参照する未確定callbackを遮断する。削除中は二重操作を防止し、Document／revision不一致、編集ロック、Color OFFでは送らない。History失敗時は楽観的な配列・選択更新をせず、既存Recoveryに委ねる。Frontend focused testsは、選択色と右クリックした非選択色の削除、先頭／中間／末尾／単一色、削除後の選択、draft破棄、失敗時の表示維持、stale revision／Document、ロック／Color OFF、メニューのEscape・外側クリック・重複防止、History型／表示を確認する。

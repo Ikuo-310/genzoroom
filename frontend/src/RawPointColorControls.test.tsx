@@ -41,6 +41,16 @@ function openPointColor() {
 }
 function swatches() { return [...host.querySelectorAll<HTMLButtonElement>('.raw-point-color-swatch')]; }
 function pointColorAdjustments() { return [...host.querySelectorAll<HTMLElement>('.raw-point-color-adjustments .adjustment-control')]; }
+function deleteButtons() { return [...host.querySelectorAll<HTMLButtonElement>('.raw-point-color-actions .adjustment-category-reset')]; }
+function contextDelete(index: number, x = 24, y = 36) {
+  const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: x, clientY: y });
+  act(() => swatches()[index].dispatchEvent(event));
+  return event;
+}
+function confirmContextDelete() {
+  const item = document.querySelector<HTMLButtonElement>('.raw-point-color-context-menu [role="menuitem"]')!;
+  act(() => item.click());
+}
 
 it('shows an inactive eyedropper and localized prompt for an empty Point Color array', async () => {
   const raw = createRaw();
@@ -140,7 +150,7 @@ it('shows eight editable controls in order with localized labels, Native ranges 
   const controls = pointColorAdjustments();
   expect(controls).toHaveLength(8);
   expect([...host.querySelector('.raw-point-color-content')!.children].map(element => element.className))
-    .toEqual(['raw-point-color-empty', 'raw-point-color-swatches', 'raw-point-color-adjustments']);
+    .toEqual(['raw-point-color-empty', 'raw-point-color-swatches', 'raw-point-color-adjustments', 'raw-point-color-actions']);
   const controlIds = ['hueShift', 'satShift', 'lumShift', 'variance', 'range', 'hueRange', 'satRange', 'lumRange'];
   expect(controls.map(control => control.querySelector<HTMLInputElement>('.adjustment-range')?.dataset.adjustmentId))
     .toEqual(controlIds.map(field => `pointColor.0.${field}`));
@@ -308,6 +318,119 @@ it('does not optimistically reset values when the History operation fails', () =
   expect(raw.operate).toHaveBeenCalledWith({ kind: 'pointColorControlReset', metadata: { control: 'pointColor.0.range' } });
   raw.operationError = 'raw_connection_failed'; draw(raw);
   expect(pointColorAdjustments()[4].querySelector<HTMLInputElement>('.adjustment-number')?.value).toBe('80');
+});
+
+it.each([
+  { count: 3, index: 0, selected: 0, remain: [1, 2], expectedSelected: 0 },
+  { count: 3, index: 1, selected: 1, remain: [0, 2], expectedSelected: 1 },
+  { count: 3, index: 2, selected: 2, remain: [0, 1], expectedSelected: 1 },
+  { count: 1, index: 0, selected: 0, remain: [], expectedSelected: null },
+])('deletes the selected Point Color index $index and selects the adjacent surviving entry', ({ count, index, selected, remain, expectedSelected }) => {
+  const colors = [point(10, { hue_shift: 11 }), point(110, { hue_shift: 22 }), point(210, { hue_shift: 33 })].slice(0, count);
+  const raw = createRaw(colors);
+  draw(raw); openPointColor(); act(() => swatches()[selected].click());
+  expect(deleteButtons()).toHaveLength(1);
+  expect(deleteButtons()[0].textContent).toBe('Delete');
+  act(() => deleteButtons()[0].click());
+  expect(raw.operate).toHaveBeenCalledOnce();
+  expect(raw.operate).toHaveBeenCalledWith({ kind: 'pointColorDelete', metadata: { index } });
+  expect(raw.settings.point_colors).toEqual(colors);
+
+  raw.settings = { ...raw.settings, revision: raw.settings.revision + 1,
+    point_colors: remain.map(position => colors[position]) };
+  draw(raw);
+  expect(swatches().map(button => button.getAttribute('aria-pressed')))
+    .toEqual(swatches().map((_, position) => position === expectedSelected ? 'true' : 'false'));
+  if (expectedSelected === null) expect(pointColorAdjustments()).toHaveLength(0);
+  else expect(pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-number')?.value)
+    .toBe(String(colors[remain[expectedSelected]].hue_shift));
+});
+
+it('deletes the right-clicked nonselected swatch without selecting it and preserves the same selected color', () => {
+  const colors = [point(10, { hue_shift: 11 }), point(110, { hue_shift: 22 }), point(210, { hue_shift: 33 })];
+  const raw = createRaw(colors);
+  draw(raw); openPointColor(); act(() => swatches()[2].click());
+  expect(contextDelete(1).defaultPrevented).toBe(true);
+  expect(swatches().map(button => button.getAttribute('aria-pressed'))).toEqual(['false', 'false', 'true']);
+  const menu = document.querySelector<HTMLElement>('.raw-point-color-context-menu')!;
+  expect(menu.style.left).toBe('24px');
+  expect(menu.style.top).toBe('36px');
+  expect([...menu.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).toEqual(['Delete']);
+  confirmContextDelete();
+  expect(raw.operate).toHaveBeenCalledOnce();
+  expect(raw.operate).toHaveBeenCalledWith({ kind: 'pointColorDelete', metadata: { index: 1 } });
+  expect(raw.settings.point_colors).toEqual(colors);
+
+  raw.settings = { ...raw.settings, revision: raw.settings.revision + 1,
+    point_colors: [colors[0], colors[2]] };
+  draw(raw);
+  expect(swatches().map(button => button.getAttribute('aria-pressed'))).toEqual(['false', 'true']);
+  expect(pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-number')?.value).toBe('33');
+});
+
+it('closes the Point Color context menu on Escape and outside pointer, and prevents duplicate menus', () => {
+  const raw = createRaw([point(), point(120)]);
+  draw(raw); openPointColor();
+  contextDelete(0); contextDelete(1);
+  expect(document.querySelectorAll('.raw-point-color-context-menu')).toHaveLength(1);
+  act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+  expect(document.querySelector('.raw-point-color-context-menu')).toBeNull();
+  expect(document.activeElement).toBe(swatches()[1]);
+  contextDelete(0);
+  act(() => document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+  expect(document.querySelector('.raw-point-color-context-menu')).toBeNull();
+  expect(raw.operate).not.toHaveBeenCalled();
+});
+
+it('closes stale delete menus and rejects a delete after revision or Document changes', () => {
+  const raw = createRaw([point(), point(120)]);
+  draw(raw); openPointColor(); contextDelete(1);
+  raw.settings = { ...raw.settings, revision: raw.settings.revision + 1 };
+  draw(raw);
+  expect(document.querySelector('.raw-point-color-context-menu')).toBeNull();
+  expect(raw.operate).not.toHaveBeenCalled();
+
+  contextDelete(1);
+  const next = documentInfo('asset-b', 'b');
+  raw.assetId = next.assetId;
+  raw.settings = { ...rawSettings(next), point_colors: [point(), point(120)] };
+  draw(raw);
+  expect(document.querySelector('.raw-point-color-context-menu')).toBeNull();
+  expect(raw.operate).not.toHaveBeenCalled();
+});
+
+it('disables deletion when Color is off or editing is locked', () => {
+  const colorOff = createRaw([point()]);
+  colorOff.settings.sections.color = false;
+  draw(colorOff); openPointColor();
+  expect(deleteButtons()[0].disabled).toBe(true);
+  contextDelete(0);
+  expect(document.querySelector('.raw-point-color-context-menu')).toBeNull();
+  const locked = createRaw([point()]);
+  draw(locked, true); openPointColor();
+  expect(deleteButtons()[0].disabled).toBe(true);
+  contextDelete(0);
+  expect(document.querySelector('.raw-point-color-context-menu')).toBeNull();
+});
+
+it('discards Point Color drafts on deletion and preserves the array when History fails', () => {
+  const original = [point(42, { hue_shift: 21 }), point(210, { range: 80 })];
+  const raw = createRaw(original);
+  draw(raw); openPointColor();
+  const hue = pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-number')!;
+  act(() => {
+    hue.focus();
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(hue, '67');
+    hue.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  act(() => deleteButtons()[0].click());
+  expect(raw.operate).toHaveBeenCalledOnce();
+  expect(raw.operate).toHaveBeenCalledWith({ kind: 'pointColorDelete', metadata: { index: 0 } });
+  expect(raw.settings.point_colors).toEqual(original);
+  raw.operationError = 'raw_connection_failed'; draw(raw);
+  expect(swatches()).toHaveLength(2);
+  expect(swatches()[0].getAttribute('aria-pressed')).toBe('true');
+  expect(pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-number')?.value).toBe('21');
 });
 
 it('groups slider drag changes until pointer release and applies them to the captured selected index', () => {

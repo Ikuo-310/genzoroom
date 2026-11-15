@@ -1,6 +1,8 @@
-import { Fragment, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode,
+  type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AdjustmentSlider } from './AdjustmentSlider';
+import { AdjustmentContextMenu, type AdjustmentMenuPosition } from './AdjustmentContextMenu';
 import { commitAdjustmentEdits, focusAdjustmentCategory, navigateAdjustments, preserveAdjustmentNumberFocus,
   preservePendingAdjustmentFocus, restorePendingAdjustmentFocus } from './adjustmentFocus';
 import type { RawPointColorAdjustmentField, SliderAdjustmentId } from './adjustmentSliderIds';
@@ -38,6 +40,8 @@ const pointColorControlFields: Record<RawPointColorAdjustmentField, RawPointColo
   range: 'range', hue_range: 'hueRange', sat_range: 'satRange', lum_range: 'lumRange',
 };
 type PointColorDraft = { document: string; revision: number; index: number; field: RawPointColorAdjustmentField; original: number; value: number };
+type PointColorDeleteTarget = AdjustmentMenuPosition & { document: string; revision: number; index: number };
+type PendingPointColorDelete = { document: string; revision: number; count: number; index: number; selectedIndex: number };
 const sections: Record<Exclude<RawCategoryId, 'curves'>, RawToggleSectionId> = { basic: 'light', color: 'color', effects: 'effects', detail: 'detail' };
 const wbErrors: Record<string, string> = {
   raw_wb_no_valid_samples: 'awNoSamples', raw_wb_geometry_mismatch: 'wbGeometryMismatch',
@@ -71,6 +75,8 @@ const vignetteLabels: Partial<Record<RawControlId, string>> = {
 export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNullable<ReturnType<typeof useRawDocument>>; disabled?: boolean }) {
   const { t } = useTranslation();
   const settings = raw.settings;
+  const locked = disabled || !!raw.locked || !!raw.editError || raw.status !== 'ready';
+  const actionsLocked = locked || !!raw.historyLoading || !!raw.historyError || !raw.history;
   const panelUi = useAppSettings().rawDevelopmentPanelUi;
   const pointColorDocument = settings
     ? JSON.stringify([settings.workspaceId, settings.assetId, settings.handle, settings.generation, settings.documentToken]) : null;
@@ -82,7 +88,9 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
   const pointColorDraftRef = useRef<PointColorDraft | null>(null);
   const [pointColorDraft, setPointColorDraft] = useState<PointColorDraft | null>(null);
   const [pointColorEditEpoch, setPointColorEditEpoch] = useState(0);
-  const previousPointColorList = useRef({ document: pointColorDocument, count: pointColorCount });
+  const [pointColorDeleteMenu, setPointColorDeleteMenu] = useState<PointColorDeleteTarget | null>(null);
+  const pendingPointColorDelete = useRef<PendingPointColorDelete | null>(null);
+  const previousPointColorList = useRef({ document: pointColorDocument, count: pointColorCount, cursor: raw.history?.cursor });
   const selectedPointColorIndex = pointColorCount === 0 ? null
     : pointColorSelection.document !== pointColorDocument ? 0
       : Math.min(pointColorSelection.index ?? 0, pointColorCount - 1);
@@ -90,16 +98,40 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
     index: selectedPointColorIndex };
   useEffect(() => {
     const previous = previousPointColorList.current;
-    previousPointColorList.current = { document: pointColorDocument, count: pointColorCount };
+    const cursor = raw.history?.cursor;
+    previousPointColorList.current = { document: pointColorDocument, count: pointColorCount, cursor };
+    const pending = pendingPointColorDelete.current;
+    if (pending) {
+      if (pending.document !== pointColorDocument || raw.editError || raw.operationError || raw.historyError || raw.saveError) {
+        pendingPointColorDelete.current = null;
+      } else if (settings?.revision !== pending.revision) {
+        pendingPointColorDelete.current = null;
+        if (settings && pointColorCount === pending.count - 1) {
+          const nextIndex = pointColorCount === 0 ? null : pending.selectedIndex === pending.index
+            ? Math.min(pending.index, pointColorCount - 1)
+            : pending.selectedIndex > pending.index ? pending.selectedIndex - 1 : pending.selectedIndex;
+          setPointColorSelection({ document: pointColorDocument, index: nextIndex });
+          return;
+        }
+      }
+    }
     setPointColorSelection(current => {
       if (current.document !== pointColorDocument || previous.document !== pointColorDocument)
         return { document: pointColorDocument, index: pointColorCount ? 0 : null };
       // Only confirmed settings updates grow this list, so selection follows the saved Native result.
-      if (pointColorCount > previous.count) return { document: pointColorDocument, index: pointColorCount - 1 };
+      if (pointColorCount > previous.count && (cursor === undefined || previous.cursor === undefined || cursor > previous.cursor))
+        return { document: pointColorDocument, index: pointColorCount - 1 };
       const index = pointColorCount ? Math.min(current.index ?? 0, pointColorCount - 1) : null;
       return index === current.index ? current : { ...current, index };
     });
-  }, [pointColorDocument, pointColorCount]);
+  }, [pointColorDocument, pointColorCount, settings?.revision, raw.history?.cursor,
+    raw.editError, raw.operationError, raw.historyError, raw.saveError]);
+  const closePointColorDeleteMenu = useCallback(() => setPointColorDeleteMenu(null), []);
+  useEffect(() => {
+    if (pointColorDeleteMenu && (pointColorDeleteMenu.document !== pointColorDocument
+      || pointColorDeleteMenu.revision !== settings?.revision || pointColorDeleteMenu.index >= pointColorCount
+      || !settings?.sections.color || actionsLocked)) setPointColorDeleteMenu(null);
+  }, [pointColorDeleteMenu, pointColorDocument, pointColorCount, settings?.revision, settings?.sections.color, actionsLocked]);
   useEffect(() => {
     const draft = pointColorDraftRef.current ?? pointColorDraft;
     if (!draft) return;
@@ -121,8 +153,6 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
   const operateCurve = (channel: 'master' | 'red' | 'green' | 'blue', points: RawCurvePoint[]) => operate({
     kind: 'curve', metadata: { channel }, points: points.map(({ x, y }) => [x, y] as [number, number]),
   });
-  const locked = disabled || !!raw.locked || !!raw.editError || raw.status !== 'ready';
-  const actionsLocked = locked || !!raw.historyLoading || !!raw.historyError || !raw.history;
   const beginPointColorEdit = (index: number, field: RawPointColorAdjustmentField) => {
     const current = pointColorDraftRef.current;
     if (current?.document === pointColorDocument && current.revision === settings?.revision
@@ -174,6 +204,26 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
     raw.operate({ kind: 'pointColorControlReset', metadata: {
       control: `pointColor.${index}.${pointColorControlFields[field]}`,
     } });
+  };
+  const deletePointColor = (index: number, document: string | null, revision: number | undefined) => {
+    const currentSettings = settings;
+    if (!document || !currentSettings || document !== pointColorDocument || revision !== currentSettings.revision
+      || !currentSettings.point_colors[index] || !currentSettings.sections.color || actionsLocked || pendingPointColorDelete.current) return;
+    pendingPointColorDelete.current = { document, revision: currentSettings.revision, count: currentSettings.point_colors.length, index,
+      selectedIndex: selectedPointColorIndex ?? 0 };
+    pointColorDraftRef.current = null;
+    setPointColorDraft(null);
+    // Deletion shifts every later index, so no unconfirmed slider callback may survive it.
+    setPointColorEditEpoch(epoch => epoch + 1);
+    setPointColorDeleteMenu(null);
+    raw.operate({ kind: 'pointColorDelete', metadata: { index } });
+  };
+  const openPointColorDeleteMenu = (index: number, event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!settings || actionsLocked || pendingPointColorDelete.current || !settings.sections.color || !settings.point_colors[index]) return;
+    setPointColorDeleteMenu({ document: pointColorDocument!, revision: settings.revision, index,
+      trigger: event.currentTarget, x: event.clientX, y: event.clientY });
   };
   useEffect(() => { if (!actionsLocked && panel.current) restorePendingAdjustmentFocus(panel.current); }, [actionsLocked]);
   return <div className="raw-adjustment-controls" ref={panel} onPointerDownCapture={event => {
@@ -288,6 +338,9 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
       {category === 'color' && <RawPointColorPicker colors={settings.point_colors} selectedIndex={selectedPointColorIndex}
         valueDraft={pointColorDraft} editEpoch={pointColorEditEpoch} document={pointColorDocument} revision={settings.revision}
         controlsDisabled={actionsLocked || !settings.sections.color}
+        deletePending={!!pendingPointColorDelete.current}
+        onDeleteSelected={index => deletePointColor(index, pointColorDocument, settings.revision)}
+        onSwatchContextMenu={openPointColorDeleteMenu}
         onAdjustmentBegin={beginPointColorEdit} onAdjustmentChange={changePointColorEdit} onAdjustmentCommit={commitPointColorEdit}
         onAdjustmentCancel={cancelPointColorEdit} onAdjustmentReset={resetPointColorControl}
         pickActive={raw.pointColorPickActive} pickDisabled={actionsLocked || !raw.pointColorPickAvailable}
@@ -326,6 +379,11 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
     {raw.editError && <div role="alert"><p>{t('workspace.rawPreview.editFailed')}</p>
       <button className="tool-button" type="button" disabled={disabled || raw.locked}
         onClick={raw.retryControls}>{t('workspace.rawPreview.retry')}</button></div>}
+    {pointColorDeleteMenu && <AdjustmentContextMenu target={pointColorDeleteMenu}
+      menuLabel={t('workspace.rawPreview.pointColor.entriesLabel')} className="raw-point-color-context-menu"
+      singleAction={{ label: t('workspace.rawPreview.pointColor.delete'), onSelect: () => deletePointColor(
+        pointColorDeleteMenu.index, pointColorDeleteMenu.document, pointColorDeleteMenu.revision) }}
+      onClose={closePointColorDeleteMenu} />}
   </div>;
 }
 
@@ -491,11 +549,12 @@ function RawColorGrading({ raw, band, onBandChange, open, onOpenChange, locked, 
   </section>;
 }
 
-function RawPointColorPicker({ colors, selectedIndex, valueDraft, editEpoch, document, revision, controlsDisabled,
-  onAdjustmentBegin, onAdjustmentChange, onAdjustmentCommit, onAdjustmentCancel, onAdjustmentReset,
+function RawPointColorPicker({ colors, selectedIndex, valueDraft, editEpoch, document, revision, controlsDisabled, deletePending,
+  onDeleteSelected, onSwatchContextMenu, onAdjustmentBegin, onAdjustmentChange, onAdjustmentCommit, onAdjustmentCancel, onAdjustmentReset,
   pickActive, pickDisabled, onPickToggle, onPickCancel, onSelect, open, onOpenChange }: {
   colors: RawPointColor[]; selectedIndex: number | null; onSelect: (index: number) => void;
-  valueDraft: PointColorDraft | null; editEpoch: number; document: string | null; revision: number; controlsDisabled: boolean;
+  valueDraft: PointColorDraft | null; editEpoch: number; document: string | null; revision: number; controlsDisabled: boolean; deletePending: boolean;
+  onDeleteSelected: (index: number) => void; onSwatchContextMenu: (index: number, event: ReactMouseEvent<HTMLButtonElement>) => void;
   onAdjustmentBegin: (index: number, field: RawPointColorAdjustmentField) => void;
   onAdjustmentChange: (index: number, field: RawPointColorAdjustmentField, value: number) => void;
   onAdjustmentCommit: () => void;
@@ -539,6 +598,7 @@ function RawPointColorPicker({ colors, selectedIndex, valueDraft, editEpoch, doc
               aria-pressed={selectedIndex === index} aria-label={t('workspace.rawPreview.pointColor.entry', { index: index + 1 })}
               title={t('workspace.rawPreview.pointColor.entry', { index: index + 1 })} data-point-color-index={index}
               onClick={() => onSelect(index)} onFocus={focusAdjustmentCategory}
+              onContextMenu={event => onSwatchContextMenu(index, event)}
               onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)} />)}
           </div>
           {selectedIndex !== null && colors[selectedIndex] && <div className="raw-point-color-adjustments">
@@ -559,6 +619,14 @@ function RawPointColorPicker({ colors, selectedIndex, valueDraft, editEpoch, doc
                 onChange={next => onAdjustmentChange(selectedIndex, field, next)} onCommit={onAdjustmentCommit}
                 onReset={() => onAdjustmentReset(selectedIndex, field)} />;
             })}
+          </div>}
+          {selectedIndex !== null && colors[selectedIndex] && <div className="raw-point-color-actions">
+            <button type="button" className="adjustment-category-reset" disabled={controlsDisabled || deletePending}
+              aria-label={t('workspace.rawPreview.pointColor.delete')} title={t('workspace.rawPreview.pointColor.delete')}
+              onClick={() => onDeleteSelected(selectedIndex)} onFocus={focusAdjustmentCategory}
+              onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>
+              {t('workspace.rawPreview.pointColor.delete')}
+            </button>
           </div>}
         </>}
     </div>}

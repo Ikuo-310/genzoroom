@@ -3,12 +3,13 @@ import { createPortal } from 'react-dom';
 
 export type AdjustmentMenuPosition = { trigger: HTMLElement; x: number; y: number };
 
-export function AdjustmentContextMenu({ target, menuLabel, className, enabled, resetDisabled, pasteDisabled, hideToggle,
+export function AdjustmentContextMenu({ target, menuLabel, className, enabled, resetDisabled, pasteDisabled, hideToggle, singleAction,
   enableLabel, disableLabel, resetLabel, copyLabel, pasteLabel, onToggle, onReset, onCopy, onPaste, onClose }: {
   target: AdjustmentMenuPosition; menuLabel: string; className: string;
-  enabled: boolean; resetDisabled: boolean; pasteDisabled: boolean; hideToggle?: boolean;
-  enableLabel: string; disableLabel: string; resetLabel: string; copyLabel: string; pasteLabel: string;
-  onToggle?: () => void; onReset: () => void; onCopy: () => void; onPaste: () => void; onClose: () => void;
+  enabled?: boolean; resetDisabled?: boolean; pasteDisabled?: boolean; hideToggle?: boolean;
+  enableLabel?: string; disableLabel?: string; resetLabel?: string; copyLabel?: string; pasteLabel?: string;
+  singleAction?: { label: string; onSelect: () => void; disabled?: boolean };
+  onToggle?: () => void; onReset?: () => void; onCopy?: () => void; onPaste?: () => void; onClose: () => void;
 }) {
   const menu = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ left: target.x, top: target.y });
@@ -51,10 +52,13 @@ export function AdjustmentContextMenu({ target, menuLabel, className, enabled, r
     onBlur={(event) => {
       if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) onClose();
     }}>
-    <button type="button" className="workspace-menu-item" role="menuitem" onClick={() => invoke(onCopy)}>{copyLabel}</button>
-    <button type="button" className="workspace-menu-item" role="menuitem" disabled={pasteDisabled} onClick={() => invoke(onPaste)}>{pasteLabel}</button>
-    <div role="separator" aria-orientation="horizontal" className="edit-settings-menu-separator" />
-    {!hideToggle && onToggle && <button type="button" className="workspace-menu-item" role="menuitem" onClick={() => invoke(onToggle)}>{enabled ? disableLabel : enableLabel}</button>}
-    <button type="button" className="workspace-menu-item" role="menuitem" disabled={resetDisabled} onClick={() => invoke(onReset)}>{resetLabel}</button>
+    {singleAction ? <button type="button" className="workspace-menu-item" role="menuitem" disabled={singleAction.disabled}
+      onClick={() => invoke(singleAction.onSelect)}>{singleAction.label}</button> : <>
+      <button type="button" className="workspace-menu-item" role="menuitem" onClick={() => invoke(onCopy!)}>{copyLabel}</button>
+      <button type="button" className="workspace-menu-item" role="menuitem" disabled={pasteDisabled} onClick={() => invoke(onPaste!)}>{pasteLabel}</button>
+      <div role="separator" aria-orientation="horizontal" className="edit-settings-menu-separator" />
+      {!hideToggle && onToggle && <button type="button" className="workspace-menu-item" role="menuitem" onClick={() => invoke(onToggle)}>{enabled ? disableLabel : enableLabel}</button>}
+      <button type="button" className="workspace-menu-item" role="menuitem" disabled={resetDisabled} onClick={() => invoke(onReset!)}>{resetLabel}</button>
+    </>}
   </div>, document.body);
 }

@@ -264,6 +264,7 @@ describe('RAW History transport', () => {
     { kind: 'curveReset', metadata: { channel: 'point' } },
     { kind: 'allReset', metadata: {} },
     { kind: 'pointColorPick', metadata: { x: .2375, y: .78125 } },
+    { kind: 'pointColorDelete', metadata: { index: 1 } },
     { kind: 'pointColorControl', metadata: { control: 'pointColor.7.hueRange', value: 82.375 } },
     { kind: 'pointColorControlReset', metadata: { control: 'pointColor.1.hueShift' } },
   ])('sends allowlisted operation metadata for $kind without native settings', async operation => {
@@ -449,6 +450,23 @@ describe('RAW History transport', () => {
     await expect(readRawHistory(result)).resolves.toMatchObject({ steps: [{ kind: 'pointColorControlReset',
       metadata: { control: 'pointColor.7.lumRange' } }] });
   });
+  it('reads a Point Color deletion index', async () => {
+    const request = historyRequest('commit');
+    const result = rawHistoryResult(request, { history: { initialized: true, cursor: 1, length: 1, selectedStepId: request.saveId } });
+    const data = rawHistoryData(result);
+    data.steps[0] = { ...data.steps[0], kind: 'pointColorDelete', metadata: { index: 1 }, changes: [] };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })));
+    await expect(readRawHistory(result)).resolves.toMatchObject({ steps: [{ kind: 'pointColorDelete', metadata: { index: 1 } }] });
+  });
+  it.each([{}, { index: 1, extra: true }, { index: -1 }, { index: 8 }, { index: 1.5 }, { index: true }])
+    ('rejects malformed Point Color deletion metadata %j', async metadata => {
+      const request = historyRequest('commit');
+      const result = rawHistoryResult(request, { history: { initialized: true, cursor: 1, length: 1, selectedStepId: request.saveId } });
+      const data = rawHistoryData(result);
+      data.steps[0] = { ...data.steps[0], kind: 'pointColorDelete', metadata } as typeof data.steps[number];
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })));
+      await expect(readRawHistory(result)).rejects.toMatchObject({ code: 'raw_invalid_response' });
+    });
   it.each([{}, { control: 'pointColor.0.hueShift', extra: true }, { control: 'pointColor.8.range' },
     { control: 'pointColor.0.hue_shift' }, { control: 42 }])('rejects malformed Point Color Reset metadata %j', async metadata => {
     const request = historyRequest('commit');

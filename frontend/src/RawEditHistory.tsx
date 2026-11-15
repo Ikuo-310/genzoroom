@@ -115,6 +115,8 @@ function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t'
     const field = control.slice(control.lastIndexOf('.') + 1);
     return `${t('workspace.rawPreview.pointColor.controlResetHistory')}: ${t(`workspace.rawPreview.pointColor.adjustments.${field}`)}`;
   }
+  if (step.kind === 'pointColorDelete')
+    return `${t('workspace.rawPreview.pointColor.deleteHistory')}: ${step.metadata.index! + 1}`;
   if (step.kind === 'vignetteStyle')
     return `${t('workspace.rawPreview.vignetteMode')}: ${t(`workspace.rawPreview.vignetteStyles.${step.metadata.style}`)}`;
   if (step.kind === 'opticsFlag' || step.kind === 'opticsFlagReset') {

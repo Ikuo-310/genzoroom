@@ -105,6 +105,13 @@ describe('RAW History display', () => {
     expect(markup).toContain(language === 'ja' ? 'ポイントカラー調整をリセット' : 'Reset Point Color adjustment');
     expect(markup).toContain(language === 'ja' ? '色相' : 'Hue');
   });
+  it.each(['ja', 'en'])('labels Point Color deletion and its one-based entry in %s', async language => {
+    await i18n.changeLanguage(language);
+    const step: RawHistoryStep = { stepId: '00000000-0000-4000-8000-000000000001', kind: 'pointColorDelete',
+      metadata: { index: 1 }, createdAt: '2026-10-27T00:00:00Z', changes: [] };
+    const markup = renderToStaticMarkup(<RawEditHistory raw={rawHistory([step], 1) as never} disabled={false} onReset={() => {}} />);
+    expect(markup).toContain(language === 'ja' ? 'ポイントカラー削除: 2' : 'Point Color deletion: 2');
+  });
 
   it('shows JPEG-style before and after values, Kelvin units and no operation timestamps', () => {
     const steps: RawHistoryStep[] = [
