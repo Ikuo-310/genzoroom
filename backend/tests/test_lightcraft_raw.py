@@ -1557,6 +1557,79 @@ def test_point_color_interaction_cancel_restores_baseline_without_history(tmp_pa
     asyncio.run(run())
 
 
+def test_point_color_interaction_reset_drops_preview_owner_and_rejects_old_id(tmp_path):
+    async def run():
+        raw, _, children, files = await create(tmp_path, adaptive=True)
+        try:
+            handle, baseline = await raw.open_raw("pixel", files[0])
+            child = children[0]
+            child.photos[1]["settings"]["point_colors"] = [point_color()]
+            baseline = await raw.get_settings(handle)
+            interaction_id = await raw.begin_point_color_interaction(handle, "pointColor.0.hueShift", baseline.revision)
+            update = await raw.update_point_color_interaction(handle, interaction_id, baseline.revision, 1, 19.5,
+                max_side=512)
+            old_ticket = update.preview_ticket
+
+            await raw.reset_session(restore_active=False)
+            assert raw._point_color_interaction is None
+            assert await old_ticket is SUPERSEDED
+            with pytest.raises(LightCraftError, match="raw_point_color_interaction_stale"):
+                await raw.update_point_color_interaction(handle, interaction_id, baseline.revision, 2, 24.)
+
+            next_handle, next_snapshot = await raw.open_raw("other", files[1])
+            assert next_handle.source_key == "other" and next_snapshot.settings["point_colors"] == []
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+def test_failed_point_color_interaction_reset_does_not_promote_native_draft(tmp_path):
+    async def run():
+        raw, _, children, files = await create(tmp_path, adaptive=True)
+        try:
+            handle, baseline = await raw.open_raw("pixel", files[0])
+            child = children[0]
+            child.photos[1]["settings"]["point_colors"] = [point_color()]
+            baseline = await raw.get_settings(handle)
+            interaction_id = await raw.begin_point_color_interaction(handle, "pointColor.0.hueShift", baseline.revision)
+            child.point_control_noop = True
+            with pytest.raises(LightCraftError, match="raw_point_color_control_mismatch"):
+                await raw.update_point_color_interaction(handle, interaction_id, baseline.revision, 1, 19.5)
+            assert raw._point_color_interaction.state == "failed"
+            assert raw._photos["pixel"].settings_json == _settings_json(baseline.settings)
+
+            await raw.reset_session(restore_active=False)
+            assert raw._point_color_interaction is None
+            next_handle, next_snapshot = await raw.open_raw("other", files[1])
+            assert next_handle.source_key == "other" and next_snapshot.settings["point_colors"] == []
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+def test_point_color_interaction_close_drops_owner_and_completes_preview_ticket(tmp_path):
+    async def run():
+        raw, _, children, files = await create(tmp_path, adaptive=True)
+        try:
+            handle, baseline = await raw.open_raw("pixel", files[0])
+            child = children[0]
+            child.photos[1]["settings"]["point_colors"] = [point_color()]
+            baseline = await raw.get_settings(handle)
+            interaction_id = await raw.begin_point_color_interaction(handle, "pointColor.0.hueShift", baseline.revision)
+            update = await raw.update_point_color_interaction(handle, interaction_id, baseline.revision, 1, 19.5,
+                max_side=512)
+            old_ticket = update.preview_ticket
+
+            await raw.close()
+            assert raw._point_color_interaction is None
+            assert await old_ticket is SUPERSEDED
+            with pytest.raises(LightCraftError, match="raw_point_color_interaction_stale"):
+                await raw.update_point_color_interaction(handle, interaction_id, baseline.revision, 2, 24.)
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
 def test_curve_interaction_coalesces_pending_updates_and_cancel_restores_baseline(tmp_path):
     async def run():
         raw, manager, children, files = await create(tmp_path, adaptive=True)

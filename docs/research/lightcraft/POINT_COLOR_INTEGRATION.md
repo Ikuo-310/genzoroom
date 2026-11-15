@@ -386,3 +386,9 @@ Point Color controlの操作中Previewには、既存LightCraft Native interacti
 Frontendは既存`AdjustmentSlider`のoperation boundaryを維持し、50ms cadenceで中間値を最新値へ集約する。Native updateは同時に1件、待機値は1件だけとし、各適用値に既存のDraft After Preview ticketを結び付ける。ドラッグ中はHistory／Recipeを書かず、Pointer Up／number／keyboard／wheelの確定時に最終値を1つの`pointColorControl`として保存する。値が開始値と同じ場合はNative interactionをcancelしHistory stepを作らない。pointer cancel、slider unmount、Document終了では確定前interactionをcancelし、読戻し後に通常Previewへ戻す。Native／Preview不明結果は再送せず、既存Session失敗・durable Recipe再読込Recoveryを用いる。
 
 JPEGとDNGはWindows LightCraft Session、Native interaction、Draft Preview、History経路を共有し、GenzoRoomはLightCraftの色演算を実装しない。Point Color interaction endpointは通常control reservationを取得しない。通常編集用reservationを取得すると、そのreservation自身がinteraction beginを`raw_busy`で拒否するためである。Mock NativeでDraft readback、cancel時のbaseline復帰、History保存後のRecipe snapshot、Undo／Redoを確認した。Backend Point Color focused testsは`test_lightcraft_raw.py`、`test_raw_history_api.py`、`test_raw_category_operations.py`から94件、Frontend Point Color controls／`RawRecipeSave` focused testsは58件が成功した。TypeScript checkとproduction buildは成功した（既存bundle sizeと依存directiveのwarningあり）。実Native・Windows Desktopでの手動確認は実施していない。
+
+### P1-C4 follow-up — Session release時のinteraction破棄
+
+診断ログで、workspaceのNative reset/release後にも`raw_point_color_interaction_pending`が発生し、後続openが妨げられることを確認した。原因は`_join_operations()`がCurve／Mixer ownerだけを解除し、Point Color ownerとそのPreview ticket参照を残していたこと。join時にPoint Color interactionをfailedとして残存ticketをsupersededで完了し、非同期Native／Preview taskをjoinした後にownerを破棄する。Session reset／closeの双方がこの経路を通り、未確定working settingsは永続snapshotへ昇格しない。通常interaction中の別操作拒否は維持する。
+
+Mock Nativeの実API経路で、interaction中のworkspace release後に別workspace／別Documentを開けること、release前のRecipe／Historyがdraft値を含まないこと、古いinteraction IDが拒否されることを確認した。Session unit testsではreset／close後の古いPreview ticket解決、古いIDの拒否、新Document open、失敗interactionのreset後の再openも確認した。Point Color focused Backend testsは3 test filesで98件成功した。実Native／Windows Desktopでの手動確認は実施していない。

@@ -580,6 +580,51 @@ def test_point_color_slider_interaction_previews_then_commits_one_history_step(l
     asyncio.run(run())
 
 
+def test_point_color_workspace_release_discards_draft_before_opening_another_document(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        children[0].adaptive_supported = True
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                workspace, doc = await open_document(http)
+                doc = await operation(http, doc, "initialize")
+                doc = await operation(http, doc, "operate", body(doc) | {"kind": "pointColorPick", "metadata": {"x": .3, "y": .7}})
+                old_handle = api._raw_handle
+                recipe_identity = api._history_identity
+                begin_body = identity(doc) | {"documentRevision": doc["revision"]}
+                base = f'/api/raw/documents/{doc["handle"]}/point-color-interaction'
+                started = await http.post(f"{base}/begin", json=begin_body | {"control": "pointColor.0.hueShift"})
+                assert started.status_code == 200, started.text
+                interaction_id = started.json()["interactionId"]
+                update = await http.post(f"{base}/update", json=begin_body | {"interactionId": interaction_id,
+                    "sequence": 1, "value": 41.5, "serial": 1, "maxSide": 512, "viewGeneration": 0, "geometryId": None})
+                assert update.status_code == 200
+                preview = await http.post(f"{base}/preview", json=begin_body | {"interactionId": interaction_id,
+                    "interactionSequence": 1, "serial": 1, "maxSide": 512, "viewGeneration": 0, "geometryId": None})
+                assert preview.status_code == 200 and preview.headers["x-raw-quality"] == "draft"
+                assert api.raw._point_color_interaction is not None
+
+                released = await http.delete(f"/api/raw/workspaces/{workspace}")
+                assert released.status_code == 204
+                assert api.raw._point_color_interaction is None
+                saved = store.get_raw_recipe(recipe_identity)["recipe"]["settings"]
+                history = store.get_raw_history(recipe_identity)["history"]
+                assert saved["point_colors"][0]["hue_shift"] == 0
+                assert history["cursor"] == len(history["steps"]) == 1
+                with pytest.raises(LightCraftError, match="raw_point_color_interaction_stale"):
+                    await api.raw.update_point_color_interaction(old_handle, interaction_id, doc["revision"], 2, 50.)
+
+                next_workspace, next_doc = await open_document(http)
+                assert next_workspace != workspace and next_doc["assetId"] != doc["assetId"]
+                next_settings = await http.post(f'/api/raw/documents/{next_doc["handle"]}/settings',
+                    json=identity(next_doc))
+                assert next_settings.status_code == 200 and next_settings.json()["point_colors"] == []
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("field,value,code", [
     ("generation", 999, "raw_stale_handle"), ("documentToken", "wrong", "raw_stale_handle"),
     ("documentRevision", 999, "raw_revision_conflict"), ("settingsFingerprint", "0" * 64, "raw_revision_conflict"),

@@ -3160,18 +3160,27 @@ class LightCraftRawSession:
             tasks.append(self._worker)
         interaction = self._curve_interaction
         mixer = self._mixer_interaction
+        point_color = self._point_color_interaction
         if interaction is not None:
             self._fail_curve_pending(interaction, "raw_session_lost")
             if interaction.update_task is not None and not interaction.update_task.done():
                 tasks.append(interaction.update_task)
         if mixer is not None and mixer.state not in ("cancelled", "confirmed"):
             mixer.state = "failed"
+        if point_color is not None:
+            point_color.state = "failed"
+            for ticket in point_color.preview_tickets.values():
+                ticket.abandoned, ticket.reason = True, "raw_session_lost"
+                ticket._finish()
+            point_color.preview_tickets.clear()
         for task in tasks:
             task.cancel()
         for task in tasks:
             await _await_task_resilient(task)
         self._curve_interaction = None
         self._mixer_interaction = None
+        # The Native process is being replaced or closed, so retaining its transient owner would block every later document.
+        self._point_color_interaction = None
 
     async def reset_session(self, restore_active=True):
         if self._stop.is_set():
