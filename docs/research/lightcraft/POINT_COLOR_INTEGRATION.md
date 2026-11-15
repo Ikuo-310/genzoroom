@@ -392,3 +392,13 @@ JPEGとDNGはWindows LightCraft Session、Native interaction、Draft Preview、H
 診断ログで、workspaceのNative reset/release後にも`raw_point_color_interaction_pending`が発生し、後続openが妨げられることを確認した。原因は`_join_operations()`がCurve／Mixer ownerだけを解除し、Point Color ownerとそのPreview ticket参照を残していたこと。join時にPoint Color interactionをfailedとして残存ticketをsupersededで完了し、非同期Native／Preview taskをjoinした後にownerを破棄する。Session reset／closeの双方がこの経路を通り、未確定working settingsは永続snapshotへ昇格しない。通常interaction中の別操作拒否は維持する。
 
 Mock Nativeの実API経路で、interaction中のworkspace release後に別workspace／別Documentを開けること、release前のRecipe／Historyがdraft値を含まないこと、古いinteraction IDが拒否されることを確認した。Session unit testsではreset／close後の古いPreview ticket解決、古いIDの拒否、新Document open、失敗interactionのreset後の再openも確認した。Point Color focused Backend testsは3 test filesで98件成功した。実Native／Windows Desktopでの手動確認は実施していない。
+
+### P1-C4 readback／Preview recovery follow-up
+
+2026-11-15のDesktop診断ログは`raw_point_color_control_mismatch`と、その後のcancel要求に対する`raw_point_color_interaction_stale`のみを含み、Native readbackの対象fieldや数値は記録していない。このためログから実機で不一致だった設定項目は特定できない。`update_point_color_interaction()`と`end_point_color_interaction()`は、従来どおり`_settings_json()`で正規化した完全settingsを比較し、target値の不一致と予期しない別設定の変更をどちらも失敗として扱う。readback比較は緩和していない。
+
+不一致時の診断として、`raw.pointColor.readbackMismatch`にcontrol、phase、sequence、および最大12個の限定差分を追加した。差分にはNative field pathと有限な数値だけを含め、設定全体・画像情報・文字列値は出力しない。Mockでは、指定値が反映されない場合の`point_colors[0].hue_shift`差分と、予期しない`light.exposure`差分を検出・記録し、interactionをfailed/desynchronizedにすることを確認した。実機の元の不一致fieldは、この診断を含む次のログがないと確定できない。
+
+確認済みのLightCraft 0.20.0 managed binaryを使った実Native試験では、合成JPEGと合成DNGへ採色後、8項目すべてを小数値で`begin → update → Draft Preview → end → History確定`し、更新値のreadbackが一致した。これは報告された実機不一致の再現ではなく、JPEG／DNGの基本interaction契約の検証である。
+
+Frontendでは、interaction update失敗後のNative cancelも失敗した場合に`RawControls.endPreview()`を必ず呼んでから既存workspace Recoveryを開始する。これにより古いPreview ownerがpresentation stateを握り続けず、取消し結果不明時は耐久Recipeからworkspaceを再作成する。focused Frontend testでPreview owner解放、表示settle、Recovery開始を確認した。Backend focused interaction testsは6件、合成JPEG／DNGの実Native testsは2件、`RawRecipeSave.test.ts`は9件成功。Windows Desktopでの手動再現は未実施。

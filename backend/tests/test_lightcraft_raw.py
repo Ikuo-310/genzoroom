@@ -1583,7 +1583,12 @@ def test_point_color_interaction_reset_drops_preview_owner_and_rejects_old_id(tm
     asyncio.run(run())
 
 
-def test_failed_point_color_interaction_reset_does_not_promote_native_draft(tmp_path):
+@pytest.mark.parametrize("fault,expected_field,expected_value,actual_value", [
+    ("noop", "point_colors[0].hue_shift", 19.5, 0.),
+    ("other_setting_changed", "light.exposure", 0., 1.),
+])
+def test_failed_point_color_interaction_logs_limited_readback_difference_and_does_not_promote_draft(
+        tmp_path, monkeypatch, fault, expected_field, expected_value, actual_value):
     async def run():
         raw, _, children, files = await create(tmp_path, adaptive=True)
         try:
@@ -1592,9 +1597,17 @@ def test_failed_point_color_interaction_reset_does_not_promote_native_draft(tmp_
             child.photos[1]["settings"]["point_colors"] = [point_color()]
             baseline = await raw.get_settings(handle)
             interaction_id = await raw.begin_point_color_interaction(handle, "pointColor.0.hueShift", baseline.revision)
-            child.point_control_noop = True
+            if fault == "noop":
+                child.point_control_noop = True
+            else:
+                child.point_control_fault = fault
+            logged = []
+            monkeypatch.setattr(module, "lightcraft_log", lambda event, **context: logged.append((event, context)))
             with pytest.raises(LightCraftError, match="raw_point_color_control_mismatch"):
                 await raw.update_point_color_interaction(handle, interaction_id, baseline.revision, 1, 19.5)
+            event, context = next(item for item in logged if item[0] == "raw.pointColor.readbackMismatch")
+            difference = next(item for item in context["mismatchFields"] if item["field"] == expected_field)
+            assert (difference["expected"], difference["actual"]) == (expected_value, actual_value)
             assert raw._point_color_interaction.state == "failed"
             assert raw._photos["pixel"].settings_json == _settings_json(baseline.settings)
 

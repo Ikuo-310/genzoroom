@@ -1,12 +1,15 @@
 """Opt-in integration check against the receipt-verified Native executable."""
 
 import asyncio
+import importlib.util
+import json
 import os
 from pathlib import Path
 import shutil
 from uuid import uuid4
 
 import pytest
+from PIL import Image
 
 from lightcraft_mcp import LightCraftError
 from lightcraft_raw import LightCraftRawSession
@@ -141,6 +144,56 @@ def test_real_native_mixer_target_hsl_readback_and_interaction(tmp_path):
                 assert preview.quality in ('draft', 'full') and preview.interaction_id == interaction
                 result = await raw.end_mixer_interaction(handle, interaction, state.revision, target)
                 state = raw.confirm_mixer_interaction(handle, interaction, state.revision)
+                assert state.settings == result.settings
+        finally:
+            await raw.close()
+            await manager.close()
+
+    asyncio.run(run())
+
+
+@pytest.mark.skipif(not os.environ.get('GENZOROOM_TEST_LIGHTCRAFT_EXE'), reason='real Native executable not requested')
+@pytest.mark.parametrize('source_kind', ['jpeg', 'dng'])
+def test_real_native_point_color_interaction_round_trip_on_synthetic_images(tmp_path, source_kind):
+    async def run():
+        if source_kind == 'jpeg':
+            source = tmp_path / 'synthetic-point-color.jpg'
+            Image.new('RGB', (64, 64), (180, 90, 40)).save(source, quality=95)
+        else:
+            source = tmp_path / 'synthetic-point-color.dng'
+            probe_path = Path(__file__).resolve().parents[2] / 'native/lightcraft/settings_export_probe.py'
+            spec = importlib.util.spec_from_file_location('point_color_synthetic_dng', probe_path)
+            probe = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(probe)
+            source.write_bytes(probe.synthetic_dng())
+        manager = LightCraftManager(environment={**os.environ,
+            'GENZOROOM_LIGHTCRAFT_EXE': os.environ['GENZOROOM_TEST_LIGHTCRAFT_EXE']}, platform='win32', gpu_backend='off')
+        raw = LightCraftRawSession(manager)
+        try:
+            await manager.start()
+            async with asyncio.timeout(30):
+                while manager.status().state in ('starting', 'initializing'):
+                    await asyncio.sleep(.05)
+            assert manager.status().state == 'ready'
+            handle, state = await raw.open_raw('point-color-synthetic', str(source))
+            state = await raw.apply_history_operation(handle, 'pointColorPick', {'x': .5, 'y': .5}, state.revision)
+            controls = [('hueShift', 23.5), ('satShift', -11.25), ('lumShift', 8.5), ('variance', -5.5),
+                ('range', 63.25), ('hueRange', 45.5), ('satRange', 38.25), ('lumRange', 62.75)]
+            for field, value in controls:
+                control = f'pointColor.0.{field}'
+                interaction = await raw.begin_point_color_interaction(handle, control, state.revision)
+                update = await raw.update_point_color_interaction(handle, interaction, state.revision, 1, value,
+                    max_side=512)
+                preview = await update.preview_ticket
+                assert preview.interaction_id == interaction and preview.interaction_sequence == 1
+                actual = json.loads(await raw._read_settings(raw._photo(handle, active=True),
+                    asyncio.get_running_loop().time() + 30))
+                native_field = {'hueShift':'hue_shift','satShift':'sat_shift','lumShift':'lum_shift','hueRange':'hue_range',
+                    'satRange':'sat_range','lumRange':'lum_range'}.get(field, field)
+                assert actual['point_colors'][0][native_field] == value
+                result = await raw.end_point_color_interaction(handle, interaction, state.revision, control, value)
+                state = raw.confirm_point_color_interaction(handle, interaction, state.revision)
+                assert state.settings['point_colors'][0][native_field] == value
                 assert state.settings == result.settings
         finally:
             await raw.close()

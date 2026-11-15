@@ -412,6 +412,50 @@ def _settings_json(value):
     return _object_json(value, MAX_SETTINGS_BYTES)
 
 
+def _safe_settings_differences(expected, actual, limit=12):
+    """Return bounded field paths and scalar numbers without logging snapshot contents."""
+    differences = []
+
+    def visit(left, right, path, depth=0):
+        if len(differences) >= limit or left == right:
+            return
+        if depth >= 8:
+            differences.append({"field": path[:192], "expectedType": type(left).__name__,
+                "actualType": type(right).__name__})
+            return
+        if isinstance(left, dict) and isinstance(right, dict):
+            for key in sorted(left.keys() | right.keys(), key=str):
+                if type(key) is not str or not re.fullmatch(r"[A-Za-z0-9_]{1,64}", key):
+                    continue
+                visit(left.get(key), right.get(key), f"{path}.{key}" if path else key, depth + 1)
+                if len(differences) >= limit:
+                    break
+            return
+        if isinstance(left, list) and isinstance(right, list):
+            for index in range(max(len(left), len(right))):
+                visit(left[index] if index < len(left) else None,
+                      right[index] if index < len(right) else None, f"{path}[{index}]", depth + 1)
+                if len(differences) >= limit:
+                    break
+            return
+        field = path[:192]
+        item = {"field": field}
+        if type(left) in (int, float) and type(right) in (int, float):
+            try:
+                if math.isfinite(left) and math.isfinite(right):
+                    item.update(expected=left, actual=right)
+                else:
+                    item.update(expectedType=type(left).__name__, actualType=type(right).__name__)
+            except OverflowError:
+                item.update(expectedType=type(left).__name__, actualType=type(right).__name__)
+        else:
+            item.update(expectedType=type(left).__name__, actualType=type(right).__name__)
+        differences.append(item)
+
+    visit(expected, actual, "")
+    return differences
+
+
 def _lens_profile_info_json(value):
     unknown = {"cameraMake": None, "cameraModel": None, "lensMake": None, "lensModel": None, "lensId": None,
                "profileAvailable": None, "profileSource": "unknown", "profileName": None,
@@ -1890,7 +1934,14 @@ class LightCraftRawSession:
                 encoded = await self._read_settings(photo, deadline, validate=lambda settings: validate_point_colors(settings))
                 expected = json.loads(interaction.working_settings_json)
                 expected["point_colors"][interaction.index][interaction.native_field] = validated
-                if _settings_json(json.loads(encoded)) != _settings_json(expected):
+                actual_normalized_json = _settings_json(json.loads(encoded))
+                expected_normalized_json = _settings_json(expected)
+                if actual_normalized_json != expected_normalized_json:
+                    actual_normalized = json.loads(actual_normalized_json)
+                    expected_normalized = json.loads(expected_normalized_json)
+                    lightcraft_log("raw.pointColor.readbackMismatch", level="warn", generation=self._generation,
+                        phase="update", control=interaction.control, sequence=sequence,
+                        mismatchFields=_safe_settings_differences(expected_normalized, actual_normalized))
                     raise LightCraftError("raw_point_color_control_mismatch")
                 return encoded
 
@@ -1953,7 +2004,14 @@ class LightCraftRawSession:
                 self._desynchronized = True
             raise
         expected = json.loads(interaction.working_settings_json)
-        if _settings_json(json.loads(encoded)) != _settings_json(expected):
+        actual_normalized_json = _settings_json(json.loads(encoded))
+        expected_normalized_json = _settings_json(expected)
+        if actual_normalized_json != expected_normalized_json:
+            actual_normalized = json.loads(actual_normalized_json)
+            expected_normalized = json.loads(expected_normalized_json)
+            lightcraft_log("raw.pointColor.readbackMismatch", level="warn", generation=self._generation,
+                phase="end", control=interaction.control,
+                mismatchFields=_safe_settings_differences(expected_normalized, actual_normalized))
             interaction.state = "failed"
             self._desynchronized = True
             raise LightCraftError("raw_point_color_control_mismatch")
