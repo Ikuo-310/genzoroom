@@ -28,6 +28,7 @@ type Props = {
   hideToggle?: boolean;
   valueSuffix?: string;
   resetDisabled?: boolean;
+  cancelEditOnReset?: boolean;
   trackGradient?: string;
   className?: string;
   onCancel?: () => void; onBegin: () => void; onChange: (value: number) => void; onCommit: () => void; onReset: () => void;
@@ -140,6 +141,14 @@ export function AdjustmentSlider(props: Props) {
     interaction.current = 'idle';
     latest.current.onCommit();
   }
+  function cancelInteraction() {
+    clearTimeout(timer.current);
+    if (interaction.current === 'number') { cancelNumberEdit(); return; }
+    if (interaction.current === 'idle') return;
+    interaction.current = 'idle';
+    if (latest.current.onCancel) latest.current.onCancel();
+    else latest.current.onCommit();
+  }
   useEffect(() => {
     const element = range.current;
     if (element) registerAdjustment(element, () => {
@@ -188,6 +197,10 @@ export function AdjustmentSlider(props: Props) {
     const pointerEnd = (event:Event) => {
       if(event.type==='pointercancel' && latest.current.onCancel && interaction.current==='pointer'){
         interaction.current='idle';latest.current.onCancel();
+      }else if(latest.current.cancelEditOnReset && event.target instanceof Element
+        && event.target.closest('.adjustment-reset')?.closest('.raw-point-color-adjustments') === element?.closest('.raw-point-color-adjustments')){
+        // Reset supersedes this draft; committing it first would race a second History operation.
+        cancelInteraction();
       }else finishPointer();
     };
     const cancelPendingKeyboardFocus = (event: Event) => {
@@ -295,6 +308,7 @@ export function AdjustmentSlider(props: Props) {
         disabled={props.actionsDisabled} onClick={props.onToggle}>⏻</button>}
       <button type="button" className={`adjustment-reset${props.actionsDisabled ? ' is-unavailable' : ''}`} onClick={(event) => {
         clearAdjustmentFocusTarget(event.currentTarget);
+        if (props.cancelEditOnReset) cancelInteraction();
         props.onReset();
       }}
         onFocus={focusAdjustmentCategory}

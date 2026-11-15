@@ -410,6 +410,7 @@
         "title": "Point Color", "pick": "Pick a color from the photo", "pickActive": "Cancel Point Color picking",
         "pickHistory": "Point Color sample",
         "controlHistory": "Point Color adjustment",
+        "controlResetHistory": "Reset Point Color adjustment",
         "empty": "Use the eyedropper to pick a color from the photo.",
         "entriesLabel": "Point Color entries", "entry": "Point Color {{index}}",
         "adjustments": {

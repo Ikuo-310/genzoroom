@@ -265,6 +265,7 @@ describe('RAW History transport', () => {
     { kind: 'allReset', metadata: {} },
     { kind: 'pointColorPick', metadata: { x: .2375, y: .78125 } },
     { kind: 'pointColorControl', metadata: { control: 'pointColor.7.hueRange', value: 82.375 } },
+    { kind: 'pointColorControlReset', metadata: { control: 'pointColor.1.hueShift' } },
   ])('sends allowlisted operation metadata for $kind without native settings', async operation => {
     const request: RawHistoryRequest = { doc: rawSettings(doc), action: 'operate', operation,
       expectedRecipeRevision: 4, saveId: '00000000-0000-4000-8000-000000000001' };
@@ -437,6 +438,25 @@ describe('RAW History transport', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })));
     await expect(readRawHistory(result)).resolves.toMatchObject({ steps: [{ kind: 'pointColorControl',
       metadata: { control: 'pointColor.3.hueShift', value: -12.375 } }] });
+  });
+  it('reads indexed Point Color Reset metadata', async () => {
+    const request = historyRequest('commit');
+    const result = rawHistoryResult(request, { history: { initialized: true, cursor: 1, length: 1, selectedStepId: request.saveId } });
+    const data = rawHistoryData(result);
+    data.steps[0] = { ...data.steps[0], kind: 'pointColorControlReset',
+      metadata: { control: 'pointColor.7.lumRange' }, changes: [] };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })));
+    await expect(readRawHistory(result)).resolves.toMatchObject({ steps: [{ kind: 'pointColorControlReset',
+      metadata: { control: 'pointColor.7.lumRange' } }] });
+  });
+  it.each([{}, { control: 'pointColor.0.hueShift', extra: true }, { control: 'pointColor.8.range' },
+    { control: 'pointColor.0.hue_shift' }, { control: 42 }])('rejects malformed Point Color Reset metadata %j', async metadata => {
+    const request = historyRequest('commit');
+    const result = rawHistoryResult(request, { history: { initialized: true, cursor: 1, length: 1, selectedStepId: request.saveId } });
+    const data = rawHistoryData(result);
+    data.steps[0] = { ...data.steps[0], kind: 'pointColorControlReset', metadata } as typeof data.steps[number];
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })));
+    await expect(readRawHistory(result)).rejects.toMatchObject({ code: 'raw_invalid_response' });
   });
   it.each([
     {}, { control: 'pointColor.0.hueShift' }, { control: 'pointColor.0.hueShift', value: 0, extra: true },

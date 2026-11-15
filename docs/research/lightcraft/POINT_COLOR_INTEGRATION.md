@@ -352,3 +352,9 @@ Anshitsu RAW Previewのfocused testでAfterクリックの正規化座標、1回
 ## Point Color Native readback比較修正
 
 JPEGでの`raw_point_color_control_mismatch`は、Point Color control自体ではなく、NativeがLegacy WBのserde-default `wb.scale`を省略したreadback dictと、GenzoRoom側で`_settings_json()`により`scale: "legacy"`を補完した期待設定を直接比較していたことで発生し得た。数値変更・個別Resetのreadback検証は、実際値と期待値の双方を`_settings_json()`で正規化した構造にして比較する。Point Color対象値と他の設定を含む全体比較は維持されるため、対象値が反映されない場合と予期しない別設定の変更は引き続き拒否する。Mock focused testsではLegacy WBの`scale`省略時の数値変更・個別Reset成功、対象値no-opの拒否、対象外設定変更の拒否を確認した。既存のKelvin WBとPoint Color操作回帰も同じBackendテストで確認する。
+
+## P1-C2b-2 — 個別ResetのHistory接続
+
+8項目のResetを既存`AdjustmentSlider`から`raw.operate({kind:'pointColorControlReset', metadata:{control}})`へ接続した。control IDは選択中の有効indexと項目のcamelCase名から作る。Document identity、revision、選択index、配列entry、Color ON、操作可能状態をReset送信時に確認する。Resetは楽観的に値を書き換えず、History応答のsettingsで表示を更新する。既定値の項目はResetを無効にし、Backend no-opで不要なHistory stepを作らない既存契約に従う。
+
+Reset操作では未確定のPoint Color draftを先に破棄し、Reset自体を単一History操作にする。これによりdraft commitとResetが同じHistory fenceへ競合することを避ける。Document／revision／selectionが変わった古いイベントは送信しない。History response validationはPoint Color indexed IDだけを持つ正確なmetadataを検証し、History一覧は対象項目とResetであることを日英表示する。focused testsは8項目のcontrol ID、2件目entryへの適用、数値draft／slider dragとの競合、ロック・Color OFF・既定値の無効化、成功後settings反映・失敗時の非楽観表示、History metadata validation／表示を確認する。Undo／Redo等の既存History経路と数値編集・WB／Mixer回帰も関連テストで確認する。

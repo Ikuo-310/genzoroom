@@ -75,14 +75,19 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
   const pointColorDocument = settings
     ? JSON.stringify([settings.workspaceId, settings.assetId, settings.handle, settings.generation, settings.documentToken]) : null;
   const pointColorCount = settings?.point_colors.length ?? 0;
+  const currentPointColorTarget = useRef({ document: pointColorDocument, revision: settings?.revision,
+    index: pointColorCount ? 0 : null });
   const [pointColorSelection, setPointColorSelection] = useState<{ document: string | null; index: number | null }>(
     { document: pointColorDocument, index: pointColorCount ? 0 : null });
   const pointColorDraftRef = useRef<PointColorDraft | null>(null);
   const [pointColorDraft, setPointColorDraft] = useState<PointColorDraft | null>(null);
+  const [pointColorEditEpoch, setPointColorEditEpoch] = useState(0);
   const previousPointColorList = useRef({ document: pointColorDocument, count: pointColorCount });
   const selectedPointColorIndex = pointColorCount === 0 ? null
     : pointColorSelection.document !== pointColorDocument ? 0
       : Math.min(pointColorSelection.index ?? 0, pointColorCount - 1);
+  currentPointColorTarget.current = { document: pointColorDocument, revision: settings?.revision,
+    index: selectedPointColorIndex };
   useEffect(() => {
     const previous = previousPointColorList.current;
     previousPointColorList.current = { document: pointColorDocument, count: pointColorCount };
@@ -150,6 +155,24 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
     setPointColorDraft(edit);
     raw.operate({ kind: 'pointColorControl', metadata: {
       control: `pointColor.${edit.index}.${pointColorControlFields[edit.field]}`, value: edit.value,
+    } });
+  };
+  const cancelPointColorEdit = (index: number, field: RawPointColorAdjustmentField) => {
+    const edit = pointColorDraftRef.current;
+    if (!edit || edit.index !== index || edit.field !== field) return;
+    pointColorDraftRef.current = null;
+    setPointColorDraft(null);
+  };
+  const resetPointColorControl = (index: number, field: RawPointColorAdjustmentField) => {
+    const target = currentPointColorTarget.current;
+    if (!pointColorDocument || pointColorDocument !== target.document || settings?.revision !== target.revision
+      || index !== target.index || !settings?.point_colors[index] || !settings.sections.color || actionsLocked) return;
+    pointColorDraftRef.current = null;
+    setPointColorDraft(null);
+    // Unmount all Point Color sliders so no other field's stale local draft can commit after Reset.
+    setPointColorEditEpoch(epoch => epoch + 1);
+    raw.operate({ kind: 'pointColorControlReset', metadata: {
+      control: `pointColor.${index}.${pointColorControlFields[field]}`,
     } });
   };
   useEffect(() => { if (!actionsLocked && panel.current) restorePendingAdjustmentFocus(panel.current); }, [actionsLocked]);
@@ -263,9 +286,10 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
         })); }} locked={actionsLocked || !settings.sections.color}
         onReset={() => operate({ kind: 'sectionReset', metadata: { section: 'mixer' } })} operate={operate} panel={panel} />}
       {category === 'color' && <RawPointColorPicker colors={settings.point_colors} selectedIndex={selectedPointColorIndex}
-        valueDraft={pointColorDraft} document={pointColorDocument} revision={settings.revision}
+        valueDraft={pointColorDraft} editEpoch={pointColorEditEpoch} document={pointColorDocument} revision={settings.revision}
         controlsDisabled={actionsLocked || !settings.sections.color}
         onAdjustmentBegin={beginPointColorEdit} onAdjustmentChange={changePointColorEdit} onAdjustmentCommit={commitPointColorEdit}
+        onAdjustmentCancel={cancelPointColorEdit} onAdjustmentReset={resetPointColorControl}
         pickActive={raw.pointColorPickActive} pickDisabled={actionsLocked || !raw.pointColorPickAvailable}
         onPickToggle={() => { if (panel.current) commitAdjustmentEdits(panel.current); raw.togglePointColorPick(); }}
         onPickCancel={raw.cancelPointColorPick}
@@ -467,13 +491,16 @@ function RawColorGrading({ raw, band, onBandChange, open, onOpenChange, locked, 
   </section>;
 }
 
-function RawPointColorPicker({ colors, selectedIndex, valueDraft, document, revision, controlsDisabled,
-  onAdjustmentBegin, onAdjustmentChange, onAdjustmentCommit, pickActive, pickDisabled, onPickToggle, onPickCancel, onSelect, open, onOpenChange }: {
+function RawPointColorPicker({ colors, selectedIndex, valueDraft, editEpoch, document, revision, controlsDisabled,
+  onAdjustmentBegin, onAdjustmentChange, onAdjustmentCommit, onAdjustmentCancel, onAdjustmentReset,
+  pickActive, pickDisabled, onPickToggle, onPickCancel, onSelect, open, onOpenChange }: {
   colors: RawPointColor[]; selectedIndex: number | null; onSelect: (index: number) => void;
-  valueDraft: PointColorDraft | null; document: string | null; revision: number; controlsDisabled: boolean;
+  valueDraft: PointColorDraft | null; editEpoch: number; document: string | null; revision: number; controlsDisabled: boolean;
   onAdjustmentBegin: (index: number, field: RawPointColorAdjustmentField) => void;
   onAdjustmentChange: (index: number, field: RawPointColorAdjustmentField, value: number) => void;
   onAdjustmentCommit: () => void;
+  onAdjustmentCancel: (index: number, field: RawPointColorAdjustmentField) => void;
+  onAdjustmentReset: (index: number, field: RawPointColorAdjustmentField) => void;
   pickActive: boolean; pickDisabled: boolean; onPickToggle: () => void; onPickCancel: () => void;
   open: boolean; onOpenChange: (open: boolean) => void;
 }) {
@@ -520,14 +547,17 @@ function RawPointColorPicker({ colors, selectedIndex, valueDraft, document, revi
               const draftMatches = valueDraft?.document === document && valueDraft.revision === revision
                 && valueDraft.index === selectedIndex && valueDraft.field === field;
               const value = draftMatches ? valueDraft.value : storedValue;
-              return <AdjustmentSlider key={field} adjustmentId={`pointColor.${selectedIndex}.${pointColorControlFields[field]}`}
+              return <AdjustmentSlider key={`${field}-${editEpoch}`} adjustmentId={`pointColor.${selectedIndex}.${pointColorControlFields[field]}`}
                 commitPolicy="operation-boundary" hideToggle label={t(`workspace.rawPreview.pointColor.adjustments.${label}`)}
                 value={value} min={min} max={max} step={1} precision={0} defaultValue={defaultValue} valueText={value.toFixed(0)}
                 valueLabel={t(`workspace.rawPreview.pointColor.adjustments.${label}Value`)}
                 resetLabel={t(`workspace.rawPreview.pointColor.adjustments.${label}Reset`)}
                 enabled onToggle={() => {}} disabled={controlsDisabled || !document || selectedIndex >= colors.length}
-                resetDisabled onBegin={() => onAdjustmentBegin(selectedIndex, field)}
-                onChange={next => onAdjustmentChange(selectedIndex, field, next)} onCommit={onAdjustmentCommit} onReset={() => {}} />;
+                resetDisabled={controlsDisabled || !document || selectedIndex >= colors.length || value === defaultValue}
+                cancelEditOnReset onCancel={() => onAdjustmentCancel(selectedIndex, field)}
+                onBegin={() => onAdjustmentBegin(selectedIndex, field)}
+                onChange={next => onAdjustmentChange(selectedIndex, field, next)} onCommit={onAdjustmentCommit}
+                onReset={() => onAdjustmentReset(selectedIndex, field)} />;
             })}
           </div>}
         </>}

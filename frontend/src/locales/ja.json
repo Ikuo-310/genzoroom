@@ -401,6 +401,7 @@
         "title": "ポイントカラー", "pick": "写真から色を選択", "pickActive": "ポイントカラー採色を解除",
         "pickHistory": "ポイントカラー採色",
         "controlHistory": "ポイントカラー調整",
+        "controlResetHistory": "ポイントカラー調整をリセット",
         "empty": "スポイトで写真の色を選択してください。",
         "entriesLabel": "ポイントカラーの項目", "entry": "ポイントカラー {{index}}",
         "adjustments": {
