@@ -410,3 +410,15 @@ Frontendでは、interaction update失敗後のNative cancelも失敗した場�
 `update`／`end`の両方で、既存`_settings_json()`正規化を維持した上で、JSON object／arrayの構造とkey・順序・非数値型を厳密に比較し、有限な`int`と`float`だけを数値的に比較する`_settings_values_equal()`を使用する。`bool`は数値と等価扱いせず、配列長・キー集合・文字列・その他型・非有限値の差は拒否する。Snapshotの保存JSONやHistory形式は変更しない。field差分診断は引き続き維持する。
 
 Mockで`25`対`25.0`、`0`対`0.0`をupdate／endの双方で検証し、bool／数値、追加key、配列長、文字列、不正数値、および対象値未反映／対象外設定変更を引き続き拒否することを確認した。修正前の実Native試験は合成JPEG／DNGとも整数25で`update`が同じ`raw_point_color_control_mismatch`となり失敗、修正後は両形式の8項目（整数25・0と小数値を含む）で`begin → update → Draft Preview → end → confirm`が成功した。Mock History API試験は整数値を含む操作を1 History stepとして保存し、Undo／Redoで復元した。実機の元ログには実際の`expected`／`actual`数値がなく、例の25／25.0は再現試験で確認した型差である。
+
+#### 連続ドラッグの最終値送信競合
+
+2026-11-15の診断ログでは3回のPoint Color History確定が成功した後、4回目のHistory operateで`raw_point_color_interaction_conflict`となっている。直前にはDraft Preview完了とHistory開始が記録されているが、元ログにはPoint Color update ACK、control、requested/applied value、sequenceがなく、実機で実際に欠けた値やsequenceまでは確定できない。
+
+Frontendではpump本体Promiseを`gesture.pump`に保持し、別の`.catch().finally()`連鎖が後から参照を消していた。Deferred testで、Native update ACKの継続中にPointer Upを差し込み、最初のpump本体が完了した直後かつ後始末前に最新値25をpendingへ置く順序を再現した。修正前はNative送信が`[12]`だけなのにHistory intentは25となり、Backendのend契約と食い違うことを確認した。
+
+Pointer Upはpumpを待つたびに同じ参照なら明示的に解放し、pendingがなくなるまで直列pumpをdrainする。update応答sequenceを要求sequenceと照合し、NativeにACKされた値／sequenceが最後のgesture値／sequenceと一致してからPreview完了とHistory保存へ進む。ending後は新しい入力を受け付けない。これにより最終Draft値がRecipe／Historyへ先行して保存されない。
+
+`raw_point_color_interaction_conflict`のBackend診断にはcontrol一致、interaction state、latest/applied sequence、requested/applied数値だけを追加し、設定snapshotは記録しない。History APIが明示的なHTTP rejectionとしてinteraction conflictを返した場合は、そのimmutable retry requestを破棄して既存cancel/readback経路で未確定Native Draftを戻し、Preview ownerを解放する。結果不明のsave failureでは従来どおり同一save IDのretry境界を保ち、Native更新を再送しない。
+
+DeferredのACK直後Pointer Up競合は修正前に失敗（送信値`[12]`、History値`25`）し、修正後は`[12, 25]`をACKした後だけHistoryを確定する。20個の急速入力を含む別テストではNative updateが`[12, 32]`の直列2回に集約され、最終ACK前にHistoryを呼ばず、最終値32を1件で確定する。明示的conflict時の取消し・owner解放もFrontend testで検証する。Backendでは競合診断の限定項目とPoint Color interaction／History経路をMock Nativeで確認する。実JPEG／DNGのDesktop手動検証は未実施。

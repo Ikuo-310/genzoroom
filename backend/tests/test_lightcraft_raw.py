@@ -1539,6 +1539,31 @@ def test_point_color_interaction_previews_draft_and_promotes_only_after_history_
     asyncio.run(run())
 
 
+def test_point_color_end_conflict_logs_only_safe_sequence_and_value_diagnostics(tmp_path, monkeypatch):
+    async def run():
+        raw, _, children, files = await create(tmp_path, adaptive=True)
+        try:
+            handle, baseline = await raw.open_raw("pixel", files[0])
+            children[0].photos[1]["settings"]["point_colors"] = [point_color()]
+            baseline = await raw.get_settings(handle)
+            interaction_id = await raw.begin_point_color_interaction(handle, "pointColor.0.hueShift", baseline.revision)
+            update = await raw.update_point_color_interaction(handle, interaction_id, baseline.revision, 1, 25)
+            await update.preview_ticket
+            logged = []
+            monkeypatch.setattr(module, "lightcraft_log", lambda event, **context: logged.append((event, context)))
+            with pytest.raises(LightCraftError, match="raw_point_color_interaction_conflict"):
+                await raw.end_point_color_interaction(handle, interaction_id, baseline.revision,
+                    "pointColor.0.hueShift", 26)
+            event, context = next(item for item in logged if item[0] == "raw.pointColor.interactionConflict")
+            assert context == {"level": "warn", "generation": raw._generation, "controlMatches": True,
+                "state": "open", "latestSequence": 1, "appliedSequence": 1,
+                "requestedValue": 26., "appliedValue": 25.}
+            assert not any("settings" in key.lower() or "snapshot" in key.lower() for key in context)
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
 def test_point_color_interaction_update_and_end_accept_integer_float_readback_but_keep_type_safety(tmp_path):
     async def run():
         raw, _, children, files = await create(tmp_path, adaptive=True)

@@ -1998,6 +1998,16 @@ class LightCraftRawSession:
         validated = validate_point_color_value(interaction.control.rsplit(".", 1)[1], value)
         if control != interaction.control or validated != interaction.value or interaction.state != "open" or \
                 interaction.latest_sequence != interaction.applied_sequence:
+            applied_value = None
+            try:
+                working = json.loads(interaction.working_settings_json)
+                applied_value = working["point_colors"][interaction.index][interaction.native_field]
+            except (KeyError, IndexError, TypeError):
+                pass
+            lightcraft_log("raw.pointColor.interactionConflict", level="warn", generation=self._generation,
+                controlMatches=control == interaction.control, state=interaction.state,
+                latestSequence=interaction.latest_sequence, appliedSequence=interaction.applied_sequence,
+                requestedValue=validated, appliedValue=applied_value)
             raise LightCraftError("raw_point_color_interaction_conflict")
         ended = False
         async def action(deadline):

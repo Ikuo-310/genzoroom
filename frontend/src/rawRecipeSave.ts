@@ -12,8 +12,8 @@ import type { RawControls } from './rawControls';
 
 export const RAW_AUTOSAVE_MS = 5000;
 const RAW_CURVE_PREVIEW_THROTTLE_MS = 50;
-type PointColorGesture = { control: RawPointColorControlId; initial: number; value: number; pending?: number; doc: RawSettings;
-  started: Promise<string>; id?: string; sequence: number; displayedSequence: number; ending: boolean; timer?: ReturnType<typeof setTimeout>;
+type PointColorGesture = { control: RawPointColorControlId; initial: number; value: number; appliedValue: number; pending?: number; doc: RawSettings;
+  started: Promise<string>; id?: string; sequence: number; appliedSequence: number; displayedSequence: number; ending: boolean; timer?: ReturnType<typeof setTimeout>;
   pump?: Promise<void>; preview?: Promise<void>; controller: AbortController; display?: RawDisplayTarget; cancelPromise?: Promise<void> };
 
 /** Current-document save owner. Unknown outcomes retain one immutable request ahead of newer edits. */
@@ -152,7 +152,7 @@ export class RawRecipeSave {
     if (this.confirmed.mutationAttempts >= Math.min(this.confirmed.regenerationThreshold, this.confirmed.mutationLimit - 1)) return false;
     const preceding = this.save();
     const gesture: PointColorGesture = { control, initial: value, value, doc: structuredClone(this.options.controls!.confirmed), started: Promise.resolve(''),
-      sequence: 0, displayedSequence: 0, ending: false, controller: new AbortController() };
+      appliedValue: value, sequence: 0, appliedSequence: 0, displayedSequence: 0, ending: false, controller: new AbortController() };
     this.pointColorGesture = gesture;
     gesture.started = preceding.then(async () => {
       if (!this.active || this.pointColorGesture !== gesture) throw new RawApiError('raw_document_closed');
@@ -205,7 +205,10 @@ export class RawRecipeSave {
       const sequence = ++gesture.sequence;
       const applied = await updateRawPointColorInteraction(gesture.doc, sequence, gesture.controller.signal, gesture.display!,
         { id, sequence, control: gesture.control, value });
+      if (applied !== sequence) throw new RawApiError('raw_point_color_interaction_conflict');
       if (!this.active || this.pointColorGesture !== gesture || applied <= gesture.displayedSequence) continue;
+      gesture.appliedValue = value;
+      gesture.appliedSequence = applied;
       gesture.displayedSequence = applied;
       const preview = rawPreview(gesture.doc, sequence, gesture.controller.signal, 'after', gesture.display,
         undefined, undefined, undefined, { id, sequence: applied }).then(frame => {
@@ -231,12 +234,21 @@ export class RawRecipeSave {
     clearTimeout(gesture.timer);
     try {
       await gesture.started;
-      await gesture.pump;
-      if (gesture.pending !== undefined) {
-        this.schedulePointColorPump(gesture, true);
-        await gesture.pump;
+      // The pump Promise settles before its separate catch/finally cleanup chain. Clear a settled
+      // reference here so Pointer Up can synchronously start any value that arrived in that gap.
+      while (gesture.pump || gesture.pending !== undefined) {
+        const pump = gesture.pump;
+        if (pump) {
+          await pump;
+          if (gesture.pump === pump) gesture.pump = undefined;
+        } else {
+          this.schedulePointColorPump(gesture, true);
+          if (!gesture.pump && gesture.pending !== undefined) throw new RawApiError('raw_point_color_interaction_conflict');
+        }
       }
       await gesture.preview;
+      if (gesture.pending !== undefined || gesture.appliedValue !== gesture.value || gesture.appliedSequence !== gesture.sequence)
+        throw new RawApiError('raw_point_color_interaction_conflict');
     } catch (cause) {
       if (this.pointColorGesture === gesture && !this.moveIntent) await this.failPointColorInteraction(gesture, cause);
       throw cause;
@@ -246,7 +258,16 @@ export class RawRecipeSave {
     this.moving = true;
     this.moveIntent = { action: 'operate', operation: { kind: 'pointColorControl', metadata: { control: gesture.control, value: gesture.value } },
       pointColorInteractionId: gesture.id };
-    const operation = this.save().finally(() => {
+    const operation = this.save().catch(async cause => {
+      // This rejection happens before Native endInteraction; discard its immutable request and
+      // cancel the uncommitted Native draft so a stale owner cannot block later documents.
+      if (cause instanceof RawSaveError && cause.outcome === 'rejected' && cause.code === 'raw_point_color_interaction_conflict'
+        && this.pointColorGesture === gesture) {
+        this.retryRequest = undefined;
+        await this.cancelPointColorInteraction();
+      }
+      throw cause;
+    }).finally(() => {
       this.moving = false; this.historyOperation = undefined; if (this.active) this.options.changed();
     });
     this.historyOperation = operation;
