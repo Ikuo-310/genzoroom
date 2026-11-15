@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import i18n from './i18n';
 import { RawAdjustmentControls } from './RawAdjustmentControls';
 import { RAW_DEVELOPMENT_PANEL_UI_KEY, defaultRawDevelopmentPanelUi, updateSetting } from './appSettings';
+import type { RawPointColor } from './rawApi';
 import { rawSettings } from './test/rawSettings';
 
 let host: HTMLDivElement, root: ReturnType<typeof createRoot>;
@@ -21,8 +22,8 @@ afterEach(() => {
 
 const documentInfo = (assetId = 'asset-a', suffix = 'a') => ({ workspaceId: 'workspace', assetId, handle: `handle-${suffix}`,
   documentToken: `token-${suffix}`, generation: 1, revision: 1 });
-const point = (hue = 42) => ({ lum: 0.4, chroma: 0.15, hue, hue_shift: 0, sat_shift: 0, lum_shift: 0,
-  variance: 0, range: 50, hue_range: 50, sat_range: 50, lum_range: 50 });
+const point = (hue = 42, overrides: Partial<RawPointColor> = {}): RawPointColor => ({ lum: 0.4, chroma: 0.15, hue,
+  hue_shift: 0, sat_shift: 0, lum_shift: 0, variance: 0, range: 50, hue_range: 50, sat_range: 50, lum_range: 50, ...overrides });
 function createRaw(colors: ReturnType<typeof point>[] = []) {
   const identity = documentInfo();
   return { assetId: identity.assetId, status: 'ready', settings: { ...rawSettings(identity), point_colors: colors }, history: {},
@@ -64,6 +65,28 @@ it('shows each ordered entry including duplicates and keeps selection local to t
   expect(raw.beginControls).not.toHaveBeenCalled();
   expect(raw.changeControls).not.toHaveBeenCalled();
   expect(raw.flushControls).not.toHaveBeenCalled();
+});
+
+it('renders each center color as CSS OkLCh and ignores Point Color adjustments', () => {
+  const colors = [
+    point(20, { lum: 0.3, chroma: 0.08, hue_shift: -80, sat_shift: 40 }),
+    point(20, { lum: 0.3, chroma: 0.08, hue_shift: 80, sat_shift: -40 }),
+    point(20, { lum: 0.65, chroma: 0.08 }),
+    point(20, { lum: 0.3, chroma: 0.22 }),
+    point(140, { lum: 0.3, chroma: 0.08 }),
+  ];
+  const raw = createRaw(colors);
+  draw(raw); openPointColor();
+  const buttons = swatches();
+  const swatchColors = buttons.map(button => button.style.getPropertyValue('--point-color-swatch'));
+  expect(swatchColors).toEqual([
+    'oklch(0.3 0.08 20)', 'oklch(0.3 0.08 20)', 'oklch(0.65 0.08 20)',
+    'oklch(0.3 0.22 20)', 'oklch(0.3 0.08 140)',
+  ]);
+  expect(swatchColors[0]).toBe(swatchColors[1]);
+  expect(new Set(swatchColors).size).toBe(4);
+  expect(buttons.map(button => button.dataset.pointColorIndex)).toEqual(['0', '1', '2', '3', '4']);
+  expect(buttons[0].getAttribute('aria-pressed')).toBe('true');
 });
 
 it('clamps selection after array shrink and clears it for an empty array', () => {

@@ -316,3 +316,9 @@ Frontendの `RawSettings.point_colors` と `RawPointColor` はsnake_caseのNativ
 RAW編集パネルのColorカテゴリで、Color Mixerの後・Color Gradingの前に折りたたみ式Point Colorセクションを配置した。折りたたみ状態は既存の`rawDevelopmentPanelUi.subcategories`設定を利用する。空配列では無効化したスポイトアイコンと日本語／英語の案内だけを表示し、採色済みではNative配列順のスウォッチを表示する。FrontendにOkLCh→sRGB変換処理がないため、本工程のスウォッチは中立色とした。狭い幅では折り返す。
 
 選択indexは`RawAdjustmentControls`の一時React stateで、workspace／handle／generation／document tokenのidentityに結び付ける。初期はindex 0、空配列は選択なし、配列縮小時は末尾の有効indexへ補正し、Document identity変更時は先頭へ戻す。Recipe／Historyへは保存せず、選択クリックからNative mutationやHistory operationを呼ばない。focused UI／panel settings tests 21件、TypeScript check、Frontend build、`git diff --check`を実施した。次工程ではViewer採色や数値編集を接続する前にスウォッチ色表示の方式を決める。今回それらの操作・範囲表示は実装していない。
+
+## P1-C1a — 採色中心色のスウォッチ表示
+
+Native中心値の契約は`lum`が0〜1、`chroma`が0以上、`hue`が0以上360未満で、CSS Color 4の`oklch(L C H)`へそのまま渡せる。Frontend側でOkLCh→sRGB変換は行わず、各スウォッチのCSS custom propertyに`oklch(${lum} ${chroma} ${hue})`を設定し、ブラウザーに色域処理を任せる。CSS `@supports`非対応時は従来どおり中立色へfallbackする。
+
+スウォッチは採色した中心色の目印に限り、他のPoint Color調整値は色表示に使わない。明暗どちらでも選択を判別できるよう、選択outlineと濃色の境界を維持した。Recipe／History、Native操作、画像処理は変更していない。focused testは色差、同じ中心値の一致、lum/chroma/hue反映、調整値の無視、配列順序・選択状態を確認し、ブラウザーの画素変換結果は検証対象にしていない。

@@ -551,8 +551,11 @@ body.sidebar-resizing, body.sidebar-resizing * { cursor: col-resize !important; 
 .raw-point-color-pick { display: inline-flex; width: 24px; height: 24px; flex: 0 0 24px; align-items: center; justify-content: center; padding: 0; color: #aaa; border: 1px solid #454548; border-radius: 4px; background: #303033; }
 .raw-point-color-pick:disabled { cursor: default; opacity: 0.65; }
 .raw-point-color-swatches { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 8px; padding: 5px 0 7px; }
-.raw-point-color-swatch { width: 20px; height: 20px; flex: 0 0 20px; padding: 0; border: 1px solid #171719; border-radius: 4px; background: var(--point-color-swatch); cursor: pointer; }
-.raw-point-color-swatch.is-selected { outline: 2px solid #f4f4f5; outline-offset: 2px; }
+.raw-point-color-swatch { width: 20px; height: 20px; flex: 0 0 20px; padding: 0; border: 1px solid #171719; border-radius: 4px; background: #b8b8b8; background: var(--point-color-swatch); cursor: pointer; }
+.raw-point-color-swatch.is-selected { outline: 2px solid #f4f4f5; outline-offset: 2px; box-shadow: 0 0 0 1px #171719; }
+@supports not (color: oklch(0.5 0.1 0)) {
+  .raw-point-color-swatch { background: #b8b8b8; }
+}
 .raw-adjustment-subcategory-divider { height: 1px; margin: 8px 0; background: #353538; }
 :is(.raw-vignette-mode, .raw-grading-band) { margin: 0; gap: 6px; font-size: 0.7rem; }
 :is(.raw-vignette-mode, .raw-grading-band) > span { line-height: 1; }

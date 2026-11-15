@@ -417,8 +417,8 @@ function RawPointColorPicker({ colors, selectedIndex, onSelect, open, onOpenChan
           <span>{t('workspace.rawPreview.pointColor.empty')}</span>
         </div>
         : <div className="raw-point-color-swatches" role="group" aria-label={t('workspace.rawPreview.pointColor.entriesLabel')}>
-          {colors.map((_color, index) => <button key={index} type="button" className={`raw-point-color-swatch${selectedIndex === index ? ' is-selected' : ''}`}
-            style={{ '--point-color-swatch': '#b8b8b8' } as CSSProperties}
+          {colors.map((color, index) => <button key={index} type="button" className={`raw-point-color-swatch${selectedIndex === index ? ' is-selected' : ''}`}
+            style={{ '--point-color-swatch': `oklch(${color.lum} ${color.chroma} ${color.hue})` } as CSSProperties}
             aria-pressed={selectedIndex === index} aria-label={t('workspace.rawPreview.pointColor.entry', { index: index + 1 })}
             title={t('workspace.rawPreview.pointColor.entry', { index: index + 1 })} data-point-color-index={index}
             onClick={() => onSelect(index)} onFocus={focusAdjustmentCategory}
