@@ -142,9 +142,10 @@ function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t'
     if (section === 'optics') return t('workspace.rawPreview.resetLensCorrections');
     return t('workspace.rawPreview.sectionResetHistory', { section: t(sectionLabels[section]) });
   }
-  if (step.kind !== 'wbPick' && step.kind !== 'wbAuto' && step.kind !== 'sectionToggle')
+  if (step.kind !== 'wbPick' && step.kind !== 'pointColorPick' && step.kind !== 'wbAuto' && step.kind !== 'sectionToggle')
     return t('workspace.rawPreview.unknownHistoryOperation');
-  const operation = step.kind === 'wbPick' ? t('workspace.rawPreview.wbPick') : step.kind === 'wbAuto' ? t('workspace.rawPreview.aw')
+  const operation = step.kind === 'pointColorPick' ? t('workspace.rawPreview.pointColor.pickHistory')
+    : step.kind === 'wbPick' ? t('workspace.rawPreview.wbPick') : step.kind === 'wbAuto' ? t('workspace.rawPreview.aw')
     : t(sectionLabels[step.metadata.section as RawResetSectionId]) + ' ' + t(step.metadata.enabled ? 'workspace.basicOn' : 'workspace.basicOff');
   const changes = step.changes;
   const numeric = changes?.map(change => `${name(change.control)} ${pair(change)}`) ?? [];

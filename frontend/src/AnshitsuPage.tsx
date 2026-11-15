@@ -841,7 +841,7 @@ export function AnshitsuPage() {
               : rawDocument.status === 'error' ? rawPreviewMessage(rawDocument.code) : rawDocument.status}`) : undefined}
           previewPixels={!!rawDocument}
           rawPickActive={!!rawDocument?.pickActive || !!rawDocument?.pointColorPickActive}
-          rawPickActionEnabled={!!rawDocument?.pickActive}
+          rawPickActionEnabled={!!rawDocument?.pickActive || !!rawDocument?.pointColorPickActive}
           rawPickTargets={rawDocument?.pickTargets}
           onRawPick={rawDocument?.pick}
           onRawPickCancel={rawDocument?.cancelPick}

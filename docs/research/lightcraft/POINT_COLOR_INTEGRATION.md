@@ -334,3 +334,11 @@ Native中心値の契約は`lum`が0〜1、`chroma`が0以上、`hue`が0以上3
 WBとPoint Colorは`useRawDocument`内の同じ一時picker ownerを共有し、Document identity（asset／generation／document token）に結び付けて排他する。Point Colorは配列0〜7件、編集可能なready Document、ColorカテゴリON、After表示で起動でき、8件・History pending／loading・edit lock・crop・Before表示では起動不可または解除される。起動前には既存WB pickerと同じく開いている編集gestureを保存キューでsettleし、既存のCurve／Mixer target modeを終了する。再クリック、Escape、Document切替、右編集パネル／Colorカテゴリ／Point Colorセクションを閉じたとき、Color OFF、crop、Before表示、Historyで編集不可になったときに一時ownerを解除する。Recipe／Historyには状態を保存しない。
 
 `ImageViewer`の既存picker表示経路を利用し、crosshair、`ViewerPointLoupe`追従、Space一時Pan、Navigator外での既存pointer規則を維持する。Point ColorモードではViewerのpointer clickをpicker用に捕捉するが、採色callbackを無効にし、Native／History APIや`point_colors`へ到達させない。WBの採色callbackは既存どおり有効。8件上限はHookのavailabilityとdisabled buttonで表現し、active時は選択色・`aria-pressed`・解除用tooltip／accessible nameを更新する。関連4 test files・374件、TypeScript check、production buildが成功した。ブラウザーでの手動確認は未実施。次のP1-D1bで座標をPoint Color History operationへ接続する際も、このmode ownerと表示中frame identityを維持し、同じViewer clickを二重処理しない。
+
+## P1-D1b — Viewer採色からHistory保存への接続
+
+`ImageViewer`の既存picker pointer captureから`useRawDocument.pick`を呼び、ownerがPoint Colorの場合のみ`RawRecipeSave.operate({kind:'pointColorPick', metadata:{x,y}})`へ接続した。送信前にactive owner、After frame、正規化座標、表示surface URL／geometry／quality／maxSideとDocumentのworkspace・asset・handle・generation・token・revisionを照合する。WB pickerは従来の`wbPick` frame payloadを維持し、共有callback内でownerごとに単一分岐する。Space Pan、drag、pointer cancel、古いDocument/frameはHistory操作へ進まない。新規routeやNative直呼び出しはない。
+
+採色中のクリックで待機ownerを解除してから一度だけ既存History saveを行う。成功settingsは既存receipt確定後の応答で更新され、配列へ楽観追加しない。settings配列の増加を確認して新しい末尾indexを一時選択し、既存スウォッチと8つの表示専用スライダーへ反映する。失敗時は通常のHistory save error/recoveryに委ね、独自再送せず、確定前の配列・選択表示を維持する。Point Color History step metadata `{x,y}`をFrontend response validatorとHistory表示に追加した。
+
+Anshitsu RAW Previewのfocused testでAfterクリックの正規化座標、1回の`pointColorPick`、History経由の確定後にentry追加・末尾選択・スライダー表示、drag無操作、save失敗時の重複追加なしを確認する。`rawApi` focused testsはpayloadにframeを含めないこと、小数座標保持、history metadataの厳密validationを確認する。Space Pan／Escape／WB既存テストも維持する。Native色計算、JPEG画素、ブラウザー手動動作は対象外。次工程ではPoint Color数値編集・Resetを個別にHistory操作へ接続する。

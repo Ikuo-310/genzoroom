@@ -1310,15 +1310,30 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     togglePointColorPick: togglePointColorPickMode,
     pickTargets: { after: pickTarget('after'), before: pickTarget('before') },
     pick: (target: RawPickTarget, point: Pick<RawPickFrame, 'x' | 'y'>) => {
+      const owner = pickOwner;
       cancelPick();
       const editor = callbackEditor(), display = overlayRef.current?.display;
       const retained = target.frame.kind === 'before' ? display?.wholeBefore : display?.wholeAfter;
       const surface = retained?.url === target.url ? retained : wholeSurfaces.current[target.frame.kind];
       // The click owns its displayed frame; queued work cannot silently rebind it to a later revision.
-      if (!pickActive || frozen.current || !editor || !surface || surface.url !== target.url
+      if (frozen.current || !editor || !surface || surface.url !== target.url
+        || editor.confirmed.workspaceId !== target.doc.workspaceId || editor.confirmed.assetId !== target.doc.assetId
+        || editor.confirmed.handle !== target.doc.handle || editor.confirmed.generation !== target.doc.generation
         || editor.confirmed.revision !== target.doc.revision || editor.confirmed.documentToken !== target.doc.documentToken
-        || surface.doc.revision !== target.doc.revision || surface.frame.geometryId !== target.frame.geometryId
+        || surface.doc.workspaceId !== target.doc.workspaceId || surface.doc.assetId !== target.doc.assetId
+        || surface.doc.handle !== target.doc.handle || surface.doc.generation !== target.doc.generation
+        || surface.doc.documentToken !== target.doc.documentToken || surface.doc.revision !== target.doc.revision
+        || surface.frame.geometryId !== target.frame.geometryId
         || surface.maxSide !== target.frame.maxSide || surface.quality !== target.frame.quality) return;
+      if (owner === pointColorPickTag) {
+        if (!pointColorPickActive || target.frame.kind !== 'after'
+          || !Number.isFinite(point.x) || point.x < 0 || point.x > 1
+          || !Number.isFinite(point.y) || point.y < 0 || point.y > 1) return;
+        void saverRef.current?.operate({ kind: 'pointColorPick', metadata: { x: point.x, y: point.y } })
+          .catch(cause => log(cause instanceof RawApiError ? cause.code : 'raw_connection_failed', 'history.failed'));
+        return;
+      }
+      if (owner !== pickTag || !pickActive) return;
       void saverRef.current?.operate({ kind: 'wbPick', metadata: {}, frame: { ...target.frame, ...point } })
         .catch(cause => log(cause instanceof RawApiError ? cause.code : 'raw_connection_failed', 'history.failed'));
     },

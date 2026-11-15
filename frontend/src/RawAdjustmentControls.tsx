@@ -71,13 +71,18 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
   const pointColorCount = settings?.point_colors.length ?? 0;
   const [pointColorSelection, setPointColorSelection] = useState<{ document: string | null; index: number | null }>(
     { document: pointColorDocument, index: pointColorCount ? 0 : null });
+  const previousPointColorList = useRef({ document: pointColorDocument, count: pointColorCount });
   const selectedPointColorIndex = pointColorCount === 0 ? null
     : pointColorSelection.document !== pointColorDocument ? 0
       : Math.min(pointColorSelection.index ?? 0, pointColorCount - 1);
   useEffect(() => {
+    const previous = previousPointColorList.current;
+    previousPointColorList.current = { document: pointColorDocument, count: pointColorCount };
     setPointColorSelection(current => {
-      if (current.document !== pointColorDocument)
+      if (current.document !== pointColorDocument || previous.document !== pointColorDocument)
         return { document: pointColorDocument, index: pointColorCount ? 0 : null };
+      // Only confirmed settings updates grow this list, so selection follows the saved Native result.
+      if (pointColorCount > previous.count) return { document: pointColorDocument, index: pointColorCount - 1 };
       const index = pointColorCount ? Math.min(current.index ?? 0, pointColorCount - 1) : null;
       return index === current.index ? current : { ...current, index };
     });

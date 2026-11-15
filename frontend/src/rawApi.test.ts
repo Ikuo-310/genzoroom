@@ -263,6 +263,7 @@ describe('RAW History transport', () => {
     { kind: 'curveReset', metadata: { channel: 'master' } },
     { kind: 'curveReset', metadata: { channel: 'point' } },
     { kind: 'allReset', metadata: {} },
+    { kind: 'pointColorPick', metadata: { x: .2375, y: .78125 } },
   ])('sends allowlisted operation metadata for $kind without native settings', async operation => {
     const request: RawHistoryRequest = { doc: rawSettings(doc), action: 'operate', operation,
       expectedRecipeRevision: 4, saveId: '00000000-0000-4000-8000-000000000001' };
@@ -407,6 +408,24 @@ describe('RAW History transport', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })));
     if (invalid) return expect(readRawHistory(result)).rejects.toMatchObject({ code: 'raw_invalid_response' });
     return expect(readRawHistory(result)).resolves.toMatchObject({ steps: [{ kind, metadata: {} }] });
+  });
+  it('reads Point Color pick metadata as exact normalized coordinates without rounding', async () => {
+    const request = historyRequest('commit');
+    const result = rawHistoryResult(request, { history: { initialized: true, cursor: 1, length: 1, selectedStepId: request.saveId } });
+    const data = rawHistoryData(result);
+    data.steps[0] = { ...data.steps[0], kind: 'pointColorPick', metadata: { x: .123456789, y: .987654321 }, changes: [] };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })));
+    await expect(readRawHistory(result)).resolves.toMatchObject({ steps: [{ kind: 'pointColorPick', metadata: { x: .123456789, y: .987654321 } }] });
+  });
+  it.each([
+    {}, { x: .5 }, { x: .5, y: .5, extra: 1 }, { x: -0.01, y: .5 }, { x: .5, y: 1.01 }, { x: Number.NaN, y: .5 },
+  ])('rejects malformed Point Color pick metadata %j', async metadata => {
+    const request = historyRequest('commit');
+    const result = rawHistoryResult(request, { history: { initialized: true, cursor: 1, length: 1, selectedStepId: request.saveId } });
+    const data = rawHistoryData(result);
+    data.steps[0] = { ...data.steps[0], kind: 'pointColorPick', metadata } as typeof data.steps[number];
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })));
+    await expect(readRawHistory(result)).rejects.toMatchObject({ code: 'raw_invalid_response' });
   });
   it.each(['hue', 'sat', 'lum'] as const)('reads a %s Mixer target step with multi-band full-precision changes', async target => {
     const request = historyRequest('commit');

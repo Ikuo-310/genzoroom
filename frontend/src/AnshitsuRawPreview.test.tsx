@@ -2176,8 +2176,11 @@ it('toggles Picker, cancels with Escape/other edits/Asset change, and submits on
   expect(picker().getAttribute('aria-pressed')).toBe('false');
 });
 
-it('enters Point Color waiting mode with Viewer loupe and consumes clicks without editing', async () => {
+it('samples Point Color through History from one displayed After click and selects the saved entry', async () => {
   let resize = () => {};
+  const existing = { lum: .5, chroma: .1, hue: 12, hue_shift: 0, sat_shift: 0, lum_shift: 0, variance: 0,
+    range: 50, hue_range: 50, sat_range: 50, lum_range: 50 };
+  vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), point_colors: [existing] }));
   vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resize = callback; } observe() {} disconnect() {} });
   vi.mocked(rawApi.rawPreview).mockImplementation(async (_doc, sequence, _signal, kind = 'after', target) => ({
     blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence, kind,
@@ -2206,8 +2209,9 @@ it('enters Point Color waiting mode with Viewer loupe and consumes clicks withou
   dispatchPointer(viewport, 'pointermove', 1, 400, 300);
   expect(host.querySelector('[data-testid="viewer-point-loupe"]')).not.toBeNull();
   commitHistory.mockClear(); vi.mocked(rawApi.saveRawHistory).mockClear(); vi.mocked(rawApi.setRawControls).mockClear();
-  dispatchPointer(viewport, 'pointerdown', 1, 400, 300);
-  dispatchPointer(viewport, 'pointerup', 1, 400, 300);
+  dispatchPointer(viewport, 'pointerdown', 2, 400, 300);
+  dispatchPointer(viewport, 'pointermove', 2, 420, 320);
+  dispatchPointer(viewport, 'pointerup', 2, 420, 320);
   expect(commitHistory).not.toHaveBeenCalled();
   expect(vi.mocked(rawApi.saveRawHistory)).not.toHaveBeenCalled();
   expect(vi.mocked(rawApi.setRawControls)).not.toHaveBeenCalled();
@@ -2216,17 +2220,60 @@ it('enters Point Color waiting mode with Viewer loupe and consumes clicks withou
   dispatchPointer(viewport, 'pointerover', 0, 400, 300);
   act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true, cancelable: true })));
   expect(position.style.cursor).not.toBe('crosshair');
-  dispatchPointer(viewport, 'pointerdown', 2, 400, 300); dispatchPointer(viewport, 'pointerup', 2, 400, 300);
+  dispatchPointer(viewport, 'pointerdown', 3, 400, 300); dispatchPointer(viewport, 'pointerup', 3, 400, 300);
   act(() => window.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', code: 'Space', bubbles: true })));
   expect(position.style.cursor).toBe('crosshair');
 
   act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
   expect(picker().getAttribute('aria-pressed')).toBe('false');
   act(() => picker().click()); await flush();
-  act(() => host.querySelector<HTMLButtonElement>('.raw-point-color-title')!.click());
-  expect(picker()).toBeNull();
-  act(() => host.querySelector<HTMLButtonElement>('.raw-point-color-title')!.click());
+  const sampled = { lum: .42, chroma: .13, hue: 207.5, hue_shift: 1.25, sat_shift: 2.5, lum_shift: -3.75,
+    variance: 4.5, range: 55.25, hue_range: 44.5, sat_range: 66.75, lum_range: 33.125 };
+  commitHistory.mockImplementation(async request => rawHistoryResult({ ...request, doc: {
+    ...request.doc, revision: request.doc.revision + 1, settingsFingerprint: 'b'.repeat(64),
+    point_colors: [...request.doc.point_colors, sampled],
+  } }, { history: { initialized: true, cursor: 1, length: 1, selectedStepId: request.saveId } }));
+  const historyId = '00000000-0000-4000-8000-000000000001';
+  vi.mocked(rawApi.readRawHistory).mockImplementation(async doc => ({ ...rawHistoryData(doc),
+    history: { initialized: true, cursor: 1, length: 1, selectedStepId: historyId },
+    steps: [{ stepId: historyId, kind: 'pointColorPick', metadata: { x: .5, y: .5 },
+      createdAt: '2026-10-27T00:00:00Z', changes: [] }],
+  }));
+  dispatchPointer(viewport, 'pointerdown', 4, 400, 300);
+  dispatchPointer(viewport, 'pointerup', 4, 400, 300); await flush();
+  expect(commitHistory).toHaveBeenCalledOnce();
+  expect(commitHistory.mock.calls[0][0].operation).toEqual({ kind: 'pointColorPick', metadata: { x: .5, y: .5 } });
+  expect(vi.mocked(rawApi.setRawControls)).not.toHaveBeenCalled();
+  expect(host.querySelectorAll('.raw-point-color-swatch')).toHaveLength(2);
+  expect(host.querySelector<HTMLButtonElement>('[data-point-color-index="0"]')?.getAttribute('aria-pressed')).toBe('false');
+  expect(host.querySelector<HTMLButtonElement>('[data-point-color-index="1"]')?.getAttribute('aria-pressed')).toBe('true');
+  expect(host.querySelectorAll('.raw-point-color-adjustments .adjustment-control')).toHaveLength(8);
   expect(picker().getAttribute('aria-pressed')).toBe('false');
+});
+
+it('does not optimistically add a Point Color entry or resend after a failed History save', async () => {
+  vi.mocked(rawApi.rawPreview).mockImplementation(async (_doc, sequence, _signal, kind = 'after', target) => ({
+    blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence, kind,
+    quality: target?.quality ?? 'full', frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000,
+      fullWidth: 16, fullHeight: 12, aspect: 4 / 3, window: null } }));
+  await mount();
+  act(() => host.querySelector<HTMLButtonElement>('.raw-point-color-title')!.click());
+  const picker = host.querySelector<HTMLButtonElement>('.raw-point-color-pick')!;
+  act(() => picker.click()); await flush();
+  const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+  const position = host.querySelector<HTMLElement>('.viewer-image-position')!;
+  Object.defineProperty(viewport, 'setPointerCapture', { value: vi.fn() });
+  vi.spyOn(position, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 800, height: 600 } as DOMRect);
+  const image = host.querySelector<HTMLImageElement>('.raw-whole-base')!;
+  Object.defineProperty(image, 'naturalWidth', { value: 16 }); Object.defineProperty(image, 'naturalHeight', { value: 12 });
+  act(() => image.dispatchEvent(new Event('load')));
+  commitHistory.mockRejectedValueOnce(new rawApi.RawSaveError('raw_connection_failed', 'unknown', 500));
+  dispatchPointer(viewport, 'pointerdown', 11, 400, 300);
+  dispatchPointer(viewport, 'pointerup', 11, 400, 300); await flush();
+  expect(commitHistory).toHaveBeenCalledOnce();
+  expect(commitHistory.mock.calls[0][0].operation).toEqual({ kind: 'pointColorPick', metadata: { x: .5, y: .5 } });
+  expect(host.querySelectorAll('.raw-point-color-swatch')).toHaveLength(0);
+  expect(host.querySelector('.raw-point-color-empty')?.textContent).toContain('Use the eyedropper');
 });
 
 it('submits the WB-only Reset as one explicit History operation and keeps it out of the parent reset', async () => {

@@ -82,6 +82,12 @@ describe('RAW History display', () => {
     expect(markup).toContain(kind === 'wbAuto' ? '自動ホワイトバランス' : 'WBスポイト');
     if (numeric) { expect(markup).toContain('6500 K → 5200 K'); expect(markup).toContain('0 → +11'); }
   });
+  it('labels Point Color samples in the operation history', () => {
+    const step: RawHistoryStep = { stepId: '00000000-0000-4000-8000-000000000001', kind: 'pointColorPick',
+      metadata: { x: .25, y: .75 }, createdAt: '2026-10-27T00:00:00Z', changes: [] };
+    const markup = renderToStaticMarkup(<RawEditHistory raw={rawHistory([step], 1) as never} disabled={false} onReset={() => {}} />);
+    expect(markup).toContain('ポイントカラー採色');
+  });
 
   it('shows JPEG-style before and after values, Kelvin units and no operation timestamps', () => {
     const steps: RawHistoryStep[] = [
