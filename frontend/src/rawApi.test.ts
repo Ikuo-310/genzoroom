@@ -265,6 +265,7 @@ describe('RAW History transport', () => {
     { kind: 'allReset', metadata: {} },
     { kind: 'pointColorPick', metadata: { x: .2375, y: .78125 } },
     { kind: 'pointColorDelete', metadata: { index: 1 } },
+    { kind: 'pointColorReset', metadata: {} },
     { kind: 'pointColorControl', metadata: { control: 'pointColor.7.hueRange', value: 82.375 } },
     { kind: 'pointColorControlReset', metadata: { control: 'pointColor.1.hueShift' } },
   ])('sends allowlisted operation metadata for $kind without native settings', async operation => {
@@ -457,6 +458,22 @@ describe('RAW History transport', () => {
     data.steps[0] = { ...data.steps[0], kind: 'pointColorDelete', metadata: { index: 1 }, changes: [] };
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })));
     await expect(readRawHistory(result)).resolves.toMatchObject({ steps: [{ kind: 'pointColorDelete', metadata: { index: 1 } }] });
+  });
+  it('reads Point Color full reset with empty metadata only', async () => {
+    const request = historyRequest('commit');
+    const result = rawHistoryResult(request, { history: { initialized: true, cursor: 1, length: 1, selectedStepId: request.saveId } });
+    const data = rawHistoryData(result);
+    data.steps[0] = { ...data.steps[0], kind: 'pointColorReset', metadata: {}, changes: [] };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })));
+    await expect(readRawHistory(result)).resolves.toMatchObject({ steps: [{ kind: 'pointColorReset', metadata: {} }] });
+  });
+  it.each([{ extra: true }, { index: 0 }])('rejects nonempty Point Color full reset metadata %j', async metadata => {
+    const request = historyRequest('commit');
+    const result = rawHistoryResult(request, { history: { initialized: true, cursor: 1, length: 1, selectedStepId: request.saveId } });
+    const data = rawHistoryData(result);
+    data.steps[0] = { ...data.steps[0], kind: 'pointColorReset', metadata } as typeof data.steps[number];
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })));
+    await expect(readRawHistory(result)).rejects.toMatchObject({ code: 'raw_invalid_response' });
   });
   it.each([{}, { index: 1, extra: true }, { index: -1 }, { index: 8 }, { index: 1.5 }, { index: true }])
     ('rejects malformed Point Color deletion metadata %j', async metadata => {

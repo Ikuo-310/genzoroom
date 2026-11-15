@@ -140,6 +140,7 @@ export type RawHistoryOperation = { kind: 'controlReset'; metadata: { control: R
   | { kind: 'wbPick'; metadata: Record<string, never>; frame: RawPickFrame }
   | { kind: 'pointColorPick'; metadata: { x: number; y: number } }
   | { kind: 'pointColorDelete'; metadata: { index: number } }
+  | { kind: 'pointColorReset'; metadata: Record<string, never> }
   | { kind: 'pointColorControl'; metadata: { control: RawPointColorControlId; value: number } }
   | { kind: 'pointColorControlReset'; metadata: { control: RawPointColorControlId } }
   | { kind: 'allReset' | 'wbAuto' | 'wbReset' | 'colorReset'; metadata: Record<string, never> };
@@ -148,7 +149,7 @@ export type RawHistoryRequest = RawRecipeRequest & { action: 'initialize' | 'com
   curveInteractionId?: string;
   mixerInteractionId?: string;
   geometryCommit?: { gestureId: string; operation: 'set' | 'drag' | 'straighten'; action?: RawGeometryAction } };
-export type RawHistoryStep = { stepId: string; kind: 'control' | 'controlReset' | 'opticsFlag' | 'opticsFlagReset' | 'sectionToggle' | 'sectionReset' | 'vignetteStyle' | 'allReset' | 'wbAuto' | 'wbReset' | 'colorReset' | 'wbPick' | 'pointColorPick' | 'pointColorDelete' | 'pointColorControl' | 'pointColorControlReset' | 'geometry' | 'curve' | 'curveReset' | 'mixerTarget';
+export type RawHistoryStep = { stepId: string; kind: 'control' | 'controlReset' | 'opticsFlag' | 'opticsFlagReset' | 'sectionToggle' | 'sectionReset' | 'vignetteStyle' | 'allReset' | 'wbAuto' | 'wbReset' | 'colorReset' | 'wbPick' | 'pointColorPick' | 'pointColorDelete' | 'pointColorReset' | 'pointColorControl' | 'pointColorControlReset' | 'geometry' | 'curve' | 'curveReset' | 'mixerTarget';
   metadata: { control?: RawHistoryControlId | RawOpticsFlagId | RawPointColorControlId; index?: number; section?: RawResetSectionId; enabled?: boolean; style?: RawVignetteStyle; operation?: RawGeometryOperationId; action?: RawGeometryAction; channel?: RawCurveResetChannel; target?: 'hue' | 'sat' | 'lum'; x?: number; y?: number; value?: number }; createdAt: string;
   changes: { control: RawHistoryControlId; before: number; after: number }[] | null;
   flagChanges?: { control: RawOpticsFlagId; before: boolean; after: boolean }[] | null };
@@ -586,6 +587,7 @@ export async function readRawHistory(doc: RawDocument): Promise<RawHistoryData> 
         : step.kind === 'pointColorDelete' ? Object.keys(m).length !== 1 || !Number.isSafeInteger(m.index) || (m.index as number) < 0 || (m.index as number) > 7
         : step.kind === 'pointColorControl' ? Object.keys(m).length !== 2 || !validRawPointColorControlValue(m.control, m.value)
         : step.kind === 'pointColorControlReset' ? Object.keys(m).length !== 1 || !validRawPointColorControlId(m.control)
+        : step.kind === 'pointColorReset' ? Object.keys(m).length !== 0
         : !['allReset', 'wbAuto', 'wbReset', 'colorReset', 'wbPick'].includes(step.kind) || Object.keys(m).length !== 0)
       || !(step.changes === null || Array.isArray(step.changes) && step.changes.length <= RAW_HISTORY_CONTROL_IDS.length
         && step.changes.every((change: unknown, index: number, changes: unknown[]) => {

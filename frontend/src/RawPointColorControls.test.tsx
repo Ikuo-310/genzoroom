@@ -42,6 +42,7 @@ function openPointColor() {
 function swatches() { return [...host.querySelectorAll<HTMLButtonElement>('.raw-point-color-swatch')]; }
 function pointColorAdjustments() { return [...host.querySelectorAll<HTMLElement>('.raw-point-color-adjustments .adjustment-control')]; }
 function deleteButtons() { return [...host.querySelectorAll<HTMLButtonElement>('.raw-point-color-actions .adjustment-category-reset')]; }
+function resetPointColorButton() { return host.querySelector<HTMLButtonElement>('.raw-point-color > .raw-adjustment-subsection-header .adjustment-category-reset')!; }
 function contextDelete(index: number, x = 24, y = 36) {
   const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: x, clientY: y });
   act(() => swatches()[index].dispatchEvent(event));
@@ -431,6 +432,117 @@ it('discards Point Color drafts on deletion and preserves the array when History
   expect(swatches()).toHaveLength(2);
   expect(swatches()[0].getAttribute('aria-pressed')).toBe('true');
   expect(pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-number')?.value).toBe('21');
+});
+
+it('resets all Point Colors through History and adopts the confirmed empty snapshot', () => {
+  const original = [point(12, { hue_shift: 18.5 }), point(155, { range: 73.25 })];
+  const raw = createRaw(original);
+  draw(raw); openPointColor(); act(() => swatches()[1].click());
+  const title = host.querySelector<HTMLButtonElement>('.raw-point-color-title')!;
+  const reset = resetPointColorButton();
+  expect(reset.textContent).toBe('Reset');
+  expect(reset.disabled).toBe(false);
+  act(() => reset.click());
+  expect(title.getAttribute('aria-expanded')).toBe('true');
+  expect(raw.operate).toHaveBeenCalledOnce();
+  expect(raw.operate).toHaveBeenCalledWith({ kind: 'pointColorReset', metadata: {} });
+  expect(raw.settings.point_colors).toEqual(original);
+  expect(swatches()).toHaveLength(2);
+
+  raw.settings = { ...raw.settings, revision: raw.settings.revision + 1, point_colors: [] };
+  raw.history = { cursor: 2 };
+  draw(raw);
+  expect(swatches()).toHaveLength(0);
+  expect(host.querySelector('.raw-point-color-empty')?.textContent).toContain('Use the eyedropper');
+  expect(pointColorAdjustments()).toHaveLength(0);
+  expect(resetPointColorButton().disabled).toBe(true);
+});
+
+it('resets the final swatch, discards drafts, and preserves settings when History fails', () => {
+  const original = [point(42, { hue_shift: 21 })];
+  const raw = createRaw(original);
+  draw(raw); openPointColor();
+  const hue = pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-number')!;
+  act(() => {
+    hue.focus();
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(hue, '67');
+    hue.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  expect(pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-number')?.value).toBe('67');
+  act(() => resetPointColorButton().click());
+  expect(raw.operate).toHaveBeenCalledWith({ kind: 'pointColorReset', metadata: {} });
+  expect(raw.settings.point_colors).toEqual(original);
+  expect(pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-number')?.value).toBe('21');
+  raw.operationError = 'raw_connection_failed'; draw(raw);
+  expect(swatches()).toHaveLength(1);
+  expect(swatches()[0].getAttribute('aria-pressed')).toBe('true');
+  expect(pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-number')?.value).toBe('21');
+});
+
+it('disables full reset for empty, Color-off, or locked Point Color and prevents duplicate requests', () => {
+  const empty = createRaw(); draw(empty); openPointColor();
+  expect(resetPointColorButton().disabled).toBe(true);
+  act(() => resetPointColorButton().click()); expect(empty.operate).not.toHaveBeenCalled();
+
+  const colorOff = createRaw([point()]); colorOff.settings.sections.color = false;
+  draw(colorOff); openPointColor(); expect(resetPointColorButton().disabled).toBe(true);
+  act(() => resetPointColorButton().click()); expect(colorOff.operate).not.toHaveBeenCalled();
+
+  const locked = createRaw([point()]); draw(locked, true); openPointColor();
+  expect(resetPointColorButton().disabled).toBe(true);
+  act(() => resetPointColorButton().click()); expect(locked.operate).not.toHaveBeenCalled();
+
+  const available = createRaw([point(), point(120)]); draw(available); openPointColor();
+  act(() => { resetPointColorButton().click(); resetPointColorButton().click(); });
+  expect(available.operate).toHaveBeenCalledOnce();
+});
+
+it('does not reset on revision or Document changes until the current Reset button is activated', () => {
+  const raw = createRaw([point()]); draw(raw); openPointColor();
+  raw.settings = { ...raw.settings, revision: raw.settings.revision + 1 };
+  draw(raw);
+  expect(raw.operate).not.toHaveBeenCalled();
+
+  const next = documentInfo('asset-b', 'b');
+  raw.assetId = next.assetId;
+  raw.settings = { ...rawSettings(next), point_colors: [point()] };
+  draw(raw);
+  expect(raw.operate).not.toHaveBeenCalled();
+  act(() => resetPointColorButton().click());
+  expect(raw.operate).toHaveBeenCalledOnce();
+  expect(raw.operate).toHaveBeenCalledWith({ kind: 'pointColorReset', metadata: {} });
+});
+
+it('restores full Point Color snapshots and values as History moves backward, forward, and by jump', () => {
+  const before = [point(10, { hue_shift: 13.5 }), point(210, { range: 81.25 })];
+  const raw = createRaw(before);
+  raw.history = { cursor: 0 };
+  draw(raw); openPointColor(); act(() => swatches()[1].click());
+  act(() => resetPointColorButton().click());
+  raw.settings = { ...raw.settings, revision: raw.settings.revision + 1, point_colors: [] };
+  raw.history = { cursor: 1 };
+  draw(raw);
+  expect(swatches()).toHaveLength(0);
+
+  raw.settings = { ...raw.settings, revision: raw.settings.revision + 1, point_colors: before };
+  raw.history = { cursor: 0 };
+  draw(raw);
+  expect(swatches()).toHaveLength(2);
+  expect(pointColorAdjustments()[0].querySelector<HTMLInputElement>('.adjustment-number')?.value).toBe('14');
+  expect(raw.settings.point_colors).toEqual(before);
+  expect(raw.settings.point_colors[0].hue_shift).toBe(13.5);
+
+  const jumped = [point(88, { sat_shift: -24.75 })];
+  raw.settings = { ...raw.settings, revision: raw.settings.revision + 1, point_colors: jumped };
+  raw.history = { cursor: 2 };
+  draw(raw);
+  expect(swatches()).toHaveLength(1);
+  expect(pointColorAdjustments()[1].querySelector<HTMLInputElement>('.adjustment-number')?.value).toBe('-25');
+  expect(raw.settings.point_colors[0].sat_shift).toBe(-24.75);
+  raw.settings = { ...raw.settings, revision: raw.settings.revision + 1, point_colors: [] };
+  raw.history = { cursor: 1 };
+  draw(raw);
+  expect(swatches()).toHaveLength(0);
 });
 
 it('groups slider drag changes until pointer release and applies them to the captured selected index', () => {

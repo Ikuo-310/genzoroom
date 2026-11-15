@@ -412,6 +412,7 @@
         "controlHistory": "Point Color adjustment",
         "controlResetHistory": "Reset Point Color adjustment",
         "delete": "Delete", "deleteHistory": "Point Color deletion",
+        "resetHistory": "Reset Point Color",
         "empty": "Use the eyedropper to pick a color from the photo.",
         "entriesLabel": "Point Color entries", "entry": "Point Color {{index}}",
         "adjustments": {

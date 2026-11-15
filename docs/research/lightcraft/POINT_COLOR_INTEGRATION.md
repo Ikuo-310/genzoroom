@@ -366,3 +366,11 @@ Point Colorの8調整項目の下に、選択中のスウォッチを削除す�
 History応答を受けるまでは配列を変更しない。成功後は返却settingsの配列を正とし、削除対象が選択中なら同じindexへ繰り上がった色（末尾削除時は直前、最後の1色なら未選択）を選ぶ。非選択色の削除では現在の選択色を維持し、削除indexより後ろならindexを詰める。Undo／Redo／Jumpによる配列長変化もHistory cursorと配列を見て有効indexへ補正する。
 
 削除時は保留中のPoint Color draftを破棄し、sliderを再mountして古いindexを参照する未確定callbackを遮断する。削除中は二重操作を防止し、Document／revision不一致、編集ロック、Color OFFでは送らない。History失敗時は楽観的な配列・選択更新をせず、既存Recoveryに委ねる。Frontend focused testsは、選択色と右クリックした非選択色の削除、先頭／中間／末尾／単一色、削除後の選択、draft破棄、失敗時の表示維持、stale revision／Document、ロック／Color OFF、メニューのEscape・外側クリック・重複防止、History型／表示を確認する。
+
+## P1-C3b — Point Color全体Reset
+
+Point Colorサブセクション見出しの右側に、既存サブカテゴリResetと同じ`adjustment-category-reset`スタイル・フォーカス／キーボード移動処理で「リセット / Reset」を追加した。ボタンはセクション開閉ボタンと別要素で、開閉を切り替えない。配列が空、Color OFF、編集ロック／History操作不可、Point Color変更が進行中の場合は無効にする。
+
+操作は`raw.operate({kind:'pointColorReset', metadata:{}})`のみを利用する。実行前にDocument identity／revision／配列を確認し、Point Color draftを破棄してスライダーを再mountし、削除と同じpending mutation refで二重実行を防ぐ。成功応答までは配列を楽観変更せず、確定snapshotが空配列なら選択を`null`にして既存スポイト案内へ戻る。失敗時は配列と選択を保ち既存History Recoveryへ委ねる。Undo／Redo／Jumpは既存History snapshotを正とし、配列と調整値を反映する。選択は有効indexへ通常補正し、Reset前のindexを永続化しない。
+
+Frontend History operation／step型とresponse validationへ`pointColorReset`を追加し、step metadataは空objectだけを許可する。History一覧は「ポイントカラーをリセット / Reset Point Color」と表示する。focused testsは複数／単一entryのReset、payload、空配列への確定反映、draft破棄、失敗時の非楽観表示、空・Color OFF・ロック時の無効化、重複要求防止、Document/revision変更、Undo／Redo／Jumpでの配列・値反映、metadata拒否を確認する。
