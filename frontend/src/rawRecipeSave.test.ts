@@ -137,6 +137,27 @@ it('coalesces Point Color interaction updates and saves one final History operat
   expect(c.pointColorInteracting).toBe(false);
 });
 
+it('releases Preview presentation and starts workspace recovery when Point Color cancel fails', async () => {
+  const controls = { confirmed: settings(), beginPreview: vi.fn(), endPreview: vi.fn(), refreshPreview: vi.fn(), flush: vi.fn(), unsettled: false } as any;
+  const curveRecovery = vi.fn(async () => {}), pointColorSettled = vi.fn();
+  const c = new RawRecipeSave(settings(), { schedule: action => { owner = owner.then(action); }, changed, controls,
+    curveRecovery, pointColorSettled });
+  c.initialized = true; c.history = { initialized: true, cursor: 0, length: 0, selectedStepId: null };
+  vi.mocked(api.beginRawPointColorInteraction).mockResolvedValueOnce('a'.repeat(32));
+  vi.mocked(api.cancelRawPointColorInteraction).mockRejectedValueOnce(new api.RawApiError('raw_point_color_interaction_stale'));
+
+  expect(c.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true);
+  await owner;
+  await expect(c.cancelPointColorInteraction()).rejects.toThrow('raw_point_color_interaction_stale');
+  await Promise.resolve();
+
+  expect(controls.beginPreview).toHaveBeenCalledOnce();
+  expect(controls.endPreview).toHaveBeenCalledOnce();
+  expect(pointColorSettled).toHaveBeenCalledWith(true);
+  expect(curveRecovery).toHaveBeenCalledOnce();
+  expect(c.pointColorInteracting).toBe(false);
+});
+
 
 it('can persist an unchanged initial baseline before session renewal without marking desired values saved', async () => {
   const c = saver();

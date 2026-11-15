@@ -275,6 +275,8 @@ export class RawRecipeSave {
     }).catch(cause => {
       this.operationError = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
       this.pointColorGesture = undefined;
+      // A failed Native cancel still has to release the local Preview owner before workspace recovery.
+      this.options.controls?.endPreview();
       this.options.pointColorSettled?.(true);
       if (this.options.curveRecovery) void this.options.curveRecovery().catch(error => this.cropFailure(error));
       throw cause;
