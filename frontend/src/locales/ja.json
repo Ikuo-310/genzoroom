@@ -398,7 +398,8 @@
       "sectionResetHistory": "{{section}}をリセット",
       "colorCategory": "カラー",
       "pointColor": {
-        "title": "ポイントカラー", "pick": "写真から色を選択", "empty": "スポイトで写真の色を選択してください。",
+        "title": "ポイントカラー", "pick": "写真から色を選択", "pickActive": "ポイントカラー採色を解除",
+        "empty": "スポイトで写真の色を選択してください。",
         "entriesLabel": "ポイントカラーの項目", "entry": "ポイントカラー {{index}}",
         "adjustments": {
           "hueShift": "色相", "hueShiftValue": "色相の値", "hueShiftReset": "色相をリセット",

@@ -840,7 +840,8 @@ export function AnshitsuPage() {
             : t(`workspace.rawPreview.${rawDocument.displayError ? rawPreviewMessage(rawDocument.displayError)
               : rawDocument.status === 'error' ? rawPreviewMessage(rawDocument.code) : rawDocument.status}`) : undefined}
           previewPixels={!!rawDocument}
-          rawPickActive={rawDocument?.pickActive}
+          rawPickActive={!!rawDocument?.pickActive || !!rawDocument?.pointColorPickActive}
+          rawPickActionEnabled={!!rawDocument?.pickActive}
           rawPickTargets={rawDocument?.pickTargets}
           onRawPick={rawDocument?.pick}
           onRawPickCancel={rawDocument?.cancelPick}
@@ -879,7 +880,7 @@ export function AnshitsuPage() {
           onBeforeAdjustmentsChange={setPersistentBeforeAdjustments}
           onBeforeAdjustmentsDisplayChange={setViewerShowsBefore}
           onToggleLeft={() => setLeftOpen((value) => !value)}
-          onToggleRight={() => setRightOpen((value) => !value)}
+          onToggleRight={() => { if (rightOpen) rawDocument?.cancelPointColorPick(); setRightOpen(value => !value); }}
           onCopyAdjustments={() => copySettings()}
           onPasteAdjustments={pasteSettings}
           onSelectCopyAdjustments={() => openSelection('copy')}
@@ -892,7 +893,7 @@ export function AnshitsuPage() {
         <section className="viewer-panel viewer-message" aria-live="polite">
           <div className="viewer-toolbar">
             <button type="button" className="tool-button panel-toggle" onClick={() => setLeftOpen((value) => !value)} aria-label={t(leftOpen ? 'workspace.collapseLeft' : 'workspace.expandLeft')}>{leftOpen ? '‹' : '›'} <span>{t('workspace.history')}</span></button>
-            <button type="button" className="tool-button panel-toggle right" onClick={() => setRightOpen((value) => !value)} aria-label={t(rightOpen ? 'workspace.collapseRight' : 'workspace.expandRight')}><span>{t('workspace.developControls')}</span> {rightOpen ? '›' : '‹'}</button>
+            <button type="button" className="tool-button panel-toggle right" onClick={() => { if (rightOpen) rawDocument?.cancelPointColorPick(); setRightOpen(value => !value); }} aria-label={t(rightOpen ? 'workspace.collapseRight' : 'workspace.expandRight')}><span>{t('workspace.developControls')}</span> {rightOpen ? '›' : '‹'}</button>
           </div>
           <p className={detailState === 'error' ? 'error-text' : ''}>{t(detailState === 'error' ? 'workspace.detailFailed' : 'workspace.loading')}</p>
         </section>

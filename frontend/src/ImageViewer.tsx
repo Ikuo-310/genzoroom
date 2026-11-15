@@ -26,6 +26,7 @@ type ImageViewerProps = {
   rawFrame?: { nativeWidth: number; nativeHeight: number; geometryId: string };
   rawRegionDisplay?: RawRegionDisplay;
   rawPickActive?: boolean;
+  rawPickActionEnabled?: boolean;
   rawTargetedActive?: boolean;
   rawTargetCrop?: import('./rawApi').RawCrop;
   rawTargetOrientation?: string;
@@ -82,7 +83,7 @@ const NAVIGATOR_LONG_EDGE = 180;
 type ViewerLoupePoint = { anchor: Point; imagePoint: Point; fixed: boolean };
 type TargetLoupePoint = ViewerLoupePoint & { nativePoint: Point };
 
-export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, beforeFrame, rawRegionDisplay, rawRegionOutline = false, rawPickActive = false, rawTargetedActive = false, rawTargetCrop, rawTargetOrientation = 'Normal', rawTargetSourceSize, onRawTargetBegin, onRawTargetMove, onRawTargetFinish, onRawTargetCancel, onRawTargetEscape, rawPickTargets, onRawPick, onRawPickCancel, onRawViewChange, rawDiagnosticView, previewStatus, statusNote, previewPixels = false, beforeAvailable = true, beforeSrc, beforeStatus, onBeforeRetry, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, onInteractionStart, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
+export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, beforeFrame, rawRegionDisplay, rawRegionOutline = false, rawPickActive = false, rawPickActionEnabled = true, rawTargetedActive = false, rawTargetCrop, rawTargetOrientation = 'Normal', rawTargetSourceSize, onRawTargetBegin, onRawTargetMove, onRawTargetFinish, onRawTargetCancel, onRawTargetEscape, rawPickTargets, onRawPick, onRawPickCancel, onRawViewChange, rawDiagnosticView, previewStatus, statusNote, previewPixels = false, beforeAvailable = true, beforeSrc, beforeStatus, onBeforeRetry, editSource, originalStatus, showingOriginal = false, onOriginalToggle, onImageError, onInteractionStart, recipe, onHistogramChange, gpuRenderer, onGpuError, onBackendChange, alt, leftOpen, rightOpen, persistentBeforeAdjustments = false, onBeforeAdjustmentsChange, onBeforeAdjustmentsDisplayChange, onToggleLeft, onToggleRight, onCopyAdjustments, onPasteAdjustments, onSelectCopyAdjustments, onSelectPasteAdjustments, editClipboardDisabled = true, hasEditClipboard = false, keyboardBlocked = false }: ImageViewerProps) {
   const { t } = useTranslation();
   const settings = useAppSettings();
   const shortcut = useShortcutDisplay();
@@ -249,6 +250,12 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
     publishTargetLoupe(allow ? rawPickActive ? pickLoupeAt(client) : targetLoupeAt(client, fixed) : undefined);
   };
   const pickPointer = useRef<{ id: number; origin: Point; target: RawPickTarget; bounds: DOMRect; moved: boolean } | null>(null);
+  useEffect(() => {
+    if (spaceHand && pickPointer.current) {
+      pickPointer.current = null;
+      publishTargetLoupe();
+    }
+  }, [spaceHand]);
   useEffect(() => {
     pickPointer.current = null;
     if (!rawPickActive || !pickReady) { targetPointerRef.current = undefined; publishTargetLoupe(); }
@@ -510,7 +517,8 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
 
   function startPan(event: ReactPointerEvent<HTMLDivElement>) {
     if (cropBusy || (rawCrop?.active && !spaceHand)) return;
-    if (rawPickActive) {
+    // Space temporarily gives pointer-down to the shared pan path even while sampling is armed.
+    if (rawPickActive && !spaceHand) {
       if (event.button === 0 && !(event.target instanceof Element && event.target.closest('.viewer-navigator'))
         && pickReady && displayedPickTarget && imagePositionRef.current
         && wholeImagePoint({ x: event.clientX, y: event.clientY }, imagePositionRef.current.getBoundingClientRect())) {
@@ -593,7 +601,7 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
       if (event.type !== 'pointercancel' && !pick.moved && Math.hypot(event.clientX - pick.origin.x, event.clientY - pick.origin.y) < 4
         && stable && pickReady && point
         && JSON.stringify(pick.target) === JSON.stringify(displayedPickTarget)) {
-        onRawPick?.(pick.target, point);
+        if (rawPickActionEnabled) onRawPick?.(pick.target, point);
       }
       return;
     }
@@ -783,7 +791,7 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
     >
       {rawCrop?.active && <RawCropSurface binding={rawCrop} viewport={viewportSize} scale={scale} pan={pan} busy={setCropBusy} handTool={spaceHand && scale>fitScale || viewerPanActive} panning={viewerPanActive} />}
       <div ref={imagePositionRef} className="viewer-image-position" style={{ display: rawCrop?.active ? 'none' : undefined,
-        cursor: rawPickActive ? pickReady ? 'crosshair' : 'not-allowed' : targetDragging ? 'ns-resize' : rawTargetedActive && !showBeforeAdjustments && !spaceHand ? 'crosshair' : undefined,
+        cursor: rawPickActive && !spaceHand ? pickReady ? 'crosshair' : 'not-allowed' : targetDragging ? 'ns-resize' : rawTargetedActive && !showBeforeAdjustments && !spaceHand ? 'crosshair' : undefined,
         transform: `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px))` }}
         onPointerDown={(event) => {
           if (event.button === 0) viewportRef.current?.focus({ preventScroll: true });

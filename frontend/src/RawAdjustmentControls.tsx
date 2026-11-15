@@ -108,7 +108,9 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
       <span>{t('workspace.rawPreview.cameraLocalTone')}</span>
     </label>
     {settings && bindings.map(({ category, controls, ids }) => <RawCategory key={category} category={category}
-      expanded={panelUi.categories[category]} onExpandedChange={open => { if (category === 'color' && !open) raw.toggleMixerTarget(null); setCategoryOpen(category, open); }}
+      expanded={panelUi.categories[category]} onExpandedChange={open => { if (category === 'color' && !open) {
+        raw.toggleMixerTarget(null); raw.cancelPointColorPick();
+      } setCategoryOpen(category, open); }}
       enabled={category === 'curves' || settings.sections[sections[category]]} disabled={actionsLocked}
       resetDisabled={actionsLocked || category === 'color' && !settings.wb.available}
       onToggle={() => { if (category !== 'curves') operate({ kind: 'sectionToggle', metadata: { section: sections[category],
@@ -204,6 +206,9 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
         })); }} locked={actionsLocked || !settings.sections.color}
         onReset={() => operate({ kind: 'sectionReset', metadata: { section: 'mixer' } })} operate={operate} panel={panel} />}
       {category === 'color' && <RawPointColorPicker colors={settings.point_colors} selectedIndex={selectedPointColorIndex}
+        pickActive={raw.pointColorPickActive} pickDisabled={actionsLocked || !raw.pointColorPickAvailable}
+        onPickToggle={() => { if (panel.current) commitAdjustmentEdits(panel.current); raw.togglePointColorPick(); }}
+        onPickCancel={raw.cancelPointColorPick}
         onSelect={index => setPointColorSelection({ document: pointColorDocument, index })}
         open={panelUi.subcategories.pointColor} onOpenChange={pointColor => updateRawDevelopmentPanelUi(current => ({
           ...current, subcategories: { ...current.subcategories, pointColor },
@@ -402,8 +407,9 @@ function RawColorGrading({ raw, band, onBandChange, open, onOpenChange, locked, 
   </section>;
 }
 
-function RawPointColorPicker({ colors, selectedIndex, onSelect, open, onOpenChange }: {
+function RawPointColorPicker({ colors, selectedIndex, pickActive, pickDisabled, onPickToggle, onPickCancel, onSelect, open, onOpenChange }: {
   colors: RawPointColor[]; selectedIndex: number | null; onSelect: (index: number) => void;
+  pickActive: boolean; pickDisabled: boolean; onPickToggle: () => void; onPickCancel: () => void;
   open: boolean; onOpenChange: (open: boolean) => void;
 }) {
   const { t } = useTranslation();
@@ -411,7 +417,7 @@ function RawPointColorPicker({ colors, selectedIndex, onSelect, open, onOpenChan
   return <section className="raw-point-color">
     <div className="raw-adjustment-subsection-header">
       <button type="button" className="raw-point-color-title" aria-expanded={open} aria-controls={contentId}
-        onClick={() => onOpenChange(!open)} onFocus={focusAdjustmentCategory}
+        onClick={() => { if (open) onPickCancel(); onOpenChange(!open); }} onFocus={focusAdjustmentCategory}
         onKeyDown={event => navigateAdjustments(event.nativeEvent, event.currentTarget)}>
         <span className="adjustment-category-chevron" aria-hidden="true">{open ? '▾' : '▸'}</span>
         <span>{t('workspace.rawPreview.pointColor.title')}</span>
@@ -420,13 +426,21 @@ function RawPointColorPicker({ colors, selectedIndex, onSelect, open, onOpenChan
     {open && <div id={contentId} className="raw-point-color-content">
       {colors.length === 0
         ? <div className="raw-point-color-empty">
-          <button type="button" className="raw-point-color-pick" disabled
-            aria-label={t('workspace.rawPreview.pointColor.pick')} title={t('workspace.rawPreview.pointColor.pick')}>
+          <button type="button" className={`raw-point-color-pick${pickActive ? ' is-selected' : ''}`} disabled={pickDisabled}
+            aria-pressed={pickActive} aria-label={t(pickActive ? 'workspace.rawPreview.pointColor.pickActive' : 'workspace.rawPreview.pointColor.pick')}
+            title={t(pickActive ? 'workspace.rawPreview.pointColor.pickActive' : 'workspace.rawPreview.pointColor.pick')} onClick={onPickToggle}>
             <RawEyedropperIcon />
           </button>
           <span>{t('workspace.rawPreview.pointColor.empty')}</span>
         </div>
         : <>
+          <div className="raw-point-color-empty">
+            <button type="button" className={`raw-point-color-pick${pickActive ? ' is-selected' : ''}`} disabled={pickDisabled}
+              aria-pressed={pickActive} aria-label={t(pickActive ? 'workspace.rawPreview.pointColor.pickActive' : 'workspace.rawPreview.pointColor.pick')}
+              title={t(pickActive ? 'workspace.rawPreview.pointColor.pickActive' : 'workspace.rawPreview.pointColor.pick')} onClick={onPickToggle}>
+              <RawEyedropperIcon />
+            </button>
+          </div>
           <div className="raw-point-color-swatches" role="group" aria-label={t('workspace.rawPreview.pointColor.entriesLabel')}>
             {colors.map((color, index) => <button key={index} type="button" className={`raw-point-color-swatch${selectedIndex === index ? ' is-selected' : ''}`}
               style={{ '--point-color-swatch': `oklch(${color.lum} ${color.chroma} ${color.hue})` } as CSSProperties}

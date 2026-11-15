@@ -407,7 +407,8 @@
       "sectionResetHistory": "Reset {{section}}",
       "colorCategory": "Color",
       "pointColor": {
-        "title": "Point Color", "pick": "Pick a color from the photo", "empty": "Use the eyedropper to pick a color from the photo.",
+        "title": "Point Color", "pick": "Pick a color from the photo", "pickActive": "Cancel Point Color picking",
+        "empty": "Use the eyedropper to pick a color from the photo.",
         "entriesLabel": "Point Color entries", "entry": "Point Color {{index}}",
         "adjustments": {
           "hueShift": "Hue", "hueShiftValue": "Hue value", "hueShiftReset": "Reset Hue",

@@ -26,12 +26,16 @@ const point = (hue = 42, overrides: Partial<RawPointColor> = {}): RawPointColor 
   hue_shift: 0, sat_shift: 0, lum_shift: 0, variance: 0, range: 50, hue_range: 50, sat_range: 50, lum_range: 50, ...overrides });
 function createRaw(colors: ReturnType<typeof point>[] = []) {
   const identity = documentInfo();
-  return { assetId: identity.assetId, status: 'ready', settings: { ...rawSettings(identity), point_colors: colors }, history: {},
+  const settings = { ...rawSettings(identity), point_colors: colors };
+  return { assetId: identity.assetId, status: 'ready', settings, history: {},
+    pointColorPickActive: false, pointColorPickAvailable: colors.length < 8 && settings.sections.color,
+    togglePointColorPick: vi.fn(), cancelPointColorPick: vi.fn(),
     operate: vi.fn(), beginControls: vi.fn(), changeControls: vi.fn(), flushControls: vi.fn(), desired: {} };
 }
-function draw(raw: ReturnType<typeof createRaw>) { act(() => root.render(<RawAdjustmentControls raw={raw as never} />)); }
+function draw(raw: ReturnType<typeof createRaw>, disabled = false) { act(() => root.render(<RawAdjustmentControls raw={raw as never} disabled={disabled} />)); }
 function openPointColor() {
-  act(() => host.querySelector<HTMLButtonElement>('.raw-point-color-title')!.click());
+  const toggle = host.querySelector<HTMLButtonElement>('.raw-point-color-title')!;
+  if (toggle.getAttribute('aria-expanded') !== 'true') act(() => toggle.click());
 }
 function swatches() { return [...host.querySelectorAll<HTMLButtonElement>('.raw-point-color-swatch')]; }
 function pointColorAdjustments() { return [...host.querySelectorAll<HTMLElement>('.raw-point-color-adjustments .adjustment-control')]; }
@@ -44,11 +48,39 @@ it('shows an inactive eyedropper and localized prompt for an empty Point Color a
   expect(swatches()).toHaveLength(0);
   openPointColor();
   expect(host.textContent).toContain('スポイトで写真の色を選択してください。');
-  expect(host.querySelector<HTMLButtonElement>('.raw-point-color-pick')?.disabled).toBe(true);
+  expect(host.querySelector<HTMLButtonElement>('.raw-point-color-pick')?.disabled).toBe(false);
   expect(host.querySelector('.raw-point-color-content .adjustment-control')).toBeNull();
   await i18n.changeLanguage('en');
   draw(raw);
   expect(host.textContent).toContain('Use the eyedropper to pick a color from the photo.');
+});
+
+it('disables Point Color sampling at capacity, when Color is off, or while edits are locked', () => {
+  const color = (index: number): RawPointColor => ({ lum: .5, chroma: .1, hue: index, hue_shift: 0, sat_shift: 0,
+    lum_shift: 0, variance: 0, range: 50, hue_range: 50, sat_range: 50, lum_range: 50 });
+  const seven = createRaw(Array.from({ length: 7 }, (_, index) => color(index)));
+  draw(seven); openPointColor(); expect(host.querySelector<HTMLButtonElement>('.raw-point-color-pick')!.disabled).toBe(false);
+  const eight = createRaw(Array.from({ length: 8 }, (_, index) => color(index)));
+  draw(eight); openPointColor(); expect(host.querySelector<HTMLButtonElement>('.raw-point-color-pick')!.disabled).toBe(true);
+  const colorOff = createRaw(); colorOff.settings.sections.color = false; colorOff.pointColorPickAvailable = false;
+  draw(colorOff); openPointColor(); expect(host.querySelector<HTMLButtonElement>('.raw-point-color-pick')!.disabled).toBe(true);
+  const unlocked = createRaw(); draw(unlocked, true); openPointColor();
+  expect(host.querySelector<HTMLButtonElement>('.raw-point-color-pick')!.disabled).toBe(true);
+});
+
+it('toggles the Point Color sampling button state and cancels when the section closes', async () => {
+  await i18n.changeLanguage('en');
+  const raw = createRaw();
+  draw(raw); openPointColor();
+  const picker = host.querySelector<HTMLButtonElement>('.raw-point-color-pick')!;
+  expect(picker.disabled).toBe(false);
+  expect(picker.getAttribute('aria-pressed')).toBe('false');
+  act(() => picker.click()); expect(raw.togglePointColorPick).toHaveBeenCalledOnce();
+  raw.pointColorPickActive = true; draw(raw);
+  expect(picker.getAttribute('aria-pressed')).toBe('true');
+  expect(picker.title).toBe('Cancel Point Color picking');
+  act(() => host.querySelector<HTMLButtonElement>('.raw-point-color-title')!.click());
+  expect(raw.cancelPointColorPick).toHaveBeenCalledOnce();
 });
 
 it('shows each ordered entry including duplicates and keeps selection local to the UI', () => {
@@ -106,7 +138,7 @@ it('shows eight disabled controls in order with localized labels, Native ranges 
   const controls = pointColorAdjustments();
   expect(controls).toHaveLength(8);
   expect([...host.querySelector('.raw-point-color-content')!.children].map(element => element.className))
-    .toEqual(['raw-point-color-swatches', 'raw-point-color-adjustments']);
+    .toEqual(['raw-point-color-empty', 'raw-point-color-swatches', 'raw-point-color-adjustments']);
   expect(controls.map(control => control.querySelector<HTMLInputElement>('.adjustment-range')?.dataset.adjustmentId))
     .toEqual(fields.map(field => `pointColor.0.${field}`));
   expect(controls.map(control => control.querySelector('label')?.textContent)).toEqual(labels);

@@ -344,6 +344,24 @@ it.each(['currentBefore', 'oldBeforeReceipt', 'staleAfter', 'beforeKeyChange', '
   expect(commitHistory.mock.calls[0][0].operation).toEqual({ kind: 'wbPick', metadata: {}, frame: {
     kind: 'before', geometryId: 'a'.repeat(64), maxSide: displayed.maxSide, quality: displayed.quality, x: .4, y: .6 } });
 });
+it('gates Point Color picking at capacity and Color OFF and recomputes availability for the next Document', async () => {
+  vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence: 1,
+    frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000, fullWidth: 16, fullHeight: 12,
+      aspect: 4 / 3, window: null } });
+  const sample = { lum: .5, chroma: .1, hue: 12, hue_shift: 0, sat_shift: 0, lum_shift: 0, variance: 0,
+    range: 50, hue_range: 50, sat_range: 50, lum_range: 50 };
+  vi.mocked(api.readRawSettings).mockImplementation(async doc => {
+    const settings = rawSettings(doc);
+    if (doc.assetId === 'eight') settings.point_colors = Array.from({ length: 8 }, () => sample);
+    if (doc.assetId === 'color-off') settings.sections.color = false;
+    return settings;
+  });
+  await render('eight'); await flush(); expect(current!.pointColorPickAvailable).toBe(false);
+  await render('color-off'); await flush(); expect(current!.pointColorPickAvailable).toBe(false);
+  await render('a'); await flush(); expect(current!.pointColorPickAvailable).toBe(true);
+  await render('b'); await flush(); expect(current!.pointColorPickActive).toBe(false);
+  expect(current!.pointColorPickAvailable).toBe(true);
+});
 afterEach(async () => { act(() => root.unmount()); await flush(); host.remove(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 it('RAW Viewer smoke representative lifecycle', async () => {

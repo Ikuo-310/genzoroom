@@ -2176,6 +2176,59 @@ it('toggles Picker, cancels with Escape/other edits/Asset change, and submits on
   expect(picker().getAttribute('aria-pressed')).toBe('false');
 });
 
+it('enters Point Color waiting mode with Viewer loupe and consumes clicks without editing', async () => {
+  let resize = () => {};
+  vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resize = callback; } observe() {} disconnect() {} });
+  vi.mocked(rawApi.rawPreview).mockImplementation(async (_doc, sequence, _signal, kind = 'after', target) => ({
+    blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence, kind,
+    quality: target?.quality ?? 'full', frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000,
+      fullWidth: 16, fullHeight: 12, aspect: 4 / 3, window: null } }));
+  await mount();
+  act(() => host.querySelector<HTMLButtonElement>('.raw-point-color-title')!.click());
+  const picker = () => host.querySelector<HTMLButtonElement>('.raw-point-color-pick')!;
+  expect(picker().disabled).toBe(false);
+  act(() => picker().click()); await flush();
+  expect(picker().getAttribute('aria-pressed')).toBe('true');
+  expect(picker().title).toBe('Cancel Point Color picking');
+
+  const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
+  const position = host.querySelector<HTMLElement>('.viewer-image-position')!;
+  Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 800 });
+  Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 600 });
+  vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 800, height: 600 } as DOMRect);
+  act(() => resize());
+  Object.defineProperty(viewport, 'setPointerCapture', { value: vi.fn() });
+  vi.spyOn(position, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 800, height: 600 } as DOMRect);
+  const image = host.querySelector<HTMLImageElement>('.raw-whole-base')!;
+  Object.defineProperty(image, 'naturalWidth', { value: 16 }); Object.defineProperty(image, 'naturalHeight', { value: 12 });
+  act(() => image.dispatchEvent(new Event('load')));
+  expect(position.style.cursor).toBe('crosshair');
+  dispatchPointer(viewport, 'pointermove', 1, 400, 300);
+  expect(host.querySelector('[data-testid="viewer-point-loupe"]')).not.toBeNull();
+  commitHistory.mockClear(); vi.mocked(rawApi.saveRawHistory).mockClear(); vi.mocked(rawApi.setRawControls).mockClear();
+  dispatchPointer(viewport, 'pointerdown', 1, 400, 300);
+  dispatchPointer(viewport, 'pointerup', 1, 400, 300);
+  expect(commitHistory).not.toHaveBeenCalled();
+  expect(vi.mocked(rawApi.saveRawHistory)).not.toHaveBeenCalled();
+  expect(vi.mocked(rawApi.setRawControls)).not.toHaveBeenCalled();
+  expect(picker().getAttribute('aria-pressed')).toBe('true');
+
+  dispatchPointer(viewport, 'pointerover', 0, 400, 300);
+  act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true, cancelable: true })));
+  expect(position.style.cursor).not.toBe('crosshair');
+  dispatchPointer(viewport, 'pointerdown', 2, 400, 300); dispatchPointer(viewport, 'pointerup', 2, 400, 300);
+  act(() => window.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', code: 'Space', bubbles: true })));
+  expect(position.style.cursor).toBe('crosshair');
+
+  act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+  expect(picker().getAttribute('aria-pressed')).toBe('false');
+  act(() => picker().click()); await flush();
+  act(() => host.querySelector<HTMLButtonElement>('.raw-point-color-title')!.click());
+  expect(picker()).toBeNull();
+  act(() => host.querySelector<HTMLButtonElement>('.raw-point-color-title')!.click());
+  expect(picker().getAttribute('aria-pressed')).toBe('false');
+});
+
 it('submits the WB-only Reset as one explicit History operation and keeps it out of the parent reset', async () => {
   await mount();
   const wbReset = host.querySelector<HTMLButtonElement>('.raw-wb-reset')!;

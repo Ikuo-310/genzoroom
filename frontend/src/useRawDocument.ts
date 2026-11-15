@@ -1037,14 +1037,34 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   };
   const [pickOwner, setPickOwner] = useState<string | null>(null);
   const pickTag = `${assetId}:${visible?.document?.generation}:${visible?.document?.documentToken}`;
+  const pointColorPickTag = `${pickTag}:pointColor`;
   const pickStart = useRef(0);
-  const cancelPick = () => { pickStart.current++; setPickOwner(null); };
-  const pickAvailable = !visible?.cropMode && !!visible && visible.status === 'ready' && !visible.locked && !visible.pending
+  const pendingPickOwner = useRef<string | null>(null);
+  const cancelPick = () => { pickStart.current++; pendingPickOwner.current = null; setPickOwner(null); };
+  const pickModeAvailable = !visible?.cropMode && !!visible && visible.status === 'ready' && !visible.locked && !visible.pending
     && !!visible.frame && visible.imageRevision === visible.document?.revision
     && !visible.editError && !visible.historyError && !visible.historyLoading && !!visible.history
-    && !!visible.settings?.sections.color && !!visible.settings?.wb.available && !!visible.settings?.wbAutoAvailable;
+    && !!visible.settings?.sections.color;
+  const pickAvailable = pickModeAvailable && !!visible?.settings?.wb.available && !!visible?.settings?.wbAutoAvailable;
+  const pointColorPickAvailable = pickModeAvailable && !beforeRequested && (visible?.settings?.point_colors.length ?? 0) < 8;
   const pickActive = pickOwner === pickTag && pickAvailable;
-  useEffect(() => { if (!pickAvailable || pickOwner !== pickTag) setPickOwner(null); }, [pickAvailable, pickTag, pickOwner]);
+  const pointColorPickActive = pickOwner === pointColorPickTag && pointColorPickAvailable;
+  const pickModeActive = pickActive || pointColorPickActive;
+  const pickModeOwnsViewer = () => pickModeActive || pendingPickOwner.current === pickTag
+    || pendingPickOwner.current === pointColorPickTag;
+  useEffect(() => {
+    // Settling a prior gesture briefly marks the document pending, so only identity or mode exits cancel a pending start.
+    const pendingPointColorInvalid = pendingPickOwner.current === pointColorPickTag
+      && (visible?.cropMode || beforeRequested || !visible?.settings?.sections.color
+        || (visible?.settings?.point_colors.length ?? 0) >= 8);
+    if (pendingPickOwner.current && ((pendingPickOwner.current !== pickTag && pendingPickOwner.current !== pointColorPickTag)
+      || pendingPointColorInvalid)) {
+      pickStart.current++;
+      pendingPickOwner.current = null;
+    }
+    if (pickOwner !== pickTag && pickOwner !== pointColorPickTag
+      || pickOwner === pickTag && !pickAvailable || pickOwner === pointColorPickTag && !pointColorPickAvailable) setPickOwner(null);
+  }, [pickAvailable, pickOwner, pickTag, pointColorPickAvailable, pointColorPickTag]);
   const pickTarget = (kind: 'before' | 'after'): RawPickTarget | undefined => {
     const surface = wholeSurfaces.current[kind], doc = visible?.document;
     if (!surface?.maxSide || !doc || surface.doc.handle !== doc.handle || surface.doc.generation !== doc.generation
@@ -1063,7 +1083,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   };
   const beginTargetedCurve = (point: {x:number;y:number}) => {
     const editor = callbackEditor(), saver = saverRef.current;
-    if (!targetedCurveActive || pickActive || beforeRequested || visible?.cropMode || !editor || !saver || frozen.current
+    if (!targetedCurveActive || pickModeOwnsViewer() || beforeRequested || visible?.cropMode || !editor || !saver || frozen.current
       || saver.locked || !visible?.frame || visible.imageRevision !== editor.confirmed.revision
       || !editor.confirmed.sourceWidth || !editor.confirmed.sourceHeight) return false;
     const started = saver.beginTargetedCurveInteraction(curveChannel, point);
@@ -1077,7 +1097,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   };
   const beginMixerTarget = (point: {x:number;y:number}) => {
     const editor = callbackEditor(), saver = saverRef.current, target = mixerTargetMode.current;
-    if (!target || !editor || !saver || frozen.current || pickActive || beforeRequested || visible?.cropMode
+    if (!target || !editor || !saver || frozen.current || pickModeOwnsViewer() || beforeRequested || visible?.cropMode
       || saver.locked || !visible?.settings?.sections.color || !visible?.frame
       || visible.imageRevision !== editor.confirmed.revision || !editor.confirmed.sourceWidth || !editor.confirmed.sourceHeight) return false;
     if (!saver.beginMixerInteraction(target, point, curveTarget.current)) return false;
@@ -1193,6 +1213,24 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         setCropPresentation({snapshot:visual.snapshot,crop:structuredClone(confirmed.crop!),phase:'readback',revision:confirmed.revision,fingerprint:confirmed.settingsFingerprint});
     },cause=>{if(cropVisualRef.current===visual){cropVisualRef.current=null;setCropPresentation(null);}throw cause;});
   };
+  const togglePointColorPickMode = () => {
+    if (!pointColorPickAvailable || frozen.current || !callbackEditor()) return;
+    const editor = callbackEditor(), saver = saverRef.current;
+    if (!saver) return;
+    const ticket = ++pickStart.current;
+    if (pointColorPickActive) { pendingPickOwner.current = null; setPickOwner(null); return; }
+    pendingPickOwner.current = pointColorPickTag;
+    setTargetedCurveActive(false);
+    mixerTargetMode.current = null;
+    setMixerTargetActive(null);
+    saver.end();
+    // Point Color and WB share one owner so no Viewer sampling modes overlap.
+    void saver.save().then(() => {
+      if (pickStart.current !== ticket || pendingPickOwner.current !== pointColorPickTag) return;
+      pendingPickOwner.current = null;
+      if (callbackEditor() === editor && !frozen.current && !saver.locked) setPickOwner(pointColorPickTag);
+    }).catch(() => { if (pickStart.current === ticket) pendingPickOwner.current = null; });
+  };
   return visible && { ...visible,
     crop: { operation: cropSaver?.cropOperation, overlay,setOverlay, straightenTool, setStraightenTool:(value:boolean)=>setStraightenTool(value),
       operate: (operation: RawGeometryOperation, action?: import('./rawApi').RawGeometryAction) => {
@@ -1237,7 +1275,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       cancel: () => {cropVisualRef.current=null;setCropPresentation(null);return cropSaver?.cancelGeometry() ?? Promise.resolve();},
       setMode: (enabled: boolean) => { cancelPick();if(!enabled)setStraightenTool(false); if (!callbackEditor() || !cropSaver || saverRef.current !== cropSaver) return Promise.reject(new RawApiError('raw_document_closed')); return cropModeRef.current(enabled); } },
     beforeAvailable: !!beforeKey, beforeRequested,
-    pickActive, pickAvailable,
+    pickActive, pickAvailable, pointColorPickActive, pointColorPickAvailable,
     cancelPick,
     curveChannel, setCurveChannel,
     targetedCurveActive, targetedCurvePoints,
@@ -1246,14 +1284,15 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     toggleTargetedCurve: () => {
       if (targetedCurveActive) { cancelTargetedCurve(); return; }
       if (!callbackEditor() || frozen.current || visible?.cropMode || mixerTargetMode.current || visible?.imageRevision !== visible?.document?.revision) return;
-      if (pickActive) cancelPick();
+      if (pickModeOwnsViewer()) cancelPick();
       setTargetedCurveActive(true);
     },
     beginTargetedCurve, updateTargetedCurve, finishTargetedCurve, cancelTargetedCurve, cancelTargetedGesture,
     togglePick: () => {
       if (!pickAvailable || frozen.current || !callbackEditor()) return;
       const ticket = ++pickStart.current, editor = callbackEditor(), saver = saverRef.current;
-      if (pickActive) { setPickOwner(null); return; }
+      if (pickActive) { pendingPickOwner.current = null; setPickOwner(null); return; }
+      pendingPickOwner.current = null;
       setTargetedCurveActive(false);
       mixerTargetMode.current = null;
       setMixerTargetActive(null);
@@ -1264,6 +1303,11 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
           setPickOwner(pickTag);
       }).catch(() => {});
     },
+    cancelPointColorPick: () => {
+      if (pendingPickOwner.current === pointColorPickTag) { pickStart.current++; pendingPickOwner.current = null; }
+      if (pickOwner === pointColorPickTag) setPickOwner(null);
+    },
+    togglePointColorPick: togglePointColorPickMode,
     pickTargets: { after: pickTarget('after'), before: pickTarget('before') },
     pick: (target: RawPickTarget, point: Pick<RawPickFrame, 'x' | 'y'>) => {
       cancelPick();

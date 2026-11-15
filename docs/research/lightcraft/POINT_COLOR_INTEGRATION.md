@@ -328,3 +328,9 @@ Native中心値の契約は`lum`が0〜1、`chroma`が0以上、`hue`が0以上3
 選択中の配列entryから8項目（`hue_shift`、`sat_shift`、`lum_shift`、`variance`、`range`、`hue_range`、`sat_range`、`lum_range`）を既存`AdjustmentSlider`で表示する。範囲は順に−100〜100を4項目、0〜100を4項目、stepは1。数値欄は既存規則に沿い整数表示するが、Nativeの小数値・settings stateは丸めず変更しない。slider、number input、Resetはdisabledとし、unmount時の`onCommit`を含むcallbackは空実装で、Native／History操作を起こさない。
 
 表示は既存`selectedPointColorIndex`相当の一時選択値と最新settings配列を参照し、選択変更、配列縮小、空配列、Document切替、History後のsettings更新に追従する。focused testsは項目順、日英ラベル、範囲・step、既定値相当の値、小数の表示丸めとsettings保持、選択切替、配列変化、disabled状態、操作callback未呼出しを確認する。P1-C2bでは表示専用制約を外す場合のNative History操作連携を扱うが、本節では数値編集・Resetを接続していない。
+
+## P1-D1a — Point Colorスポイト待機モード
+
+WBとPoint Colorは`useRawDocument`内の同じ一時picker ownerを共有し、Document identity（asset／generation／document token）に結び付けて排他する。Point Colorは配列0〜7件、編集可能なready Document、ColorカテゴリON、After表示で起動でき、8件・History pending／loading・edit lock・crop・Before表示では起動不可または解除される。起動前には既存WB pickerと同じく開いている編集gestureを保存キューでsettleし、既存のCurve／Mixer target modeを終了する。再クリック、Escape、Document切替、右編集パネル／Colorカテゴリ／Point Colorセクションを閉じたとき、Color OFF、crop、Before表示、Historyで編集不可になったときに一時ownerを解除する。Recipe／Historyには状態を保存しない。
+
+`ImageViewer`の既存picker表示経路を利用し、crosshair、`ViewerPointLoupe`追従、Space一時Pan、Navigator外での既存pointer規則を維持する。Point ColorモードではViewerのpointer clickをpicker用に捕捉するが、採色callbackを無効にし、Native／History APIや`point_colors`へ到達させない。WBの採色callbackは既存どおり有効。8件上限はHookのavailabilityとdisabled buttonで表現し、active時は選択色・`aria-pressed`・解除用tooltip／accessible nameを更新する。関連4 test files・374件、TypeScript check、production buildが成功した。ブラウザーでの手動確認は未実施。次のP1-D1bで座標をPoint Color History operationへ接続する際も、このmode ownerと表示中frame identityを維持し、同じViewer clickを二重処理しない。
