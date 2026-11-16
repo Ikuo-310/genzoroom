@@ -26,6 +26,63 @@ beforeEach(() => {
 });
 afterEach(() => vi.useRealTimers());
 
+it.each(['success', 'rejected', 'unknown', 'readback'])('binds explicit Draft discard to the winning Cancel through %s', async outcome => {
+  const initial = settings();
+  const controls = { confirmed: initial, beginPreview: vi.fn(), endPreview: vi.fn(), refreshPreview: vi.fn(), flush: vi.fn(), unsettled: false } as any;
+  const c = new RawRecipeSave(initial, { schedule: action => { owner = owner.then(action); }, changed, controls });
+  c.initialized = true; c.history = { initialized: true, cursor: 0, length: 0, selectedStepId: null };
+  vi.mocked(api.beginRawPointColorInteraction).mockResolvedValueOnce('a'.repeat(32));
+  if (outcome === 'rejected') vi.mocked(api.cancelRawPointColorInteraction).mockRejectedValueOnce(new api.RawApiError('raw_busy', 409));
+  else if (outcome === 'unknown') vi.mocked(api.cancelRawPointColorInteraction).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'));
+  else vi.mocked(api.cancelRawPointColorInteraction).mockResolvedValueOnce();
+  if (outcome === 'readback') vi.mocked(api.readRawSettings).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'));
+  else if (outcome === 'success') vi.mocked(api.readRawSettings).mockResolvedValueOnce(initial);
+  expect(c.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true);
+  await owner; await (c as any).pointColorGesture.started;
+  const decision = c.beginPointColorDraftDiscard();
+  expect(decision.allowed).toBe(true);
+  expect(c.beginPointColorDraftDiscard()).toBe(decision);
+  expect(c.cancelPointColorInteraction()).toBe(decision.cancel);
+  if (outcome === 'success') await decision.cancel;
+  else await expect(decision.cancel).rejects.toBeInstanceOf(api.RawApiError);
+  expect(c.ownsPointColorDraftDiscard(decision)).toBe(true);
+  expect(saver().ownsPointColorDraftDiscard(decision)).toBe(false);
+  expect(api.saveRawHistory).not.toHaveBeenCalled();
+  if (outcome === 'success') {
+    expect(c.beginPointColorDraftDiscard()).toBe(decision);
+    vi.mocked(api.beginRawPointColorInteraction).mockResolvedValueOnce('b'.repeat(32));
+    expect(c.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true);
+    expect(c.ownsPointColorDraftDiscard(decision)).toBe(false);
+    await owner; await (c as any).pointColorGesture.started;
+    vi.mocked(api.cancelRawPointColorInteraction).mockResolvedValueOnce();
+    vi.mocked(api.readRawSettings).mockResolvedValueOnce(initial);
+    await c.cancelPointColorInteraction();
+  }
+});
+
+it.each(['finish', 'normal-cancel', 'retry', 'history', 'uncertain'])('refuses Draft discard when %s owns or obscures the save boundary', async boundary => {
+  const initial = settings();
+  const controls = { confirmed: initial, beginPreview: vi.fn(), endPreview: vi.fn(), refreshPreview: vi.fn(), flush: vi.fn(), unsettled: false } as any;
+  const c = new RawRecipeSave(initial, { schedule: action => { owner = owner.then(action); }, changed, controls });
+  c.initialized = true; c.history = { initialized: true, cursor: 0, length: 0, selectedStepId: null };
+  vi.mocked(api.beginRawPointColorInteraction).mockResolvedValueOnce('a'.repeat(32));
+  expect(c.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true);
+  await owner; await (c as any).pointColorGesture.started;
+  if (boundary === 'finish') (c as any).pointColorGesture.endOwner = 'finish';
+  if (boundary === 'normal-cancel') {
+    vi.mocked(api.cancelRawPointColorInteraction).mockResolvedValueOnce();
+    vi.mocked(api.readRawSettings).mockResolvedValueOnce(initial);
+    void c.cancelPointColorInteraction();
+  }
+  if (boundary === 'retry') (c as any).retryRequest = { saveId: 'pending' };
+  if (boundary === 'history') (c as any).historyOperation = new Promise(() => {});
+  if (boundary === 'uncertain') controls.confirmed = { ...initial };
+  const decision = c.beginPointColorDraftDiscard();
+  expect(decision.allowed).toBe(false);
+  expect(c.ownsPointColorDraftDiscard(decision)).toBe(false);
+  await decision.cancel;
+});
+
 it('autosaves only settled confirmed readback after five seconds', async () => {
   const c = saver();
   c.observe(settings(), false);
@@ -392,6 +449,7 @@ it('keeps Finish ownership while Preview is pending and makes later Cancel await
   const finish = c.finishPointColorInteraction();
   expect(c.finishPointColorInteraction()).toBe(finish);
   expect(c.cancelPointColorInteraction()).toBe(finish);
+  expect(c.beginPointColorDraftDiscard().allowed).toBe(false);
   expect(api.cancelRawPointColorInteraction).not.toHaveBeenCalled();
   expect(saved).not.toHaveBeenCalled();
   preview.resolve({ blob: new Blob(), width: 10, height: 10, epoch: 1, sequence: 1,
@@ -461,6 +519,7 @@ it('holds departure on unknown History outcome and retries only the existing sav
   c.updatePointColorInteraction(38, target);
   await vi.advanceTimersByTimeAsync(50);
   await expect(c.finishPointColorInteraction()).rejects.toMatchObject({ outcome: 'unknown' });
+  expect(c.beginPointColorDraftDiscard().allowed).toBe(false);
   await expect(c.preparePointColorForDeparture()).rejects.toMatchObject({ outcome: 'unknown' });
   expect(c.pointColorInteracting).toBe(true);
   expect(api.cancelRawPointColorInteraction).not.toHaveBeenCalled();

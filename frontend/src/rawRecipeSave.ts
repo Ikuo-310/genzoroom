@@ -15,7 +15,9 @@ const RAW_CURVE_PREVIEW_THROTTLE_MS = 50;
 type PointColorGesture = { control: RawPointColorControlId; initial: number; value: number; appliedValue: number; pending?: number; doc: RawSettings;
   started: Promise<string>; id?: string; sequence: number; appliedSequence: number; displayedSequence: number; ending: boolean; timer?: ReturnType<typeof setTimeout>;
   pump?: Promise<void>; preview?: Promise<void>; controller: AbortController; display?: RawDisplayTarget;
-  endOwner?: 'finish' | 'cancel'; finishPromise?: Promise<void>; cancelPromise?: Promise<void>; failurePromise?: Promise<void> };
+  endOwner?: 'finish' | 'cancel'; finishStarted?: boolean; finishPromise?: Promise<void>; cancelPromise?: Promise<void>; failurePromise?: Promise<void> };
+
+export type RawDraftDiscardDecision = Readonly<{ allowed: boolean; cancel: Promise<void> }>;
 
 /** Current-document save owner. Unknown outcomes retain one immutable request ahead of newer edits. */
 export class RawRecipeSave {
@@ -49,6 +51,7 @@ export class RawRecipeSave {
     pump?: Promise<void>; preview?: Promise<void>; display?: RawDisplayTarget; changes: Partial<Record<RawHistoryControlId, number>>;
     cancelPromise?: Promise<void> };
   private pointColorGesture?: PointColorGesture;
+  private pointColorDiscardDecision?: RawDraftDiscardDecision;
   // Clearing the local gesture after an ambiguous cancel must not make workspace departure look safe.
   private pointColorRecoveryRequired = false;
   private cropGesture?: { id: string; type: 'drag' | 'straighten'; action?: RawGeometryAction; sequence: number; latest?: RawGeometryOperation; ending: boolean;
@@ -157,6 +160,7 @@ export class RawRecipeSave {
     const gesture: PointColorGesture = { control, initial: value, value, doc: structuredClone(this.options.controls!.confirmed), started: Promise.resolve(''),
       appliedValue: value, sequence: 0, appliedSequence: 0, displayedSequence: 0, ending: false, controller: new AbortController() };
     this.pointColorGesture = gesture;
+    this.pointColorDiscardDecision = undefined;
     gesture.started = preceding.then(async () => {
       if (!this.active || this.pointColorGesture !== gesture) throw new RawApiError('raw_document_closed');
       gesture.doc = structuredClone(this.options.controls!.confirmed);
@@ -253,6 +257,7 @@ export class RawRecipeSave {
     if (!gesture) return Promise.resolve();
     if (gesture.endOwner === 'cancel') return gesture.cancelPromise ?? Promise.resolve();
     if (gesture.finishPromise) return gesture.finishPromise;
+    gesture.finishStarted = true;
     gesture.endOwner = 'finish';
     gesture.ending = true;
     clearTimeout(gesture.timer);
@@ -338,6 +343,28 @@ export class RawRecipeSave {
       return;
     }
     await this.cancelPointColorInteraction();
+  }
+  /** Reserves Cancel for an explicit discard and binds the decision to this Saver and gesture. */
+  beginPointColorDraftDiscard(): RawDraftDiscardDecision {
+    const gesture = this.pointColorGesture;
+    if (this.pointColorDiscardDecision) return this.pointColorDiscardDecision;
+    const allowed = !!gesture && this.active && !gesture.endOwner && !gesture.finishStarted && !this.pointColorRecoveryRequired
+      && !!gesture.id && this.initialized && !!this.history && !this.historyLoading && !this.historyError
+      && !this.operation && !this.historyOperation && !this.retryRequest && !this.moveIntent && !this.moving
+      && !this.gesture && !this.handoff && !this.cropGesture && !this.curveGesture && !this.mixerGesture
+      && !this.error && !this.options.controls?.unsettled
+      && this.options.controls?.confirmed === this.confirmed
+      && this.confirmed.settingsFingerprint === this.savedFingerprint
+      && gesture.doc.workspaceId === this.confirmed.workspaceId && gesture.doc.handle === this.confirmed.handle
+      && gesture.doc.generation === this.confirmed.generation && gesture.doc.documentToken === this.confirmed.documentToken
+      && gesture.doc.revision === this.confirmed.revision;
+    const cancel = allowed ? this.cancelPointColorInteraction() : Promise.resolve();
+    const decision = Object.freeze({ allowed, cancel });
+    if (allowed) this.pointColorDiscardDecision = decision;
+    return decision;
+  }
+  ownsPointColorDraftDiscard(decision: RawDraftDiscardDecision): boolean {
+    return this.pointColorDiscardDecision === decision && decision.allowed;
   }
   cancelPointColorInteraction() {
     if (this.pointColorRecoveryRequired) return Promise.reject(new RawApiError('raw_save_unconfirmed'));
