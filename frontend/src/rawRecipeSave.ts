@@ -366,6 +366,12 @@ export class RawRecipeSave {
   ownsPointColorDraftDiscard(decision: RawDraftDiscardDecision): boolean {
     return this.pointColorDiscardDecision === decision && decision.allowed;
   }
+  /** A workspace discard must not erase an immutable request whose durable outcome is unknown. */
+  canDiscardWorkspace(decision?: RawDraftDiscardDecision): boolean {
+    const ownsDraft = !!decision && this.ownsPointColorDraftDiscard(decision);
+    return !this.operation && !this.historyOperation && !this.retryRequest && !this.moveIntent && !this.saving && !this.moving
+      && (!this.pointColorRecoveryRequired || ownsDraft);
+  }
   cancelPointColorInteraction() {
     if (this.pointColorRecoveryRequired) return Promise.reject(new RawApiError('raw_save_unconfirmed'));
     const gesture = this.pointColorGesture;

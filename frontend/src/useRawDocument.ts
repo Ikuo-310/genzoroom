@@ -1006,6 +1006,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     enqueue(open);
     let discarded=false,discardOperation:Promise<void>|undefined;
     let discardTermination: RawWorkspaceTermination | undefined;
+    let discardSaveSafeAtStart: boolean | undefined;
     let discardDecision: RawDraftDiscardDecision | undefined;
     let discardSaver: RawRecipeSave | undefined, discardEditor: RawControls | undefined;
     let discardProof: { workspaceId: string; saver: RawRecipeSave; handle: string; generation: number; documentToken: string; revision: number } | undefined;
@@ -1041,7 +1042,11 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     };
     discardRef.current=()=>{
       if(discardOperation)return discardOperation;
-      if (discardTermination) return runExplicitDiscard(discardTermination);
+      if (discardTermination) {
+        discardSaveSafeAtStart = discardSaver?.canDiscardWorkspace(discardDecision) ?? true;
+        if (!discardSaveSafeAtStart) return Promise.reject(new RawApiError('raw_save_unconfirmed'));
+        return runExplicitDiscard(discardTermination);
+      }
       if(!active || identity.current!==assetId || serial.current!==currentSerial || !workspace)return Promise.reject(new RawApiError('raw_document_closed'));
       if (pointColorTermination) return Promise.reject(new RawApiError('raw_busy'));
       const ownedWorkspace=workspace;
@@ -1059,6 +1064,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
           discardProof = { workspaceId: ownedWorkspace, saver: ownedSaver, handle: doc.handle,
             generation: doc.generation, documentToken: doc.documentToken, revision: doc.revision };
       }
+      discardSaveSafeAtStart = ownedSaver?.canDiscardWorkspace(discardDecision) ?? true;
       retired=true;frozen.current=true;
       setState(previous=>previous && {...previous,locked:true});
       let discardSent = false;
@@ -1071,10 +1077,13 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
             throw new RawApiError('raw_save_unconfirmed');
           }
           try { await discardDecision.cancel; } catch { /* A proven draft may be discarded even when Native Cancel is unacknowledged. */ }
-          if (!identityStillOwned() || !ownedSaver?.ownsPointColorDraftDiscard(discardDecision))
+          if (!identityStillOwned() || !ownedSaver?.ownsPointColorDraftDiscard(discardDecision)
+            || !ownedSaver.canDiscardWorkspace(discardDecision))
             throw new RawApiError('raw_save_unconfirmed');
           return;
         }
+        if (!discardSaveSafeAtStart || ownedSaver && !ownedSaver.canDiscardWorkspace())
+          throw new RawApiError('raw_save_unconfirmed');
         if (pointColorGuard && (ownedSaver?.saving || ownedSaver?.error || ownedEditor?.unsettled))
           throw new RawApiError('raw_save_unconfirmed');
         await ownedSaver?.preparePointColorForDeparture();
@@ -1083,6 +1092,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         if (workspace !== ownedWorkspace || !identityStillOwned()) throw new RawApiError('raw_stale_handle');
         if (discardDecision && (!ownsDiscardProof() || !ownedSaver?.ownsPointColorDraftDiscard(discardDecision)))
           throw new RawApiError('raw_save_unconfirmed');
+        if (ownedSaver && !ownedSaver.canDiscardWorkspace(discardDecision)) throw new RawApiError('raw_save_unconfirmed');
         abortRawWorkspaceRequests(ownedWorkspace);
         const confirmEmptyOrThrow = async (failure: unknown) => {
           if (await rawWorkspaceEmpty(ownedWorkspace)) return;
@@ -1093,13 +1103,17 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
           // A retry requires the original P1 proof; without it only an empty Backend can release ownership.
           if (!ownsDiscardProof()) throw new RawApiError('raw_save_unconfirmed');
         }
+        if (ownedSaver && !ownedSaver.canDiscardWorkspace(discardDecision)) throw new RawApiError('raw_save_unconfirmed');
         try {
           discardSent = true;
           await discardRawWorkspace({workspaceId:ownedWorkspace});
         } catch (cause) {
           if (await rawWorkspaceEmpty(ownedWorkspace)) return;
           if (!ownsDiscardProof()) throw cause;
-          try { await discardRawWorkspace({workspaceId:ownedWorkspace}); }
+          if (ownedSaver && !ownedSaver.canDiscardWorkspace(discardDecision)) throw new RawApiError('raw_save_unconfirmed');
+          try {
+            await discardRawWorkspace({workspaceId:ownedWorkspace});
+          }
           catch (retryCause) {
             if (await rawWorkspaceEmpty(ownedWorkspace)) return;
             throw retryCause;

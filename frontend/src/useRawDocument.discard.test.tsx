@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useRawDocument } from './useRawDocument';
+import { RawRecipeSave, type RawDraftDiscardDecision } from './rawRecipeSave';
 import * as api from './rawApi';
 import { rawSettings } from './test/rawSettings';
 import { rawHistoryData, rawHistoryResult } from './test/rawHistory';
@@ -59,6 +60,54 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove(); vi.unstubAllGlobals();
+});
+
+it('preserves an unresolved public Point Color History operation instead of discarding its workspace', async () => {
+  await act(async () => { root.render(<Harness />); }); await flush();
+  expect(current).toMatchObject({ status: 'ready', history: { initialized: true } });
+  const unknownSave = new api.RawSaveError('raw_history_save_failed', 'unknown');
+  commitHistory.mockRejectedValueOnce(unknownSave);
+
+  act(() => current!.operate({ kind: 'pointColorDelete', metadata: { index: 0 } }));
+  await flush();
+  expect(commitHistory).toHaveBeenCalledOnce();
+  const pendingSave = commitHistory.mock.calls[0]![0];
+  expect(pendingSave).toMatchObject({ action: 'operate', operation: { kind: 'pointColorDelete', metadata: { index: 0 } } });
+  expect(current).toMatchObject({ saving: false, movingHistory: false, saveError: 'raw_history_save_failed' });
+
+  await expect(act(async () => current!.discardChanges())).rejects.toMatchObject({ code: 'raw_save_unconfirmed' });
+  expect(api.discardRawWorkspace).not.toHaveBeenCalled();
+  act(() => current!.operate({ kind: 'pointColorReset', metadata: {} }));
+  await flush();
+  expect(commitHistory).toHaveBeenCalledOnce();
+
+  commitHistory.mockImplementationOnce(async request => rawHistoryResult(request));
+  await act(async () => { await current!.retrySave(); });
+  expect(commitHistory).toHaveBeenCalledTimes(2);
+  expect(commitHistory.mock.calls[1]![0]).toEqual(pendingSave);
+  await act(async () => { await current!.discardChanges(); });
+  expect(api.discardRawWorkspace).toHaveBeenCalledOnce();
+  expect(api.discardRawWorkspace).toHaveBeenCalledWith({ workspaceId: 'workspace-a' });
+});
+
+it('rechecks the same Saver immediately before sending a proven-draft discard', async () => {
+  await act(async () => { root.render(<Harness />); }); await flush();
+  act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); }); await flush();
+  const original = RawRecipeSave.prototype.canDiscardWorkspace;
+  let checks = 0;
+  const safety = vi.spyOn(RawRecipeSave.prototype, 'canDiscardWorkspace').mockImplementation(function (this: RawRecipeSave,
+    decision?: RawDraftDiscardDecision) {
+    checks++;
+    return checks === 4 ? false : original.call(this, decision);
+  });
+
+  await expect(act(async () => current!.discardChanges())).rejects.toMatchObject({ code: 'raw_save_unconfirmed' });
+  expect(checks).toBeGreaterThanOrEqual(4);
+  expect(api.discardRawWorkspace).not.toHaveBeenCalled();
+  safety.mockRestore();
+
+  await act(async () => { await current!.discardChanges(); });
+  expect(api.discardRawWorkspace).toHaveBeenCalledOnce();
 });
 
 it('does not discard when P1 cannot prove the active Point Color interaction is draft-only', async () => {

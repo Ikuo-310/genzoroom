@@ -41,11 +41,13 @@ it.each(['success', 'rejected', 'unknown', 'readback'])('binds explicit Draft di
   await owner; await (c as any).pointColorGesture.started;
   const decision = c.beginPointColorDraftDiscard();
   expect(decision.allowed).toBe(true);
+  expect(c.canDiscardWorkspace(decision)).toBe(true);
   expect(c.beginPointColorDraftDiscard()).toBe(decision);
   expect(c.cancelPointColorInteraction()).toBe(decision.cancel);
   if (outcome === 'success') await decision.cancel;
   else await expect(decision.cancel).rejects.toBeInstanceOf(api.RawApiError);
   expect(c.ownsPointColorDraftDiscard(decision)).toBe(true);
+  expect(c.canDiscardWorkspace(decision)).toBe(true);
   expect(saver().ownsPointColorDraftDiscard(decision)).toBe(false);
   expect(api.saveRawHistory).not.toHaveBeenCalled();
   if (outcome === 'success') {
@@ -81,6 +83,26 @@ it.each(['finish', 'normal-cancel', 'retry', 'history', 'uncertain'])('refuses D
   expect(decision.allowed).toBe(false);
   expect(c.ownsPointColorDraftDiscard(decision)).toBe(false);
   await decision.cancel;
+});
+
+it('blocks workspace discard while a public History save has an unresolved receipt and permits it after same-ID retry', async () => {
+  const initial = settings();
+  const controls = { confirmed: initial, beginPreview: vi.fn(), endPreview: vi.fn(), refreshPreview: vi.fn(), flush: vi.fn(), unsettled: false } as any;
+  const c = new RawRecipeSave(initial, { schedule: action => { owner = owner.then(action); }, changed, controls });
+  c.initialized = true; c.history = { initialized: true, cursor: 0, length: 0, selectedStepId: null };
+  vi.mocked(api.saveRawHistory).mockRejectedValueOnce(new api.RawSaveError('raw_history_save_failed', 'unknown'));
+
+  const operation = c.operate({ kind: 'pointColorDelete', metadata: { index: 0 } });
+  await owner;
+  await expect(operation).rejects.toMatchObject({ code: 'raw_history_save_failed' });
+  expect(c.canDiscardWorkspace()).toBe(false);
+  const uncertainRequest = vi.mocked(api.saveRawHistory).mock.calls[0]![0];
+  expect(uncertainRequest).toMatchObject({ action: 'operate', operation: { kind: 'pointColorDelete', metadata: { index: 0 } } });
+
+  vi.mocked(api.saveRawHistory).mockImplementationOnce(async request => rawHistoryResult(request));
+  await c.save(true);
+  expect(vi.mocked(api.saveRawHistory).mock.calls[1]![0]).toEqual(uncertainRequest);
+  expect(c.canDiscardWorkspace()).toBe(true);
 });
 
 it('autosaves only settled confirmed readback after five seconds', async () => {
