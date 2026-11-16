@@ -1885,6 +1885,130 @@ it('retains the release owner when status lookup fails and retries it on a later
   expect(current?.document?.assetId).toBe('c');
 });
 
+it.each((['discard', 'create', 'open', 'settings'] as const).flatMap(stage =>
+  (['unmountWhileWaiting', 'switchAtCompletion'] as const).map(timing => [stage, timing] as const)))
+  ('transfers Recovery ownership after %s when the hook %s', async (stage, timing) => {
+    const pointColor = { lum: .5, chroma: .1, hue: 20, hue_shift: 0, sat_shift: 0, lum_shift: 0, variance: 0,
+      range: 50, hue_range: 50, sat_range: 50, lum_range: 50 };
+    const sourceDoc: api.RawDocument = { workspaceId: 'source-ws', assetId: 'a', handle: 'source-handle', generation: 1,
+      documentToken: 'source-token', revision: 1 };
+    const recoveryDoc: api.RawDocument = { workspaceId: 'recovery-ws', assetId: 'a', handle: 'recovery-handle', generation: 2,
+      documentToken: 'recovery-token', revision: 1 };
+    const nextDoc: api.RawDocument = { workspaceId: 'next-ws', assetId: 'b', handle: 'next-handle', generation: 1,
+      documentToken: 'next-token', revision: 1 };
+    const discardGate = deferred<void>(), createGate = deferred<string>(), openGate = deferred<api.RawDocument>();
+    const settingsGate = deferred<api.RawSettings>(), releaseGate = deferred<void>();
+    let createCount = 0;
+    vi.mocked(api.createRawWorkspace).mockImplementation(async () => {
+      createCount++;
+      if (createCount === 1) return 'source-ws';
+      if (stage === 'discard') return 'next-ws';
+      if (createCount === 2) return stage === 'create' ? createGate.promise : 'recovery-ws';
+      return 'next-ws';
+    });
+    vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => {
+      if (workspaceId === 'source-ws') return sourceDoc;
+      if (workspaceId === 'recovery-ws') return stage === 'open' ? openGate.promise : recoveryDoc;
+      return nextDoc;
+    });
+    let settingsCalls = 0;
+    vi.mocked(api.readRawSettings).mockImplementation(async doc => {
+      settingsCalls++;
+      if (doc.workspaceId === 'recovery-ws' && stage === 'settings') return settingsGate.promise;
+      return { ...rawSettings(doc), point_colors: doc.workspaceId === 'source-ws' ? [pointColor] : [] };
+    });
+    vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(['png']), width: 16, height: 12,
+      epoch: 1, sequence: 1, frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000,
+        aspect: 4/3, fullWidth: 16, fullHeight: 12, window: null } });
+    vi.mocked(api.cancelRawPointColorInteraction).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'));
+    vi.mocked(api.discardRawWorkspace).mockImplementation(async () => stage === 'discard' ? discardGate.promise : undefined);
+    vi.mocked(api.releaseRawWorkspace).mockImplementation(async id => id === 'recovery-ws' ? releaseGate.promise : undefined);
+
+    await render('a'); await flush();
+    act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); });
+    await flush();
+    act(() => current!.cancelPointColorInteraction());
+    await flush();
+    expect(api.discardRawWorkspace).toHaveBeenCalledOnce();
+    if (stage === 'create') expect(vi.mocked(api.createRawWorkspace)).toHaveBeenCalledTimes(2);
+    if (stage === 'open') expect(vi.mocked(api.openRawDocument)).toHaveBeenCalledTimes(2);
+    if (stage === 'settings') expect(settingsCalls).toBe(2);
+
+    const resolveStage = () => {
+      if (stage === 'discard') discardGate.resolve();
+      if (stage === 'create') createGate.resolve('recovery-ws');
+      if (stage === 'open') openGate.resolve(recoveryDoc);
+      if (stage === 'settings') settingsGate.resolve({ ...rawSettings(recoveryDoc), point_colors: [] });
+    };
+    if (timing === 'unmountWhileWaiting') {
+      await render(null);
+      resolveStage();
+    } else {
+      await act(async () => { resolveStage(); root.render(<Harness id="b" />); });
+    }
+    await flush();
+
+    if (stage !== 'discard') {
+      expect(vi.mocked(api.releaseRawWorkspace).mock.calls.filter(([id]) => id === 'recovery-ws')).toHaveLength(1);
+      expect(vi.mocked(api.openRawDocument).mock.calls.filter(([, assetId]) => assetId === 'b')).toHaveLength(0);
+      if (timing === 'unmountWhileWaiting') { await render('b'); await flush(); }
+      await act(async () => { releaseGate.resolve(); }); await flush();
+    } else if (timing === 'unmountWhileWaiting') {
+      await render('b'); await flush();
+    }
+
+    expect(current?.document?.assetId).toBe('b');
+    expect(vi.mocked(api.openRawDocument).mock.calls.filter(([, assetId]) => assetId === 'b')).toHaveLength(1);
+    expect(vi.mocked(api.openRawDocument).mock.calls.find(([, assetId]) => assetId === 'b')?.[0]).toBe('next-ws');
+  });
+
+it('retains a stale Recovery workspace owner after an uncertain release until a later open confirms empty', async () => {
+  const pointColor = { lum: .5, chroma: .1, hue: 20, hue_shift: 0, sat_shift: 0, lum_shift: 0, variance: 0,
+    range: 50, hue_range: 50, sat_range: 50, lum_range: 50 };
+  const sourceDoc: api.RawDocument = { workspaceId: 'recovery-source', assetId: 'a', handle: 'source-handle', generation: 1,
+    documentToken: 'source-token', revision: 1 };
+  const nextDoc: api.RawDocument = { workspaceId: 'recovery-next', assetId: 'b', handle: 'next-handle', generation: 1,
+    documentToken: 'next-token', revision: 1 };
+  const createGate = deferred<string>();
+  let created = 0, releases = 0, confirmations = 0;
+  vi.mocked(api.createRawWorkspace).mockImplementation(async () => {
+    created++;
+    return created === 1 ? 'recovery-source' : created === 2 ? createGate.promise : 'recovery-next';
+  });
+  vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => workspaceId === 'recovery-source'
+    ? sourceDoc : nextDoc);
+  vi.mocked(api.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc),
+    point_colors: doc.workspaceId === 'recovery-source' ? [pointColor] : [] }));
+  vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(['png']), width: 16, height: 12,
+    epoch: 1, sequence: 1, frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000,
+      aspect: 4/3, fullWidth: 16, fullHeight: 12, window: null } });
+  vi.mocked(api.cancelRawPointColorInteraction).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'));
+  vi.mocked(api.discardRawWorkspace).mockResolvedValue();
+  vi.mocked(api.releaseRawWorkspace).mockImplementation(async id => {
+    expect(id).toBe('recovery-stale');
+    releases++;
+    if (releases <= 3) throw new api.RawApiError('raw_workspace_conflict', 409);
+  });
+  vi.mocked(api.rawWorkspaceEmpty).mockImplementation(async id => {
+    expect(id).toBe('recovery-stale');
+    confirmations++;
+    return confirmations === 3;
+  });
+
+  await render('a'); await flush();
+  act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); });
+  await flush();
+  act(() => current!.cancelPointColorInteraction()); await flush();
+  expect(vi.mocked(api.createRawWorkspace)).toHaveBeenCalledTimes(2);
+  await render('b');
+  createGate.resolve('recovery-stale');
+  await flush();
+  expect(releases).toBe(3);
+  expect(confirmations).toBe(3);
+  expect(vi.mocked(api.openRawDocument).mock.calls.filter(([, assetId]) => assetId === 'b')).toHaveLength(1);
+  expect(current?.document?.assetId).toBe('b');
+});
+
 it('keeps a Point Color owner at the saving boundary when History outcome is unknown', async () => {
   const pointColor = { lum: .5, chroma: .1, hue: 20, hue_shift: 0, sat_shift: 0, lum_shift: 0, variance: 0,
     range: 50, hue_range: 50, sat_range: 50, lum_range: 50 };
