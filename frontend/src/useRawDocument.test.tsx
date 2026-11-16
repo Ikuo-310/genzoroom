@@ -960,6 +960,104 @@ describe('RAW document lifetime', () => {
     await flush();
   }
 
+  it('cancels an acknowledged Point Color draft before explicit discard', async () => {
+    await beginPointColor();
+    await act(async () => { await current!.discardChanges(); });
+    expect(api.cancelRawPointColorInteraction).toHaveBeenCalledOnce();
+    expect(api.discardRawWorkspace).toHaveBeenCalledOnce();
+    expect(api.discardRawWorkspace).toHaveBeenCalledWith({ workspaceId: 'workspace' });
+    expect(vi.mocked(api.saveRawHistory).mock.calls.filter(([request]) => request.action === 'commit')).toHaveLength(0);
+  });
+
+  it('keeps the P1 draft-discard proof when Native Cancel fails and completes explicit discard once', async () => {
+    await beginPointColor();
+    const cancel = deferred<void>(), discard = deferred<void>();
+    vi.mocked(api.cancelRawPointColorInteraction).mockReturnValueOnce(cancel.promise);
+    vi.mocked(api.discardRawWorkspace).mockReturnValueOnce(discard.promise);
+
+    let request!: Promise<void>;
+    act(() => { request = current!.discardChanges(); });
+    await flush();
+    expect(api.cancelRawPointColorInteraction).toHaveBeenCalledOnce();
+    expect(api.discardRawWorkspace).not.toHaveBeenCalled();
+    await act(async () => { cancel.reject(new api.RawApiError('raw_connection_failed')); await flush(); });
+    await flush();
+
+    expect(api.discardRawWorkspace).toHaveBeenCalledOnce();
+    expect(api.discardRawWorkspace).toHaveBeenCalledWith({ workspaceId: 'workspace' });
+    expect(api.createRawWorkspace).toHaveBeenCalledOnce();
+    await act(async () => { discard.resolve(); await request; });
+    expect(api.discardRawWorkspace).toHaveBeenCalledOnce();
+    expect(api.saveRawHistory).not.toHaveBeenCalledWith(expect.objectContaining({ action: 'operate' }));
+  });
+
+  it('retains explicit discard ownership across unmount and waits before opening the next Document', async () => {
+    await beginPointColor();
+    const cancel = deferred<void>(), discard = deferred<void>();
+    vi.mocked(api.cancelRawPointColorInteraction).mockReturnValueOnce(cancel.promise);
+    vi.mocked(api.discardRawWorkspace).mockReturnValueOnce(discard.promise);
+    let request!: Promise<void>;
+    act(() => { request = current!.discardChanges(); });
+    await flush();
+    await act(async () => { window.dispatchEvent(new Event('pagehide')); });
+    await render(null);
+    await render('b'); await flush();
+    expect(api.openRawDocument).toHaveBeenCalledOnce();
+
+    await act(async () => { cancel.reject(new api.RawApiError('raw_connection_failed')); await flush(); });
+    await flush();
+    expect(api.discardRawWorkspace).toHaveBeenCalledOnce();
+    expect(api.openRawDocument).toHaveBeenCalledOnce();
+    await act(async () => { discard.resolve(); await flush(); });
+    await flush();
+    await request;
+    expect(api.openRawDocument).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(api.openRawDocument).mock.calls.at(-1)?.[1]).toBe('b');
+  });
+
+  it('continues a proven discard after Cancel ACK but failed settings readback', async () => {
+    await beginPointColor();
+    vi.mocked(api.readRawSettings).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'));
+    vi.mocked(api.cancelRawPointColorInteraction).mockResolvedValueOnce();
+
+    await act(async () => { await current!.discardChanges(); });
+    expect(api.cancelRawPointColorInteraction).toHaveBeenCalledOnce();
+    expect(api.discardRawWorkspace).toHaveBeenCalledOnce();
+    expect(api.discardRawWorkspace).toHaveBeenCalledWith({ workspaceId: 'workspace' });
+  });
+
+  it('confirms Backend empty after a lost discard reply and retries only with the bound P1 proof', async () => {
+    await beginPointColor();
+    vi.mocked(api.cancelRawPointColorInteraction).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'));
+    vi.mocked(api.discardRawWorkspace).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'));
+    vi.mocked(api.rawWorkspaceEmpty).mockResolvedValueOnce(true);
+
+    await act(async () => { await current!.discardChanges(); });
+    expect(api.discardRawWorkspace).toHaveBeenCalledOnce();
+    expect(api.rawWorkspaceEmpty).toHaveBeenCalledWith('workspace');
+
+    await render('b'); await flush();
+    expect(current?.assetId).toBe('b');
+    expect(api.openRawDocument).toHaveBeenCalledTimes(2);
+  });
+
+  it('retains the old discard owner and retries its exact workspace after an uncertain result', async () => {
+    await beginPointColor();
+    vi.mocked(api.cancelRawPointColorInteraction).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'));
+    vi.mocked(api.discardRawWorkspace).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'))
+      .mockRejectedValueOnce(new api.RawApiError('raw_workspace_conflict', 409))
+      .mockResolvedValueOnce();
+    vi.mocked(api.rawWorkspaceEmpty).mockResolvedValue(false);
+    await expect(act(async () => { await current!.discardChanges(); })).rejects.toMatchObject({ code: 'raw_workspace_conflict' });
+
+    await render('b'); await flush();
+    expect(vi.mocked(api.discardRawWorkspace).mock.calls.map(([request]) => request)).toEqual([
+      { workspaceId: 'workspace' }, { workspaceId: 'workspace' }, { workspaceId: 'workspace' },
+    ]);
+    expect(api.openRawDocument).toHaveBeenCalledTimes(2);
+    expect(current?.assetId).toBe('b');
+  });
+
   it.each(['delivered', 'superseded'])('saves a departing Finish after a %s Preview before opening the successor', async delivery => {
     await beginPointColor();
     const preview = deferred<api.RawFrame>(), history = deferred<api.RawHistoryResult>(), release = deferred<void>();
