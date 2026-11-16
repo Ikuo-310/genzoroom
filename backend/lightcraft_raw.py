@@ -1940,6 +1940,12 @@ class LightCraftRawSession:
             raise LightCraftError("raw_invalid_preview_request")
         sent = False
         async with interaction.update_lock:
+            if self._point_color_interaction is not interaction or interaction.interaction_id != interaction_id or \
+                    interaction.handle != handle or interaction.state != "open":
+                raise LightCraftError("raw_point_color_interaction_stale")
+            if expected_revision != interaction.baseline_revision or sequence != interaction.latest_sequence + 1:
+                raise LightCraftError("raw_revision_conflict")
+
             async def action(deadline):
                 nonlocal sent
                 photo = self._photo(handle, active=True)
@@ -1996,58 +2002,65 @@ class LightCraftRawSession:
                 expected_revision != interaction.baseline_revision:
             raise LightCraftError("raw_point_color_interaction_stale")
         validated = validate_point_color_value(interaction.control.rsplit(".", 1)[1], value)
-        if control != interaction.control or validated != interaction.value or interaction.state != "open" or \
-                interaction.latest_sequence != interaction.applied_sequence:
-            applied_value = None
+        # End must share the update fence so it validates the last ACK, not a stale pre-queue value.
+        async with interaction.update_lock:
+            if self._point_color_interaction is not interaction or interaction.interaction_id != interaction_id or \
+                    interaction.handle != handle or interaction.baseline_revision != expected_revision:
+                raise LightCraftError("raw_point_color_interaction_stale")
+            if control != interaction.control or validated != interaction.value or interaction.state != "open" or \
+                    interaction.latest_sequence != interaction.applied_sequence:
+                applied_value = None
+                try:
+                    working = json.loads(interaction.working_settings_json)
+                    applied_value = working["point_colors"][interaction.index][interaction.native_field]
+                except (KeyError, IndexError, TypeError):
+                    pass
+                lightcraft_log("raw.pointColor.interactionConflict", level="warn", generation=self._generation,
+                    controlMatches=control == interaction.control, state=interaction.state,
+                    latestSequence=interaction.latest_sequence, appliedSequence=interaction.applied_sequence,
+                    requestedValue=validated, appliedValue=applied_value)
+                raise LightCraftError("raw_point_color_interaction_conflict")
+            ended = False
+
+            async def action(deadline):
+                nonlocal ended
+                photo = self._photo(handle, active=True)
+                if photo.applied_revision != interaction.baseline_revision or photo.requested_revision != photo.applied_revision:
+                    raise LightCraftError("raw_revision_conflict")
+                await self._command("develop.endInteraction", {}, deadline)
+                ended = True
+                return await self._read_settings(photo, deadline)
+
             try:
-                working = json.loads(interaction.working_settings_json)
-                applied_value = working["point_colors"][interaction.index][interaction.native_field]
-            except (KeyError, IndexError, TypeError):
-                pass
-            lightcraft_log("raw.pointColor.interactionConflict", level="warn", generation=self._generation,
-                controlMatches=control == interaction.control, state=interaction.state,
-                latestSequence=interaction.latest_sequence, appliedSequence=interaction.applied_sequence,
-                requestedValue=validated, appliedValue=applied_value)
-            raise LightCraftError("raw_point_color_interaction_conflict")
-        ended = False
-        async def action(deadline):
-            nonlocal ended
-            photo = self._photo(handle, active=True)
-            if photo.applied_revision != interaction.baseline_revision or photo.requested_revision != photo.applied_revision:
-                raise LightCraftError("raw_revision_conflict")
-            await self._command("develop.endInteraction", {}, deadline)
-            ended = True
-            return await self._read_settings(photo, deadline)
-        try:
-            encoded = await self._submit(action, self._timeouts.command, interaction_id=interaction_id)
-        except MCPTransportError:
-            interaction.state = "unknown"
-            self._desynchronized = True
-            raise
-        except LightCraftError as error:
-            if error.code == "raw_operation_timeout" or ended or self._lost:
-                interaction.state = "unknown" if not ended else "failed"
+                encoded = await self._submit(action, self._timeouts.command, interaction_id=interaction_id)
+            except MCPTransportError:
+                interaction.state = "unknown"
                 self._desynchronized = True
-            raise
-        expected = json.loads(interaction.working_settings_json)
-        actual_normalized_json = _settings_json(json.loads(encoded))
-        expected_normalized_json = _settings_json(expected)
-        actual_normalized = json.loads(actual_normalized_json)
-        expected_normalized = json.loads(expected_normalized_json)
-        if not _settings_values_equal(actual_normalized, expected_normalized):
-            lightcraft_log("raw.pointColor.readbackMismatch", level="warn", generation=self._generation,
-                phase="end", control=interaction.control,
-                mismatchFields=_safe_settings_differences(expected_normalized, actual_normalized))
-            interaction.state = "failed"
-            self._desynchronized = True
-            raise LightCraftError("raw_point_color_control_mismatch")
-        if encoded != interaction.baseline_settings_json:
-            self._edits += 1
-        interaction.final_result = PointColorInteractionResult(handle, interaction_id,
-            interaction.baseline_revision, control, validated, encoded)
-        interaction.state = "finalized"
-        self._invalidate()
-        return interaction.final_result
+                raise
+            except LightCraftError as error:
+                if error.code == "raw_operation_timeout" or ended or self._lost:
+                    interaction.state = "unknown" if not ended else "failed"
+                    self._desynchronized = True
+                raise
+            expected = json.loads(interaction.working_settings_json)
+            actual_normalized_json = _settings_json(json.loads(encoded))
+            expected_normalized_json = _settings_json(expected)
+            actual_normalized = json.loads(actual_normalized_json)
+            expected_normalized = json.loads(expected_normalized_json)
+            if not _settings_values_equal(actual_normalized, expected_normalized):
+                lightcraft_log("raw.pointColor.readbackMismatch", level="warn", generation=self._generation,
+                    phase="end", control=interaction.control,
+                    mismatchFields=_safe_settings_differences(expected_normalized, actual_normalized))
+                interaction.state = "failed"
+                self._desynchronized = True
+                raise LightCraftError("raw_point_color_control_mismatch")
+            if encoded != interaction.baseline_settings_json:
+                self._edits += 1
+            interaction.final_result = PointColorInteractionResult(handle, interaction_id,
+                interaction.baseline_revision, control, validated, encoded)
+            interaction.state = "finalized"
+            self._invalidate()
+            return interaction.final_result
 
     async def cancel_point_color_interaction(self, handle, interaction_id, expected_revision):
         interaction = self._point_color_interaction
@@ -3216,8 +3229,18 @@ class LightCraftRawSession:
             if point_color is not None and point_color.interaction_id == ticket.interaction_id:
                 if point_color.state == "open" and ticket.interaction_sequence == point_color.latest_sequence == point_color.applied_sequence:
                     from raw_controls import validate_point_colors
-                    validate_point_colors(json.loads(settings))
-                    point_color.working_settings_json = settings
+                    actual = json.loads(_settings_json(json.loads(settings)))
+                    expected = json.loads(_settings_json(json.loads(point_color.working_settings_json)))
+                    validate_point_colors(actual)
+                    if not _settings_values_equal(expected, actual):
+                        lightcraft_log("raw.pointColor.readbackMismatch", level="warn", generation=self._generation,
+                            phase="preview", control=point_color.control,
+                            sequence=ticket.interaction_sequence,
+                            mismatchFields=_safe_settings_differences(expected, actual))
+                        point_color.state = "failed"
+                        self._desynchronized = True
+                        raise LightCraftError("raw_point_color_control_mismatch")
+                    # Preview readback verifies the ACKed draft; it never becomes the durable candidate.
                 else:
                     ticket.abandoned, ticket.reason = True, "point_color_sequence"
                 return

@@ -422,3 +422,15 @@ Pointer Upはpumpを待つたびに同じ参照なら明示的に解放し、pen
 `raw_point_color_interaction_conflict`のBackend診断にはcontrol一致、interaction state、latest/applied sequence、requested/applied数値だけを追加し、設定snapshotは記録しない。History APIが明示的なHTTP rejectionとしてinteraction conflictを返した場合は、そのimmutable retry requestを破棄して既存cancel/readback経路で未確定Native Draftを戻し、Preview ownerを解放する。結果不明のsave failureでは従来どおり同一save IDのretry境界を保ち、Native更新を再送しない。
 
 DeferredのACK直後Pointer Up競合は修正前に失敗（送信値`[12]`、History値`25`）し、修正後は`[12, 25]`をACKした後だけHistoryを確定する。20個の急速入力を含む別テストではNative updateが`[12, 32]`の直列2回に集約され、最終ACK前にHistoryを呼ばず、最終値32を1件で確定する。明示的conflict時の取消し・owner解放もFrontend testで検証する。Backendでは競合診断の限定項目とPoint Color interaction／History経路をMock Nativeで確認する。実JPEG／DNGのDesktop手動検証は未実施。
+
+#### Point Color interaction確定値／Preview readback整合性
+
+全体監査F1をDeferred Native commandで再現した。`update`が`develop.set(25)`中でも`end(value=0)`は`update_lock`の外で古いACK値0を検査し、Nativeキューではupdateの後にendを送っていた。結果としてSnapshot 25とmetadata 0を確定できる状態だった。endはupdateと同じ既存`update_lock`をNative end・readback・finalized遷移まで保持する。ロック取得後にinteraction object／ID、Document handle、baseline revision、control、open state、latest/applied sequence、最後にACKした値を再検証する。updateも同じロック取得後にstate／identity／sequenceを再確認し、end確定後に待機していた古いupdateをNativeへ送らない。要求値がACK値と異なればNative endを送らず`raw_point_color_interaction_conflict`で拒否し、正しい値だけを検証済みSnapshotと結果へ確定する。Native end送信後の通信不明／readback失敗は従来どおりfailed／unknownとdesynchronizedへ移行する。
+
+監査F4はPreview後のNative readbackがPoint Color配列の形だけを検証し、既にACK照合済みだった`working_settings_json`を無条件に置き換えることで再現した。Preview後はreadback全体を既存`_settings_json()`で正規化し、最後にACKされた完全working snapshotと`_settings_values_equal()`で比較する。有限なint／float同値だけを許容し、bool、配列／キー構造、未反映の対象値、Point Color以外の差異も拒否する。不一致は限定field差分診断を出しinteractionをfailed、Sessionをdesynchronizedにし、未検証readbackをworking／History候補に採用しない。一致時もreadbackは検証目的に限り、Preview描画結果と履歴確定snapshotを分離する。Nativeの正規化で許容する具体的なPoint Color外差分は確認されていないため、例外許容は追加していない。
+
+Deferred Mock testはF1のupdate待機中end値0を修正前に受理すること、F4のPreview readbackで対象値99または`light.exposure`変更を修正前に受理することを確認した。修正後は不一致endがNative endを送らず拒否され、25のACK値での並行endは1回の確定として成功する。また、end中にlock待ちとなった古いupdateはNative送信前に拒否する。Previewの対象値／対象外設定不一致はともにticket error、failed／desynchronized、durable baseline不変となり、誤った値でのend／History確定を拒否する。`test_lightcraft_raw.py`、`test_raw_history_api.py`、`test_raw_category_operations.py`は合計290件成功し、同一save ID retry／receipt replayと既存History／Recipe／Undo／Redoを含むMock API／SQLite回帰も通過した。receipt再試行の動作は変更していない。
+
+receipt確認済みLightCraft v0.20.0 CLIで、合成JPEG／DNG各1件の既存real-Native Point Colorテストが成功した。各テストは採色後に8項目を含む`begin → update → Draft Preview → end → confirm`とNative readbackを通すが、今回のrace順序・Preview readback障害注入はMockでのみ検証しており、Windows Desktop実機の手動試験はしていない。Frontend focused testsは4 files／421件成功し、build内TypeScript checkとproduction buildも成功した（既存bundle size／依存directive warningあり）。
+
+HTTP `history/operate`はF1の事前Native拒否を既存のHistory operation中に受けるため、Windows API側のstage／owner解放はF2の監査対象として残る。本変更はWindows API、HTTP error mapping、History owner管理を変更しない。F2未修正のため、この拒否後のowner残留／同一save ID再試行挙動は未解決であり、独立して対応が必要である。

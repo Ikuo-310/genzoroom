@@ -1564,6 +1564,159 @@ def test_point_color_end_conflict_logs_only_safe_sequence_and_value_diagnostics(
     asyncio.run(run())
 
 
+def test_point_color_end_revalidates_after_an_inflight_update_finishes(tmp_path, monkeypatch):
+    async def run():
+        raw, _, children, files = await create(tmp_path, adaptive=True)
+        try:
+            handle, baseline = await raw.open_raw("pixel", files[0])
+            children[0].photos[1]["settings"]["point_colors"] = [point_color()]
+            baseline = await raw.get_settings(handle)
+            interaction_id = await raw.begin_point_color_interaction(handle, "pointColor.0.hueShift", baseline.revision)
+            entered, release = asyncio.Event(), asyncio.Event()
+            original = raw._command
+
+            async def delayed(command, params, deadline):
+                if command == "develop.set":
+                    entered.set()
+                    await release.wait()
+                return await original(command, params, deadline)
+
+            monkeypatch.setattr(raw, "_command", delayed)
+            update_task = asyncio.create_task(raw.update_point_color_interaction(
+                handle, interaction_id, baseline.revision, 1, 25))
+            await entered.wait()
+            end_task = asyncio.create_task(raw.end_point_color_interaction(
+                handle, interaction_id, baseline.revision, "pointColor.0.hueShift", 0))
+            await asyncio.sleep(0)
+            assert not end_task.done()
+            release.set()
+            update = await update_task
+            await update.preview_ticket
+            with pytest.raises(LightCraftError, match="raw_point_color_interaction_conflict"):
+                await end_task
+            assert not any(command == "develop.endInteraction" for command, _ in children[0].commands)
+            assert raw._point_color_interaction.state == "open"
+            assert raw._photos["pixel"].settings_json == _settings_json(baseline.settings)
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("fault", ["target", "other_setting"])
+def test_point_color_preview_readback_mismatch_never_promotes_unverified_snapshot(tmp_path, monkeypatch, fault):
+    async def run():
+        raw, _, children, files = await create(tmp_path, adaptive=True)
+        try:
+            handle, baseline = await raw.open_raw("pixel", files[0])
+            child = children[0]
+            child.photos[1]["settings"]["point_colors"] = [point_color()]
+            baseline = await raw.get_settings(handle)
+            interaction_id = await raw.begin_point_color_interaction(handle, "pointColor.0.hueShift", baseline.revision)
+            update = await raw.update_point_color_interaction(handle, interaction_id, baseline.revision, 1, 25)
+            original = raw._read_settings
+            calls = 0
+
+            async def altered_readback(photo, deadline, validate=None):
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    settings = child.photos[1]["settings"]
+                    if fault == "target":
+                        settings["point_colors"][0]["hue_shift"] = 99.
+                    else:
+                        settings["light"]["exposure"] = 1.
+                return await original(photo, deadline, validate=validate)
+
+            monkeypatch.setattr(raw, "_read_settings", altered_readback)
+            with pytest.raises(LightCraftError, match="raw_point_color_control_mismatch"):
+                await update.preview_ticket
+            interaction = raw._point_color_interaction
+            assert interaction.state == "failed"
+            assert raw._desynchronized
+            assert json.loads(interaction.working_settings_json)["point_colors"][0]["hue_shift"] == 25.
+            assert raw._photos["pixel"].settings_json == _settings_json(baseline.settings)
+            with pytest.raises(LightCraftError, match="raw_point_color_interaction_conflict"):
+                await raw.end_point_color_interaction(handle, interaction_id, baseline.revision,
+                    "pointColor.0.hueShift", 25)
+            assert child.interaction_history == []
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+def test_point_color_end_accepts_last_ack_after_waiting_for_inflight_update(tmp_path, monkeypatch):
+    async def run():
+        raw, _, children, files = await create(tmp_path, adaptive=True)
+        try:
+            handle, baseline = await raw.open_raw("pixel", files[0])
+            children[0].photos[1]["settings"]["point_colors"] = [point_color()]
+            baseline = await raw.get_settings(handle)
+            interaction_id = await raw.begin_point_color_interaction(handle, "pointColor.0.hueShift", baseline.revision)
+            entered, release = asyncio.Event(), asyncio.Event()
+            original = raw._command
+
+            async def delayed(command, params, deadline):
+                if command == "develop.set":
+                    entered.set()
+                    await release.wait()
+                return await original(command, params, deadline)
+
+            monkeypatch.setattr(raw, "_command", delayed)
+            update_task = asyncio.create_task(raw.update_point_color_interaction(
+                handle, interaction_id, baseline.revision, 1, 25))
+            await entered.wait()
+            end_task = asyncio.create_task(raw.end_point_color_interaction(
+                handle, interaction_id, baseline.revision, "pointColor.0.hueShift", 25))
+            await asyncio.sleep(0)
+            assert not end_task.done()
+            release.set()
+            update = await update_task
+            await update.preview_ticket
+            ended = await end_task
+            committed = raw.confirm_point_color_interaction(handle, interaction_id, baseline.revision)
+            assert ended.value == 25 and ended.settings["point_colors"][0]["hue_shift"] == 25
+            assert committed.settings["point_colors"][0]["hue_shift"] == 25
+            assert len(children[0].interaction_history) == 1
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+def test_point_color_update_waiting_behind_end_is_rejected_without_native_mutation(tmp_path, monkeypatch):
+    async def run():
+        raw, _, children, files = await create(tmp_path, adaptive=True)
+        try:
+            handle, baseline = await raw.open_raw("pixel", files[0])
+            children[0].photos[1]["settings"]["point_colors"] = [point_color()]
+            baseline = await raw.get_settings(handle)
+            interaction_id = await raw.begin_point_color_interaction(handle, "pointColor.0.hueShift", baseline.revision)
+            entered, release = asyncio.Event(), asyncio.Event()
+            original = raw._command
+
+            async def delayed(command, params, deadline):
+                if command == "develop.endInteraction":
+                    entered.set()
+                    await release.wait()
+                return await original(command, params, deadline)
+
+            monkeypatch.setattr(raw, "_command", delayed)
+            end_task = asyncio.create_task(raw.end_point_color_interaction(
+                handle, interaction_id, baseline.revision, "pointColor.0.hueShift", 0))
+            await entered.wait()
+            update_task = asyncio.create_task(raw.update_point_color_interaction(
+                handle, interaction_id, baseline.revision, 1, 25))
+            await asyncio.sleep(0)
+            assert not update_task.done()
+            release.set()
+            await end_task
+            with pytest.raises(LightCraftError, match="raw_point_color_interaction_stale"):
+                await update_task
+            assert not any(command == "develop.set" for command, _ in children[0].commands)
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
 def test_point_color_interaction_update_and_end_accept_integer_float_readback_but_keep_type_safety(tmp_path):
     async def run():
         raw, _, children, files = await create(tmp_path, adaptive=True)
