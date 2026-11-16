@@ -232,6 +232,7 @@ export class RawRecipeSave {
     if (!gesture || gesture.ending) return;
     gesture.ending = true;
     clearTimeout(gesture.timer);
+    gesture.timer = undefined;
     try {
       await gesture.started;
       // The pump Promise settles before its separate catch/finally cleanup chain. Clear a settled
@@ -279,6 +280,7 @@ export class RawRecipeSave {
     if (gesture.cancelPromise) return gesture.cancelPromise;
     gesture.ending = true;
     clearTimeout(gesture.timer);
+    gesture.timer = undefined;
     gesture.pending = undefined;
     const cancellation = gesture.started.then(async id => {
       if (this.pointColorGesture !== gesture) return;

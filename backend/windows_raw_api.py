@@ -36,7 +36,7 @@ HISTORY_CONFLICTS = {"raw_history_save_pending", "raw_history_commit_required", 
                      "raw_history_operation_outcome_unknown",
                      "raw_curve_interaction_pending", "raw_mixer_interaction_pending",
                      "raw_curve_interaction_stale", "raw_mixer_interaction_stale", "raw_mixer_interaction_sequence",
-                     "raw_mixer_interaction_conflict"}
+                     "raw_mixer_interaction_conflict", "raw_point_color_interaction_conflict"}
 LEASE_SECONDS = 180
 LEASE_POLL_SECONDS = 15
 
@@ -1568,9 +1568,18 @@ class RawPreviewApi:
                     pending["settings"] = interaction_result.settings
                 elif point_color_interaction:
                     pending["stage"] = "ending"
-                    interaction_result = await self.raw.end_point_color_interaction(self._raw_handle,
-                        body["pointColorInteractionId"], body["documentRevision"], body["metadata"]["control"],
-                        body["metadata"]["value"])
+                    try:
+                        interaction_result = await self.raw.end_point_color_interaction(self._raw_handle,
+                            body["pointColorInteractionId"], body["documentRevision"], body["metadata"]["control"],
+                            body["metadata"]["value"])
+                    except BaseException:
+                        # Only an open, synced interaction proves Native end was never attempted.
+                        interaction = self.raw._point_color_interaction
+                        if self._history_save is pending and interaction is not None and \
+                                interaction.interaction_id == body["pointColorInteractionId"] and \
+                                interaction.state == "open" and self.raw.status().state == "synced":
+                            self._history_save = None
+                        raise
                     self._history_verify(doc)
                     pending["settings"] = interaction_result.settings
                 else:

@@ -2027,6 +2027,8 @@ class LightCraftRawSession:
                 photo = self._photo(handle, active=True)
                 if photo.applied_revision != interaction.baseline_revision or photo.requested_revision != photo.applied_revision:
                     raise LightCraftError("raw_revision_conflict")
+                # This state is the fence between a provably unsent rejection and an ambiguous Native outcome.
+                interaction.state = "ending"
                 await self._command("develop.endInteraction", {}, deadline)
                 ended = True
                 return await self._read_settings(photo, deadline)
@@ -2038,8 +2040,13 @@ class LightCraftRawSession:
                 self._desynchronized = True
                 raise
             except LightCraftError as error:
-                if error.code == "raw_operation_timeout" or ended or self._lost:
+                if error.code == "raw_operation_timeout" or ended or interaction.state == "ending" or self._lost:
                     interaction.state = "unknown" if not ended else "failed"
+                    self._desynchronized = True
+                raise
+            except BaseException:
+                if interaction.state == "ending":
+                    interaction.state = "unknown"
                     self._desynchronized = True
                 raise
             expected = json.loads(interaction.working_settings_json)

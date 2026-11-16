@@ -125,7 +125,9 @@ it('coalesces Point Color interaction updates and saves one final History operat
   const target: api.RawDisplayTarget = { quality: 'draft', mode: 'whole', maxSide: 512, viewGeneration: 0, geometryId: null };
   c.updatePointColorInteraction(12, target);
   c.updatePointColorInteraction(25.5, target);
-  await vi.advanceTimersByTimeAsync(50);
+  await vi.advanceTimersByTimeAsync(49);
+  expect(api.updateRawPointColorInteraction).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1);
   expect(api.updateRawPointColorInteraction).toHaveBeenCalledOnce();
   expect(vi.mocked(api.updateRawPointColorInteraction).mock.calls[0][4].value).toBe(25.5);
   expect(api.saveRawHistory).not.toHaveBeenCalled();
@@ -135,6 +137,99 @@ it('coalesces Point Color interaction updates and saves one final History operat
   expect(request.operation).toEqual({ kind: 'pointColorControl', metadata: { control: 'pointColor.0.hueShift', value: 25.5 } });
   expect(request.pointColorInteractionId).toBe('a'.repeat(32));
   expect(c.pointColorInteracting).toBe(false);
+});
+
+it('flushes a pending Point Color value immediately when Pointer Up arrives before the 50ms pump', async () => {
+  const point = { lum: .5, chroma: .1, hue: 20, hue_shift: 0, sat_shift: 0, lum_shift: 0, variance: 0,
+    range: 50, hue_range: 50, sat_range: 50, lum_range: 50 };
+  const initial = { ...settings(), point_colors: [point] };
+  const controls = { confirmed: initial, beginPreview: vi.fn(), endPreview: vi.fn(), refreshPreview: vi.fn(), flush: vi.fn(), unsettled: false } as any;
+  const c = new RawRecipeSave(initial, { schedule: action => { owner = owner.then(action); }, changed, controls });
+  c.initialized = true; c.history = { initialized: true, cursor: 0, length: 0, selectedStepId: null };
+  vi.mocked(api.beginRawPointColorInteraction).mockResolvedValueOnce('a'.repeat(32));
+  const ack = deferred<number>();
+  vi.mocked(api.updateRawPointColorInteraction).mockReturnValueOnce(ack.promise);
+  vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(), width: 10, height: 10, epoch: 1, sequence: 1,
+    kind: 'after', quality: 'draft', interactionId: 'a'.repeat(32), interactionSequence: 1 } as api.RawFrame);
+  const save = vi.spyOn(c, 'save').mockResolvedValue();
+
+  expect(c.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true);
+  await owner;
+  await (c as any).pointColorGesture.started;
+  save.mockClear();
+  const target: api.RawDisplayTarget = { quality: 'draft', mode: 'whole', maxSide: 512, viewGeneration: 0, geometryId: null };
+  c.updatePointColorInteraction(38, target);
+  const finishing = c.finishPointColorInteraction();
+  await vi.advanceTimersByTimeAsync(10);
+
+  expect(api.updateRawPointColorInteraction).toHaveBeenCalledOnce();
+  expect(vi.mocked(api.updateRawPointColorInteraction).mock.calls[0]![4].value).toBe(38);
+  expect(save).not.toHaveBeenCalled();
+  ack.resolve(1);
+  await finishing;
+
+  expect(save).toHaveBeenCalledOnce();
+  expect((c as any).moveIntent.operation.metadata.value).toBe(38);
+  expect((c as any).pointColorGesture.appliedValue).toBe(38);
+  expect((c as any).pointColorGesture.appliedSequence).toBe(1);
+  expect(api.cancelRawPointColorInteraction).not.toHaveBeenCalled();
+});
+
+it('settles twenty short Point Color gestures independently without waiting for their throttle timers', async () => {
+  const point = { lum: .5, chroma: .1, hue: 20, hue_shift: 0, sat_shift: 0, lum_shift: 0, variance: 0,
+    range: 50, hue_range: 50, sat_range: 50, lum_range: 50 };
+  const initial = { ...settings(), point_colors: [point] };
+  const target: api.RawDisplayTarget = { quality: 'draft', mode: 'whole', maxSide: 512, viewGeneration: 0, geometryId: null };
+  const committed: number[] = [];
+  for (let index = 0; index < 20; index++) {
+    const controls = { confirmed: initial, beginPreview: vi.fn(), endPreview: vi.fn(), refreshPreview: vi.fn(), flush: vi.fn(), unsettled: false } as any;
+    const c = new RawRecipeSave(initial, { schedule: action => { owner = owner.then(action); }, changed, controls });
+    c.initialized = true; c.history = { initialized: true, cursor: 0, length: 0, selectedStepId: null };
+    vi.mocked(api.beginRawPointColorInteraction).mockResolvedValueOnce('a'.repeat(32));
+    vi.mocked(api.updateRawPointColorInteraction).mockImplementationOnce(async (_doc, _serial, _signal, _target, operation) => operation.sequence);
+    vi.mocked(api.rawPreview).mockResolvedValueOnce({ blob: new Blob(), width: 10, height: 10, epoch: 1, sequence: 1,
+      kind: 'after', quality: 'draft', interactionId: 'a'.repeat(32), interactionSequence: 1 } as api.RawFrame);
+    const save = vi.spyOn(c, 'save').mockImplementation(async () => {
+      if ((c as any).moveIntent?.operation) committed.push((c as any).moveIntent.operation.metadata.value);
+    });
+    expect(c.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true);
+    await owner;
+    await (c as any).pointColorGesture.started;
+    save.mockClear();
+    c.updatePointColorInteraction(index + 1, target);
+    await c.finishPointColorInteraction();
+    expect(save).toHaveBeenCalledOnce();
+  }
+  expect(committed).toEqual(Array.from({ length: 20 }, (_, index) => index + 1));
+  expect(api.updateRawPointColorInteraction).toHaveBeenCalledTimes(20);
+});
+
+it('cancels a Point Color gesture returned to its initial value without a History save', async () => {
+  const point = { lum: .5, chroma: .1, hue: 20, hue_shift: 0, sat_shift: 0, lum_shift: 0, variance: 0,
+    range: 50, hue_range: 50, sat_range: 50, lum_range: 50 };
+  const initial = { ...settings(), point_colors: [point] };
+  const controls = { confirmed: initial, beginPreview: vi.fn(), endPreview: vi.fn(), refreshPreview: vi.fn(), flush: vi.fn(), unsettled: false } as any;
+  const c = new RawRecipeSave(initial, { schedule: action => { owner = owner.then(action); }, changed, controls });
+  c.initialized = true; c.history = { initialized: true, cursor: 0, length: 0, selectedStepId: null };
+  vi.mocked(api.beginRawPointColorInteraction).mockResolvedValueOnce('a'.repeat(32));
+  vi.mocked(api.updateRawPointColorInteraction).mockImplementation(async (_doc, _serial, _signal, _target, operation) => operation.sequence);
+  vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(), width: 10, height: 10, epoch: 1, sequence: 1,
+    kind: 'after', quality: 'draft', interactionId: 'a'.repeat(32), interactionSequence: 1 } as api.RawFrame);
+  vi.mocked(api.cancelRawPointColorInteraction).mockResolvedValueOnce(undefined as any);
+  vi.mocked(api.readRawSettings).mockResolvedValueOnce(initial);
+  const save = vi.spyOn(c, 'save').mockResolvedValue();
+  expect(c.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true);
+  await owner;
+  await (c as any).pointColorGesture.started;
+  save.mockClear();
+  const target: api.RawDisplayTarget = { quality: 'draft', mode: 'whole', maxSide: 512, viewGeneration: 0, geometryId: null };
+  c.updatePointColorInteraction(38, target);
+  c.updatePointColorInteraction(0, target);
+  await c.finishPointColorInteraction();
+  expect(api.updateRawPointColorInteraction).toHaveBeenCalledOnce();
+  expect(vi.mocked(api.updateRawPointColorInteraction).mock.calls[0]![4].value).toBe(0);
+  expect(save).not.toHaveBeenCalled();
+  expect(api.cancelRawPointColorInteraction).toHaveBeenCalledOnce();
 });
 
 it('flushes the last Point Color value when Pointer Up runs between pump settlement and cleanup', async () => {
@@ -240,6 +335,41 @@ it('cancels an uncommitted Point Color draft after a definitive interaction conf
   expect(api.cancelRawPointColorInteraction).toHaveBeenCalledOnce();
   expect(c.pointColorInteracting).toBe(false);
   expect(controls.endPreview).toHaveBeenCalledOnce();
+  expect((c as any).retryRequest).toBeUndefined();
+});
+
+it('cancels the Point Color draft when the actual History HTTP response is a definite conflict', async () => {
+  const actualApi = await vi.importActual<typeof import('./rawApi')>('./rawApi');
+  const point = { lum: .5, chroma: .1, hue: 20, hue_shift: 0, sat_shift: 0, lum_shift: 0, variance: 0,
+    range: 50, hue_range: 50, sat_range: 50, lum_range: 50 };
+  const initial = { ...settings(), point_colors: [point] };
+  const controls = { confirmed: initial, beginPreview: vi.fn(), endPreview: vi.fn(), refreshPreview: vi.fn(), flush: vi.fn(), unsettled: false } as any;
+  const c = new RawRecipeSave(initial, { schedule: action => { owner = owner.then(action); }, changed, controls });
+  c.initialized = true; c.history = { initialized: true, cursor: 0, length: 0, selectedStepId: null };
+  vi.mocked(api.beginRawPointColorInteraction).mockResolvedValueOnce('a'.repeat(32));
+  vi.mocked(api.updateRawPointColorInteraction).mockImplementation(async (_doc, _serial, _signal, _target, operation) => operation.sequence);
+  vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(), width: 10, height: 10, epoch: 1, sequence: 1,
+    kind: 'after', quality: 'draft', interactionId: 'a'.repeat(32), interactionSequence: 1 } as api.RawFrame);
+  vi.mocked(api.cancelRawPointColorInteraction).mockResolvedValueOnce(undefined as any);
+  vi.mocked(api.readRawSettings).mockResolvedValueOnce(initial);
+  vi.mocked(api.saveRawHistory).mockImplementation(actualApi.saveRawHistory);
+  const fetch = vi.fn(async () => new Response(JSON.stringify({ code: 'raw_point_color_interaction_conflict' }),
+    { status: 409, headers: { 'Content-Type': 'application/json' } }));
+  vi.stubGlobal('fetch', fetch);
+
+  expect(c.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true);
+  await owner;
+  await (c as any).pointColorGesture.started;
+  const target: api.RawDisplayTarget = { quality: 'draft', mode: 'whole', maxSide: 512, viewGeneration: 0, geometryId: null };
+  c.updatePointColorInteraction(25, target);
+  await vi.advanceTimersByTimeAsync(50);
+  await expect(c.finishPointColorInteraction()).rejects.toMatchObject({
+    code: 'raw_point_color_interaction_conflict', outcome: 'rejected', status: 409 });
+
+  expect(fetch).toHaveBeenCalledOnce();
+  expect(api.cancelRawPointColorInteraction).toHaveBeenCalledOnce();
+  expect(controls.endPreview).toHaveBeenCalledOnce();
+  expect(c.pointColorInteracting).toBe(false);
   expect((c as any).retryRequest).toBeUndefined();
 });
 

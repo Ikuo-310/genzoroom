@@ -581,6 +581,185 @@ def test_point_color_slider_interaction_previews_then_commits_one_history_step(l
     asyncio.run(run())
 
 
+def test_point_color_pre_native_end_conflict_is_409_and_releases_history_owner(local, tmp_path, monkeypatch):
+    async def run():
+        api, manager, children, _ = await setup(tmp_path, local, monkeypatch)
+        children[0].adaptive_supported = True
+        entered, release = asyncio.Event(), asyncio.Event()
+        original_command = manager._raw_command
+
+        async def delayed_command(generation, command, params, *, timeout=None):
+            if command == "develop.set":
+                entered.set()
+                await release.wait()
+            return await original_command(generation, command, params, timeout=timeout)
+
+        monkeypatch.setattr(manager, "_raw_command", delayed_command)
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                workspace, doc = await open_document(http)
+                doc = await operation(http, doc, "initialize")
+                doc = await operation(http, doc, "operate", body(doc) | {
+                    "kind": "pointColorPick", "metadata": {"x": .3, "y": .7}})
+                base = f'/api/raw/documents/{doc["handle"]}/point-color-interaction'
+                identity_body = identity(doc) | {"documentRevision": doc["revision"]}
+                started = await http.post(f"{base}/begin", json=identity_body | {
+                    "control": "pointColor.0.hueShift"})
+                assert started.status_code == 200
+                interaction_id = started.json()["interactionId"]
+                update_body = identity_body | {"interactionId": interaction_id, "sequence": 1,
+                    "value": 25, "serial": 1, "maxSide": 512, "viewGeneration": 0, "geometryId": None}
+                update_task = asyncio.create_task(http.post(f"{base}/update", json=update_body))
+                await entered.wait()
+                end_request = body(doc) | {"kind": "pointColorControl", "metadata": {
+                    "control": "pointColor.0.hueShift", "value": 0}, "pointColorInteractionId": interaction_id}
+                end_task = asyncio.create_task(http.post(url(doc, "operate"), json=end_request))
+                await asyncio.sleep(0)
+                assert not end_task.done()
+                release.set()
+                update = await update_task
+                assert update.status_code == 200
+                rejected = await end_task
+                assert rejected.status_code == 409
+                assert rejected.json() == {"code": "raw_point_color_interaction_conflict"}
+                assert api._history_save is None
+                assert len(store.get_raw_history(api._history_identity)["history"]["steps"]) == 1
+                assert store.get_raw_recipe(api._history_identity)["recipe"]["settings"]["point_colors"][0]["hue_shift"] == 0
+                assert not any(command == "develop.endInteraction" for command, _ in children[0].commands)
+
+                retry = await http.post(url(doc, "operate"), json=end_request)
+                assert retry.status_code == 409 and retry.json() == rejected.json()
+                assert api._history_save is None
+                assert not any(command == "develop.endInteraction" for command, _ in children[0].commands)
+
+                cancelled = await http.post(f"{base}/cancel", json=identity_body | {"interactionId": interaction_id})
+                assert cancelled.status_code == 204
+                assert (await api.raw.get_settings(api._raw_handle)).settings["point_colors"][0]["hue_shift"] == 0
+                next_started = await http.post(f"{base}/begin", json=identity_body | {
+                    "control": "pointColor.0.hueShift"})
+                assert next_started.status_code == 200
+                assert (await http.post(f"{base}/cancel", json=identity_body | {
+                    "interactionId": next_started.json()["interactionId"]})).status_code == 204
+
+                doc = await operation(http, doc, "operate", body(doc) | {"kind": "pointColorControl",
+                    "metadata": {"control": "pointColor.0.hueShift", "value": 12}})
+                assert doc["point_colors"][0]["hue_shift"] == 12
+                assert (await http.delete(f"/api/raw/workspaces/{workspace}")).status_code == 204
+                next_workspace, next_doc = await open_document(http)
+                assert next_workspace != workspace and next_doc["assetId"] != doc["assetId"]
+        finally:
+            release.set()
+            await api.close()
+    asyncio.run(run())
+
+
+def test_point_color_end_unknown_and_history_receipt_retries_do_not_resend_native_end(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        children[0].adaptive_supported = True
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                _, doc = await open_document(http)
+                doc = await operation(http, doc, "initialize")
+                doc = await operation(http, doc, "operate", body(doc) | {
+                    "kind": "pointColorPick", "metadata": {"x": .3, "y": .7}})
+                base = f'/api/raw/documents/{doc["handle"]}/point-color-interaction'
+                identity_body = identity(doc) | {"documentRevision": doc["revision"]}
+                started = await http.post(f"{base}/begin", json=identity_body | {
+                    "control": "pointColor.0.hueShift"})
+                interaction_id = started.json()["interactionId"]
+                update_body = identity_body | {"interactionId": interaction_id, "sequence": 1,
+                    "value": 25, "serial": 1, "maxSide": 512, "viewGeneration": 0, "geometryId": None}
+                assert (await http.post(f"{base}/update", json=update_body)).status_code == 200
+                assert (await http.post(f"{base}/preview", json=identity_body | {
+                    "interactionId": interaction_id, "interactionSequence": 1, "serial": 1,
+                    "maxSide": 512, "viewGeneration": 0, "geometryId": None})).status_code == 200
+                request = body(doc) | {"kind": "pointColorControl", "metadata": {
+                    "control": "pointColor.0.hueShift", "value": 25}, "pointColorInteractionId": interaction_id}
+                children[0].fail_commands.add("develop.endInteraction")
+                failed = await http.post(url(doc, "operate"), json=request)
+                assert failed.status_code == 502 and failed.json() == {"code": "lightcraft_tool_error"}
+                assert api._history_save["stage"] == "ending"
+                assert api.raw._point_color_interaction.state == "unknown" and api.raw._desynchronized
+                assert sum(command == "develop.endInteraction" for command, _ in children[0].commands) == 1
+                unknown_retry = await http.post(url(doc, "operate"), json=request)
+                assert unknown_retry.status_code == 409
+                assert unknown_retry.json() == {"code": "raw_history_operation_outcome_unknown"}
+                assert sum(command == "develop.endInteraction" for command, _ in children[0].commands) == 1
+        finally:
+            # This injected Native outcome is deliberately unresolved; teardown is not a product recovery path.
+            api._history_save = None
+            api._history_initialized = False
+            await api.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("commit_unknown", [False, True])
+def test_point_color_sqlite_save_retries_without_resending_native_end(local, tmp_path, monkeypatch, commit_unknown):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        children[0].adaptive_supported = True
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                _, doc = await open_document(http)
+                doc = await operation(http, doc, "initialize")
+                doc = await operation(http, doc, "operate", body(doc) | {
+                    "kind": "pointColorPick", "metadata": {"x": .3, "y": .7}})
+                base = f'/api/raw/documents/{doc["handle"]}/point-color-interaction'
+                identity_body = identity(doc) | {"documentRevision": doc["revision"]}
+                interaction_id = (await http.post(f"{base}/begin", json=identity_body | {
+                    "control": "pointColor.0.hueShift"})).json()["interactionId"]
+                update_body = identity_body | {"interactionId": interaction_id, "sequence": 1,
+                    "value": 25, "serial": 1, "maxSide": 512, "viewGeneration": 0, "geometryId": None}
+                assert (await http.post(f"{base}/update", json=update_body)).status_code == 200
+                assert (await http.post(f"{base}/preview", json=identity_body | {
+                    "interactionId": interaction_id, "interactionSequence": 1, "serial": 1,
+                    "maxSide": 512, "viewGeneration": 0, "geometryId": None})).status_code == 200
+                request = body(doc) | {"kind": "pointColorControl", "metadata": {
+                    "control": "pointColor.0.hueShift", "value": 25}, "pointColorInteractionId": interaction_id}
+                original_append = store.append_raw_history
+                calls = 0
+
+                # For the pre-commit case, fail before SQLite; for the ambiguous case, fail after commit.
+                def injected(*args, **kwargs):
+                    nonlocal calls
+                    calls += 1
+                    if calls == 1 and not commit_unknown:
+                        raise store.StoreUnavailable()
+                    result = original_append(*args, **kwargs)
+                    if calls == 1 and commit_unknown:
+                        raise store.StoreUnavailable()
+                    return result
+
+                before = rows()
+                with monkeypatch.context() as patch:
+                    patch.setattr(store, "append_raw_history", injected)
+                    first = await http.post(url(doc, "operate"), json=request)
+                assert first.status_code == 503 and first.json() == {"code": "raw_history_save_failed"}
+                assert api._history_save["stage"] == "save"
+                assert sum(command == "develop.endInteraction" for command, _ in children[0].commands) == 1
+                if not commit_unknown:
+                    assert rows() == before
+                else:
+                    history = store.get_raw_history(api._history_identity)["history"]
+                    assert len(history["steps"]) == 2 and history["steps"][-1]["metadata"] == request["metadata"]
+                retried = await http.post(url(doc, "operate"), json=request)
+                assert retried.status_code == 200 and retried.json()["replayed"] is commit_unknown
+                assert sum(command == "develop.endInteraction" for command, _ in children[0].commands) == 1
+                saved = store.get_raw_recipe(api._history_identity)["recipe"]["settings"]
+                assert saved["point_colors"][0]["hue_shift"] == 25
+                history = store.get_raw_history(api._history_identity)["history"]
+                assert len(history["steps"]) == 2 and history["steps"][-1]["metadata"] == request["metadata"]
+        finally:
+            if api._history_save and api._history_save["stage"] != "complete":
+                api._history_save = None
+            await api.close()
+    asyncio.run(run())
+
+
 def test_point_color_workspace_release_discards_draft_before_opening_another_document(local, tmp_path, monkeypatch):
     async def run():
         api, _, children, _ = await setup(tmp_path, local, monkeypatch)

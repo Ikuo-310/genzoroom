@@ -376,6 +376,16 @@ describe('RAW History transport', () => {
     await expect(saveRawHistory(request)).rejects.toMatchObject({ outcome: status === 409 ? 'rejected' : 'unknown' });
     expect(request.expectedRecipeRevision).toBe(4);
   });
+  it('classifies a definite pre-Native Point Color end conflict from the real HTTP response', async () => {
+    const request: RawHistoryRequest = { doc: rawSettings(doc), action: 'operate',
+      operation: { kind: 'pointColorControl', metadata: { control: 'pointColor.0.hueShift', value: 25 } },
+      pointColorInteractionId: 'd'.repeat(32), expectedRecipeRevision: 4,
+      saveId: '00000000-0000-4000-8000-000000000001' };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ code: 'raw_point_color_interaction_conflict' }),
+      { status: 409, headers: { 'Content-Type': 'application/json' } })));
+    await expect(saveRawHistory(request)).rejects.toMatchObject({ code: 'raw_point_color_interaction_conflict',
+      outcome: 'rejected', status: 409 });
+  });
   it.each(['undo', 'redo', 'jump'] as const)('sends a %s operation without controls or snapshots', async action => {
     const request: RawHistoryRequest = { ...historyRequest('commit'), action, targetStepId: null };
     const result = rawHistoryResult(request, { revision: doc.revision + 1 });

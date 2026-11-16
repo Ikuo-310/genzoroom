@@ -1706,12 +1706,14 @@ def test_point_color_update_waiting_behind_end_is_rejected_without_native_mutati
             update_task = asyncio.create_task(raw.update_point_color_interaction(
                 handle, interaction_id, baseline.revision, 1, 25))
             await asyncio.sleep(0)
-            assert not update_task.done()
-            release.set()
+            try:
+                assert update_task.done()
+                with pytest.raises(LightCraftError, match="raw_point_color_interaction_stale"):
+                    await update_task
+                assert not any(command == "develop.set" for command, _ in children[0].commands)
+            finally:
+                release.set()
             await end_task
-            with pytest.raises(LightCraftError, match="raw_point_color_interaction_stale"):
-                await update_task
-            assert not any(command == "develop.set" for command, _ in children[0].commands)
         finally:
             await raw.close()
     asyncio.run(run())

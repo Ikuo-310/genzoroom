@@ -433,4 +433,18 @@ Deferred Mock testはF1のupdate待機中end値0を修正前に受理するこ�
 
 receipt確認済みLightCraft v0.20.0 CLIで、合成JPEG／DNG各1件の既存real-Native Point Colorテストが成功した。各テストは採色後に8項目を含む`begin → update → Draft Preview → end → confirm`とNative readbackを通すが、今回のrace順序・Preview readback障害注入はMockでのみ検証しており、Windows Desktop実機の手動試験はしていない。Frontend focused testsは4 files／421件成功し、build内TypeScript checkとproduction buildも成功した（既存bundle size／依存directive warningあり）。
 
-HTTP `history/operate`はF1の事前Native拒否を既存のHistory operation中に受けるため、Windows API側のstage／owner解放はF2の監査対象として残る。本変更はWindows API、HTTP error mapping、History owner管理を変更しない。F2未修正のため、この拒否後のowner残留／同一save ID再試行挙動は未解決であり、独立して対応が必要である。
+当時のF1／F4修正ではWindows API側のstage／owner解放を変更せず、F2を後続監査項目として残した。F2は次節で修正・検証した。
+
+#### Point Color監査P2 — F2拒否時owner解放／F3短時間操作
+
+F2の実HTTP＋Mock Native再現では、update ACK前にendが古い値を要求すると、Native `develop.endInteraction`送信前に`raw_point_color_interaction_conflict`となる。従来はAPI側のpending stageが`ending`のまま残り、競合がHTTP 502としてFrontendへ届くため、Frontendは結果不明扱いとなりHistory owner／Preview gestureを保持していた。
+
+endのNative送信境界を明確にするため、`LightCraftRawSession`はNative command queue内で、revision確認後かつ`develop.endInteraction`呼び出し直前にinteraction stateを`ending`へ遷移させる。Windows APIは失敗時、同一pending ownerとinteraction IDがなお存在し、interactionがopenでSession statusがsyncedの場合に限りpendingを解放する。この状態はNative endを未送信と証明できる。送信を開始した後は`ending`／`unknown`／`failed`となり、pendingを保持して既存の結果不明・same-save-ID retry／SQLite receipt経路へ渡す。`raw_point_color_interaction_conflict`は既存History conflict群と同じHTTP 409で返し、Frontendの実HTTP parserも`outcome=rejected`として扱う。拒否後はFrontendがimmutable retry requestを破棄し、既存Native cancel/readbackでdraftを戻してPreview ownerを解放する。
+
+F3は`finishPointColorInteraction()`が50ms pump timerをclearしても`gesture.timer`参照を残し、force flushのscheduleが既存timer有りと判断してreturnすることが原因だった。Timerをclearする箇所で参照も解放し、pending値を即時pumpできるようにした。Native updateは従来どおりACKを待ち、sequence／適用値が最終gesture値に一致した後でのみHistory確定へ進む。既存の50msドラッグ中集約は維持する。キャンセル時もtimer参照を解放し、draftを送らない。
+
+修正前のF2統合テストは競合拒否をHTTP 502として観測し、pending ownerが残るためworkspace closeも`raw_history_save_pending`で拒否された。修正後はHTTP 409と正確なerror code、History／Recipe未変更、Native end未送信、owner解放を確認し、cancel後の新interaction・通常operation・workspace release・別Document openが成功した。Native end送信後の結果不明はHTTP 502／unknownのままpendingを保持し、retryでNative endを再送しない。SQLite commit前の保存失敗は同一save ID retryで保存され、commit後の結果不明はreceipt replayでHistory stepを重複追加しない。両ケースでNative endは1回だけである。
+
+F3のDeferred Promiseテストでは修正前、10msでPointer Upした値38にNative update／History saveがなくcancelだけが呼ばれることを再現した。修正後は50msを待たず値38を送信し、ACK後に1件だけHistoryへ保存、Preview／interactionを解放する。初期値へ戻す操作ではHistoryを作らない。既存ACK直後のPromise cleanup race、50ms境界のpump集約、20件の短い連続gestureも確認した。
+
+検証はMock NativeのBackend／HTTP／SQLite focused suite 424件、Frontend focused 4 files 426件が成功した。TypeScript check／production buildも成功（既存bundle sizeとdependency directiveのwarningあり）。receipt確認済みLightCraft v0.20.0 CLIでは合成JPEG／DNG各1件のPoint Color interaction testが成功した。実Native確認は正常系に限定され、F2／F3障害注入とWindows Desktop手動確認はMock／自動テストのみである。F5〜F8は未変更・未検証であり、今回の対象外とする。
