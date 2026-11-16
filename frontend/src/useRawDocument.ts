@@ -6,6 +6,7 @@ import { createRawWorkspace, openRawDocument, rawCapability, rawPreview, cancelR
 import { frontendLogger } from './frontendLogging';
 import { RawControls } from './rawControls';
 import { RawRecipeSave } from './rawRecipeSave';
+import { RawWorkspaceTermination } from './rawWorkspaceTermination';
 import { rawWholeSide, type RawView } from './rawWholePreview';
 import { rawRegionOwner, rawRegion } from './rawApi';
 import { RawRegionDelivery } from './rawRegionDelivery';
@@ -29,8 +30,8 @@ type RawState = { cropSnapshot?: CropSnapshot; cropMode?: boolean; cropDisplay?:
 // Serialize ownership changes even when React unmounts during a transmitted import.
 let ownership = Promise.resolve();
 function enqueue(action: () => Promise<void>) { ownership = ownership.then(action, action).catch(() => {}); }
-// Gate successor opens without occupying the queue that the departing Finish still needs.
-let pointColorDeparture: Promise<boolean> | undefined;
+// Keep a departing workspace owner reachable after its React hook has unmounted.
+let pointColorTermination: RawWorkspaceTermination | undefined;
 function log(code: string, event = 'preview.failed') {
   try { frontendLogger.add({ level: 'error', component: 'raw', event, context: { errorCode: code } }); }
   catch { /* Diagnostics cannot change Preview ownership. */ }
@@ -901,12 +902,16 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         }
       }
     };
-    if (pointColorDeparture) void pointColorDeparture.then(released => {
-      if (!current()) return;
-      if (released) enqueue(open);
-      else fail(new RawApiError('raw_save_unconfirmed'));
-    });
-    else enqueue(open);
+    const previousTermination = pointColorTermination;
+    if (previousTermination) {
+      // P2-C owns an explicit release retry; a later Document open must not retry an unknown release.
+      const pending = previousTermination.state.stage === 'unknown'
+        ? Promise.reject(previousTermination.state.error) : previousTermination.run();
+      void pending.then(() => {
+        if (pointColorTermination === previousTermination) pointColorTermination = undefined;
+        if (current()) enqueue(open);
+      }, error => { if (current()) fail(error); });
+    } else enqueue(open);
     let discarded=false,discardOperation:Promise<void>|undefined;
     discardRef.current=()=>{
       if(discardOperation)return discardOperation;
@@ -945,8 +950,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       saver?.pause();
       // A late slider unmount cannot target a successor. Its old owner still finishes its
       // gesture on this same queue before cleanup, including transmitted native mutations.
-      const departure = discardOperation ?? (saver?.pointColorInteracting ? saver.preparePointColorForDeparture() : undefined);
-      const finalSave = discarded || departure ? undefined : saver?.mixerInteracting ? saver.cancelMixerInteraction()
+      const pointColorDeparture = !!saver?.pointColorInteracting;
+      const finalSave = discarded || discardOperation || pointColorDeparture ? undefined : saver?.mixerInteracting ? saver.cancelMixerInteraction()
         : saver?.cropping ? saver.cancelGeometry() : saver?.save();
       if (saverRef.current === saver) saverRef.current = null;
       if (editorRef.current === editor) editorRef.current = null;
@@ -965,16 +970,33 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         }
         return true;
       };
-      if (departure) {
-        const barrier = departure.then(() => new Promise<boolean>(resolve => {
-          enqueue(async () => {
-            try { resolve(await releaseAfterSave()); }
-            catch { log('raw_release_failed'); resolve(false); }
+      if (discardOperation || pointColorDeparture) {
+        const ownedWorkspace = workspace;
+        if (!ownedWorkspace) return;
+        const explicitDiscard = discardOperation;
+        const termination = new RawWorkspaceTermination(ownedWorkspace, explicitDiscard ? 'discard' : 'release', saver,
+          async () => {
+            if (explicitDiscard) {
+              await explicitDiscard;
+              return;
+            }
+            // Finish/Cancel must stay outside ownership: Finish may enqueue History work there.
+            await saver?.preparePointColorForDeparture();
+            if (saver?.dirty || saver?.error || editor?.unsettled) throw new RawApiError('raw_save_unconfirmed');
+          },
+          async () => {
+            if (explicitDiscard) return; // Explicit discard already terminated this workspace.
+            await owned(async () => {
+              if (workspace !== ownedWorkspace) throw new RawApiError('raw_stale_handle');
+              await release();
+              editor?.dispose(); saver?.dispose();
+            });
           });
-        }), () => false);
-        pointColorDeparture = barrier;
-        void barrier.then(released => {
-          if (released && pointColorDeparture === barrier) pointColorDeparture = undefined;
+        pointColorTermination = termination;
+        void termination.run().then(() => {
+          if (pointColorTermination === termination) pointColorTermination = undefined;
+        }).catch(() => {
+          log('raw_save_unconfirmed', 'recipe.saveFailed');
         });
       } else enqueue(async () => {
         try { await finalSave; } catch { return; }
