@@ -132,6 +132,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     if (!assetId) { setState(null); return; }
     const currentSerial = ++serial.current;
     let active = true, retired=false, available = false, workspace: string | undefined, url: string | undefined;
+    let recoveryInProgress = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let editor: RawControls | undefined;
     let saver: RawRecipeSave | undefined;
@@ -595,60 +596,66 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
           const discardOwner = pointColorTermination;
           // The explicit discard owner decides whether this failed Cancel has safe discard proof.
           if (discardOwner?.kind === 'discard' && discardOwner.workspaceId === oldWorkspace && discardOwner.saver === oldSaver) return;
-          const identity = oldEditor?.confirmed;
-          const recoveryCurrent = () => !!identity && current() && editor === oldEditor && saver === oldSaver
-            && oldEditor!.confirmed.workspaceId === identity.workspaceId && oldEditor!.confirmed.handle === identity.handle
-            && oldEditor!.confirmed.generation === identity.generation && oldEditor!.confirmed.documentToken === identity.documentToken
-            && oldEditor!.confirmed.revision === identity.revision;
-          await owned(async () => {
-            if (!oldWorkspace) return;
-            if (!recoveryCurrent() || workspace !== oldWorkspace) {
-              await retainUncertainRecoveryWorkspace(oldWorkspace, oldSaver, new RawApiError('raw_save_unconfirmed'));
-              return;
-            }
-            const recoveryDiscardSafe = !oldSaver?.error && !oldSaver?.saving && !oldSaver?.moving && !oldEditor?.unsettled;
-            if (!recoveryDiscardSafe) {
-              await retainUncertainRecoveryWorkspace(oldWorkspace, oldSaver, new RawApiError('raw_save_unconfirmed'));
-              return;
-            }
-            frozen.current = true;
-            invalidateDisplay();
-            settleCurvePresentation(true);
-            try { await discardRawWorkspace({ workspaceId: oldWorkspace }); }
-            catch (cause) {
-              if (!recoveryCurrent()) {
-                await retainUncertainRecoveryDiscard(oldWorkspace, oldSaver, oldEditor, identity!, cause, recoveryDiscardSafe);
+          recoveryInProgress = true;
+          try {
+            const identity = oldEditor?.confirmed;
+            const recoveryCurrent = () => !!identity && current() && editor === oldEditor && saver === oldSaver
+              && oldEditor!.confirmed.workspaceId === identity.workspaceId && oldEditor!.confirmed.handle === identity.handle
+              && oldEditor!.confirmed.generation === identity.generation && oldEditor!.confirmed.documentToken === identity.documentToken
+              && oldEditor!.confirmed.revision === identity.revision;
+            await owned(async () => {
+              if (!oldWorkspace) return;
+              if (!recoveryCurrent() || workspace !== oldWorkspace) {
+                await retainUncertainRecoveryWorkspace(oldWorkspace, oldSaver, new RawApiError('raw_save_unconfirmed'));
                 return;
               }
-              throw cause;
-            }
-            if (workspace !== oldWorkspace) throw new RawApiError('raw_stale_handle');
-            workspace = undefined;
-            oldSaver?.dispose(); oldEditor?.dispose();
-            if (!recoveryCurrent()) return;
-            const createdWorkspace = await createRawWorkspace();
-            workspace = createdWorkspace;
-            if (!recoveryCurrent() || workspace !== createdWorkspace) {
-              await terminateStaleRecoveryWorkspace(createdWorkspace);
-              return;
-            }
-            let reopened: RawDocument;
-            try { reopened = await openRawDocument(createdWorkspace, assetId); }
-            catch (cause) {
+              const recoveryDiscardSafe = !oldSaver?.error && !oldSaver?.saving && !oldSaver?.moving && !oldEditor?.unsettled;
+              if (!recoveryDiscardSafe) {
+                await retainUncertainRecoveryWorkspace(oldWorkspace, oldSaver, new RawApiError('raw_save_unconfirmed'));
+                return;
+              }
+              frozen.current = true;
+              invalidateDisplay();
+              settleCurvePresentation(true);
+              try { await discardRawWorkspace({ workspaceId: oldWorkspace }); }
+              catch (cause) {
+                if (!recoveryCurrent()) {
+                  await retainUncertainRecoveryDiscard(oldWorkspace, oldSaver, oldEditor, identity!, cause, recoveryDiscardSafe);
+                  return;
+                }
+                throw cause;
+              }
+              if (workspace !== oldWorkspace) throw new RawApiError('raw_stale_handle');
+              workspace = undefined;
+              oldSaver?.dispose(); oldEditor?.dispose();
+              if (!recoveryCurrent()) return;
+              const createdWorkspace = await createRawWorkspace();
+              workspace = createdWorkspace;
+              if (!recoveryCurrent() || workspace !== createdWorkspace) {
+                await terminateStaleRecoveryWorkspace(createdWorkspace);
+                return;
+              }
+              let reopened: RawDocument;
+              try { reopened = await openRawDocument(createdWorkspace, assetId); }
+              catch (cause) {
+                if (!recoveryCurrent()) { await terminateStaleRecoveryWorkspace(createdWorkspace); return; }
+                throw cause;
+              }
+              if (!recoveryCurrent() || workspace !== createdWorkspace) { await terminateStaleRecoveryWorkspace(createdWorkspace); return; }
+              let settings: RawSettings;
+              try { settings = await readRawSettings(reopened); }
+              catch (cause) {
+                if (!recoveryCurrent()) { await terminateStaleRecoveryWorkspace(createdWorkspace); return; }
+                throw cause;
+              }
               if (!recoveryCurrent()) { await terminateStaleRecoveryWorkspace(createdWorkspace); return; }
-              throw cause;
-            }
-            if (!recoveryCurrent() || workspace !== createdWorkspace) { await terminateStaleRecoveryWorkspace(createdWorkspace); return; }
-            let settings: RawSettings;
-            try { settings = await readRawSettings(reopened); }
-            catch (cause) {
-              if (!recoveryCurrent()) { await terminateStaleRecoveryWorkspace(createdWorkspace); return; }
-              throw cause;
-            }
-            if (!recoveryCurrent()) { await terminateStaleRecoveryWorkspace(createdWorkspace); return; }
-            frozen.current = false;
-            install(settings);
-          });
+              frozen.current = false;
+              recoveryInProgress = false;
+              install(settings);
+            });
+          } finally {
+            recoveryInProgress = false;
+          }
         },
         curveReadback: (channel, points, sequence) => {
           if (current() && curvePresentation.current.active)
@@ -1041,7 +1048,10 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       } catch (error) { fail(error); }
       finally {
         if (!current() && workspace && !retired) {
-          try { await releaseRawWorkspace(workspace); workspace = undefined; } catch { log('raw_release_failed'); }
+          // An installed termination owner must be the only caller to release this imported workspace.
+          if (pointColorTermination?.workspaceId !== workspace) {
+            try { await releaseRawWorkspace(workspace); workspace = undefined; } catch { log('raw_release_failed'); }
+          }
         }
       }
     };
@@ -1209,7 +1219,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       // A late slider unmount cannot target a successor. Its old owner still finishes its
       // gesture on this same queue before cleanup, including transmitted native mutations.
       const pointColorDeparture = !!saver?.pointColorInteracting;
-      const finalSave = discarded || discardOperation || pointColorDeparture ? undefined : saver?.mixerInteracting ? saver.cancelMixerInteraction()
+      const finalSave = discarded || discardOperation || pointColorDeparture || recoveryInProgress ? undefined : saver?.mixerInteracting ? saver.cancelMixerInteraction()
         : saver?.cropping ? saver.cancelGeometry() : saver?.save();
       if (saverRef.current === saver) saverRef.current = null;
       if (editorRef.current === editor) editorRef.current = null;
@@ -1256,6 +1266,34 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         });
       } else if (discardOperation) {
         // A non-Point-Color discard already owns this workspace and continues after the hook leaves.
+      } else if (recoveryInProgress) {
+        // Recovery owns the workspace until it can transfer the known outcome to a termination owner.
+      } else if (workspace) {
+        const ownedWorkspace = workspace;
+        let initialSettle = finalSave;
+        const termination = new RawWorkspaceTermination(ownedWorkspace, 'release', saver, async () => {
+          const pending = initialSettle;
+          // The queued save must settle outside ownership; a retry can then reuse the Saver's immutable request.
+          initialSettle = undefined;
+          if (pending) await pending;
+          else if (saver?.mixerInteracting) await saver.cancelMixerInteraction();
+          else if (saver?.cropping) await saver.cancelGeometry();
+          else await saver?.save(true);
+          if (saver?.dirty || saver?.error || editor?.unsettled) throw new RawApiError('raw_save_unconfirmed');
+        }, async () => {
+          await owned(async () => {
+            if (workspace !== ownedWorkspace) throw new RawApiError('raw_stale_handle');
+            await releaseWorkspaceConfirmed(ownedWorkspace);
+            workspace = undefined;
+            editor?.dispose(); saver?.dispose();
+          });
+        });
+        pointColorTermination = termination;
+        void termination.run().then(() => {
+          if (pointColorTermination === termination) pointColorTermination = undefined;
+        }).catch(cause => {
+          log(cause instanceof RawApiError ? cause.code : 'raw_connection_failed', 'raw.releaseFailed');
+        });
       } else enqueue(async () => {
         try { await finalSave; } catch { return; }
         await releaseAfterSave();

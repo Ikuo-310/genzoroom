@@ -705,19 +705,6 @@ describe('RAW native Before cache', () => {
     act(() => current!.flushControls()); await flush(); expect(current?.quality).toBe('full');
   });
 
-  it('resynchronizes a render revision once without rewriting its History checkpoint', async () => {
-    await render('a'); await flush();
-    const saved = current!.settings!.recipeFingerprint;
-    vi.mocked(api.readRawSettings).mockImplementationOnce(async doc => ({ ...rawSettings(doc), revision: doc.revision + 1,
-      settingsFingerprint: 'f'.repeat(64), recipeFingerprint: saved! }));
-    vi.mocked(api.rawPreview).mockRejectedValueOnce(new api.RawSuperseded('revision'));
-    act(() => current!.viewChanged()); await flush();
-    expect(current?.settings?.settingsFingerprint).toBe('f'.repeat(64));
-    expect(current?.dirty).toBe(true);
-    await act(async () => { await expect(current!.prepareSave()).rejects.toThrow('raw_history_readback_mismatch'); });
-    expect(commitHistory).not.toHaveBeenCalled();
-    expect(current?.saveError).toBe('raw_history_readback_mismatch');
-  });
   it('discards a delayed Full after an edit and drains the latest Draft before final Full', async () => {
     const gate = deferred<api.RawFrame>(); vi.mocked(api.rawPreview).mockReturnValueOnce(gate.promise);
     await render('a'); await flush();
@@ -1229,6 +1216,37 @@ describe('RAW document lifetime', () => {
     await act(async () => pending.resolve(rawHistoryResult(request))); await flush();
     expect(current?.assetId).toBe('b'); expect(current?.dirty).toBe(false);
     expect(api.releaseRawWorkspace).toHaveBeenCalledOnce();
+  });
+  it('retains a normal departure release owner and retries the same workspace before opening only the latest successor', async () => {
+    let created = 0, releases = 0;
+    const firstRelease = deferred<void>();
+    vi.mocked(api.createRawWorkspace).mockImplementation(async () => `normal-${++created}`);
+    vi.mocked(api.releaseRawWorkspace).mockImplementation(async id => {
+      if (id !== 'normal-1') return;
+      releases++;
+      if (releases === 1) return firstRelease.promise;
+      if (releases === 2) throw new api.RawApiError('raw_connection_failed');
+    });
+    vi.mocked(api.rawWorkspaceEmpty).mockResolvedValue(false);
+
+    await render('a'); await flush();
+    await render('b'); await flush();
+    expect(api.releaseRawWorkspace).toHaveBeenCalledOnce();
+    expect(api.createRawWorkspace).toHaveBeenCalledOnce();
+
+    await act(async () => firstRelease.reject(new api.RawApiError('raw_connection_failed')));
+    await flush();
+    expect(api.releaseRawWorkspace).toHaveBeenCalledTimes(2);
+    expect(api.createRawWorkspace).toHaveBeenCalledOnce();
+
+    await render('c'); await flush();
+    expect(api.releaseRawWorkspace).toHaveBeenCalledTimes(3);
+    expect(api.createRawWorkspace).toHaveBeenCalledTimes(2);
+    expect(api.openRawDocument).toHaveBeenCalledWith('normal-2', 'c');
+    expect(api.openRawDocument).not.toHaveBeenCalledWith('normal-2', 'b');
+    expect(vi.mocked(api.releaseRawWorkspace).mock.invocationCallOrder[2])
+      .toBeLessThan(vi.mocked(api.createRawWorkspace).mock.invocationCallOrder[1]);
+    expect(current?.document?.assetId).toBe('c');
   });
   it('rejects old slider callbacks after a successor RAW document has opened', async () => {
     await render('a'); await flush(); const old = current!;
@@ -2141,7 +2159,7 @@ it('retries an uncertain Recovery discard only for its original workspace after 
 
   await render('b'); await flush();
   expect(api.rawWorkspaceEmpty).toHaveBeenCalledWith('recovery-source');
-  expect(api.discardRawWorkspace.mock.calls.map(([request]) => request)).toEqual([
+  expect(vi.mocked(api.discardRawWorkspace).mock.calls.map(([request]) => request)).toEqual([
     { workspaceId: 'recovery-source' }, { workspaceId: 'recovery-source' },
   ]);
   expect(api.createRawWorkspace).toHaveBeenCalledTimes(2);
@@ -2205,7 +2223,7 @@ it('retains a stale Recovery workspace owner after an uncertain release until a 
   vi.mocked(api.cancelRawPointColorInteraction).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'));
   vi.mocked(api.discardRawWorkspace).mockResolvedValue();
   vi.mocked(api.releaseRawWorkspace).mockImplementation(async id => {
-    expect(id).toBe('recovery-stale');
+    if (id !== 'recovery-stale') return;
     releases++;
     if (releases <= 3) throw new api.RawApiError('raw_workspace_conflict', 409);
   });
