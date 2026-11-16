@@ -2436,3 +2436,24 @@ F-02ではDockerでNative Recipeが優先される保存状態選択、異方針
 自動検証結果はRuntime／Thumbnail関連69件成功、Queue／Retry等を含むBackend関連175件成功、Frontend Persistence 76件成功、TypeScriptチェック成功、`git diff --check`成功。69件は175件の関連Backend検証範囲に一部重なるため、合算件数ではない。これらは自動テスト結果であり、実機操作とは区別する。別途、ユーザー報告によるWindows Desktop実機ではJPEG Native ExportとImmich登録、DNG ExportおよびSTACK作成を確認済み。今回の修正に関するDocker実環境の追加手動検証をCodexが実施したものではない。
 
 Phase 1〜4の仕様、コード経路、実装前調査との区別および受入根拠は[共通現像設計](research/lightcraft/WINDOWS_COMMON_DEVELOPMENT_PIPELINE_DESIGN.md)を参照する。これはPhase完了記録であり、次段階のコード変更を開始した記録ではない。
+
+
+## Point Color統合とRAW終了所有権の完了記録（2026-11-16）
+
+Windows LightCraft v0.20.0のPoint Colorを既存RAW設定、Preview、History／Recipe、Export設定伝搬へ接続した。UIはColorカテゴリ内に採色・選択、OkLCh中心色スウォッチ、8項目の調整、個別Reset、選択色削除、配列全体Resetを備える。Viewerスポイトは既存picker ownerと座標／frame照合を共有する。数値ドラッグではNative interaction update ACKとDraft Previewを利用し、ドラッグ終了時に1件のHistory operationとして確定する。Recipe／Historyには配列snapshotを保存し、Undo／Redo／JumpとDocument再オープンで完全snapshotを復元する。LightCraftの色計算はGenzoRoomへ移植していない。
+
+Point Colorの統合後監査では、F1〜F8としてNative ACKとFinish metadataの順序、Preview readbackと確定snapshotの分離、明示拒否／保存不明時のowner処理、連続操作の最終値flush、Preview ticketの失効を順に修正した。F9〜F11では共有キューの循環待ちを避け、`RawSuperseded`を既存Preview契約どおり扱い、Cancel失敗をRecoveryへ渡した。詳細な個別原因と対応テストは[Point Color統合記録](research/lightcraft/POINT_COLOR_INTEGRATION.md)に残している。
+
+終了所有権はP1〜P3-Bで段階導入した。P1はSaverによるDraft限定discard証明、P2-Aはworkspace ID・終了段階・共有Promiseを持つ`RawWorkspaceTermination`の基盤、P2-BはPoint Color離脱のsettle/release移行、P2-Cはrelease応答不明後のBackend照合・同一workspace再試行を導入した。P3-AはRecovery途中のDocument失効後もworkspace終了責任を保持し、P3-Bは証明のあるDraftだけを明示discardできるよう接続した。
+
+F15〜F19の個別修正は次のCommitで記録した。
+
+- **F15** `992b73d`：保存中フラグの解除を保存確定と誤認して明示discardへ進む経路を防止。Saverの保存安全性をdiscard開始時と送信直前に確認し、未確定Historyと同一save ID retryを保持する。
+- **F16** `1d57b0d`：Finishが先行しHistory保存が確定した場合、discardせず通常releaseへ移行。結果不明なら旧Saver／workspaceを保留する。
+- **F17** `d7491c3`：Recovery discard応答喪失を保存結果不明から分離し、旧workspace IDでBackend empty照合・安全な再試行を行う。
+- **F18** `a4bcdd4`：通常Document離脱も終了ownerへ接続し、保存確定後にreleaseする。release失敗時はownerを保持して後続openから同じworkspaceを復旧する。
+- **F19** `1d97b88`：Backend終了確認後のSaver／Editor等の後始末をowner共通完了処理へ移した。再試行が後続openから成功した場合も後始末が一度実行され、完了前に次Documentをopenしない。完了処理の失敗はBackend終了結果不明と区別して保持する。
+
+各工程で指示範囲のFocusedテスト、関連回帰、TypeScriptチェック、必要なproduction build／`git diff --check`を実施した。件数は工程ごとに対象範囲が異なるため合算していない。直近のF18は7 test files・434 tests、F19は7 test files・439 testsが成功し、F19のTypeScriptチェック、Frontend production build、`git diff --check`も成功した。Buildには既存の大容量chunkおよびReact Router module directive警告がある。これらは自動テスト結果であり、実Native／実Desktopの確認とは区別する。
+
+本記録時点で、ユーザーはWindows Desktopで通常のPoint Color操作を確認し、使用した範囲では問題を認めなかったと報告した。通信断や全ての終了・Recovery異常系を実機で再現したわけではなく、多くはMock／自動テストで検証している。Backend create応答が失われworkspace IDを取得できない場合、Frontendだけでは作成済みworkspaceを特定できない。保存結果が不明な場合は安全側に保留し、workspace終了と後続openを遅らせることがある。Point Colorの「範囲を表示」は未実装で、別工程の調査対象である。

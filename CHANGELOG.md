@@ -9,8 +9,12 @@ Internal changes are omitted unless they affect users.
 ### Fixed
 
 - Windows Desktop Color Mixer target adjustments no longer make the edit History unavailable when the valid `mixerTarget` step is reloaded.
+- Windows Desktop Point Color edits keep Native interaction, Draft Preview and the single History save for a gesture in sync; uncertain saves are retained for recovery instead of being discarded during photo changes.
+- Windows Desktop RAW photo changes recover workspace release or discard failures before opening the next photo, and release editing resources after workspace termination is confirmed.
 
 ### Added
+
+- Windows Desktop adds Point Color sampling and editing with ordered color swatches, eight adjustment controls, per-control Reset, color deletion and full Point Color Reset, integrated with History, Recipe and RAW Export settings.
 
 - Windows Desktop Color Mixer Hue sliders show a gradient for each color band to indicate the direction of the hue shift.
 

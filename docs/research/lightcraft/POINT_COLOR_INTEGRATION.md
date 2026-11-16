@@ -1,5 +1,17 @@
 # LightCraft Point Color 統合調査 P0
 
+## 現行統合状態（2026-11-16）
+
+本節以降のP0・段階記録は調査時点の記録であり、未実装・提案と記された過去の状態は現行仕様ではない。Windows LightCraft v0.20.0に対するPoint Color統合は、Backendのsnapshot validation、既存History API／SQLite保存、完全Recipe復元・Export設定伝搬、Frontend表示、Viewer採色、8項目編集、個別Reset、スウォッチ削除、配列全体Resetまで実装済みである。History operationは`pointColorPick`、`pointColorDelete`、`pointColorControl`、`pointColorControlReset`、`pointColorReset`を既存`/history/operate`経路で扱う。Point Colorの状態はNativeの順序付き`point_colors`配列で、個別永続IDは追加していない。
+
+数値drag中はNative interactionの`begin → update → end/cancel`を使い、各update ACKを確認しながらDraft Previewを更新する。ドラッグ中の値はRecipe／Historyへ保存せず、Finish時に最後のACK値と`pointColorControl` metadataを一致させ、同じ確定snapshotを既存History／Recipe transactionへ保存する。Cancelはdraftをbaselineへ戻しHistoryを追加しない。保存結果不明時はSaverとimmutable save ID requestを保持し、同じrequestのretryまたはreceipt replayへ進む。未確定Historyがあるworkspaceを明示discardしない。
+
+Document離脱では`RawWorkspaceTermination`がhook寿命から独立してworkspace ID、Saver、終了段階、進行中Promiseを保持する。保存settleは共有queue外、releaseと次Document openは既存queueで順序付ける。明示discardは既存のinteraction/drain ownership規則を維持し、Point Colorのsettle完了後に終了処理へ進む。保存結果不明（`unknown/saving`）はBackend empty照会で解消しない。Backend終了結果不明（`unknown/releasing`）はownerが保持する旧IDに対する状態照会と、安全性を満たす場合の同じID再試行で解消する。Backend終了確認後の後始末失敗（`unknown/completing`）はBackend操作を再送せず後始末だけを再試行する。旧Saver／Editor、通信状態、Preview URLの後始末が完了してから後続openを許可する。
+
+F1〜F19の監査修正は本書末尾の「最終監査修正 F12〜F19」に追記した。通常操作のWindows Desktopユーザー確認では、使用した範囲で問題がなかったとの報告を受けている。通信断など全異常系を実機で再現したわけではなく、多くはMock Native／Frontend自動テストによる確認である。Backend create応答が失われworkspace ID自体を得られない場合はFrontendだけではworkspaceを特定できず、保存結果が不明な場合は終了と後続openを安全側に保留することがある。
+
+**Point Color「範囲を表示」は未実装で、今後の調査対象である。** LightCraft v0.20.0内部の`Overlay::PointColorRange(index)`と`visualize::point_color_range`は確認済みだが、現在のHeadless／MCP公開契約はPoint Color overlayのindex引数・結果metadataを公開していない。P0時点で提案したmanaged patchは歴史的な案であり、現行実装には含まれない。本更新でNative調査やpatch開発は行っていない。
+
 ## 1. 調査対象バージョン・固定 Commit
 
 - GenzoRoom の基準は `main` の `2874ebda76506d7191a88fb2efc8e211619bc312`。調査開始時の作業ツリーは clean で、ローカルの `origin/main` と一致。
@@ -94,7 +106,9 @@ RenderJob／CPU/GPU 描画機能は共通コードに存在し、CLI/MCP の公�
 
 **提案**。GenzoRoom は写真単位の選択 index と checkbox を `useRawDocument` 周辺の UI 状態で所有する。Undo/Redo/Jump では表示を解除し、復元後の有効範囲に選択を合わせる。写真切替・パネル閉・Color OFF・Before・Crop 編集・選択可能なリストが空になった場合も解除する。選択や checkbox を切り替えた場合は settings revision が同じでも viewGeneration/要求 identity を変え、古い診断 PNG を通常 After や別 index に採用しない。スライダー変更は通常の編集リビジョンで Draft → Full を再要求し、範囲軸の更新を反映する。選択中の調整 4 値は診断描画で中立化されるので、診断中にそのスライダーを動かしても直ちにカラールックが変わらない場合がある。Before のリクエスト、通常の thumbnail、Recipe/History、JPEG Export には診断 identity を渡さない。
 
-## 9. History／Recipe 統合上の課題
+## 9. History／Recipe 統合（P0時点の課題と後続実装）
+
+以下の確認・候補箇所はP0時点の設計記録である。Point ColorのHistory API、Store metadata、完全snapshot復元と旧snapshot補完は後続P1-A2/P1-A2c-3bで実装済みであり、未解決の現行課題として読むものではない。
 
 [Backend](../../../backend/windows_raw_api.py) が History の readback と永続化を所有し、[Recipe store](../../../backend/raw_recipe_store.py) は未公開フィールドを含む Native JSON を保持して各 step の完全 snapshot を保存する。Undo/Redo/Jump は保存 snapshot を復元するので、index の再実行や各 step での Native `edit.undo` に依存する必要はない。現行 `_restore` は Native reset → `develop.merge` → readback 比較。[raw_controls.py](../../../backend/raw_controls.py) に完全復元／比較用の既定値補完がある。旧 snapshot の欠落を `[]` に正規化する候補箇所はここ。欠落のまま partial merge すると現在値が残り得るうえ、空配列付き readback と比較不一致になる。旧保存値・fingerprint・receipt は開いた時点で書き換えず、復元ペイロードと比較用の値にだけ既定を補う。Explicit malformed とキー省略は区別する。
 
@@ -110,7 +124,9 @@ RenderJob／CPU/GPU 描画機能は共通コードに存在し、CLI/MCP の公�
 
 既存の metadata は whitelist で、追加や削除を意味する既存 kind はない。旧 kind に別の設定操作として載せると履歴の説明と検証がずれる。P1 で snapshot/adaptor 検証後に必要な operation metadata・ラベルを確定する。エントリーの識別に永続 ID や SQLite schema を増やす根拠は現時点でない。History step の ID と Point Color の配列 index は用途が異なる。操作の再試行、Revision の衝突、途中 readback 失敗、写真切替は [rawRecipeSave](../../../frontend/src/rawRecipeSave.ts) と [LightCraftRawSession](../../../backend/lightcraft_raw.py) の既存経路へ載せる。
 
-## 10. GenzoRoom UI 統合方針
+## 10. GenzoRoom UI統合（P0時点の方針と現行実装）
+
+以下の「提案」は実装前のP0記録である。現在はPoint Colorの表示、Viewer採色、8項目編集、Reset、削除が既存Frontend／History経路に接続済み。「範囲を表示」だけが未実装であり、先頭の現行状態節を参照すること。
 
 **提案**。[RawAdjustmentControls](../../../frontend/src/RawAdjustmentControls.tsx) の Color 内で Mixer／Grading と同じ折りたたみ・Reset・ロックの形を再利用。空ではスポイトと採色案内、採色後に最大 8 スウォッチ、8 個のスライダー、選択色の削除、独立した範囲表示のチェック項目を置く。幅が狭い場合にスウォッチを折り返し、入力行は内容に応じて伸縮させる。Point Color 独立 ON/OFF は設けない。Undo/Redo や写真切替時の index と checkbox は写真編集 UI で管理し、`appSettings.ts` に保存する場合も flyout の開閉設定だけを対象とする。
 
@@ -127,21 +143,20 @@ Viewer の crosshair と [ViewerPointLoupe](../../../frontend/src/ViewerPointLou
 ## 12. 採用可能な実装方式
 
 1. **既存 Native コマンド＋完全 snapshot**。採色、削除、数値編集、配列 Reset、通常 Preview、Recipe/History/Export を同じ開発設定に接続できる。混在操作の許可条件と保存失敗後の再試行は既存 GenzoRoom の所有権で管理。
-2. **Preview 専用の最小 Native 公開 patch**。Desktop と共通の `RenderJob::with_overlay` を Headless Whole から選べるようにする。Region 公開が必要になった時点で同じ Overlay を配線する。Composer や独立した描画アルゴリズムは追加しない。
+2. **P0時点の歴史的な提案（現行未実装）**。Preview 専用の最小 Native 公開 patchでDesktopと共通の`RenderJob::with_overlay`をHeadless Wholeへ公開する案を検討した。現行のv0.20.0 Headless／MCP契約にはPoint Color overlay引数がないため、範囲表示は未実装であり、この案を実装済み仕様と解釈しない。
 3. **成立しない経路**。既存 `render_preview` の設定変更だけで同じ表示を得る方法は確認できなかった。通常 After を単純にモノクロにする方法や、全調整を書き換えて疑似表示する方法では、Desktop の選択エントリーのみを中立化して最終色から重みを再計算する処理を再現できず、永続化の境界も崩れる。
 
-## 13. 実確認・未解決事項
+## 13. P0時点の実確認・未解決事項（後続工程で一部解消）
 
 **実 CLI 確認**。SHA/receipt 照合済み CLI、CPU（`LIGHTCRAFT_GPU_BACKEND=off`）、一時ディレクトリ内の合成 64×32 二色 PNG と in-memory Headless Session を使用。MCP schema と command list、空 snapshot/controls、採色値と初期値、重複採色、座標 clamp、不正座標、8 件上限、削除と index 移動、0/56 control 列挙、存在しない index の書込み no-op、clamp／小数保持、個別 Reset、Point Color Section Reset の no-op、キー省略と空配列 merge、配列 merge が 9 件・範囲外値を保持することを確認。通常 Draft/Full PNG を取得し、Full が編集前と異なること、合成素材の JPEG 出力と前後 snapshot の Point Color 一致を確認。JPEG の画素別照合は実施していない。
 
-**未確認**。実 RAW/非RAW と EXIF・Rotate/Flip・Straighten・Crop・高倍率 Region の組合せにおける採色位置、proxy とルーペの色差、RAW の埋込 Preview/フォールバック時の採色、Desktop 範囲表示の目視と翻訳ラベル表記、DX12 と CPU の診断出力/応答性、GenzoRoom アプリでの History/Recipe/Legacy/JPEG Export を実測していない。範囲表示を既存 Headless に仮の引数で呼び出す試験は行っていない。既存単体テストは関連ソースを参照した。製品変更がないため製品テスト、ビルド、ブラウザ検証は対象外。
+**P0調査時点で未確認**。実 RAW/非RAW と EXIF・Rotate/Flip・Straighten・Crop・高倍率 Region の組合せにおける採色位置、proxy とルーペの色差、RAW の埋込 Preview/フォールバック時の採色、Desktop 範囲表示の目視と翻訳ラベル表記、DX12 と CPU の診断出力/応答性、GenzoRoom アプリでの History/Recipe/Legacy/JPEG Export を実測していなかった。後続工程で自動テスト、実Native合成JPEG／DNG正常系、およびユーザーによる通常Desktop操作確認を追加したが、通信断等の全異常系を実機確認した意味ではない。範囲表示を既存 Headless に仮の引数で呼び出す試験は行っていない。
 
-**残るリスク**。配列 index は移動・再利用される。古い要求が別色に作用することを revision と操作所有者で防ぐ。明示配列の不正型・長さ、旧 snapshot 省略、保存再試行、Color OFF/B&W、診断 PNG の取り違えを P1/P2 の focused 回帰対象とする。強い Grading 等により Desktop 診断と通常調整の範囲が異なる点は LightCraft v0.20.0 の挙動として扱う。
+**P0時点でのリスク候補**。配列indexは移動・再利用されるため、古い要求が別色に作用しないよう後続実装ではrevisionと操作所有者で検証する。明示配列の不正型・長さ、旧snapshot省略、保存再試行、Color OFF/B&W、診断PNGの取り違えは後続P1 focused tests／実装で扱った。強いGrading等によりDesktop診断と通常調整の範囲が異なる点はLightCraft v0.20.0の挙動であり、GenzoRoom独自の画像処理では解消しない。
 
 ## 14. P1 以降の段階的実装案
 
-1. **P1 — Point Color 編集と永続化**。BackendのNative操作・History／Recipe保存・旧snapshot復元・Windows Export設定引き渡しを実装・確認済み。残りは共通 Viewer と Color サブカテゴリのFrontend接続、および実 RAW・非RAWでの採色位置とHistory／再オープン操作の手動確認。
-2. **P2 — 範囲表示**。既存 Overlay を Whole Draft/Full へ公開する最小 managed patch と実 binary 検証。表示セッションの切替、Before/通常／診断の取り違え、slider 更新、Export 分離、CPU/DX12 を確認。高倍率の描画品質が必要なら Region を同じ段階で接続する。
+この段階表はP0調査時点の提案であり、現行ロードマップではない。**P1 Point Color編集・保存・Export設定引き渡し・Frontend操作は実装済み**で、通常操作のWindows Desktop確認をもって今回の開発作業は一区切りとする。**範囲表示は未実装**。LightCraft内部Overlayと現行Headless／MCP公開契約の差を踏まえ、別工程で必要性・公開契約を調査する。P0時のpatch候補を実施予定として扱わない。
 
 ## 15. 主要ソース
 
@@ -484,3 +499,32 @@ F8は各Draft Preview Promiseを作成時に観測する。古いPromiseがgestu
 修正前は、Deferred Preview完了後もHistory保存に到達しないこと、`RawSuperseded` で確定が失敗すること、明示的Cancelの拒否をVitestが未処理例外として検出することを各テストで確認した。修正後はHistory保存、workspace解放、次Documentのopenの順序と、Cancel失敗後のRecoveryと再操作を確認した。
 
 Frontend 607件、Backend Mock／API／SQLite 374件、実Native 8件（合成JPEG／DNGのPoint Color各1件を含む）、TypeScript、production build、差分チェックが成功した。実Nativeは正常系を確認し、離脱競合と障害注入は自動テストで検証した。Windows Desktop手動確認は未実施。
+
+### 最終監査修正 F12〜F19 — RAW workspace終了所有権
+
+#### F12〜F14：終了所有権への移行
+
+F12では、通常releaseの応答喪失をrelease失敗として破棄せず、旧workspace IDを持つownerを残した。後続openは`rawWorkspaceEmpty(workspaceId)`を使ってBackendのcapability応答を照会し、`workspaceState === "empty" && cleanupPending === false`の場合だけ終了確認とする。このBackend状態は単一workspace manager全体の状態で、応答にIDは含まれない。Frontendはserialized ownerが保持する旧IDを使い、実際のrelease要求にはそのIDを含める。空でなければ同じIDで既存releaseを再試行し、409／404／503だけから終了済みと推測しない。`unknown/saving`はこのempty照会では解消しない。
+
+F13では共通Recoveryのdiscard／create／open／settings各await後に、開始時のasset・workspace・handle・generation・document token等を確認する。旧UIが失効した後は結果をそのUIへ反映しない。create成功後に失効した場合は応答で得たworkspace IDを既存termination ownerへ渡して終了し、後続openはその終了確認まで待つ。create応答自体が失われIDを得られない場合は、別workspaceを推測して終了しない。
+
+F14では明示discardにP1のSaver／gesture／Documentへ結び付くDraft限定discard証明を要求する。Cancelが失敗しても、開始時に確認した保存境界と証明を保持し、HTTP statusや`retryRequest`の不存在だけではdiscard可否を決めない。未確定History／Native end結果不明ならdiscardしない。Historyが確定したFinish先行ではdiscardで保存を消さず、通常releaseへ移行する。
+
+#### F15〜F19：保存安全性と共通後始末
+
+- **F15（`992b73d`）**：処理中flagの解除を保存確定と誤認し、未確定Historyを明示discardする経路を防いだ。Saverの`canDiscardWorkspace()`をdiscard開始時とBackend送信直前に確認し、未解決save ID／SQLite結果不明／Native反映とHistoryの不一致がある場合は旧Saver、retry request、workspace IDを維持する。P1のDraft限定証明は別契約として維持した。
+- **F16（`1d57b0d`）**：Finishが先にownerとなってHistory保存が確定した場合は通常releaseへ移行し、Backend discardを呼ばない。Native／History結果不明ならreleaseもdiscardもせず旧Saverと同じretry requestを保持する。
+- **F17（`d7491c3`）**：安全な共通Recovery discard送信後のHTTP応答喪失を保存結果不明と区別した。後続openは旧workspace IDを保持する終了ownerからcapability endpointのworkspaceState／cleanupPendingを照会し、emptyなら完了、非emptyなら元の安全条件を維持できる場合に限り同じIDで再試行する。empty照会の応答自体はworkspace IDを返さない。
+- **F18（`a4bcdd4`）**：通常Document離脱も`RawWorkspaceTermination`へ接続した。保存settleは共有queue外、releaseは既存queue内で行い、成功または既存P2-Cの照合／再試行後だけ後続openを許可する。保存結果不明時はworkspaceをreleaseしない。
+- **F19（`1d97b88`）**：明示discardのSaver／Editor／Preview等の後始末を最初のUI操作Promiseではなくowner共通完了経路に置いた。後続openからの再試行成功やBackend empty確認でも後始末する。`saving`、`releasing`、`completing`、`complete`を区別し、後始末失敗はBackend終了未確認と混同せず、終了APIを再送せず後始末だけを再試行する。終了成功時の旧Saver／Editor disposeとowner解放は一度だけ行い、UI更新は同一Document identityが有効な場合に限る。
+
+P1〜P3-BおよびF15〜F19の各段階で、Deferred Promiseを用いたFocused／関連回帰テスト、TypeScript、必要なFrontend buildと差分チェックを実施した。個別工程で検証範囲と件数が異なるため件数は合算しない。直近のF18では7 test files・434 tests、F19では7 test files・439 testsが成功した。F19のTypeScriptチェック・production build・`git diff --check`も成功し、buildには既存のchunk size／React Router directive警告があった。F15〜F17の各工程のテスト範囲はそれぞれのCommit/task記録に従い、本節では総合件数を作らない。実機で全通信断・保存不明順序を再現したという意味ではない。
+
+現行の終了所有者はReact hookより長くworkspace IDと必要なSaverを保持する。保存結果不明の`unknown/saving`は安全なHistory retryなしに解放しない。workspace終了結果不明の`unknown/releasing`は同一IDのBackend照合で復旧する。Backend終了済みで後始末だけ失敗した`unknown/completing`は後始末を再開する。終了が確定しない間は次Documentのopenを保留する。Windows Desktopの通常Point Color操作はユーザーが使用した範囲で問題なしと確認したが、通信断等を含む全異常系を実機確認したわけではない。
+
+#### 残る既知の制約
+
+- Backend create応答が失われworkspace IDを取得できない場合、Frontendだけでは作成済みworkspaceを特定できない。
+- History／Native保存結果が不明の場合は、データ保護のためworkspace終了と次Document openを保留することがある。
+- 多くの異常系はMock／自動テストであり、Windows Desktopで全て実機再現していない。
+- Point Colorの「範囲を表示」は未実装。LightCraft v0.20.0内部には`Overlay::PointColorRange(index)`があるが、現行Headless／MCP公開契約には対応する公開引数がない。追加Native調査・managed patchは本記録更新の対象外。
