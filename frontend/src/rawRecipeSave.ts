@@ -61,6 +61,7 @@ export class RawRecipeSave {
   get curveInteracting() { return !!this.curveGesture; }
   get mixerInteracting() { return !!this.mixerGesture; }
   get pointColorInteracting() { return !!this.pointColorGesture; }
+  get pointColorFinishPending() { return this.pointColorGesture?.endOwner === 'finish'; }
   get pointColorInputEnabled() { return !!this.pointColorGesture && !this.pointColorGesture.ending; }
   private gesture?: { control: RawHistoryControlId; fingerprint: string };
   // One adjacent control's unsent intent is held until the preceding gesture is acknowledged.

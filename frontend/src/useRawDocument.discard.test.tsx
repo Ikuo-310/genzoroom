@@ -23,7 +23,7 @@ const frame: api.RawFrame = { blob: new Blob(['preview']), width: 16, height: 12
   interactionId: 'd'.repeat(32), interactionSequence: 1,
   frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000, aspect: 4 / 3,
     fullWidth: 16, fullHeight: 12, window: null } };
-function Harness() { current = useRawDocument('a'); return <span>{current?.url}</span>; }
+function Harness({ id = 'a' }: { id?: string } = {}) { current = useRawDocument(id); return <span>{current?.url}</span>; }
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>(yes => { resolve = yes; });
@@ -90,6 +90,36 @@ it('preserves an unresolved public Point Color History operation instead of disc
   expect(api.discardRawWorkspace).toHaveBeenCalledWith({ workspaceId: 'workspace-a' });
 });
 
+it('releases instead of discarding when Finish wins an explicit discard and then confirms History', async () => {
+  await act(async () => { root.render(<Harness />); }); await flush();
+  act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); }); await flush();
+  act(() => current!.updatePointColorInteraction(38));
+  await new Promise(resolve => setTimeout(resolve, 60)); await flush();
+
+  const history = deferred<api.RawHistoryResult>();
+  commitHistory.mockReturnValueOnce(history.promise);
+  act(() => current!.finishPointColorInteraction()); await flush();
+  expect(commitHistory).toHaveBeenCalledOnce();
+  const finish = commitHistory.mock.calls[0]![0];
+  let discarded!: Promise<void>;
+  act(() => { discarded = current!.discardChanges(); void discarded.catch(() => {}); });
+  await flush();
+  expect(api.discardRawWorkspace).not.toHaveBeenCalled();
+  expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
+
+  await act(async () => { root.render(<Harness id="b" />); }); await flush();
+  expect(api.openRawDocument).toHaveBeenCalledOnce();
+  vi.mocked(api.releaseRawWorkspace).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'));
+  await act(async () => { history.resolve(rawHistoryResult(finish)); await discarded; await flush(); });
+  expect(api.discardRawWorkspace).not.toHaveBeenCalled();
+  expect(api.releaseRawWorkspace).toHaveBeenCalledTimes(2);
+  expect(vi.mocked(api.releaseRawWorkspace).mock.calls).toEqual([['workspace-a'], ['workspace-a']]);
+  expect(vi.mocked(api.releaseRawWorkspace).mock.invocationCallOrder[1]).toBeLessThan(
+    vi.mocked(api.openRawDocument).mock.invocationCallOrder[1]);
+  expect(api.openRawDocument).toHaveBeenCalledTimes(2);
+  expect(vi.mocked(api.openRawDocument).mock.calls[1]![1]).toBe('b');
+});
+
 it('rechecks the same Saver immediately before sending a proven-draft discard', async () => {
   await act(async () => { root.render(<Harness />); }); await flush();
   act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); }); await flush();
@@ -110,7 +140,31 @@ it('rechecks the same Saver immediately before sending a proven-draft discard', 
   expect(api.discardRawWorkspace).toHaveBeenCalledOnce();
 });
 
-it('does not discard when P1 cannot prove the active Point Color interaction is draft-only', async () => {
+it('keeps an unknown Finish save and retries it before releasing the same workspace', async () => {
+  await act(async () => { root.render(<Harness />); }); await flush();
+  act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); }); await flush();
+  act(() => current!.updatePointColorInteraction(38));
+  await new Promise(resolve => setTimeout(resolve, 60)); await flush();
+
+  commitHistory.mockRejectedValueOnce(new api.RawSaveError('raw_history_save_failed', 'unknown'));
+  act(() => current!.finishPointColorInteraction()); await flush();
+  expect(commitHistory).toHaveBeenCalledOnce();
+  const uncertainRequest = commitHistory.mock.calls[0]![0];
+  await expect(act(async () => current!.discardChanges())).rejects.toMatchObject({ code: 'raw_history_save_failed' });
+  expect(api.discardRawWorkspace).not.toHaveBeenCalled();
+  expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
+
+  commitHistory.mockImplementationOnce(async request => rawHistoryResult(request));
+  await act(async () => { await current!.retrySave(); });
+  expect(commitHistory).toHaveBeenCalledTimes(2);
+  expect(commitHistory.mock.calls[1]![0]).toEqual(uncertainRequest);
+  await act(async () => { await current!.discardChanges(); });
+  expect(api.discardRawWorkspace).not.toHaveBeenCalled();
+  expect(api.releaseRawWorkspace).toHaveBeenCalledOnce();
+  expect(api.releaseRawWorkspace).toHaveBeenCalledWith('workspace-a');
+});
+
+it('releases after Finish succeeds when P1 cannot prove the interaction is draft-only', async () => {
   await act(async () => { root.render(<Harness />); }); await flush();
   expect(current).toMatchObject({ status: 'ready', locked: false, history: { initialized: true }, frame: expect.any(Object), imageRevision: 1 });
   act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); }); await flush();
@@ -126,6 +180,7 @@ it('does not discard when P1 cannot prove the active Point Color interaction is 
   await flush();
   expect(api.discardRawWorkspace).not.toHaveBeenCalled();
   await act(async () => { history.resolve(rawHistoryResult(commitHistory.mock.calls[0]![0])); await flush(); });
-  await expect(request).rejects.toMatchObject({ code: 'raw_save_unconfirmed' });
+  await expect(request).resolves.toBeUndefined();
   expect(api.discardRawWorkspace).not.toHaveBeenCalled();
+  expect(api.releaseRawWorkspace).toHaveBeenCalledOnce();
 });

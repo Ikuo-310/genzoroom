@@ -1008,6 +1008,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     let discardTermination: RawWorkspaceTermination | undefined;
     let discardSaveSafeAtStart: boolean | undefined;
     let discardDecision: RawDraftDiscardDecision | undefined;
+    let releaseAfterFinish = false;
     let discardSaver: RawRecipeSave | undefined, discardEditor: RawControls | undefined;
     let discardProof: { workspaceId: string; saver: RawRecipeSave; handle: string; generation: number; documentToken: string; revision: number } | undefined;
     let discardIdentity: { workspaceId: string; handle: string; generation: number; documentToken: string; revision: number } | undefined;
@@ -1053,6 +1054,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       const ownedSaver=saver, ownedEditor=editor;
       discardSaver=ownedSaver; discardEditor=ownedEditor;
       const doc=ownedEditor?.confirmed;
+      const finishOwnedPointColor = !!ownedSaver?.pointColorFinishPending;
       const pointColorGuard = !!ownedSaver?.pointColorInteracting || !!ownedSaver
         && !ownedSaver.cropping && !ownedSaver.mixerInteracting && !ownedSaver.curveInteracting
         && (ownedSaver.saving || ownedSaver.moving);
@@ -1074,7 +1076,16 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         if (discardDecision) {
           if (!discardDecision.allowed) {
             await ownedSaver?.preparePointColorForDeparture();
-            throw new RawApiError('raw_save_unconfirmed');
+            const settled = ownedEditor?.confirmed;
+            if (!finishOwnedPointColor || !ownedSaver?.canDiscardWorkspace() || ownedSaver.dirty || ownedSaver.error
+              || ownedEditor?.unsettled || !settled || !discardIdentity
+              || settled.workspaceId !== discardIdentity.workspaceId || settled.handle !== discardIdentity.handle
+              || settled.generation !== discardIdentity.generation || settled.documentToken !== discardIdentity.documentToken)
+              throw new RawApiError('raw_save_unconfirmed');
+            // Finish can advance the Document revision while this owner waits; only its stable identity is retained.
+            discardIdentity = { ...discardIdentity, revision: settled.revision };
+            releaseAfterFinish = true;
+            return;
           }
           try { await discardDecision.cancel; } catch { /* A proven draft may be discarded even when Native Cancel is unacknowledged. */ }
           if (!identityStillOwned() || !ownedSaver?.ownsPointColorDraftDiscard(discardDecision)
@@ -1090,9 +1101,15 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       };
       const terminateOwned = async () => {
         if (workspace !== ownedWorkspace || !identityStillOwned()) throw new RawApiError('raw_stale_handle');
-        if (discardDecision && (!ownsDiscardProof() || !ownedSaver?.ownsPointColorDraftDiscard(discardDecision)))
+        if (discardDecision?.allowed && (!ownsDiscardProof() || !ownedSaver?.ownsPointColorDraftDiscard(discardDecision)))
           throw new RawApiError('raw_save_unconfirmed');
         if (ownedSaver && !ownedSaver.canDiscardWorkspace(discardDecision)) throw new RawApiError('raw_save_unconfirmed');
+        if (releaseAfterFinish) {
+          await releaseWorkspaceConfirmed(ownedWorkspace);
+          workspace = undefined;
+          ownedEditor?.dispose(); ownedSaver?.dispose();
+          return;
+        }
         abortRawWorkspaceRequests(ownedWorkspace);
         const confirmEmptyOrThrow = async (failure: unknown) => {
           if (await rawWorkspaceEmpty(ownedWorkspace)) return;
