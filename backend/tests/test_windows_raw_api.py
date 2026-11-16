@@ -160,7 +160,7 @@ def test_actual_adapter_render_preview_and_safe_release(local, tmp_path, monkeyp
                                     "recipeStatus", "recipeRevision", "settingsFingerprint", "recipeFingerprint",
                                     "importDefaultsFingerprint",
                                     "mutationAttempts", "mutationLimit", "regenerationThreshold", "beforeKey",
-                                    "sourceWidth", "sourceHeight"}
+                                    "sourceWidth", "sourceHeight", "recipeRecoveryPending"}
                 assert doc["recipeStatus"] == "none" and doc["recipeRevision"] == 0
                 state = await http.get(f'/api/raw/documents/{doc["handle"]}', headers={"X-Raw-Workspace": workspace})
                 assert state.json()["revision"] == doc["revision"]
