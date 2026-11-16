@@ -29,6 +29,8 @@ type RawState = { cropSnapshot?: CropSnapshot; cropMode?: boolean; cropDisplay?:
 // Serialize ownership changes even when React unmounts during a transmitted import.
 let ownership = Promise.resolve();
 function enqueue(action: () => Promise<void>) { ownership = ownership.then(action, action).catch(() => {}); }
+// Gate successor opens without occupying the queue that the departing Finish still needs.
+let pointColorDeparture: Promise<boolean> | undefined;
 function log(code: string, event = 'preview.failed') {
   try { frontendLogger.add({ level: 'error', component: 'raw', event, context: { errorCode: code } }); }
   catch { /* Diagnostics cannot change Preview ownership. */ }
@@ -871,7 +873,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       if (regenerationError) throw new RawApiError(regenerationError);
     };
     setState({ assetId, status: 'loading' });
-    enqueue(async () => {
+    const open = async () => {
       try {
         if (!current()) return;
         if (!await rawCapability(controller.signal)) throw new RawApiError('raw_unavailable');
@@ -898,7 +900,13 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
           try { await releaseRawWorkspace(workspace); workspace = undefined; } catch { log('raw_release_failed'); }
         }
       }
+    };
+    if (pointColorDeparture) void pointColorDeparture.then(released => {
+      if (!current()) return;
+      if (released) enqueue(open);
+      else fail(new RawApiError('raw_save_unconfirmed'));
     });
+    else enqueue(open);
     let discarded=false,discardOperation:Promise<void>|undefined;
     discardRef.current=()=>{
       if(discardOperation)return discardOperation;
@@ -937,29 +945,41 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       saver?.pause();
       // A late slider unmount cannot target a successor. Its old owner still finishes its
       // gesture on this same queue before cleanup, including transmitted native mutations.
-      const finalSave = discarded ? undefined : saver?.pointColorInteracting
-        ? saver.preparePointColorForDeparture()
-        : saver?.mixerInteracting ? saver.cancelMixerInteraction()
-          : saver?.cropping ? saver.cancelGeometry() : saver?.save();
+      const departure = discardOperation ?? (saver?.pointColorInteracting ? saver.preparePointColorForDeparture() : undefined);
+      const finalSave = discarded || departure ? undefined : saver?.mixerInteracting ? saver.cancelMixerInteraction()
+        : saver?.cropping ? saver.cancelGeometry() : saver?.save();
       if (saverRef.current === saver) saverRef.current = null;
       if (editorRef.current === editor) editorRef.current = null;
       controller.abort();
       clearTimeout(timer); clearTimeout(viewTimer);
       revoke();
       const releaseAfterSave = async () => {
-        try { await finalSave; } catch { return; }
-        if(discarded)return;
+        if (discarded) return true;
         if (saver?.dirty || saver?.error || editor?.unsettled) {
           log('raw_save_unconfirmed', 'recipe.saveFailed');
-          return; // Never release an unconfirmed native document after an unexpected unmount.
+          return false; // Never release an unconfirmed native document after an unexpected unmount.
         }
         editor?.dispose(); saver?.dispose();
         if (workspace) {
-          try { await releaseRawWorkspace(workspace); } catch { log('raw_release_failed'); }
-          workspace = undefined;
+          try { await release(); } catch { log('raw_release_failed'); return false; }
         }
+        return true;
       };
-      enqueue(releaseAfterSave);
+      if (departure) {
+        const barrier = departure.then(() => new Promise<boolean>(resolve => {
+          enqueue(async () => {
+            try { resolve(await releaseAfterSave()); }
+            catch { log('raw_release_failed'); resolve(false); }
+          });
+        }), () => false);
+        pointColorDeparture = barrier;
+        void barrier.then(released => {
+          if (released && pointColorDeparture === barrier) pointColorDeparture = undefined;
+        });
+      } else enqueue(async () => {
+        try { await finalSave; } catch { return; }
+        await releaseAfterSave();
+      });
     };
     const pagehide = () => {
       if (current()) setState({ assetId, status: 'error', code: 'raw_document_closed' });
@@ -1437,12 +1457,20 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       if (!callbackEditor() || frozen.current || !saver?.pointColorInteracting) return;
       void saver.finishPointColorInteraction().catch(cause => {
         const code = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
-        setState(previous => previous && ({ ...previous, displayError: code }));
+        if (saverRef.current === saver && identity.current === assetId)
+          setState(previous => previous?.assetId === assetId ? { ...previous, displayError: code } : previous);
       });
     },
     cancelPointColorInteraction: () => {
+      const owner = saverRef.current;
+      if (!callbackEditor() || !owner) return;
       curvePresentation.current.active = false;
-      void saverRef.current?.cancelPointColorInteraction();
+      void owner.cancelPointColorInteraction().catch(cause => {
+        const code = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
+        log(code, 'pointColor.cancelFailed');
+        if (saverRef.current === owner && identity.current === assetId)
+          setState(previous => previous?.assetId === assetId ? { ...previous, displayError: code } : previous);
+      });
     },
     operate: (operation: RawHistoryOperation) => {
       cancelPick();

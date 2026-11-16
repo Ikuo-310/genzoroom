@@ -99,7 +99,7 @@ it('does not accept an acknowledgement for a disposed document', async () => {
   expect(changed).not.toHaveBeenCalled(); expect(c.savedFingerprint).toBe(fingerprint(1));
 });
 
-it('coalesces Point Color interaction updates and saves one final History operation', async () => {
+it.each(['delivered', 'superseded'])('coalesces Point Color updates and saves one History operation with a %s Preview', async delivery => {
   const point = { lum: .5, chroma: .1, hue: 20, hue_shift: 0, sat_shift: 0, lum_shift: 0, variance: 0,
     range: 50, hue_range: 50, sat_range: 50, lum_range: 50 };
   const initial = { ...settings(), point_colors: [point] };
@@ -110,6 +110,7 @@ it('coalesces Point Color interaction updates and saves one final History operat
   vi.mocked(api.updateRawPointColorInteraction).mockImplementation(async (_doc, _serial, _signal, _target, operation) => operation.sequence);
   vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(), width: 10, height: 10, epoch: 1, sequence: 1,
     kind: 'after', quality: 'draft', interactionId: 'a'.repeat(32), interactionSequence: 2 } as api.RawFrame);
+  if (delivery === 'superseded') vi.mocked(api.rawPreview).mockRejectedValueOnce(new api.RawSuperseded('replaced'));
   vi.mocked(api.saveRawHistory).mockImplementation(async request => {
     const stepId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', saved = { ...initial, settingsFingerprint: fingerprint(2), recipeFingerprint: fingerprint(2),
       recipeRevision: request.expectedRecipeRevision + 1, history: { initialized: true, cursor: 1, length: 1, selectedStepId: stepId },
@@ -138,6 +139,7 @@ it('coalesces Point Color interaction updates and saves one final History operat
   const request = vi.mocked(api.saveRawHistory).mock.calls[0][0];
   expect(request.operation).toEqual({ kind: 'pointColorControl', metadata: { control: 'pointColor.0.hueShift', value: 25.5 } });
   expect(request.pointColorInteractionId).toBe('a'.repeat(32));
+  expect(api.cancelRawPointColorInteraction).not.toHaveBeenCalled();
   expect(c.pointColorInteracting).toBe(false);
 });
 

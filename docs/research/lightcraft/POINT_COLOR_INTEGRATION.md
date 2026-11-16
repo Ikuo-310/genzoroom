@@ -474,3 +474,13 @@ F8は各Draft Preview Promiseを作成時に観測する。古いPromiseがgestu
 共有経路のBackend回帰として`test_lightcraft_raw.py`と`test_raw_region.py`の188 tests、Point Color History API／receipt／retry 8 testsが成功した。Frontend Point Color／Preview関連5 filesは571 tests成功し、TypeScript checkとproduction buildも成功した（既存Vite bundle-sizeとmodule-directive warning、React testの`act()` warningあり）。Mock以外の実Native／実Desktop試験は行っていない。P1（F1/F4）、P2（F2/F3）、P3（F5/F6）の状態遷移は上記の関連回帰で維持を確認し、その設計は変更していない。P4ではF7/F8を修正した。F2〜F8全体の新たな網羅監査ではなく、今回のPreview経路に関わるF2/F3/F5/F6回帰のみ実施した。
 
 変更対象はPreview ticketの待機・無効化とPoint Color Preview Promiseの寿命に限る。JPEG／DNG実Native正常系、Windows Desktop手動確認、P4以外のpreview generation問題は未検証であり、Native画像処理・History保存形式には変更を加えていない。
+
+### 最終監査の修正 F9〜F11
+
+- **F9** 最終Draft Previewを待つFinishは、まだHistory保存をキューへ登録していないことがある。cleanupが先にキューを取得すると、Finishとcleanupが循環待ちになる。Document離脱はキュー外で終了Promiseを待ち、その後で既存キューにworkspace解放を登録する。次Documentのopenは解放成功まで待機する。解放や保存が確定しない場合はopenを拒否する。Documentが残っている間の結果不明時は、従来どおり同じsave IDで保存を再試行できる。
+- **F10** Draft Previewの `RawSuperseded` は配信終了として扱う。FinishはNative ACK済みの値とsequenceを照合して保存へ進む。それ以外のPreview失敗とNative readback不一致は従来の取消し／Recovery経路に進む。
+- **F11** 明示的Cancelの拒否をUIで処理し、診断と該当Saverのエラー表示に反映する。Recoveryとdirty／lockedは既存Saverが管理し、再オープン後は新しいSaverで編集を再開する。
+
+修正前は、Deferred Preview完了後もHistory保存に到達しないこと、`RawSuperseded` で確定が失敗すること、明示的Cancelの拒否をVitestが未処理例外として検出することを各テストで確認した。修正後はHistory保存、workspace解放、次Documentのopenの順序と、Cancel失敗後のRecoveryと再操作を確認した。
+
+Frontend 607件、Backend Mock／API／SQLite 374件、実Native 8件（合成JPEG／DNGのPoint Color各1件を含む）、TypeScript、production build、差分チェックが成功した。実Nativeは正常系を確認し、離脱競合と障害注入は自動テストで検証した。Windows Desktop手動確認は未実施。

@@ -37,7 +37,11 @@ function TargetedViewerHarness({ id }: { id: string }) {
 }
 async function render(id: string | null, before = false) { await act(async () => { root.render(<Harness id={id} before={before} />); }); }
 async function flush() { await act(async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); }); }
-function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes; }); return { promise, resolve }; }
+function deferred<T>() {
+  let resolve!: (value: T) => void, reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
 beforeEach(() => {
   vi.mocked(api.readRawHistory).mockReset().mockImplementation(async doc => rawHistoryData(doc));
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
@@ -945,6 +949,68 @@ describe('RAW native Before cache', () => {
 describe('RAW document lifetime', () => {
   const pointColor = { lum: .5, chroma: .1, hue: 20, hue_shift: 0, sat_shift: 0, lum_shift: 0, variance: 0,
     range: 50, hue_range: 50, sat_range: 50, lum_range: 50 };
+  const pointFrame = { blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence: 1,
+    frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000, aspect: 4/3,
+      fullWidth: 16, fullHeight: 12, window: null } };
+  async function beginPointColor() {
+    vi.mocked(api.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), point_colors: [pointColor] }));
+    vi.mocked(api.rawPreview).mockResolvedValue(pointFrame);
+    await render('a'); await flush();
+    act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); });
+    await flush();
+  }
+
+  it.each(['delivered', 'superseded'])('saves a departing Finish after a %s Preview before opening the successor', async delivery => {
+    await beginPointColor();
+    const preview = deferred<api.RawFrame>(), history = deferred<api.RawHistoryResult>(), release = deferred<void>();
+    vi.mocked(api.rawPreview).mockReturnValueOnce(preview.promise);
+    commitHistory.mockReturnValueOnce(history.promise);
+    vi.mocked(api.releaseRawWorkspace).mockReturnValueOnce(release.promise);
+    act(() => { current!.updatePointColorInteraction(38); current!.finishPointColorInteraction(); });
+    await flush();
+    expect(api.updateRawPointColorInteraction).toHaveBeenCalledOnce();
+    await render('b');
+    act(() => { window.dispatchEvent(new Event('pagehide')); });
+    // The waiting successor can also depart without replacing the original release barrier.
+    await render('c'); await flush();
+    expect(commitHistory).not.toHaveBeenCalled();
+    expect(api.openRawDocument).toHaveBeenCalledOnce();
+    await act(async () => {
+      if (delivery === 'superseded') preview.reject(new api.RawSuperseded('replaced'));
+      else preview.resolve({ ...pointFrame, interactionId: 'd'.repeat(32), interactionSequence: 1 });
+    }); await flush();
+    expect(commitHistory).toHaveBeenCalledOnce();
+    const request = commitHistory.mock.calls[0]![0];
+    expect(request.operation?.metadata).toEqual({ control: 'pointColor.0.hueShift', value: 38 });
+    expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
+    await act(async () => { history.resolve(rawHistoryResult(request)); }); await flush();
+    expect(api.releaseRawWorkspace).toHaveBeenCalledOnce();
+    expect(api.openRawDocument).toHaveBeenCalledOnce();
+    await act(async () => { release.resolve(); }); await flush();
+    expect(vi.mocked(api.openRawDocument).mock.calls.map(call => call[1])).toEqual(['a', 'c']);
+    expect(api.cancelRawPointColorInteraction).not.toHaveBeenCalled();
+  });
+
+  it('observes explicit Point Color cancel failure and permits editing after workspace recovery', async () => {
+    await beginPointColor();
+    const discard = deferred<void>();
+    vi.mocked(api.discardRawWorkspace).mockReturnValueOnce(discard.promise);
+    vi.mocked(api.cancelRawPointColorInteraction).mockRejectedValueOnce(new api.RawApiError('raw_point_color_interaction_stale'));
+    act(() => { current!.cancelPointColorInteraction(); current!.cancelPointColorInteraction(); });
+    await flush();
+    expect(api.cancelRawPointColorInteraction).toHaveBeenCalledOnce();
+    expect(api.discardRawWorkspace).toHaveBeenCalledOnce();
+    expect(current?.dirty).toBe(true);
+    expect(current?.locked).toBe(true);
+    await act(async () => { discard.resolve(); }); await flush();
+    expect(current?.locked).toBe(false);
+    act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); });
+    await flush();
+    act(() => current!.cancelPointColorInteraction()); await flush();
+    expect(current?.pointColorInteracting).toBe(false);
+    expect(commitHistory).not.toHaveBeenCalled();
+  });
+
   it('cancels an open Point Color draft once during repeated save preparation before switching Documents', async () => {
     vi.mocked(api.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), point_colors: [pointColor] }));
     vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence: 1,

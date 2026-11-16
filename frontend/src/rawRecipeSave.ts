@@ -218,12 +218,15 @@ export class RawRecipeSave {
         undefined, undefined, undefined, { id, sequence: applied }).then(frame => {
         if (this.active && this.pointColorGesture === gesture && frame.interactionSequence === gesture.displayedSequence)
           this.options.pointColorPreview?.(frame, gesture.doc, applied, gesture.display!);
+      }).catch(cause => {
+        // Delivery can be superseded even though Native acknowledged the final update.
+        if (!(cause instanceof RawSuperseded)) throw cause;
       });
       gesture.preview = preview;
       // Keep an observer attached even after a newer preview replaces this Promise; only the current
       // request may fail the gesture, while Finish still awaits that request's original rejection.
       void preview.catch(cause => {
-        if (cause instanceof RawSuperseded || !this.active || this.pointColorGesture !== gesture ||
+        if (!this.active || this.pointColorGesture !== gesture ||
             gesture.preview !== preview || gesture.controller.signal.aborted) return;
         void this.failPointColorInteraction(gesture, cause).catch(() => {
           // Cancel records its own error and starts existing workspace recovery before it rejects.
