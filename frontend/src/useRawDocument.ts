@@ -606,7 +606,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
               await retainUncertainRecoveryWorkspace(oldWorkspace, oldSaver, new RawApiError('raw_save_unconfirmed'));
               return;
             }
-            if (oldSaver?.error || oldSaver?.saving || oldSaver?.moving || oldEditor?.unsettled) {
+            const recoveryDiscardSafe = !oldSaver?.error && !oldSaver?.saving && !oldSaver?.moving && !oldEditor?.unsettled;
+            if (!recoveryDiscardSafe) {
               await retainUncertainRecoveryWorkspace(oldWorkspace, oldSaver, new RawApiError('raw_save_unconfirmed'));
               return;
             }
@@ -616,7 +617,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
             try { await discardRawWorkspace({ workspaceId: oldWorkspace }); }
             catch (cause) {
               if (!recoveryCurrent()) {
-                await retainUncertainRecoveryWorkspace(oldWorkspace, oldSaver, cause);
+                await retainUncertainRecoveryDiscard(oldWorkspace, oldSaver, oldEditor, identity!, cause, recoveryDiscardSafe);
                 return;
               }
               throw cause;
@@ -840,6 +841,47 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       pointColorTermination = owner;
       try { await owner.run(); }
       catch { /* Keep unknown/saving ownership; no release is safe after an ambiguous discard. */ }
+    };
+    const retainUncertainRecoveryDiscard = async (workspaceId: string, oldSaver: RawRecipeSave | undefined,
+      oldEditor: RawControls | undefined, identity: RawSettings, cause: unknown, discardWasSafe: boolean) => {
+      const existing = pointColorTermination;
+      if (existing) {
+        if (existing.workspaceId !== workspaceId) throw new RawApiError('raw_workspace_conflict');
+        return;
+      }
+      let firstAttempt = true;
+      const discardStillSafe = () => {
+        const doc = oldEditor?.confirmed;
+        return discardWasSafe && !!doc && doc.workspaceId === workspaceId && doc.handle === identity.handle
+          && doc.generation === identity.generation && doc.documentToken === identity.documentToken && doc.revision === identity.revision
+          && !oldSaver?.error && !oldSaver?.saving && !oldSaver?.moving && !oldEditor?.unsettled;
+      };
+      const owner = new RawWorkspaceTermination(workspaceId, 'recovery', oldSaver, async () => {}, async () => {
+        if (firstAttempt) { firstAttempt = false; throw cause; }
+        await owned(async () => {
+          if (workspace !== workspaceId) throw new RawApiError('raw_stale_handle');
+          if (await rawWorkspaceEmpty(workspaceId)) {
+            workspace = undefined;
+            oldSaver?.dispose(); oldEditor?.dispose();
+            return;
+          }
+          if (!discardStillSafe()) throw new RawApiError('raw_save_unconfirmed');
+          try { await discardRawWorkspace({ workspaceId }); }
+          catch (retryCause) {
+            if (await rawWorkspaceEmpty(workspaceId)) {
+              workspace = undefined;
+              oldSaver?.dispose(); oldEditor?.dispose();
+              return;
+            }
+            throw retryCause;
+          }
+          workspace = undefined;
+          oldSaver?.dispose(); oldEditor?.dispose();
+        });
+      });
+      pointColorTermination = owner;
+      try { await owner.run(); }
+      catch { /* The request was sent; retain a releasing owner for later status reconciliation. */ }
     };
     const sessionEvent = (event: string) => {
       try { frontendLogger.add({ level: 'info', component: 'raw', event, context: {

@@ -2060,6 +2060,128 @@ it.each((['discard', 'create', 'open', 'settings'] as const).flatMap(stage =>
     expect(vi.mocked(api.openRawDocument).mock.calls.find(([, assetId]) => assetId === 'b')?.[0]).toBe('next-ws');
   });
 
+it.each([['raw_connection_failed', undefined], ['raw_workspace_conflict', 409], ['raw_request_failed', 503]] as const)
+  ('reconciles a Recovery discard %s before opening the next document when Backend is empty', async (code, status) => {
+  const pointColor = { lum: .5, chroma: .1, hue: 20, hue_shift: 0, sat_shift: 0, lum_shift: 0, variance: 0,
+    range: 50, hue_range: 50, sat_range: 50, lum_range: 50 };
+  const sourceDoc: api.RawDocument = { workspaceId: 'recovery-source', assetId: 'a', handle: 'source-handle', generation: 1,
+    documentToken: 'source-token', revision: 1 };
+  const nextDoc: api.RawDocument = { workspaceId: 'recovery-next', assetId: 'c', handle: 'next-handle', generation: 1,
+    documentToken: 'next-token', revision: 1 };
+  const discardGate = deferred<void>(), emptyGate = deferred<boolean>();
+  let created = 0;
+  vi.mocked(api.createRawWorkspace).mockImplementation(async () => ++created === 1 ? 'recovery-source' : 'recovery-next');
+  vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => workspaceId === 'recovery-source'
+    ? sourceDoc : { ...nextDoc, workspaceId, assetId });
+  vi.mocked(api.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc),
+    point_colors: doc.workspaceId === 'recovery-source' ? [pointColor] : [] }));
+  vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence: 1,
+    frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000, aspect: 4/3,
+      fullWidth: 16, fullHeight: 12, window: null } });
+  vi.mocked(api.cancelRawPointColorInteraction).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'));
+  vi.mocked(api.discardRawWorkspace).mockImplementationOnce(async request => {
+    expect(request).toEqual({ workspaceId: 'recovery-source' });
+    return discardGate.promise;
+  });
+  vi.mocked(api.rawWorkspaceEmpty).mockImplementationOnce(async workspaceId => {
+    expect(workspaceId).toBe('recovery-source');
+    return emptyGate.promise;
+  });
+
+  await render('a'); await flush();
+  act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); });
+  await flush();
+  act(() => current!.cancelPointColorInteraction()); await flush();
+  expect(api.discardRawWorkspace).toHaveBeenCalledOnce();
+
+  await render(null);
+  // Model a successful Backend discard whose HTTP acknowledgement was lost.
+  discardGate.reject(new api.RawApiError(code, status));
+  await flush();
+  expect(api.rawWorkspaceEmpty).not.toHaveBeenCalled();
+
+  await render('b'); await flush();
+  expect(api.rawWorkspaceEmpty).toHaveBeenCalledOnce();
+  expect(api.discardRawWorkspace).toHaveBeenCalledOnce();
+  expect(api.openRawDocument).not.toHaveBeenCalledWith('recovery-next', 'b');
+  await render('c'); await flush();
+  expect(api.rawWorkspaceEmpty).toHaveBeenCalledOnce();
+  expect(api.createRawWorkspace).toHaveBeenCalledOnce();
+
+  emptyGate.resolve(true);
+  await flush();
+  expect(api.discardRawWorkspace).toHaveBeenCalledOnce();
+  expect(api.createRawWorkspace).toHaveBeenCalledTimes(2);
+  expect(api.openRawDocument).toHaveBeenCalledWith('recovery-next', 'c');
+  expect(current?.document?.assetId).toBe('c');
+});
+
+it('retries an uncertain Recovery discard only for its original workspace after confirming it remains occupied', async () => {
+  const pointColor = { lum: .5, chroma: .1, hue: 20, hue_shift: 0, sat_shift: 0, lum_shift: 0, variance: 0,
+    range: 50, hue_range: 50, sat_range: 50, lum_range: 50 };
+  let created = 0;
+  vi.mocked(api.createRawWorkspace).mockImplementation(async () => ++created === 1 ? 'recovery-source' : 'recovery-next');
+  vi.mocked(api.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc),
+    point_colors: doc.workspaceId === 'recovery-source' ? [pointColor] : [] }));
+  vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence: 1,
+    frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000, aspect: 4/3,
+      fullWidth: 16, fullHeight: 12, window: null } });
+  vi.mocked(api.cancelRawPointColorInteraction).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'));
+  const discardGate = deferred<void>();
+  vi.mocked(api.discardRawWorkspace).mockImplementationOnce(() => discardGate.promise).mockResolvedValueOnce();
+  vi.mocked(api.rawWorkspaceEmpty).mockResolvedValueOnce(false);
+
+  await render('a'); await flush();
+  act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); });
+  await flush();
+  act(() => current!.cancelPointColorInteraction()); await flush();
+  await render(null);
+  discardGate.reject(new api.RawApiError('raw_connection_failed'));
+  await flush();
+
+  await render('b'); await flush();
+  expect(api.rawWorkspaceEmpty).toHaveBeenCalledWith('recovery-source');
+  expect(api.discardRawWorkspace.mock.calls.map(([request]) => request)).toEqual([
+    { workspaceId: 'recovery-source' }, { workspaceId: 'recovery-source' },
+  ]);
+  expect(api.createRawWorkspace).toHaveBeenCalledTimes(2);
+  expect(current?.document?.assetId).toBe('b');
+});
+
+it('retains a Recovery discard owner after status lookup failure for a later open to reconcile', async () => {
+  const pointColor = { lum: .5, chroma: .1, hue: 20, hue_shift: 0, sat_shift: 0, lum_shift: 0, variance: 0,
+    range: 50, hue_range: 50, sat_range: 50, lum_range: 50 };
+  let created = 0;
+  vi.mocked(api.createRawWorkspace).mockImplementation(async () => ++created === 1 ? 'recovery-source' : 'recovery-next');
+  vi.mocked(api.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc),
+    point_colors: doc.workspaceId === 'recovery-source' ? [pointColor] : [] }));
+  vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence: 1,
+    frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000, aspect: 4/3,
+      fullWidth: 16, fullHeight: 12, window: null } });
+  vi.mocked(api.cancelRawPointColorInteraction).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'));
+  const discardGate = deferred<void>();
+  vi.mocked(api.discardRawWorkspace).mockImplementationOnce(() => discardGate.promise);
+  vi.mocked(api.rawWorkspaceEmpty).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'))
+    .mockResolvedValueOnce(true);
+
+  await render('a'); await flush();
+  act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); });
+  await flush();
+  act(() => current!.cancelPointColorInteraction()); await flush();
+  await render(null);
+  discardGate.reject(new api.RawApiError('raw_connection_failed'));
+  await flush();
+
+  await render('b'); await flush();
+  expect(api.rawWorkspaceEmpty).toHaveBeenNthCalledWith(1, 'recovery-source');
+  expect(api.createRawWorkspace).toHaveBeenCalledOnce();
+  await render('c'); await flush();
+  expect(api.rawWorkspaceEmpty).toHaveBeenNthCalledWith(2, 'recovery-source');
+  expect(api.discardRawWorkspace).toHaveBeenCalledOnce();
+  expect(api.createRawWorkspace).toHaveBeenCalledTimes(2);
+  expect(current?.document?.assetId).toBe('c');
+});
+
 it('retains a stale Recovery workspace owner after an uncertain release until a later open confirms empty', async () => {
   const pointColor = { lum: .5, chroma: .1, hue: 20, hue_shift: 0, sat_shift: 0, lum_shift: 0, variance: 0,
     range: 50, hue_range: 50, sat_range: 50, lum_range: 50 };
