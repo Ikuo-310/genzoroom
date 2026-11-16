@@ -905,7 +905,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     const previousTermination = pointColorTermination;
     if (previousTermination) {
       // P2-C owns an explicit release retry; a later Document open must not retry an unknown release.
-      const pending = previousTermination.state.stage === 'unknown'
+      const pending = previousTermination.state.stage === 'unknown' && previousTermination.state.failedAt === 'saving'
         ? Promise.reject(previousTermination.state.error) : previousTermination.run();
       void pending.then(() => {
         if (pointColorTermination === previousTermination) pointColorTermination = undefined;
@@ -988,7 +988,23 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
             if (explicitDiscard) return; // Explicit discard already terminated this workspace.
             await owned(async () => {
               if (workspace !== ownedWorkspace) throw new RawApiError('raw_stale_handle');
-              await release();
+              try {
+                await releaseRawWorkspace(ownedWorkspace);
+                workspace = undefined;
+              } catch {
+                if (!await rawWorkspaceEmpty(ownedWorkspace)) {
+                  try {
+                    // The endpoint revalidates this ID against the current owner before releasing anything.
+                    await releaseRawWorkspace(ownedWorkspace);
+                    workspace = undefined;
+                  } catch (retryError) {
+                    if (!await rawWorkspaceEmpty(ownedWorkspace)) throw retryError;
+                    workspace = undefined;
+                  }
+                } else {
+                  workspace = undefined;
+                }
+              }
               editor?.dispose(); saver?.dispose();
             });
           });

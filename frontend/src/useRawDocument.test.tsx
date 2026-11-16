@@ -1777,7 +1777,7 @@ it('displays Full Whole Frame without diagnostics and releases its URL on depart
   expect(revokeURL).toHaveBeenCalledWith(url);
 });
 
-it('keeps a failed Point Color release owner and blocks later opens without retrying release', async () => {
+it('keeps a conflicting Point Color release owner and retries the same ID on a later open', async () => {
   const pointColor = { lum: .5, chroma: .1, hue: 20, hue_shift: 0, sat_shift: 0, lum_shift: 0, variance: 0,
     range: 50, hue_range: 50, sat_range: 50, lum_range: 50 };
   vi.mocked(api.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), point_colors: [pointColor] }));
@@ -1785,18 +1785,128 @@ it('keeps a failed Point Color release owner and blocks later opens without retr
     frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000, aspect: 4/3,
       fullWidth: 16, fullHeight: 12, window: null } });
   vi.mocked(api.cancelRawPointColorInteraction).mockResolvedValue();
-  vi.mocked(api.releaseRawWorkspace).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'));
+  let created = 0, releaseAttempts = 0;
+  vi.mocked(api.createRawWorkspace).mockImplementation(async () => `pc-retry-${++created}`);
+  vi.mocked(api.releaseRawWorkspace).mockImplementation(async id => {
+    if (id === 'pc-retry-1' && releaseAttempts++ < 2) throw new api.RawApiError('raw_workspace_conflict', 409);
+  });
+  vi.mocked(api.rawWorkspaceEmpty).mockImplementation(async () => false);
   await render('a'); await flush();
   act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); });
   await flush();
   await render('b'); await flush();
   expect(api.cancelRawPointColorInteraction).toHaveBeenCalledOnce();
-  expect(api.releaseRawWorkspace).toHaveBeenCalledOnce();
-  expect(api.openRawDocument).toHaveBeenCalledOnce();
-  expect(current).toMatchObject({ assetId: 'b', status: 'error', code: 'raw_connection_failed' });
+  expect(vi.mocked(api.releaseRawWorkspace).mock.calls.filter(([id]) => id === 'pc-retry-1')).toHaveLength(2);
+  expect(vi.mocked(api.openRawDocument).mock.calls.filter(([id]) => id.startsWith('pc-retry-'))).toHaveLength(1);
+  expect(current).toMatchObject({ assetId: 'b', status: 'error', code: 'raw_workspace_conflict' });
 
   await render('c'); await flush();
-  expect(api.releaseRawWorkspace).toHaveBeenCalledOnce();
+  expect(vi.mocked(api.releaseRawWorkspace).mock.calls.filter(([id]) => id === 'pc-retry-1')).toHaveLength(3);
+  expect(vi.mocked(api.openRawDocument).mock.calls.filter(([id]) => id.startsWith('pc-retry-'))).toHaveLength(2);
+  expect(current?.assetId).toBe('c');
+});
+
+it.each([
+  ['raw_connection_failed', undefined], ['raw_workspace_conflict', 409], ['raw_request_failed', 503],
+] as const)('opens the successor when %s release failure is confirmed empty', async (code, status) => {
+  const pointColor = { lum: .5, chroma: .1, hue: 20, hue_shift: 0, sat_shift: 0, lum_shift: 0, variance: 0,
+    range: 50, hue_range: 50, sat_range: 50, lum_range: 50 };
+  vi.mocked(api.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), point_colors: [pointColor] }));
+  vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence: 1,
+    frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000, aspect: 4/3,
+      fullWidth: 16, fullHeight: 12, window: null } });
+  vi.mocked(api.cancelRawPointColorInteraction).mockResolvedValue();
+  let created = 0;
+  vi.mocked(api.createRawWorkspace).mockImplementation(async () => `pc-empty-${++created}`);
+  vi.mocked(api.releaseRawWorkspace).mockImplementation(async id => {
+    if (id === 'pc-empty-1') throw new api.RawApiError(code, status);
+  });
+  vi.mocked(api.rawWorkspaceEmpty).mockImplementation(async id => id === 'pc-empty-1');
+  await render('a'); await flush();
+  act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); });
+  await flush();
+  await render('b'); await flush();
+  expect(vi.mocked(api.releaseRawWorkspace).mock.calls.filter(([id]) => id === 'pc-empty-1')).toHaveLength(1);
+  expect(vi.mocked(api.rawWorkspaceEmpty).mock.calls.filter(([id]) => id === 'pc-empty-1')).toHaveLength(1);
+  expect(vi.mocked(api.openRawDocument).mock.calls.filter(([id]) => id.startsWith('pc-empty-'))).toHaveLength(2);
+  expect(current?.document?.assetId).toBe('b');
+});
+
+it('retries a pre-send Point Color release failure once with the same workspace ID', async () => {
+  const pointColor = { lum: .5, chroma: .1, hue: 20, hue_shift: 0, sat_shift: 0, lum_shift: 0, variance: 0,
+    range: 50, hue_range: 50, sat_range: 50, lum_range: 50 };
+  vi.mocked(api.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), point_colors: [pointColor] }));
+  vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence: 1,
+    frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000, aspect: 4/3,
+      fullWidth: 16, fullHeight: 12, window: null } });
+  vi.mocked(api.cancelRawPointColorInteraction).mockResolvedValue();
+  let created = 0, releaseAttempts = 0;
+  vi.mocked(api.createRawWorkspace).mockImplementation(async () => `pc-pre-send-${++created}`);
+  vi.mocked(api.releaseRawWorkspace).mockImplementation(async id => {
+    if (id === 'pc-pre-send-1' && releaseAttempts++ === 0) throw new api.RawApiError('raw_connection_failed');
+  });
+  vi.mocked(api.rawWorkspaceEmpty).mockImplementation(async id => id !== 'pc-pre-send-1');
+  await render('a'); await flush();
+  act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); });
+  await flush();
+  await render('b'); await flush();
+  expect(vi.mocked(api.releaseRawWorkspace).mock.calls.filter(([id]) => id === 'pc-pre-send-1')).toHaveLength(2);
+  expect(vi.mocked(api.rawWorkspaceEmpty).mock.calls.filter(([id]) => id === 'pc-pre-send-1')).toHaveLength(1);
+  expect(vi.mocked(api.openRawDocument).mock.calls.filter(([id]) => id.startsWith('pc-pre-send-'))).toHaveLength(2);
+  expect(current?.document?.assetId).toBe('b');
+});
+
+it('retains the release owner when status lookup fails and retries it on a later open', async () => {
+  const pointColor = { lum: .5, chroma: .1, hue: 20, hue_shift: 0, sat_shift: 0, lum_shift: 0, variance: 0,
+    range: 50, hue_range: 50, sat_range: 50, lum_range: 50 };
+  vi.mocked(api.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), point_colors: [pointColor] }));
+  vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence: 1,
+    frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000, aspect: 4/3,
+      fullWidth: 16, fullHeight: 12, window: null } });
+  let created = 0;
+  let releaseAttempts = 0;
+  vi.mocked(api.createRawWorkspace).mockImplementation(async () => `pc-query-${++created}`);
+  vi.mocked(api.releaseRawWorkspace).mockImplementation(async id => {
+    if (id === 'pc-query-1' && releaseAttempts++ === 0)
+      throw new api.RawApiError('raw_connection_failed');
+  });
+  vi.mocked(api.rawWorkspaceEmpty).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'));
+  await render('a'); await flush();
+  act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); });
+  await flush();
+  await render('b'); await flush();
+  expect(vi.mocked(api.releaseRawWorkspace).mock.calls.filter(([id]) => id === 'pc-query-1')).toHaveLength(1);
+  expect(vi.mocked(api.openRawDocument).mock.calls.filter(([id]) => id.startsWith('pc-query-'))).toHaveLength(1);
+  expect(current).toMatchObject({ assetId: 'b', status: 'error' });
+
+  await render('c'); await flush();
+  expect(vi.mocked(api.releaseRawWorkspace).mock.calls.filter(([id]) => id === 'pc-query-1')).toHaveLength(2);
+  expect(vi.mocked(api.openRawDocument).mock.calls.filter(([id]) => id.startsWith('pc-query-'))).toHaveLength(2);
+  expect(current?.document?.assetId).toBe('c');
+});
+
+it('keeps a Point Color owner at the saving boundary when History outcome is unknown', async () => {
+  const pointColor = { lum: .5, chroma: .1, hue: 20, hue_shift: 0, sat_shift: 0, lum_shift: 0, variance: 0,
+    range: 50, hue_range: 50, sat_range: 50, lum_range: 50 };
+  vi.mocked(api.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), point_colors: [pointColor] }));
+  vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence: 1,
+    quality: 'draft', interactionId: 'd'.repeat(32), interactionSequence: 1,
+    frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000, aspect: 4/3,
+      fullWidth: 16, fullHeight: 12, window: null } });
+  await render('a'); await flush();
+  act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); });
+  await flush();
+  act(() => current!.updatePointColorInteraction(38));
+  await new Promise(resolve => setTimeout(resolve, 60)); await flush();
+  commitHistory.mockRejectedValueOnce(new api.RawSaveError('raw_connection_failed', 'unknown'));
+  act(() => current!.finishPointColorInteraction()); await flush();
+  await render('b'); await flush();
+  expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
+  expect(api.rawWorkspaceEmpty).not.toHaveBeenCalled();
   expect(api.openRawDocument).toHaveBeenCalledOnce();
-  expect(current).toMatchObject({ assetId: 'c', status: 'error', code: 'raw_connection_failed' });
+  expect(current).toMatchObject({ assetId: 'b', status: 'error' });
+
+  await render('c'); await flush();
+  expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
+  expect(api.openRawDocument).toHaveBeenCalledOnce();
 });

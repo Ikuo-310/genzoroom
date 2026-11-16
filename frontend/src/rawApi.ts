@@ -866,7 +866,9 @@ export async function rawPreview(doc: RawDocument, serial: number, signal: Abort
 }
 
 /** A repeated DELETE can lose its ack; only an observed empty owner permits moving on. */
-export async function rawWorkspaceEmpty(): Promise<boolean> {
+export async function rawWorkspaceEmpty(workspaceId?: string): Promise<boolean> {
   const value = await json('/capabilities');
-  return value.workspaceState === 'empty' && value.cleanupPending === false;
+  const empty = value.workspaceState === 'empty' && value.cleanupPending === false;
+  if (empty && workspaceId) workspaceTransports.delete(workspaceId);
+  return empty;
 }

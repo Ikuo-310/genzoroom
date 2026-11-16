@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { LIGHTCRAFT_ENGINE } from './lightcraftEngine';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createRawWorkspace,abortRawWorkspaceRequests,discardRawWorkspace, rawCapability, rawPreview, beginRawCurveInteraction, cancelRawCurveInteraction, updateRawTargetedCurve, beginRawMixerInteraction, updateRawMixerInteraction, cancelRawMixerInteraction, endRawMixerInteraction, readRawSettings, setRawControls, saveRawRecipe, saveRawHistory, readRawHistory, readRawRecipe, rawWorkspaceEmpty,
+import { createRawWorkspace,abortRawWorkspaceRequests,discardRawWorkspace, rawCapability, rawPreview, beginRawCurveInteraction, cancelRawCurveInteraction, updateRawTargetedCurve, beginRawMixerInteraction, updateRawMixerInteraction, cancelRawMixerInteraction, endRawMixerInteraction, readRawDocument, readRawSettings, setRawControls, saveRawRecipe, saveRawHistory, readRawHistory, readRawRecipe, rawWorkspaceEmpty,
   RAW_CONTROL_IDS, RAW_HISTORY_CONTROL_IDS, RawSaveError, type RawDocument, type RawHistoryRequest, type RawHistoryOperation, validRawCurve, validRawCurveInput } from './rawApi';
 import { downloadRawLensDatabase, readRawLensDatabaseStatus } from './rawApi';
 import { rawSettings } from './test/rawSettings';
@@ -712,6 +712,21 @@ it('permits release-ack recovery only for an observed empty workspace with no cl
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(state), { headers: { 'Content-Type': 'application/json' } })));
     expect(await rawWorkspaceEmpty()).toBe(state.workspaceState === 'empty' && state.cleanupPending === false);
   }
+});
+
+it('removes the released workspace transport after a positive empty-state confirmation', async () => {
+  const workspaceId = 'e'.repeat(32), ownedDocument = { ...doc, workspaceId };
+  const fetch = vi.fn<typeof globalThis.fetch>()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ workspaceId }), { headers: { 'Content-Type': 'application/json' } }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ workspaceState: 'empty', cleanupPending: false }),
+      { headers: { 'Content-Type': 'application/json' } }))
+    .mockResolvedValueOnce(new Response(JSON.stringify(ownedDocument), { headers: { 'Content-Type': 'application/json' } }));
+  vi.stubGlobal('fetch', fetch);
+  expect(await createRawWorkspace()).toBe(workspaceId);
+  expect(await rawWorkspaceEmpty(workspaceId)).toBe(true);
+  abortRawWorkspaceRequests(workspaceId);
+  await readRawDocument(ownedDocument);
+  expect((fetch.mock.calls[2]![1] as RequestInit).signal?.aborted).toBe(false);
 });
 
 it.each(['valid','fullFallback','normalContract','wrongFingerprint','wrongGeometry','missingCrop'])('validates crop-edit transport independently: %s',async(mode)=>{
