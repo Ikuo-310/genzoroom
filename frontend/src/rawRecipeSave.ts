@@ -14,7 +14,8 @@ export const RAW_AUTOSAVE_MS = 5000;
 const RAW_CURVE_PREVIEW_THROTTLE_MS = 50;
 type PointColorGesture = { control: RawPointColorControlId; initial: number; value: number; appliedValue: number; pending?: number; doc: RawSettings;
   started: Promise<string>; id?: string; sequence: number; appliedSequence: number; displayedSequence: number; ending: boolean; timer?: ReturnType<typeof setTimeout>;
-  pump?: Promise<void>; preview?: Promise<void>; controller: AbortController; display?: RawDisplayTarget; cancelPromise?: Promise<void> };
+  pump?: Promise<void>; preview?: Promise<void>; controller: AbortController; display?: RawDisplayTarget;
+  endOwner?: 'finish' | 'cancel'; finishPromise?: Promise<void>; cancelPromise?: Promise<void> };
 
 /** Current-document save owner. Unknown outcomes retain one immutable request ahead of newer edits. */
 export class RawRecipeSave {
@@ -48,6 +49,8 @@ export class RawRecipeSave {
     pump?: Promise<void>; preview?: Promise<void>; display?: RawDisplayTarget; changes: Partial<Record<RawHistoryControlId, number>>;
     cancelPromise?: Promise<void> };
   private pointColorGesture?: PointColorGesture;
+  // Clearing the local gesture after an ambiguous cancel must not make workspace departure look safe.
+  private pointColorRecoveryRequired = false;
   private cropGesture?: { id: string; type: 'drag' | 'straighten'; action?: RawGeometryAction; sequence: number; latest?: RawGeometryOperation; ending: boolean;
     started: Promise<void>; end?: Promise<void>; error?: unknown; cancelled?: boolean; updateDoc?: RawSettings; rejected?: boolean; commit?: RawHistoryRequest };
   get cropOperation() { return this.cropGesture?.type; }
@@ -224,15 +227,24 @@ export class RawRecipeSave {
   private async failPointColorInteraction(gesture: PointColorGesture, cause: unknown) {
     if (!this.active || this.pointColorGesture !== gesture) return;
     gesture.ending = true;
+    this.releasePointColorFinishForCancel(gesture);
     this.options.pointColorPreviewError?.(cause);
     await this.cancelPointColorInteraction();
   }
-  async finishPointColorInteraction() {
+  finishPointColorInteraction(): Promise<void> {
     const gesture = this.pointColorGesture;
-    if (!gesture || gesture.ending) return;
+    if (!gesture) return Promise.resolve();
+    if (gesture.endOwner === 'cancel') return gesture.cancelPromise ?? Promise.resolve();
+    if (gesture.finishPromise) return gesture.finishPromise;
+    gesture.endOwner = 'finish';
     gesture.ending = true;
     clearTimeout(gesture.timer);
     gesture.timer = undefined;
+    const finishing = this.finishPointColorGesture(gesture);
+    gesture.finishPromise = finishing;
+    return finishing;
+  }
+  private async finishPointColorGesture(gesture: PointColorGesture) {
     try {
       await gesture.started;
       // The pump Promise settles before its separate catch/finally cleanup chain. Clear a settled
@@ -251,11 +263,18 @@ export class RawRecipeSave {
       if (gesture.pending !== undefined || gesture.appliedValue !== gesture.value || gesture.appliedSequence !== gesture.sequence)
         throw new RawApiError('raw_point_color_interaction_conflict');
     } catch (cause) {
-      if (this.pointColorGesture === gesture && !this.moveIntent) await this.failPointColorInteraction(gesture, cause);
+      if (this.pointColorGesture === gesture) {
+        this.releasePointColorFinishForCancel(gesture);
+        await this.failPointColorInteraction(gesture, cause);
+      }
       throw cause;
     }
     if (this.pointColorGesture !== gesture || gesture.controller.signal.aborted) return;
-    if (gesture.value === gesture.initial) { await this.cancelPointColorInteraction(); return; }
+    if (gesture.value === gesture.initial) {
+      this.releasePointColorFinishForCancel(gesture);
+      await this.cancelPointColorInteraction();
+      return;
+    }
     this.moving = true;
     this.moveIntent = { action: 'operate', operation: { kind: 'pointColorControl', metadata: { control: gesture.control, value: gesture.value } },
       pointColorInteractionId: gesture.id };
@@ -265,6 +284,7 @@ export class RawRecipeSave {
       if (cause instanceof RawSaveError && cause.outcome === 'rejected' && cause.code === 'raw_point_color_interaction_conflict'
         && this.pointColorGesture === gesture) {
         this.retryRequest = undefined;
+        this.releasePointColorFinishForCancel(gesture);
         await this.cancelPointColorInteraction();
       }
       throw cause;
@@ -274,10 +294,41 @@ export class RawRecipeSave {
     this.historyOperation = operation;
     await operation;
   }
+  private releasePointColorFinishForCancel(gesture: PointColorGesture) {
+    if (gesture.endOwner === 'finish') {
+      // The Finish path has failed before a durable result; its own recovery must take Cancel ownership.
+      gesture.endOwner = undefined;
+      gesture.finishPromise = undefined;
+    }
+  }
+  async preparePointColorForDeparture(retry = false) {
+    if (this.pointColorRecoveryRequired) throw new RawApiError('raw_save_unconfirmed');
+    const gesture = this.pointColorGesture;
+    if (!gesture) return;
+    if (gesture.endOwner === 'cancel') {
+      await gesture.cancelPromise;
+      return;
+    }
+    if (gesture.endOwner === 'finish') {
+      try {
+        await gesture.finishPromise;
+      } catch (cause) {
+        if (this.pointColorGesture !== gesture) return;
+        if (!retry || !this.retryRequest) throw cause;
+        // Replay only the existing immutable History request; the Native interaction is not ended again.
+        await this.save(true);
+      }
+      return;
+    }
+    await this.cancelPointColorInteraction();
+  }
   cancelPointColorInteraction() {
+    if (this.pointColorRecoveryRequired) return Promise.reject(new RawApiError('raw_save_unconfirmed'));
     const gesture = this.pointColorGesture;
     if (!gesture) return Promise.resolve();
+    if (gesture.endOwner === 'finish') return gesture.finishPromise ?? Promise.resolve();
     if (gesture.cancelPromise) return gesture.cancelPromise;
+    gesture.endOwner = 'cancel';
     gesture.ending = true;
     clearTimeout(gesture.timer);
     gesture.timer = undefined;
@@ -296,6 +347,7 @@ export class RawRecipeSave {
       this.options.pointColorSettled?.(true);
       this.operationError = undefined;
     }).catch(cause => {
+      this.pointColorRecoveryRequired = true;
       this.operationError = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
       this.pointColorGesture = undefined;
       // A failed Native cancel still has to release the local Preview owner before workspace recovery.
@@ -593,9 +645,9 @@ export class RawRecipeSave {
       }
     } finally { if (this.active) this.options.changed(); }
   }
-  get dirty() { return !!this.cropGesture || !!this.curveGesture || !!this.mixerGesture || !!this.pointColorGesture || !!this.retryRequest || !!this.gesture || !!this.handoff || !!this.moveIntent
+  get dirty() { return !!this.cropGesture || !!this.curveGesture || !!this.mixerGesture || !!this.pointColorGesture || this.pointColorRecoveryRequired || !!this.retryRequest || !!this.gesture || !!this.handoff || !!this.moveIntent
     || !!this.options.controls && !this.initialized || this.confirmed.settingsFingerprint !== this.savedFingerprint; }
-  get locked() { return !!this.cropGesture || !!this.curveGesture || !!this.mixerGesture || !!this.pointColorGesture || !!this.options.controls && (!this.initialized || !!this.operation || !!this.error || this.moving); }
+  get locked() { return !!this.cropGesture || !!this.curveGesture || !!this.mixerGesture || !!this.pointColorGesture || this.pointColorRecoveryRequired || !!this.options.controls && (!this.initialized || !!this.operation || !!this.error || this.moving); }
   get gesturing() { return !!this.gesture && !this.operation && !this.paused && !this.moving; }
   get canUndo() { return !!this.history && (this.history.cursor > 0 || !!this.gesture || !!this.cropGesture); }
   get canRedo() { return !!this.history && this.history.cursor < this.history.length; }

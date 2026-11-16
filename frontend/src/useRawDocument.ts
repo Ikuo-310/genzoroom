@@ -904,12 +904,15 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       if(discardOperation)return discardOperation;
       if(!active || identity.current!==assetId || serial.current!==currentSerial || !workspace)return Promise.reject(new RawApiError('raw_document_closed'));
       const ownedWorkspace=workspace;
-      // Retire unsent intent before detaching transports. Backend independently
-      // drains already accepted requests, even when their HTTP replies were lost.
-      retired=true;frozen.current=true;saver?.dispose();editor?.dispose();invalidateDisplay();
-      abortRawWorkspaceRequests(ownedWorkspace);
+      retired=true;frozen.current=true;
       setState(previous=>previous && {...previous,locked:true});
-      discardOperation=discardRawWorkspace({workspaceId:ownedWorkspace}).then(()=>{
+      discardOperation=(async()=>{
+        // A committed finish is awaited; an open draft must be cancelled before its workspace is discarded.
+        await saver?.preparePointColorForDeparture();
+        saver?.dispose();editor?.dispose();invalidateDisplay();
+        abortRawWorkspaceRequests(ownedWorkspace);
+        await discardRawWorkspace({workspaceId:ownedWorkspace});
+      })().then(()=>{
         discarded=true;workspace=undefined;cropVisualRef.current=null;setCropPresentation(null);revoke();
         setState({assetId,status:'error',code:'raw_document_closed'});
       }).catch(cause=>{discardOperation=undefined;throw cause;});
@@ -934,14 +937,16 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       saver?.pause();
       // A late slider unmount cannot target a successor. Its old owner still finishes its
       // gesture on this same queue before cleanup, including transmitted native mutations.
-      const finalSave = discarded ? undefined : saver?.mixerInteracting ? saver.cancelMixerInteraction()
-        : saver?.cropping ? saver.cancelGeometry() : saver?.save();
+      const finalSave = discarded ? undefined : saver?.pointColorInteracting
+        ? saver.preparePointColorForDeparture()
+        : saver?.mixerInteracting ? saver.cancelMixerInteraction()
+          : saver?.cropping ? saver.cancelGeometry() : saver?.save();
       if (saverRef.current === saver) saverRef.current = null;
       if (editorRef.current === editor) editorRef.current = null;
       controller.abort();
       clearTimeout(timer); clearTimeout(viewTimer);
       revoke();
-      enqueue(async () => {
+      const releaseAfterSave = async () => {
         try { await finalSave; } catch { return; }
         if(discarded)return;
         if (saver?.dirty || saver?.error || editor?.unsettled) {
@@ -953,7 +958,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
           try { await releaseRawWorkspace(workspace); } catch { log('raw_release_failed'); }
           workspace = undefined;
         }
-      });
+      };
+      enqueue(releaseAfterSave);
     };
     const pagehide = () => {
       if (current()) setState({ assetId, status: 'error', code: 'raw_document_closed' });
@@ -1202,6 +1208,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     suspendDisplayRef.current();
     saver.pause();
     notifyRef.current();
+    await saver.preparePointColorForDeparture(retry);
     await saver.waitHistory(retry);
     // An open curve gesture is not a savable snapshot; fail instead of looping on its dirty owner.
     if (saver.curveInteracting) throw new RawApiError('raw_save_unconfirmed');

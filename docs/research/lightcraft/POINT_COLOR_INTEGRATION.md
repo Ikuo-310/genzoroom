@@ -448,3 +448,15 @@ F3は`finishPointColorInteraction()`が50ms pump timerをclearしても`gesture.
 F3のDeferred Promiseテストでは修正前、10msでPointer Upした値38にNative update／History saveがなくcancelだけが呼ばれることを再現した。修正後は50msを待たず値38を送信し、ACK後に1件だけHistoryへ保存、Preview／interactionを解放する。初期値へ戻す操作ではHistoryを作らない。既存ACK直後のPromise cleanup race、50ms境界のpump集約、20件の短い連続gestureも確認した。
 
 検証はMock NativeのBackend／HTTP／SQLite focused suite 424件、Frontend focused 4 files 426件が成功した。TypeScript check／production buildも成功（既存bundle sizeとdependency directiveのwarningあり）。receipt確認済みLightCraft v0.20.0 CLIでは合成JPEG／DNG各1件のPoint Color interaction testが成功した。実Native確認は正常系に限定され、F2／F3障害注入とWindows Desktop手動確認はMock／自動テストのみである。F5〜F8は未変更・未検証であり、今回の対象外とする。
+
+#### Point Color監査P3 — F5離脱時のdrain／F6 Finish・Cancel所有権
+
+F5では`prepareSave()`が未終了Point Color gestureをdrainせず、`saver.dirty`にgesture ownerが残るため、保存準備が完了しない経路があった。React cleanupもMixer／Cropだけを個別終了し、Point Color中は通常の`save()`だけを呼ぶため、Native interaction／Preview ownerを残したままrelease判定で停止していた。保存準備では入力をfreezeした後、`preparePointColorForDeparture()`をHistory待ちより先に呼ぶ。Open中のgestureは既存cancel APIを1回実行してNative cancel ACKとbaseline settings readbackを待ち、Preview／gesture ownerを解放する。FinishまたはCancelが既に所有している場合は、その同じPromiseを待つ。Document cleanupとdiscardも同じdrainを通し、Cancel／Finishが確定する前にworkspace releaseやabortを進めない。保存準備が成功した場合だけ通常のRecipe／History保存・Document切替を続ける。
+
+F6ではPoint Color gestureに終了owner（`finish`または`cancel`）と各終了Promiseを持たせ、最初の終了要求が同期的にownerを確保する。同じ操作の重複呼び出しは同じPromiseを返す。Cancel先行ならFinishはCancel結果を待ちHistoryを作らない。Finish先行なら後続CancelはFinish Promiseを待ち、Native cancelを重ねて送らない。gestureはownerが決まった時点で入力を止める。Pump／Preview失敗や、F2でNative end未送信と確認できた拒否からの内部回復では、Finishが確定に失敗した後だけownerを明示的にCancelへ移す。History保存結果不明時はFinish ownerとimmutable retry requestを保持し、離脱を拒否する。retry付き保存準備は同じsave IDの既存requestを再生し、成功後にのみrelease可能となる。Native cancel／readbackが失敗した場合はlocal gestureをUIから解放して既存Recoveryへ渡す一方、Recovery完了までSaverをdirty／lockedのまま保ち、後続の離脱がreleaseを強行しない。Native end結果不明やCancel失敗を正常終了扱いせず、releaseを強行しない。
+
+Document cleanupのreleaseは、終了Promiseがすでに予約した編集Queue処理の後ろに置く。Point Color cancellationはQueue外のAPI ACKを待つため、cleanup側が先にQueueを占有してその完了を待つ循環を避ける。連続操作の既存単一History保存・P1/P2のACK／retry／receipt契約は変更していない。Document離脱ではold saverが保持するDocument identityを使い、後続DocumentへDraftや応答を転送しない。
+
+追加したFrontend testsは、open draftの反復`prepareSave()`とswitch、unmount時のDeferred Native cancel ACK待ち、History finish中のDocument離脱待ち、Cancel先行／Finish先行、Native update ACK中のCancel、Preview待機中のCancel、Finish／Cancel重複呼び出し、History結果不明で離脱を保留し同一save requestをretryする経路を確認する。初期値へ戻すno-op、50ms短時間操作、pump cleanup競合、F2明確拒否後cancelの既存回帰も保持した。Frontend指定5 filesは566 tests成功、TypeScript check／production build成功（既存bundle sizeとmodule directive警告あり）。実Windows Desktop手動確認はしていない。
+
+F7（古いPreview worker／Promiseの遅延結果）とF8（Preview worker・世代管理の残存問題）は今回変更・検証していない。F5/F6の終了後にもPreview側の独立した古い応答問題が残る可能性があり、別工程の監査対象とする。
