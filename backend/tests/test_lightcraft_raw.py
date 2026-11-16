@@ -2182,6 +2182,62 @@ def test_preview_coalesces_latest_and_never_returns_running_stale_bytes(tmp_path
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("action", ["cancel", "replace", "reset", "close"])
+def test_preview_worker_rechecks_pending_ticket_after_control_wait(tmp_path, action):
+    async def run():
+        raw, _, children, files = await create(tmp_path)
+        reservation = False
+        try:
+            handle, settings = await raw.open_raw("raw", files[0])
+            raw.reserve_control()
+            reservation = True
+            stale = raw.request_preview(handle, settings.revision)
+            await asyncio.sleep(0)
+            worker = raw._worker
+            assert worker is not None and not worker.done()
+
+            if action == "cancel":
+                raw.cancel_preview(handle, "after", 0)
+                raw.release_control()
+                reservation = False
+            elif action == "replace":
+                replacement = raw.request_preview(handle, settings.revision)
+                assert await stale is SUPERSEDED
+                raw.release_control()
+                reservation = False
+                assert isinstance(await replacement, PreviewFrame)
+            elif action == "reset":
+                reset = asyncio.create_task(raw.reset_session())
+                await asyncio.sleep(0)
+                restored = await reset
+                assert restored is not None and not raw._control_idle.is_set()
+                raw.release_control()
+                reservation = False
+            else:
+                await raw.close()
+                reservation = False
+
+            assert await stale is SUPERSEDED
+            await worker
+            assert worker.done()
+            assert children[0].render_count == (1 if action == "replace" else 0)
+
+            if action == "cancel":
+                fresh = raw.request_preview(handle, settings.revision)
+                assert isinstance(await fresh, PreviewFrame)
+                assert children[0].render_count == 1
+            elif action == "reset":
+                current = await raw.get_settings(restored)
+                fresh = raw.request_preview(restored, current.revision)
+                assert isinstance(await fresh, PreviewFrame)
+                assert children[-1].render_count == 1
+        finally:
+            if reservation:
+                raw.release_control()
+            await raw.close()
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("change", ["edit", "switch", "reopen"])
 def test_inflight_preview_is_discarded_on_edit_or_A_B_A_or_reopen(tmp_path, change):
     async def run():

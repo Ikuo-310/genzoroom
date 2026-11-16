@@ -15,7 +15,7 @@ const RAW_CURVE_PREVIEW_THROTTLE_MS = 50;
 type PointColorGesture = { control: RawPointColorControlId; initial: number; value: number; appliedValue: number; pending?: number; doc: RawSettings;
   started: Promise<string>; id?: string; sequence: number; appliedSequence: number; displayedSequence: number; ending: boolean; timer?: ReturnType<typeof setTimeout>;
   pump?: Promise<void>; preview?: Promise<void>; controller: AbortController; display?: RawDisplayTarget;
-  endOwner?: 'finish' | 'cancel'; finishPromise?: Promise<void>; cancelPromise?: Promise<void> };
+  endOwner?: 'finish' | 'cancel'; finishPromise?: Promise<void>; cancelPromise?: Promise<void>; failurePromise?: Promise<void> };
 
 /** Current-document save owner. Unknown outcomes retain one immutable request ahead of newer edits. */
 export class RawRecipeSave {
@@ -192,7 +192,8 @@ export class RawRecipeSave {
       gesture.timer = undefined;
       const pump = this.pumpPointColorInteraction(gesture);
       gesture.pump = pump;
-      void pump.catch(cause => this.failPointColorInteraction(gesture, cause)).finally(() => {
+      // Cancellation records its own failure and starts workspace recovery; observe that rejection too.
+      void pump.catch(cause => this.failPointColorInteraction(gesture, cause)).catch(() => undefined).finally(() => {
         if (gesture.pump === pump) gesture.pump = undefined;
         if (this.pointColorGesture === gesture && gesture.pending !== undefined && !gesture.ending)
           this.schedulePointColorPump(gesture);
@@ -217,19 +218,32 @@ export class RawRecipeSave {
         undefined, undefined, undefined, { id, sequence: applied }).then(frame => {
         if (this.active && this.pointColorGesture === gesture && frame.interactionSequence === gesture.displayedSequence)
           this.options.pointColorPreview?.(frame, gesture.doc, applied, gesture.display!);
-      }).catch(cause => {
-        if (cause instanceof RawSuperseded) return;
-        throw cause;
       });
       gesture.preview = preview;
+      // Keep an observer attached even after a newer preview replaces this Promise; only the current
+      // request may fail the gesture, while Finish still awaits that request's original rejection.
+      void preview.catch(cause => {
+        if (cause instanceof RawSuperseded || !this.active || this.pointColorGesture !== gesture ||
+            gesture.preview !== preview || gesture.controller.signal.aborted) return;
+        void this.failPointColorInteraction(gesture, cause).catch(() => {
+          // Cancel records its own error and starts existing workspace recovery before it rejects.
+        });
+      });
     }
   }
   private async failPointColorInteraction(gesture: PointColorGesture, cause: unknown) {
     if (!this.active || this.pointColorGesture !== gesture) return;
+    if (gesture.failurePromise) return gesture.failurePromise;
     gesture.ending = true;
     this.releasePointColorFinishForCancel(gesture);
-    this.options.pointColorPreviewError?.(cause);
-    await this.cancelPointColorInteraction();
+    const cancellation = this.cancelPointColorInteraction();
+    // Cancel restores the baseline presentation and clears display errors, so publish the Preview failure afterward.
+    const failure = cancellation.then(() => this.options.pointColorPreviewError?.(cause), cancelCause => {
+      this.options.pointColorPreviewError?.(cause);
+      throw cancelCause;
+    });
+    gesture.failurePromise = failure;
+    await failure;
   }
   finishPointColorInteraction(): Promise<void> {
     const gesture = this.pointColorGesture;

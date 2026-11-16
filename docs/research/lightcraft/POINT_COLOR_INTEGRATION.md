@@ -460,3 +460,17 @@ Document cleanupのreleaseは、終了Promiseがすでに予約した編集Queue
 追加したFrontend testsは、open draftの反復`prepareSave()`とswitch、unmount時のDeferred Native cancel ACK待ち、History finish中のDocument離脱待ち、Cancel先行／Finish先行、Native update ACK中のCancel、Preview待機中のCancel、Finish／Cancel重複呼び出し、History結果不明で離脱を保留し同一save requestをretryする経路を確認する。初期値へ戻すno-op、50ms短時間操作、pump cleanup競合、F2明確拒否後cancelの既存回帰も保持した。Frontend指定5 filesは566 tests成功、TypeScript check／production build成功（既存bundle sizeとmodule directive警告あり）。実Windows Desktop手動確認はしていない。
 
 F7（古いPreview worker／Promiseの遅延結果）とF8（Preview worker・世代管理の残存問題）は今回変更・検証していない。F5/F6の終了後にもPreview側の独立した古い応答問題が残る可能性があり、別工程の監査対象とする。
+
+### Point Color監査P4 — F7 Preview worker ticketとF8 Draft Preview rejection
+
+F7の再現原因は、Preview workerが`_control_idle.wait()`中にpending ticketをcancel／replaceされても、wake-up後にslotを再確認せず`_pending`と`_before_pending`から`None`を選択できることだった。`_ticket_current(None)`が`AttributeError`となり、generic exception handlerも`ticket.kind`を参照してworker taskを異常終了させる。待機復帰後にstop/reset状態と両slotを確認し、空ならloopを終了・再試行する。slot選択も存在するticketに限定し、例外処理でticketが存在しない場合に属性を参照しない。無効化されたticketのFutureは既存の`_discard_pending`／`cancel_preview`が完了させ、置換ticketは最新slotの所有権確認後にのみNativeへ進む。
+
+Session reset／closeではcontrol idle eventがclearのままworkerが待ち続け、`_join_operations()`を止める可能性もあるため、既存eventをwakeして古いworkerをretireさせる。reset終了時はまだcontrol reservationを保持しているcallerがあればeventを再びclearし、resetのwake-upで新Sessionのcontrol fenceが開いたままにならないようにする。workerやqueueは追加していない。
+
+F8は各Draft Preview Promiseを作成時に観測する。古いPromiseがgestureの最新Preview参照から置き換わった後もrejection handlerが残り、`RawSuperseded`とgesture／Document／controllerが古くなった結果は現在gestureへ転送しない。現在のgestureが所有するPreview失敗は既存のcancel・Recoveryへ一度だけ移し、そのPromiseをFinishも待っている場合にも終了処理を重複させない。cancelがbaseline表示と一時error表示を戻すため、Preview failureはcancel settle後にUIへ通知する。各元PromiseはFinishが必要に応じてawaitできる形を保ち、置換されたPromiseだけが未処理rejectionとして残らない。
+
+修正前にBackendのcontrol wait中cancelを再現し、`_ticket_current(None)`と例外処理の`ticket.kind`でworkerが異常終了することを確認した。修正後のMockテストではcancel、置換ticket、reset、closeの4経路で旧Future完了・worker正常終了を確認し、置換またはcancel/reset後の次の有効Preview成功とNative render回数も確認した。FrontEndのDeferred Promiseテストは旧Preview失敗後の最新Preview成功とHistory Finish、最新要求の失敗からのcancel／UI error、Cancel後の遅延失敗、旧成功結果の無表示、Saver dispose後の応答破棄を確認する。修正前は旧Previewの遅延rejectをVitestが未処理rejectionとして検出し、修正後は検出しない。
+
+共有経路のBackend回帰として`test_lightcraft_raw.py`と`test_raw_region.py`の188 tests、Point Color History API／receipt／retry 8 testsが成功した。Frontend Point Color／Preview関連5 filesは571 tests成功し、TypeScript checkとproduction buildも成功した（既存Vite bundle-sizeとmodule-directive warning、React testの`act()` warningあり）。Mock以外の実Native／実Desktop試験は行っていない。P1（F1/F4）、P2（F2/F3）、P3（F5/F6）の状態遷移は上記の関連回帰で維持を確認し、その設計は変更していない。P4ではF7/F8を修正した。F2〜F8全体の新たな網羅監査ではなく、今回のPreview経路に関わるF2/F3/F5/F6回帰のみ実施した。
+
+変更対象はPreview ticketの待機・無効化とPoint Color Preview Promiseの寿命に限る。JPEG／DNG実Native正常系、Windows Desktop手動確認、P4以外のpreview generation問題は未検証であり、Native画像処理・History保存形式には変更を加えていない。

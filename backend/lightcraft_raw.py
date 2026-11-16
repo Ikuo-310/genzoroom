@@ -3004,15 +3004,24 @@ class LightCraftRawSession:
         try:
             while (self._pending is not None or self._before_pending is not None) and not self._stop.is_set() and not self._resetting:
                 await self._control_idle.wait()
+                # Pending tickets can be cancelled or replaced while controls own the fence.
+                # Recheck before selecting a slot so the worker never treats an empty slot as a ticket.
+                if self._stop.is_set() or self._resetting:
+                    break
+                if self._pending is None and self._before_pending is None:
+                    continue
                 controls = tuple(task for task in self._operations if not task.done())
                 if controls:
                     await asyncio.wait(controls, return_when=asyncio.FIRST_COMPLETED)
                     continue
                 # After has its own latest-wins slot and priority; Before never supersedes it.
+                ticket = None
                 if self._pending is not None:
                     ticket, self._pending = self._pending, None
-                else:
+                elif self._before_pending is not None:
                     ticket, self._before_pending = self._before_pending, None
+                if ticket is None:
+                    continue
                 self._running = ticket
                 try:
                     if not self._ticket_current(ticket):
@@ -3202,11 +3211,12 @@ class LightCraftRawSession:
                         self._discard_pending("raw_session_lost")
                     ticket._finish(error=error.code)
                 except Exception:
-                    if ticket.kind == "after" and ticket.interaction_id is None:
+                    if ticket is not None and ticket.kind == "after" and ticket.interaction_id is None:
                         self.manager._abort_raw(ticket.handle.generation, "lightcraft_preview_failed")
                         self._lost = True
                         self._discard_pending("raw_session_lost")
-                    ticket._finish(error="lightcraft_preview_failed")
+                    if ticket is not None:
+                        ticket._finish(error="lightcraft_preview_failed")
                 finally:
                     self._running = None
         finally:
@@ -3303,6 +3313,7 @@ class LightCraftRawSession:
             raise LightCraftError("raw_resetting")
         self._resetting = True
         self._invalidate(selection=True)
+        self._control_idle.set()
         self._reset_task = asyncio.create_task(self._reset(restore_active), name="lightcraft-raw-reset")
         try:
             return await asyncio.shield(self._reset_task)
@@ -3366,10 +3377,16 @@ class LightCraftRawSession:
                 raise
             finally:
                 self._resetting = False
+                # The reset wakeup retires old work; restore the fence for any caller still unwinding.
+                if self._control_reservations:
+                    self._control_idle.clear()
+                else:
+                    self._control_idle.set()
 
     async def close(self):
         self._stop.set()
         self._invalidate(selection=True)
+        self._control_idle.set()
         if self._close_task is None or self._close_task.done() and not self._closed:
             self._close_task = asyncio.create_task(self._close(), name="lightcraft-raw-close")
         cancelled = await _await_task_resilient(self._close_task)
