@@ -58,6 +58,25 @@ it.each(['saving', 'releasing'] as const)('retains the %s failure and retries th
   expect(terminate).toHaveBeenCalledTimes(failedAt === 'releasing' ? 2 : 1);
 });
 
+it('keeps Backend termination confirmed while retrying a failed common completion callback', async () => {
+  const completionError = new Error('cleanup failed');
+  const terminate = vi.fn(async () => {});
+  const onComplete = vi.fn().mockRejectedValueOnce(completionError).mockResolvedValueOnce(undefined);
+  const saver = {} as RawRecipeSave;
+  const owner = new RawWorkspaceTermination('workspace-cleanup', 'discard', saver, async () => {}, terminate, onComplete);
+
+  await expect(owner.run()).rejects.toBe(completionError);
+  expect(owner.state).toEqual({ stage: 'unknown', failedAt: 'completing', error: completionError });
+  expect(terminate).toHaveBeenCalledOnce();
+  expect(owner.saver).toBe(saver);
+
+  await owner.run();
+  expect(owner.state).toEqual({ stage: 'complete' });
+  expect(owner.saver).toBeUndefined();
+  expect(terminate).toHaveBeenCalledOnce();
+  expect(onComplete).toHaveBeenCalledTimes(2);
+});
+
 it('retains the discard kind for a separate owner', () => {
   const owner = new RawWorkspaceTermination('workspace-c', 'discard', undefined, async () => {}, async () => {});
   expect(owner).toMatchObject({ workspaceId: 'workspace-c', kind: 'discard', state: { stage: 'saving' } });

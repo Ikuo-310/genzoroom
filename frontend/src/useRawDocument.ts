@@ -1079,15 +1079,17 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         && doc.documentToken === discardIdentity.documentToken && doc.revision === discardIdentity.revision;
     };
     const completeExplicitDiscard = (owner: RawWorkspaceTermination) => {
-      if (pointColorTermination === owner) pointColorTermination = undefined;
-      discarded=true;workspace=undefined;cropVisualRef.current=null;setCropPresentation(null);revoke();
+      discarded=true;workspace=undefined;cropVisualRef.current=null;revoke();
       discardSaver?.dispose();discardEditor?.dispose();
-      if (identity.current === assetId && serial.current === currentSerial)
+      if (pointColorTermination === owner) pointColorTermination = undefined;
+      if (identity.current === assetId && serial.current === currentSerial) {
+        setCropPresentation(null);
         setState({assetId,status:'error',code:'raw_document_closed'});
+      }
     };
     const runExplicitDiscard = (owner: RawWorkspaceTermination) => {
       if (discardOperation) return discardOperation;
-      discardOperation = owner.run().then(() => completeExplicitDiscard(owner)).catch(cause => {
+      discardOperation = owner.run().catch(cause => {
         discardOperation=undefined;
         throw cause;
       });
@@ -1159,7 +1161,6 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         if (releaseAfterFinish) {
           await releaseWorkspaceConfirmed(ownedWorkspace);
           workspace = undefined;
-          ownedEditor?.dispose(); ownedSaver?.dispose();
           return;
         }
         abortRawWorkspaceRequests(ownedWorkspace);
@@ -1192,7 +1193,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       };
       // Point Color Cancel settles outside ownership; its discard joins the queue, while other tools keep the Backend drain path.
       const terminate = async () => pointColorGuard ? owned(terminateOwned) : terminateOwned();
-      const termination = new RawWorkspaceTermination(ownedWorkspace, 'discard', ownedSaver, settle, terminate);
+      const termination = new RawWorkspaceTermination(ownedWorkspace, 'discard', ownedSaver, settle, terminate,
+        () => completeExplicitDiscard(termination));
       discardTermination = termination;
       pointColorTermination = termination;
       discardOperation = undefined;
