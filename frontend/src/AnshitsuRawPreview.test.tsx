@@ -39,6 +39,9 @@ vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawA
     settingsFingerprint: String(doc.revision + 1).padStart(64, '0'),
     values: { ...rawSettings(doc).values, ...patch } })), releaseRawWorkspace: vi.fn(async () => {}),
   readRawHistory: vi.fn(), saveRawHistory: vi.fn(), saveRawRecipe: vi.fn(), readRawRecipe: vi.fn(),
+  beginRawPointColorInteraction: vi.fn(async () => 'a'.repeat(32)),
+  updateRawPointColorInteraction: vi.fn(async (_doc, _serial, _signal, _target, interaction) => interaction.sequence),
+  cancelRawPointColorInteraction: vi.fn(async () => {}),
   beginRawCurveInteraction: vi.fn(async () => 'a'.repeat(32)), cancelRawCurveInteraction: vi.fn(async () => {}) }));
 const commitHistory = vi.fn(async (request: rawApi.RawHistoryRequest): Promise<rawApi.RawHistoryResult> => rawHistoryResult(request));
 let root: Root, host: HTMLDivElement;
@@ -2276,37 +2279,45 @@ it('does not optimistically add a Point Color entry or resend after a failed His
   expect(host.querySelector('.raw-point-color-empty')?.textContent).toContain('Use the eyedropper');
 });
 
-it('saves Point Color slider edits through the History operation and adopts returned settings', async () => {
+it('starts the Point Color Native interaction and forwards numeric slider drafts', async () => {
   const point = { lum: .42, chroma: .13, hue: 207.5, hue_shift: 0, sat_shift: 0, lum_shift: 0, variance: 0,
     range: 55, hue_range: 44, sat_range: 66, lum_range: 33 };
   vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), point_colors: [point] }));
+  vi.mocked(rawApi.rawPreview).mockImplementation(async (_doc, sequence, _signal, kind = 'after', target) => ({
+    blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence, interactionSequence: sequence, kind,
+    quality: target?.quality ?? 'full', frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000,
+      fullWidth: 16, fullHeight: 12, aspect: 4 / 3, window: null } }));
   await mount();
+  // The 50ms Native preview throttle is part of the interaction contract; control it deterministically.
+  vi.useFakeTimers();
   const pointColorTitle = host.querySelector<HTMLButtonElement>('.raw-point-color-title')!;
   if (pointColorTitle.getAttribute('aria-expanded') !== 'true') act(() => pointColorTitle.click());
-  commitHistory.mockImplementation(async request => {
-    const operation = request.operation;
-    if (operation?.kind !== 'pointColorControl') throw new Error('unexpected History operation');
-    const nextPoint = { ...request.doc.point_colors[0], hue_shift: operation.metadata.value };
-    return rawHistoryResult({ ...request, doc: { ...request.doc, revision: request.doc.revision + 1,
-      settingsFingerprint: 'c'.repeat(64), point_colors: [nextPoint] } },
-    { history: { initialized: true, cursor: 1, length: 1, selectedStepId: request.saveId } });
-  });
-  const number = host.querySelector<HTMLInputElement>('[data-adjustment-id="pointColor.0.hueShift"]')!
+  let number = host.querySelector<HTMLInputElement>('[data-adjustment-id="pointColor.0.hueShift"]')!
     .closest('.adjustment-control')!.querySelector<HTMLInputElement>('.adjustment-number')!;
+  act(() => number.focus());
+  await flush();
+  number = host.querySelector<HTMLInputElement>('[data-adjustment-id="pointColor.0.hueShift"]')!
+    .closest('.adjustment-control')!.querySelector<HTMLInputElement>('.adjustment-number')!;
+  act(() => number.focus());
   act(() => {
-    number.focus();
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(number, '38');
     number.dispatchEvent(new Event('input', { bubbles: true }));
-    number.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
   });
   await flush();
-  expect(commitHistory).toHaveBeenCalledOnce();
-  expect(commitHistory.mock.calls[0][0].action).toBe('operate');
-  expect(commitHistory.mock.calls[0][0].operation).toEqual({ kind: 'pointColorControl', metadata: {
-    control: 'pointColor.0.hueShift', value: 38,
-  } });
+  await vi.advanceTimersByTimeAsync(50);
+  await flush();
+  expect(number.value).toBe('38');
+  expect(rawApi.beginRawPointColorInteraction).toHaveBeenCalledOnce();
+  expect(rawApi.updateRawPointColorInteraction).toHaveBeenCalledOnce();
+  expect(rawApi.updateRawPointColorInteraction).toHaveBeenCalledWith(expect.objectContaining({ handle: 'handle', revision: 1 }),
+    expect.any(Number), expect.any(AbortSignal), expect.objectContaining({ quality: 'draft', mode: 'whole' }),
+    expect.objectContaining({ id: 'a'.repeat(32), sequence: 1, control: 'pointColor.0.hueShift', value: 38 }));
+  expect(rawApi.rawPreview).toHaveBeenCalledWith(expect.objectContaining({ handle: 'handle', revision: 1 }),
+    expect.any(Number), expect.any(AbortSignal), 'after', expect.objectContaining({ quality: 'draft', mode: 'whole' }),
+    undefined, undefined, undefined, expect.objectContaining({ id: 'a'.repeat(32), sequence: 1 }));
+  expect(commitHistory).not.toHaveBeenCalled();
+  expect(rawApi.saveRawHistory).not.toHaveBeenCalledWith(expect.objectContaining({ operation: expect.anything() }));
   expect(vi.mocked(rawApi.setRawControls)).not.toHaveBeenCalled();
-  expect(host.querySelector<HTMLInputElement>('[data-adjustment-id="pointColor.0.hueShift"]')?.value).toBe('38');
 });
 
 it('submits the WB-only Reset as one explicit History operation and keeps it out of the parent reset', async () => {
