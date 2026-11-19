@@ -89,7 +89,8 @@ export function Filmstrip({ assets, activeAssetId, recipeChangeRevision = 0, onA
           : historyOnlyStatuses[asset.id] ? t('workspace.historyRetained') : undefined}
       >
         <ThumbnailImage rendition="rendered-thumbnail" assetId={asset.id} surface="filmstrip" mode="rendered" alt=""
-          fetchPriority={asset.id === activeAssetId ? 'high' : undefined} />
+          loading={asset.id === activeAssetId ? 'eager' : 'lazy'}
+          fetchPriority={asset.id === activeAssetId ? 'high' : 'auto'} />
         <FormatBadge format={asset.format} isRaw={asset.is_raw} />
       </button>
         {editStatuses[asset.id] !== true && historyOnlyStatuses[asset.id] === true

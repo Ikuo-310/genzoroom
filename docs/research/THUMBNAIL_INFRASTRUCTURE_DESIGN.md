@@ -392,3 +392,13 @@ Windows WebView2、Docker実機、Immich実サービス、大量画像でのメ�
 
 Backend関連は150件・15サブテスト成功。最後のRAW復旧ガード変更後は該当44件を再実行し成功。Frontend関連は6ファイル265件成功。最終Frontend全体は4,201成功、138失敗、2 skipだった。P4の137件との差分はP5時にも記録した `places all RAW optics controls after NR, uses readback History flags and preserves independent sections` の5秒タイムアウトで、今回も単独実行では成功した。他の失敗は既存のRAW 3ファイルにあり、サムネイル関連の失敗はなかった。TypeScriptチェックと本番ビルド、`git diff --check`は成功。
 
+## P6実装記録：暗室Filmstripの読み込み優先度
+
+Filmstripの全AssetでP4共通の`ThumbnailImage`とP5のAsset公開版購読を維持する。アクティブAssetには`loading="eager"`と`fetchPriority="high"`を指定し、その他は`loading="lazy"`と`fetchPriority="auto"`を指定する。`activeAssetId`の変更では既存img要素の属性だけを更新し、URL・Asset identity・publicationVersionを変えないため、優先順位の移行だけで取得済み画像を再取得しない。横スクロール時の取得範囲はブラウザー標準lazy loadingに任せる。
+
+表示範囲外Assetも既存の共有SSE／状態同期に購読したままなので、公開版更新は当該AssetのURLにだけ反映される。ResetはP5の通常画像fallbackに従う。Filmstrip独自の通知、取得キュー、先読み、仮想スクロールは追加しない。Recipe保存、写真切替・暗室終了時の即時生成依頼、非ブロッキング移動、History、横スクロール、アクティブ写真の自動可視化、手動Retryを維持する。
+
+`AnshitsuPage.test.tsx`と`ImageViewer.test.tsx`のFilmstrip関連4テストが成功。全Frontend比較ではP6前の`c04fe66`とP6作業ツリーがともに4,201 passed／138 failed／2 skippedだった。失敗138件のテスト名に追加・解消はなく、正規化後のエラー内容にも差がなかった。失敗は既知のRAW関連テスト群である。TypeScriptチェックと本番build、`git diff --check`が成功した。全体テスト失敗の詳細には全体実行時に再現しない5秒timeoutが含まれる。
+
+単体テストは画像属性を検証するが、実際にブラウザーが何件の画像を取得するかは検証しない。WebView2でのlazy loading、横スクロール距離・速度と取得件数、初期取得数、アクティブ切替時の待ち時間、画像要素の再取得数、メモリ使用量はP7の大量画像実測で確認する。
+

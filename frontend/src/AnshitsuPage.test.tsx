@@ -99,8 +99,15 @@ describe('Anshitsu workspace', () => {
     expect(markup).toMatch(new RegExp(`<img\\b[^>]*src="/api/assets/${asset.id}/rendered-thumbnail"`));
     expect(markup).toMatch(new RegExp(`<img\\b[^>]*src="/api/assets/${secondAsset.id}/rendered-thumbnail"`));
     expect(markup).toContain('fetchPriority="high"');
+    const filmstripImages = [...markup.matchAll(/<img\b[^>]*>/g)].map(match => match[0]);
+    expect(filmstripImages).toHaveLength(2);
+    expect(filmstripImages[0]).toContain('loading="lazy"');
+    expect(filmstripImages[0]).toContain('fetchPriority="auto"');
+    expect(filmstripImages[1]).toContain('loading="eager"');
+    expect(filmstripImages[1]).toContain('fetchPriority="high"');
     expect(markup.match(/filmstrip-item/g)).toHaveLength(2);
   });
+
 
   it('uses the active Filmstrip asset for the workspace filename and date', () => {
     const markup = renderWorkspace('en', [asset, secondAsset], secondAsset.id);
