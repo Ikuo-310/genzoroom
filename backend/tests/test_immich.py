@@ -351,6 +351,68 @@ class ImmichAssetTests(unittest.TestCase):
         self.assertEqual(thumbnail.media_type, "image/jpeg")
         self.assertNotIn(API_KEY, repr(thumbnail))
 
+    def test_thumbnail_reads_can_share_a_caller_owned_http_client(self):
+        requests = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            if request.url.path.endswith("/thumbnail"):
+                return httpx.Response(200, content=b"image", headers={"content-type": "image/jpeg"})
+            return httpx.Response(200, json={
+                "type": "IMAGE", "originalFileName": "photo.jpg",
+                "fileCreatedAt": "2026-09-01T12:00:00.000Z", "isFavorite": False,
+            })
+
+        async def exercise():
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                first = await get_asset_thumbnail(IMMICH_URL, API_KEY, ASSET_ID, client=client)
+                self.assertFalse(client.is_closed)
+                second = await get_asset_preview(IMMICH_URL, API_KEY, ASSET_ID, client=client)
+                detail = await get_asset_detail(IMMICH_URL, API_KEY, ASSET_ID, client=client)
+                self.assertFalse(client.is_closed)
+                return first, second, detail
+
+        first, second, detail = asyncio.run(exercise())
+        self.assertEqual(first.content, b"image")
+        self.assertEqual(second.content, b"image")
+        self.assertEqual(detail.filename, "photo.jpg")
+        self.assertEqual(len(requests), 3)
+        self.assertEqual([request.headers["x-api-key"] for request in requests], [API_KEY] * 3)
+
+    def test_thumbnail_reads_reuse_one_keep_alive_connection(self):
+        async def exercise():
+            connections = 0
+
+            async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+                nonlocal connections
+                connections += 1
+                try:
+                    while True:
+                        await reader.readuntil(b"\r\n\r\n")
+                        writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n"
+                                     b"Content-Type: image/jpeg\r\nConnection: keep-alive\r\n\r\nimage")
+                        await writer.drain()
+                except (asyncio.IncompleteReadError, ConnectionError):
+                    pass
+                finally:
+                    writer.close()
+                    await writer.wait_closed()
+
+            server = await asyncio.start_server(handle, "127.0.0.1", 0)
+            client = httpx.AsyncClient()
+            try:
+                port = server.sockets[0].getsockname()[1]
+                url = f"http://127.0.0.1:{port}"
+                await get_asset_thumbnail(url, API_KEY, ASSET_ID, client=client)
+                await get_asset_thumbnail(url, API_KEY, ASSET_ID, client=client)
+                return connections
+            finally:
+                await client.aclose()
+                server.close()
+                await server.wait_closed()
+
+        self.assertEqual(asyncio.run(exercise()), 1)
+
     def test_gets_asset_detail_and_selected_exif_fields(self):
         def handler(request: httpx.Request) -> httpx.Response:
             self.assertEqual(request.method, "GET")

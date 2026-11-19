@@ -59,6 +59,7 @@ from immich import (
     check_immich_status,
     get_asset_detail,
     get_asset_preview,
+    create_immich_read_client,
     get_asset_original,
     get_asset_thumbnail,
     get_recent_assets,
@@ -78,6 +79,11 @@ def thumbnail_diagnostic_start(request: Request, asset_id: UUID, surface: str):
     started = monotonic()
     thumbnail_log("request.received", component="thumbnail_http", **context)
     return context, started
+
+
+def immich_read_client_option(request: Request) -> dict:
+    client = getattr(request.app.state, "immich_read_client", None)
+    return {"client": client} if client is not None else {}
 
 
 def thumbnail_diagnostic_finish(diagnostic, status: int):
@@ -121,8 +127,11 @@ async def lifespan(app: FastAPI):
     app.state.tag_repair = GenzoRoomTagRepair(url, key)
     cache = ThumbnailCache()
     async def generate(asset_id):
-        return await generate_saved_thumbnail(asset_id, immich_url=url, api_key=key)
+        return await generate_saved_thumbnail(asset_id, immich_url=url, api_key=key,
+                                              client=immich_read_client)
     scheduler = ThumbnailScheduler(cache, generate)
+    immich_read_client = create_immich_read_client()
+    app.state.immich_read_client = immich_read_client
     app.state.thumbnail_cache = cache
     app.state.thumbnail_scheduler = scheduler
     try:
@@ -134,9 +143,16 @@ async def lifespan(app: FastAPI):
         await scheduler.start()
         yield
     finally:
-        await scheduler.close()
-        await app.state.tag_repair.close()
-        await runtime.wait()
+        try:
+            await scheduler.close()
+        finally:
+            try:
+                await app.state.tag_repair.close()
+            finally:
+                try:
+                    await runtime.wait()
+                finally:
+                    await immich_read_client.aclose()
 
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
@@ -685,6 +701,7 @@ async def asset_thumbnail(asset_id: UUID, request: Request) -> Response:
             os.getenv("IMMICH_URL"),
             os.getenv("IMMICH_API_KEY"),
             asset_id,
+            **immich_read_client_option(request),
         )
     except ImmichRequestError as error:
         thumbnail_diagnostic_error(diagnostic, error)
@@ -702,18 +719,23 @@ async def asset_thumbnail(asset_id: UUID, request: Request) -> Response:
     return response
 
 
-async def generate_saved_thumbnail(asset_id, *, immich_url, api_key):
-    detail = await get_asset_detail(immich_url, api_key, asset_id)
+async def generate_saved_thumbnail(asset_id, *, immich_url, api_key, client=None):
     if development_engine() == "lightcraft":
         return await generate_thumbnail(asset_id, immich_url=immich_url, api_key=api_key, input_kind="raw")
-    return await generate_thumbnail(asset_id, immich_url=immich_url, api_key=api_key, input_kind="jpeg")
+    return await generate_thumbnail(asset_id, immich_url=immich_url, api_key=api_key,
+                                    client=client, input_kind="jpeg")
+
+
+async def require_immich_asset(asset_id: UUID, request: Request) -> None:
+    try:
+        await get_asset_detail(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"), asset_id,
+                               **immich_read_client_option(request))
+    except ImmichRequestError as error:
+        raise _upstream_error(error) from error
 
 
 async def thumbnail_recipe_reason(asset_id):
-    try:
-        detail = await get_asset_detail(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"), asset_id)
-    except ImmichRequestError as error:
-        raise _upstream_error(error) from error
+    # The selected development engine defines which saved-state store owns this Asset's Recipe.
     if development_engine() == "lightcraft":
         state = await run_in_threadpool(get_raw_saved_state, asset_id)
         if state is None:
@@ -731,6 +753,7 @@ async def request_rendered_thumbnail(asset_id: UUID, request: Request) -> Respon
     if scheduler is None:
         raise HTTPException(status_code=503, detail={"code": "thumbnail_scheduler_unavailable"})
     async with scheduler.mutation_lock:
+        await require_immich_asset(asset_id, request)
         try:
             reason = await thumbnail_recipe_reason(asset_id)
         except StoreUnavailable as error:
@@ -764,6 +787,11 @@ async def rendered_thumbnail(asset_id: UUID, request: Request) -> Response:
     has_recipe = reason is None
     content = await run_in_threadpool(cache.read, asset_id) if cache is not None and has_recipe else None
     if content is not None:
+        try:
+            await require_immich_asset(asset_id, request)
+        except Exception as error:
+            thumbnail_diagnostic_error(diagnostic, error)
+            raise
         thumbnail_diagnostic_event(diagnostic, "cache.hit")
         response = Response(content=content, media_type="image/jpeg", headers={"Cache-Control": "private, no-store"})
         thumbnail_diagnostic_finish(diagnostic, response.status_code)
@@ -792,6 +820,11 @@ async def immersive_preview(asset_id: UUID, request: Request) -> Response:
     has_recipe = reason is None
     content = await run_in_threadpool(cache.read, asset_id) if cache is not None and has_recipe else None
     if content is not None:
+        try:
+            await require_immich_asset(asset_id, request)
+        except Exception as error:
+            thumbnail_diagnostic_error(diagnostic, error)
+            raise
         thumbnail_diagnostic_event(diagnostic, "cache.hit")
         response = Response(content=content, media_type="image/jpeg", headers={"Cache-Control": "private, no-store"})
         thumbnail_diagnostic_finish(diagnostic, response.status_code)
@@ -799,7 +832,8 @@ async def immersive_preview(asset_id: UUID, request: Request) -> Response:
     thumbnail_diagnostic_event(diagnostic, "fallback.selected", fallback="immich_preview",
                                recipeReason=reason or "cache_miss")
     try:
-        preview = await get_asset_preview(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"), asset_id)
+        preview = await get_asset_preview(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"), asset_id,
+                                          **immich_read_client_option(request))
     except ImmichRequestError as error:
         thumbnail_diagnostic_error(diagnostic, error)
         raise _upstream_error(error) from error
@@ -817,12 +851,13 @@ async def immersive_preview(asset_id: UUID, request: Request) -> Response:
     response_model=AssetDetail,
     response_model_exclude_none=True,
 )
-async def asset_detail(asset_id: UUID) -> AssetDetail:
+async def asset_detail(asset_id: UUID, request: Request) -> AssetDetail:
     try:
         return await get_asset_detail(
             os.getenv("IMMICH_URL"),
             os.getenv("IMMICH_API_KEY"),
             asset_id,
+            **immich_read_client_option(request),
         )
     except ImmichRequestError as error:
         raise _upstream_error(error) from error
@@ -836,6 +871,7 @@ async def asset_preview(asset_id: UUID, request: Request) -> Response:
             os.getenv("IMMICH_URL"),
             os.getenv("IMMICH_API_KEY"),
             asset_id,
+            **immich_read_client_option(request),
         )
     except ImmichRequestError as error:
         thumbnail_diagnostic_error(diagnostic, error)

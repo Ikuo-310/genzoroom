@@ -16,6 +16,13 @@ from pydantic import BaseModel, Field
 from backend_logging import backend_logger
 
 IMMICH_TIMEOUT = httpx.Timeout(5.0, connect=3.0)
+
+
+def create_immich_read_client() -> httpx.AsyncClient:
+    """Create the lifespan-owned pool used by non-streaming Immich reads."""
+    return httpx.AsyncClient(timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False)
+
+
 DEFAULT_RECENT_ASSET_LIMIT = 100
 MIN_RECENT_ASSET_LIMIT = 50
 MAX_RECENT_ASSET_LIMIT = 500
@@ -1369,21 +1376,28 @@ async def get_asset_detail(
     api_key: str | None,
     asset_id: UUID,
     *,
+    client: httpx.AsyncClient | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> AssetDetail:
     url, key = _require_configuration(immich_url, api_key)
 
     try:
-        async with httpx.AsyncClient(
-            timeout=IMMICH_TIMEOUT,
-            follow_redirects=False,
-            trust_env=False,
-            transport=transport,
-        ) as client:
-            response = await _immich_request(
-                client, "GET", url, f"/assets/{asset_id}",
+        async def fetch(active_client: httpx.AsyncClient):
+            return await _immich_request(
+                active_client, "GET", url, f"/assets/{asset_id}",
                 headers={"x-api-key": key, "Accept": "application/json"},
             )
+
+        if client is None:
+            async with httpx.AsyncClient(
+                timeout=IMMICH_TIMEOUT,
+                follow_redirects=False,
+                trust_env=False,
+                transport=transport,
+            ) as active_client:
+                response = await fetch(active_client)
+        else:
+            response = await fetch(client)
     except (httpx.InvalidURL, httpx.RequestError) as error:
         raise ImmichRequestError(
             "unreachable",
@@ -1446,22 +1460,29 @@ async def _get_asset_image(
     asset_id: UUID,
     size: Literal["thumbnail", "preview"],
     *,
+    client: httpx.AsyncClient | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> ImmichThumbnail:
     url, key = _require_configuration(immich_url, api_key)
 
     try:
-        async with httpx.AsyncClient(
-            timeout=IMMICH_TIMEOUT,
-            follow_redirects=False,
-            trust_env=False,
-            transport=transport,
-        ) as client:
-            response = await _immich_request(
-                client, "GET", url, f"/assets/{asset_id}/thumbnail",
+        async def fetch(active_client: httpx.AsyncClient):
+            return await _immich_request(
+                active_client, "GET", url, f"/assets/{asset_id}/thumbnail",
                 headers={"x-api-key": key, "Accept": "image/*"},
                 params={"size": size},
             )
+
+        if client is None:
+            async with httpx.AsyncClient(
+                timeout=IMMICH_TIMEOUT,
+                follow_redirects=False,
+                trust_env=False,
+                transport=transport,
+            ) as active_client:
+                response = await fetch(active_client)
+        else:
+            response = await fetch(client)
     except (httpx.InvalidURL, httpx.RequestError) as error:
         raise ImmichRequestError(
             "unreachable",
@@ -1480,6 +1501,7 @@ async def get_asset_thumbnail(
     api_key: str | None,
     asset_id: UUID,
     *,
+    client: httpx.AsyncClient | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> ImmichThumbnail:
     return await _get_asset_image(
@@ -1487,6 +1509,7 @@ async def get_asset_thumbnail(
         api_key,
         asset_id,
         "thumbnail",
+        client=client,
         transport=transport,
     )
 
@@ -1496,6 +1519,7 @@ async def get_asset_preview(
     api_key: str | None,
     asset_id: UUID,
     *,
+    client: httpx.AsyncClient | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> ImmichThumbnail:
     # Immich's generated preview is suitable for viewing without always transferring originals.
@@ -1504,6 +1528,7 @@ async def get_asset_preview(
         api_key,
         asset_id,
         "preview",
+        client=client,
         transport=transport,
     )
 

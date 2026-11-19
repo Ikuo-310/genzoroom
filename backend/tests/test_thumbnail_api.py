@@ -188,6 +188,7 @@ def test_get_only_reads_cache_or_original_and_never_generates(setup):
             assert source.content == b"original"
             assert source.headers["cache-control"] == "private, max-age=300"
         assert original.await_count == 2
+        assert main.get_asset_detail.await_count == 2
         generate.assert_not_called()
         assert not scheduler._pending and not scheduler._deadlines
     asyncio.run(run())
@@ -211,6 +212,7 @@ def test_immediate_request_http_contract(setup, edited, reason, status):
                 assert list(scheduler._pending) == [ASSET]
             else:
                 assert not scheduler._pending and cache.read(ASSET) is None
+            assert main.get_asset_detail.await_count == (2 if edited else 1)
             generate.assert_not_called()
     asyncio.run(run())
 
@@ -224,6 +226,20 @@ def test_fallback_failure_preserves_existing_upstream_error_contract(setup):
             assert result.status_code == 503
         generate.assert_not_called()
     asyncio.run(run())
+
+
+def test_saved_thumbnail_generation_reuses_preview_client_without_detail_lookup(setup, monkeypatch):
+    pool = object()
+    generated = AsyncMock(return_value=b"rendered")
+    monkeypatch.setattr(main, "development_engine", lambda: "jpeg")
+    monkeypatch.setattr(main, "generate_thumbnail", generated)
+
+    assert asyncio.run(main.generate_saved_thumbnail(
+        ASSET, immich_url="http://immich.test", api_key="private-key", client=pool,
+    )) == b"rendered"
+    generated.assert_awaited_once_with(ASSET, immich_url="http://immich.test", api_key="private-key",
+                                       client=pool, input_kind="jpeg")
+    main.get_asset_detail.assert_not_awaited()
 
 
 @pytest.mark.parametrize("saved_state,cache_content,expected", [
@@ -249,7 +265,9 @@ def test_immersive_preview_prefers_only_saved_edited_cache(setup, monkeypatch, s
             assert result.status_code == 200 and result.content == expected
             assert result.headers["cache-control"] == "private, no-store"
             assert scheduler._pending == pending_before and scheduler._deadlines == deadlines_before
-            if expected == b"cached-jpeg": preview.assert_not_awaited()
+            if expected == b"cached-jpeg":
+                preview.assert_not_awaited()
+                main.get_asset_detail.assert_awaited_once()
             else: preview.assert_awaited_once()
             generate.assert_not_called()
     asyncio.run(run())
@@ -301,11 +319,14 @@ def test_lifespan_owns_scheduler_and_closes_it(setup, monkeypatch):
     async def run():
         async with main.app.router.lifespan_context(main.app):
             scheduler = main.app.state.thumbnail_scheduler
+            read_client = main.app.state.immich_read_client
+            assert not read_client.is_closed
             assert scheduler._task is not None and not scheduler._task.done()
             async with client() as api:
                 await put(api)
             assert ASSET in scheduler._deadlines
         assert scheduler._closed and scheduler._task.done()
+        assert read_client.is_closed
         assert not scheduler._deadlines
     asyncio.run(run())
 

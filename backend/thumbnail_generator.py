@@ -80,6 +80,7 @@ def _render_preview(content: bytes, recipe: dict) -> bytes:
 
 async def generate_thumbnail(
     asset_id: UUID, *, immich_url: str | None, api_key: str | None,
+    client: httpx.AsyncClient | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
     input_kind: str = "jpeg",
 ) -> bytes:
@@ -94,7 +95,7 @@ async def generate_thumbnail(
     try:
         recipe = await run_in_threadpool(_load_recipe, asset_id)
         try:
-            preview = await get_asset_preview(immich_url, api_key, asset_id, transport=transport)
+            preview = await get_asset_preview(immich_url, api_key, asset_id, client=client, transport=transport)
         except Exception as error:
             raise ThumbnailGenerationError("preview_fetch_failed") from error
         # Content-Type is an upstream contract, not an assumption based on the endpoint name.
