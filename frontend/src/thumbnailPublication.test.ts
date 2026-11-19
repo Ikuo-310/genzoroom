@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { closeThumbnailPublicationStream, getThumbnailPublication, subscribeThumbnailPublication } from './thumbnailPublication';
+import { closeThumbnailPublicationStream, getThumbnailPublication, resumeThumbnailPublicationStream,
+  subscribeThumbnailPublication } from './thumbnailPublication';
 
 const generation = 'a'.repeat(32);
 const nextGeneration = 'b'.repeat(32);
@@ -34,8 +35,9 @@ function deferredStatus() {
     ids: string[]; signal: AbortSignal; fail: () => void;
     reply: (sequence: number, version: string, id?: string) => void;
   }> = [];
-  vi.stubGlobal('fetch', (_url: string, init: RequestInit) => new Promise<Response>(resolve => {
+  vi.stubGlobal('fetch', (_url: string, init: RequestInit) => new Promise<Response>((resolve, reject) => {
     const ids: string[] = JSON.parse(String(init.body)).assetIds;
+    init.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
     requests.push({ ids, signal: init.signal!, fail: () => resolve(new Response(null, { status: 503 })),
       reply: (sequence, version, generationId = generation) => resolve(new Response(JSON.stringify({
         sequence, generationId, items: Object.fromEntries(ids.map(id => [id, {
@@ -96,9 +98,9 @@ it('retries a failed shared batch at bounded intervals and resynchronizes on rec
   expect(getThumbnailPublication('a')?.publicationVersion).toBe('5');
 });
 
-it('closes the shared stream and aborts all synchronization during application shutdown', async () => {
+it('retains current subscribers while stopped and resynchronizes only those still subscribed on resume', async () => {
   const requests = deferredStatus();
-  watch(['shutdown-asset']);
+  const active = subscribeThumbnailPublication('shutdown-asset', () => {});
   const stream = Stream.latest;
   await vi.advanceTimersByTimeAsync(25);
   expect(requests).toHaveLength(1);
@@ -106,9 +108,23 @@ it('closes the shared stream and aborts all synchronization during application s
   expect(stream.close).toHaveBeenCalledOnce();
   expect(requests[0].signal.aborted).toBe(true);
   stream.emit(generation, 1, 'shutdown-asset', '2');
-  watch(['late-asset']);
+  const late = subscribeThumbnailPublication('late-asset', () => {});
+  late();
   await vi.advanceTimersByTimeAsync(10000);
   expect(requests).toHaveLength(1);
-  expect(getThumbnailPublication('shutdown-asset')).toBeUndefined();
   expect(Stream.latest).toBe(stream);
+  resumeThumbnailPublicationStream();
+  await vi.advanceTimersByTimeAsync(25);
+  expect(requests[1].ids).toEqual(['shutdown-asset']);
+  requests[1].reply(1, '2');
+  await vi.advanceTimersByTimeAsync(0);
+  expect(requests).toHaveLength(2);
+  expect(requests[1].ids).not.toContain('late-asset');
+  expect(getThumbnailPublication('shutdown-asset')?.publicationVersion).toBe('2');
+  expect(Stream.latest).not.toBe(stream);
+  active();
+  const resumedStream = Stream.latest;
+  closeThumbnailPublicationStream();
+  resumeThumbnailPublicationStream();
+  expect(Stream.latest).toBe(resumedStream);
 });

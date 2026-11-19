@@ -122,10 +122,13 @@ it('does not let a delayed rejection for an old closeResult cancel the current r
   await flush();
   expect(document.body.textContent).toContain('Waiting for the current export and Backend to finish');
 
+  const resumesBeforeOldRejection = resumePublicationStream.mock.calls.length;
   await act(async () => rejectFirstResponse(new Error('stale request')));
   await flush();
   expect(document.body.textContent).toContain('Waiting for the current export and Backend to finish');
   expect(document.body.textContent).not.toContain('Closing was cancelled');
+  expect(resumePublicationStream).toHaveBeenCalledTimes(resumesBeforeOldRejection);
+  expect(stopPublicationStream).toHaveBeenCalledTimes(2);
 });
 
 const desktopButton=(text:string)=>Array.from(document.querySelectorAll<HTMLButtonElement>('dialog button')).find(b=>b.textContent===text)!;

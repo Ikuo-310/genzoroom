@@ -592,3 +592,37 @@ def test_closing_sse_response_releases_backend_subscriber(setup):
         assert len(hub._subscribers) == 0
 
     asyncio.run(run())
+
+
+def test_server_shutdown_closes_existing_and_rejects_new_sse_subscribers(setup):
+    _, _, _, _, _ = setup
+    hub = main.app.state.thumbnail_publication_hub
+
+    async def run():
+        request = Request({"type": "http", "method": "GET", "path": "/thumbnail-publications/events",
+                          "headers": [], "query_string": b"", "server": ("test", 80),
+                          "client": ("test", 1), "scheme": "http", "app": main.app})
+        response = await main.thumbnail_publication_events(request)
+        iterator = response.body_iterator
+        assert await anext(iterator) == b": connected\n\n"
+        queue = next(iter(hub._subscribers))
+        main.begin_server_shutdown()
+        try:
+            await anext(iterator)
+        except StopAsyncIteration:
+            pass
+        else:
+            raise AssertionError("the shutdown signal must finish the SSE response")
+        assert len(hub._subscribers) == 0
+        assert queue.qsize() == 1
+        hub.publish(ASSET, "published", "1")
+        assert queue.qsize() == 1
+        hub.unsubscribe(queue)
+        try:
+            await main.thumbnail_publication_events(request)
+        except Exception as error:
+            assert getattr(error, "status_code", None) == 503
+        else:
+            raise AssertionError("a new SSE request was accepted during shutdown")
+
+    asyncio.run(run())

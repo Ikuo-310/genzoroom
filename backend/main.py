@@ -210,6 +210,13 @@ MAX_EDIT_STATE_BYTES = 8 * 1024 * 1024
 app.add_middleware(AssetImageErrorCacheMiddleware)
 
 
+def begin_server_shutdown():
+    """End long-lived publication streams before Uvicorn drains HTTP tasks."""
+    hub = getattr(app.state, "thumbnail_publication_hub", None)
+    if hub is not None:
+        hub.begin_shutdown()
+
+
 @app.exception_handler(RequestValidationError)
 async def safe_diagnostic_validation(request: Request, error: RequestValidationError):
     if request.url.path.startswith("/export/"):
@@ -599,16 +606,20 @@ async def thumbnail_publication_events(request: Request) -> Response:
     hub = getattr(request.app.state, "thumbnail_publication_hub", None)
     if hub is None:
         raise _edit_error(503, "thumbnail_scheduler_unavailable")
+    if hub.stopping:
+        raise _edit_error(503, "thumbnail_scheduler_unavailable")
     async def events():
         queue = hub.subscribe()
         try:
             yield b": connected\n\n"
-            while not await request.is_disconnected():
+            while not hub.stopping and not await request.is_disconnected():
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=15)
                 except TimeoutError:
                     yield b": keepalive\n\n"
                     continue
+                if event is None:
+                    break
                 event_name = "resync" if event.get("type") == "resync" else "publication"
                 payload = json.dumps(event, separators=(",", ":")).encode("utf-8")
                 yield b"event: " + event_name.encode("ascii") + b"\ndata: " + payload + b"\n\n"

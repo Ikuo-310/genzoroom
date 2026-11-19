@@ -162,7 +162,7 @@ function onPublication(event: MessageEvent<string>) {
 }
 
 function ensureEventSource() {
-  if (eventSource || typeof EventSource === 'undefined') return;
+  if (shuttingDown || eventSource || typeof EventSource === 'undefined') return;
   try {
     const source = new EventSource('/api/thumbnail-publications/events');
     eventSource = source;
@@ -184,43 +184,47 @@ function ensureEventSource() {
 }
 
 export function subscribeThumbnailPublication(assetId: string, listener: () => void): () => void {
-  if (shuttingDown) return () => {};
   let assetListeners = listeners.get(assetId);
   if (!assetListeners) { assetListeners = new Set(); listeners.set(assetId, assetListeners); }
   assetListeners.add(listener);
+  if (shuttingDown) return () => unsubscribeThumbnailPublication(assetId, listener);
   if (idleTimer !== null) clearTimeout(idleTimer);
   idleTimer = null;
   ensureEventSource();
   if (eventSource) scheduleReconciliation([assetId]);
   return () => {
-    const current = listeners.get(assetId);
-    current?.delete(listener);
-    if (current?.size !== 0) return;
-    listeners.delete(assetId);
-    snapshots.delete(assetId);
-    assetSequences.delete(assetId);
-    pendingIds.delete(assetId);
-    retries.delete(assetId);
-    retryIds.delete(assetId);
-    if (activeChunk.length && !activeChunk.some(id => listeners.has(id))) {
-      controller?.abort();
-      // The request owns the remaining batches too, so preserve their pending work.
-      scheduleReconciliation();
-    }
-    if (listeners.size) return;
-    resetSynchronization();
-    if (reconcileTimer !== null) clearTimeout(reconcileTimer);
-    reconcileTimer = null;
-    // Keep the transport across route transitions without retaining Asset state.
-    idleTimer = setTimeout(() => {
-      idleTimer = null;
-      const source = eventSource;
-      eventSource = null;
-      streamListeners?.abort();
-      streamListeners = null;
-      source?.close();
-    }, 1000);
+    unsubscribeThumbnailPublication(assetId, listener);
   };
+}
+
+function unsubscribeThumbnailPublication(assetId: string, listener: () => void) {
+  const current = listeners.get(assetId);
+  current?.delete(listener);
+  if (current?.size !== 0) return;
+  listeners.delete(assetId);
+  snapshots.delete(assetId);
+  assetSequences.delete(assetId);
+  pendingIds.delete(assetId);
+  retries.delete(assetId);
+  retryIds.delete(assetId);
+  if (activeChunk.length && !activeChunk.some(id => listeners.has(id))) {
+    controller?.abort();
+    // The request owns the remaining batches too, so preserve their pending work.
+    scheduleReconciliation();
+  }
+  if (listeners.size || shuttingDown) return;
+  resetSynchronization();
+  if (reconcileTimer !== null) clearTimeout(reconcileTimer);
+  reconcileTimer = null;
+  // Keep the transport across route transitions without retaining Asset state.
+  idleTimer = setTimeout(() => {
+    idleTimer = null;
+    const source = eventSource;
+    eventSource = null;
+    streamListeners?.abort();
+    streamListeners = null;
+    source?.close();
+  }, 1000);
 }
 
 export function closeThumbnailPublicationStream() {
@@ -247,6 +251,7 @@ export function closeThumbnailPublicationStream() {
 export function resumeThumbnailPublicationStream() {
   if (!shuttingDown) return;
   shuttingDown = false;
+  if (!listeners.size) return;
   ensureEventSource();
   scheduleReconciliation();
 }

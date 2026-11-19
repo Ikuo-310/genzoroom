@@ -283,6 +283,8 @@ class LocalServer(uvicorn.Server):
 
     async def shutdown(self, sockets=None):
         try:
+            from main import begin_server_shutdown
+            begin_server_shutdown()
             await super().shutdown(sockets=sockets)
         finally:
             if self.handoff is not None:

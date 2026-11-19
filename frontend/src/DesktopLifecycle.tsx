@@ -80,7 +80,12 @@ export function DesktopLifecycleProvider({ children }: { children: ReactNode }) 
         else fail();
         if (saved || discarded) closeThumbnailPublicationStream();
         try { await bridge.respond({ kind: 'closeResult', requestId, saved, ...(discarded?{discarded:true as const}:{}) }); }
-        catch { resumeThumbnailPublicationStream(); fail(false, requestId); }
+        catch {
+          // A stale host reply must not resume transport owned by a newer close request.
+          if (pending.current !== requestId) return;
+          resumeThumbnailPublicationStream();
+          fail(false, requestId);
+        }
       })();
     };
     const cancelled = (event: Event) => {

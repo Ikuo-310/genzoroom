@@ -17,6 +17,14 @@ def test_release_nginx_preserves_all_routing_and_limits():
     assert release == expected
 
 
+def test_release_backend_uses_the_sse_aware_uvicorn_launcher():
+    dockerfile = (ROOT / "Dockerfile.release").read_text()
+    assert "COPY backend/*.py ./" in dockerfile
+    assert "ENV GENZOROOM_HOST=127.0.0.1" in dockerfile
+    supervisor = (ROOT / "release/supervisor.py").read_text()
+    assert '("backend", ["python", "run_server.py"], signal.SIGTERM)' in supervisor
+
+
 @pytest.fixture
 def supervisor(monkeypatch):
     spec = importlib.util.spec_from_file_location("release_supervisor", ROOT / "release/supervisor.py")

@@ -8,8 +8,7 @@ import time
 
 SHUTDOWN_SECONDS = 60
 COMMANDS = (
-    ("backend", ["uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8000",
-                 "--workers", "1", "--no-proxy-headers"], signal.SIGTERM),
+    ("backend", ["python", "run_server.py"], signal.SIGTERM),
     ("nginx", ["nginx", "-g", "daemon off;"], getattr(signal, "SIGQUIT", signal.SIGTERM)),
 )
 
