@@ -4,6 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 NGINX_CONFIG = (ROOT / "frontend" / "nginx.conf").read_text(encoding="utf-8")
+RELEASE_NGINX_CONFIG = (ROOT / "release" / "nginx.conf").read_text(encoding="utf-8")
 
 
 def exact_location(path: str) -> str:
@@ -34,3 +35,12 @@ def test_stack_and_general_api_proxy_timeouts_are_unchanged() -> None:
     general_api = re.search(r"(?ms)^\s*location /api/ \{(?P<body>.*?)^\s*\}", NGINX_CONFIG)
     assert general_api is not None
     assert "proxy_read_timeout 10s;" in general_api.group("body")
+
+
+def test_nginx_variants_leave_private_image_cache_headers_to_backend() -> None:
+    for config in (NGINX_CONFIG, RELEASE_NGINX_CONFIG):
+        directives = config.lower()
+        assert "proxy_cache " not in directives
+        assert "proxy_hide_header cache-control" not in directives
+        assert "add_header cache-control" not in directives
+        assert "expires " not in directives

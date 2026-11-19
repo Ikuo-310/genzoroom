@@ -99,6 +99,44 @@ def test_thumbnail_http_diagnostics_correlate_frontend_id_and_response(setup):
         backend_logger.clear()
 
 
+def test_thumbnail_cache_revalidates_current_asset_before_returning_not_modified(setup):
+    _, _, _, _, original = setup
+    original.side_effect = [
+        ImmichThumbnail(b"same-image", "image/jpeg"),
+        ImmichThumbnail(b"same-image", "image/jpeg"),
+        ImmichThumbnail(b"updated-image", "image/jpeg"),
+    ]
+
+    async def run():
+        async with client() as api:
+            first = await api.get(f"/assets/{ASSET}/thumbnail")
+            assert first.status_code == 200 and first.content == b"same-image"
+            assert first.headers["cache-control"] == "private, no-cache"
+            assert first.headers["etag"].startswith('"')
+            unchanged = await api.get(f"/assets/{ASSET}/thumbnail",
+                                      headers={"If-None-Match": first.headers["etag"]})
+            assert unchanged.status_code == 304 and not unchanged.content
+            assert unchanged.headers["etag"] == first.headers["etag"]
+            updated = await api.get(f"/assets/{ASSET}/thumbnail",
+                                    headers={"If-None-Match": first.headers["etag"]})
+            assert updated.status_code == 200 and updated.content == b"updated-image"
+            assert updated.headers["etag"] != first.headers["etag"]
+        assert original.await_count == 3
+    asyncio.run(run())
+
+
+def test_asset_image_upstream_errors_are_never_cached(setup):
+    _, _, _, _, original = setup
+    original.side_effect = ImmichRequestError("unreachable", "unreachable")
+
+    async def run():
+        async with client() as api:
+            response = await api.get(f"/assets/{ASSET}/thumbnail")
+            assert response.status_code == 503
+            assert response.headers["cache-control"] == "private, no-store"
+    asyncio.run(run())
+
+
 def test_store_failure_never_reserves(setup, monkeypatch):
     _, scheduler, _, _, _ = setup
     def fail(*args):
@@ -186,7 +224,8 @@ def test_get_only_reads_cache_or_original_and_never_generates(setup):
             assert (await api.get(PATH)).content == b"updated"
             source = await api.get(f"/assets/{ASSET}/thumbnail")
             assert source.content == b"original"
-            assert source.headers["cache-control"] == "private, max-age=300"
+            assert source.headers["cache-control"] == "private, no-cache"
+            assert source.headers["etag"].startswith('"')
         assert original.await_count == 2
         assert main.get_asset_detail.await_count == 2
         generate.assert_not_called()
@@ -304,7 +343,8 @@ def test_original_preview_bypasses_edited_cache_without_loading_recipe_or_schedu
             monkeypatch.setattr(cache, "read", Mock(side_effect=AssertionError("Cache must not be read")))
             result = await api.get(f"/assets/{ASSET}/preview")
             assert result.status_code == 200 and result.content == b"original-preview"
-            assert result.headers["cache-control"] == "private, max-age=300"
+            assert result.headers["cache-control"] == "private, no-cache"
+            assert result.headers["etag"].startswith('"')
             assert scheduler._pending == pending_before
             preview.assert_awaited_once()
             generate.assert_not_called()

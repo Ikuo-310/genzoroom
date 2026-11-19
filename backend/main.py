@@ -1,6 +1,7 @@
 import os
 import json
 import copy
+import hashlib
 from contextlib import asynccontextmanager
 from datetime import date
 from time import monotonic
@@ -86,6 +87,29 @@ def immich_read_client_option(request: Request) -> dict:
     return {"client": client} if client is not None else {}
 
 
+def asset_image_response(request: Request, content: bytes, media_type: str, *, cacheable: bool) -> Response:
+    if not cacheable:
+        return Response(content=content, media_type=media_type,
+                        headers={"Cache-Control": "private, no-store"})
+    # Validation follows the current authorized Immich fetch, so an ETag never bypasses access checks.
+    etag = '"' + hashlib.sha256(media_type.encode() + b"\0" + content).hexdigest() + '"'
+    headers = {"Cache-Control": "private, no-cache", "ETag": etag}
+    candidates = (candidate.strip() for value in request.headers.getlist("if-none-match")
+                  for candidate in value.split(","))
+    if request.method in ("GET", "HEAD") and any(
+        candidate == "*" or candidate.removeprefix("W/") == etag for candidate in candidates
+    ):
+        return Response(status_code=304, media_type=media_type, headers=headers)
+    return Response(content=content, media_type=media_type, headers=headers)
+
+
+def is_asset_image_path(path: str) -> bool:
+    parts = path.strip("/").split("/")
+    return len(parts) == 3 and parts[0] == "assets" and parts[2] in {
+        "thumbnail", "rendered-thumbnail", "preview", "immersive-preview", "original",
+    }
+
+
 def thumbnail_diagnostic_finish(diagnostic, status: int):
     if diagnostic is None:
         return
@@ -157,6 +181,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 MAX_EDIT_STATE_BYTES = 8 * 1024 * 1024
+
+
+@app.middleware("http")
+async def prevent_asset_image_error_caching(request: Request, call_next):
+    response = await call_next(request)
+    if is_asset_image_path(request.url.path) and response.status_code >= 400:
+        # An error must replace any cached success instead of leaving old pixels usable.
+        response.headers["Cache-Control"] = "private, no-store"
+    return response
 
 
 @app.exception_handler(RequestValidationError)
@@ -710,11 +743,8 @@ async def asset_thumbnail(asset_id: UUID, request: Request) -> Response:
         thumbnail_diagnostic_error(diagnostic, error)
         raise
 
-    response = Response(
-        content=thumbnail.content,
-        media_type=thumbnail.media_type,
-        headers={"Cache-Control": "private, max-age=300"},
-    )
+    response = asset_image_response(request, thumbnail.content, thumbnail.media_type,
+                                    cacheable=request.url.path.endswith("/thumbnail"))
     thumbnail_diagnostic_finish(diagnostic, response.status_code)
     return response
 
@@ -880,11 +910,7 @@ async def asset_preview(asset_id: UUID, request: Request) -> Response:
         thumbnail_diagnostic_error(diagnostic, error)
         raise
 
-    response = Response(
-        content=preview.content,
-        media_type=preview.media_type,
-        headers={"Cache-Control": "private, max-age=300"},
-    )
+    response = asset_image_response(request, preview.content, preview.media_type, cacheable=True)
     thumbnail_diagnostic_finish(diagnostic, response.status_code)
     return response
 

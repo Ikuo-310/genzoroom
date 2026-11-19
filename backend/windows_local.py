@@ -139,11 +139,23 @@ class LocalHost:
 
         async def protected_send(message):
             if message["type"] == "http.response.start":
-                # HTML, image and API responses share the same privacy boundary.
+                headers = message.get("headers", [])
+                cache_control = next((value for key, value in headers if key.lower() == b"cache-control"), b"")
+                content_type = next((value for key, value in headers if key.lower() == b"content-type"), b"")
+                etag = next((value for key, value in headers if key.lower() == b"etag"), b"")
+                path = request.url.path.strip("/").split("/")
+                # Corrected and original images remain uncacheable until their identity is versioned.
+                cacheable_image = request.method in ("GET", "HEAD") and message.get("status") in (200, 304) \
+                    and len(path) == 4 and path[:2] == ["api", "assets"] \
+                    and path[3] in ("thumbnail", "preview") \
+                    and (content_type.lower().startswith(b"image/") or message.get("status") == 304) \
+                    and cache_control == b"private, no-cache" and etag.startswith(b'"')
                 headers = [(key, value) for key, value in message.get("headers", [])
-                           if key.lower() not in (b"cache-control", b"referrer-policy")]
+                           if key.lower() not in (b"cache-control", b"referrer-policy")
+                           and (cacheable_image or key.lower() != b"etag")]
                 message = {**message, "headers": headers + [
-                    (b"cache-control", b"no-store"), (b"referrer-policy", b"no-referrer"),
+                    (b"cache-control", cache_control if cacheable_image else b"no-store"),
+                    (b"referrer-policy", b"no-referrer"),
                     (b"x-content-type-options", b"nosniff"),
                     (b"content-security-policy", b"default-src 'self'; script-src 'self'; "
                      b"style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; "

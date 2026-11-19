@@ -18,6 +18,7 @@ from immich import (
     ImmichThumbnail,
     check_immich_status,
     classify_image_format,
+    create_immich_read_client,
     get_asset_detail,
     get_asset_preview,
     get_asset_thumbnail,
@@ -412,6 +413,25 @@ class ImmichAssetTests(unittest.TestCase):
                 await server.wait_closed()
 
         self.assertEqual(asyncio.run(exercise()), 1)
+
+    def test_shared_immich_client_does_not_store_or_resend_cookies(self):
+        observed_cookie_headers = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            observed_cookie_headers.append(request.headers.get("cookie"))
+            self.assertNotIn(API_KEY, str(request.url))
+            return httpx.Response(200, content=b"image", headers={
+                "content-type": "image/jpeg", "set-cookie": "immich-session=private; Path=/",
+            })
+
+        async def exercise():
+            async with create_immich_read_client(httpx.MockTransport(handler)) as client:
+                await get_asset_thumbnail(IMMICH_URL, API_KEY, ASSET_ID, client=client)
+                await get_asset_thumbnail(IMMICH_URL, API_KEY, ASSET_ID, client=client)
+                return list(client.cookies.jar)
+
+        self.assertEqual(asyncio.run(exercise()), [])
+        self.assertEqual(observed_cookie_headers, [None, None])
 
     def test_gets_asset_detail_and_selected_exif_fields(self):
         def handler(request: httpx.Request) -> httpx.Response:

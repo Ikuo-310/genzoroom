@@ -16,7 +16,7 @@ Gallery、STACK管理、Export管理、暗室フィルムストリップ、ア�
 | 確認済み事実 | 通常サムネイルは `/assets/{id}/thumbnail` からImmichのサムネイルを取得する。補正済み表示は `/assets/{id}/rendered-thumbnail`。取得GET自身は生成を開始せず、生成依頼POSTと保存通知が既存スケジューラを動かす。 |
 | 確認済み事実 | 補正済み画像は最大辺1024pxのJPEGで、Asset ID単位のファイルとして最大1 GiBのBackendディスクキャッシュに保存される。古い生成時刻から容量整理し、読取りでは時刻を延長しない。 |
 | 確認済み事実 | 保存Recipeの変更は60秒デバウンスで生成予約され、暗室の写真移動・終了などは保存後に即時予約を送る。生成ワーカーは1つで、保存・Resetと公開の順序をロックで保護する。完了をFrontendに通知する仕組みはない。 |
-| 確認済み事実 | WindowsのLocalHostは画像を含むレスポンスのCache-Controlを `no-store` に上書きする。Dockerのnginx設定は通常APIをBackendへproxyし、画像用nginx proxy cacheは見当たらない。 |
+| 確認済み事実 | 初回監査時、Windows LocalHostは画像を含む全レスポンスのCache-Controlを `no-store` に上書きしていた。P3で成功した通常画像／Previewに限りBackendの `private, no-cache` とETagを通す。Docker nginxはBackendへproxyし、画像用proxy cacheもCache-Control上書きも行わない。 |
 | 実機確認 | 387枚・193件のSTACK候補を扱うケースで画像欠落がWindows版・Docker版のGalleryとSTACK管理で発生し、Immich本体でも同一写真で再現した。Immichの欠落サムネイル生成ジョブ234件の完了後に全画像が表示された。今回の直接原因はImmich側のサムネイル欠損。 |
 | 未確定 | Immich側でサムネイル欠損が発生した理由。P1のFrontend／Backend診断機構は維持し、GenzoRoom側で別の欠落が発生した場合の障害境界を引き続き追跡する。 |
 | 実測で判断 | DOM・画像デコードメモリ、ブラウザ同時接続・待ち時間、Backend event loop・ワーカープール・HTTP接続数、Immich応答時間、画面間キャッシュ再利用率。1,000枚以上の負荷試験で測る。 |
@@ -30,6 +30,24 @@ Gallery、STACK管理、Export管理、暗室フィルムストリップ、ア�
 ### P2実装記録
 
 Backend lifespanが通常のImmich thumbnail／preview／asset detail GETおよびJPEG補正サムネイル生成で共有する `httpx.AsyncClient` を所有し、終了時に閉じる。Immich API keyは従来通りリクエストごとのヘッダーとして渡し、接続先のHTTPX poolはoriginごとに分かれる。原本streamingとExport書込みは既存の独立した接続・cleanup境界を維持する。Recipe資格判定と生成ワーカーから未使用のAsset detail取得を除去し、cache miss時は後続のImmich画像要求でAssetを確認する。生成予約と既存補正画像のcache hitでは、削除済みAssetの誤処理・誤配信を防ぐdetail確認を維持する。回帰テストでは呼出し側所有Clientが複数要求の間に開いたまま維持されることと、重複した詳細取得を行わないことを確認した。TCP接続再利用の実環境計測、接続待ち時間の比較、profile切替時の運用確認はP7の実機・負荷検証に残す。
+
+### P3実装記録
+
+| 画像種別 | 変更前 | 変更後 |
+|---|---|---|
+| 通常サムネイル | Backend `private, max-age=300`。Windows LocalHostは `no-store` に上書き。 | 両環境 `private, no-cache`＋強いETag。毎回Immichで現行Assetを確認し、内容一致時は304。 |
+| 補正済みサムネイル | `private, no-store`。 | `private, no-store`を維持。P5公開版前に保存キャッシュを有効化しない。 |
+| 補正済みサムネイルのFallback | `private, no-store`。 | `private, no-store`を維持。 |
+| 通常Preview | Backend `private, max-age=300`。Windows LocalHostは `no-store` に上書き。 | 両環境 `private, no-cache`＋強いETag。 |
+| Immersive Preview | `private, no-store`。 | `private, no-store`を維持。補正済み／Immich fallbackの混在URLを保存しない。 |
+| 原本画像 | `private, no-store`。 | `private, no-store`を維持。streaming・Export経路も維持。 |
+| 画像エラー | Windowsは `no-store`。Docker Backendでは全経路の明示保証なし。 | 両環境 `private, no-store`。 |
+
+300秒からの変更理由は、fresh期間内に接続先・API key・ユーザーが切り替わった場合やAsset削除・権限変更後、ブラウザがBackendへアクセス確認せず古い画像を返すため。`no-cache`は画像本体をブラウザのprivate cacheに保持しながら再検証を必須にする。Backendは現在のImmich応答を先に得てからETagを比較するため、同じ内容なら304で画像本文を返さず、変化時は新本文、上流エラー時は現在のエラーとなる。ETagはmedia typeと画像内容から作り、秘密を含めない。
+
+Windows Hostは通常サムネイル／Previewの成功200／304かつ画像Content-Type、Backendの許可済みCache-Control、ETagが揃う場合だけ両ヘッダーを通す。HTML、設定、認証、状態API、原本、補正済み、エラーは `no-store` を維持する。Dockerのfrontend／release nginx双方にproxy cacheやheader rewriteはなく、Backendヘッダーを中継する。P3ではP2のHTTPX shared clientへCookie-free transportを追加し、Cookieを送信せず、`Set-Cookie`を受け入れない。
+
+P3の自動検証はBackendの画像Cache-Control／ETag／304／エラー応答、Windows Hostの画像ヘッダー反映・非画像およびエラーのno-store、HTTPX shared clientのCookie非保持・再送なし、Docker nginxのCache-Control中継構成を対象とする。Recipe保存・Reset後も補正画像が `no-store` のままfallback／最新cache内容を返すことを関連API回帰テストで確認する。Windows WebView2とDocker実ブラウザでの再検証・profile変更・ユーザー切替は未実施であり、P7の手動確認に残す。P4以降には着手していない。
 
 ## 3. 現行の取得・表示経路
 
@@ -58,15 +76,17 @@ JPEG生成は保存Recipeを読み、Immich Previewを取得し、縮小後にGe
 
 ### Immich通信
 
-通常画像取得と詳細取得は、それぞれAsset要求ごとに `httpx.AsyncClient` を生成・終了する。HTTP接続プールを複数画像要求の間で再利用していない。補正済みGETの現行経路は、保存状態を調べる前にAsset詳細取得を行い、その後キャッシュを読む。キャッシュヒットでもImmich詳細通信が残る。フォールバック時はさらにImmich画像取得が必要となる。
+P2後、通常画像・Preview・詳細取得・JPEG補正サムネイル生成はBackend lifespan所有の `httpx.AsyncClient` を共有する。P3ではそのClientのtransportでImmich Cookie送受信を止めた。原本streamingとExport書込みは引き続き独立している。Recipe資格判定と生成ワーカーから不要な詳細取得は除去済み。補正GET cache hitと生成予約ではAsset存在・権限を確認し、通常画像のETag再検証では現在のImmich画像を取得してから304可否を決める。
 
-P2ではlifespan所有の共通接続再利用を実装し、通常画像・Preview・詳細取得の呼出しで共有する。キャッシュ配信資格、Asset削除やユーザー切替後に古い画像を配信しない条件はP3で定義する。原本streaming、Export書込みは独立したままとし、各Immich要求の接続先とAPI keyはリクエスト単位で指定する。接続上限はHTTPX既定値を維持し、大量画像の同時要求・待ち時間をP7で実測して見直す。
+P2ではlifespan所有の共通接続再利用を実装し、通常画像・Preview・詳細取得の呼出しで共有する。P3でブラウザ再検証時にImmichの現行Asset応答を確認し、Asset削除・権限変更や接続切替後に旧画像を無検証で返さない条件を定義した。原本streaming、Export書込みは独立したままとし、各Immich要求の接続先とAPI keyはリクエスト単位で指定する。接続上限はHTTPX既定値を維持し、大量画像の同時要求・待ち時間をP7で実測して見直す。
 
 ### ブラウザキャッシュと認証境界
 
-Dockerの通常 `/thumbnail` と `/preview` はBackendで `private, max-age=300`。補正済みGETとImmersive補正画像は `private, no-store`。Windows LocalHostはレスポンス境界で `no-store` に統一する。ブラウザ内で同じURLの画像を画面間再利用できる範囲はレスポンスCache-ControlとURL同一性に依存する。Frontendに画像バイトキャッシュや進行中画像要求の共有機構はない。
+P3後の通常 `/thumbnail` と `/preview` は両環境で `private, no-cache` と強いETagを返す。ブラウザはprivate cacheに画像本体を保存できるが、次の表示時にBackendへ再検証し、Backendは現在のImmich接続先・資格情報で画像を取得して比較する。同一内容なら304で画像本文の再転送を避け、変更なら新しい本文とETagを返す。Asset削除・権限変更・接続先やユーザーの切替後にfreshなブラウザ応答だけで旧画像を返さないため、既存の300秒fresh期間は採用しない。
 
-HTTPキャッシュはWindowsの認証付きユーザー・Immich接続プロファイルと整合させる。接続先・ログインユーザー・資格情報の切替境界で前プロファイル画像を再利用しない要件を明記する。Windowsの `no-store` はサムネイル欠落の原因と判断しないが、共通欠落調査と切り離したP3の改善対象として扱う。
+補正済みGET、そのfallback、Immersive Preview、原本は `private, no-store`。P5のAsset公開版管理がなく同じURLの画像内容が変わるため、補正結果をブラウザへ保存させない。Windows LocalHostは通常画像／Previewの成功200／304だけBackendの許可済み `private, no-cache` を通し、HTML、設定、認証、状態API、原本、補正済み、エラーは `no-store` を維持する。Docker nginxにproxy cacheやCache-Control上書きはなく、Backendヘッダーをそのまま通す。ETagはmedia typeと画像内容のSHA-256であり、秘密・Assetの認証情報を含まない。
+
+共有HTTPX clientはImmichのCookieを送信せず、`Set-Cookie`も取り込まない。Immich API keyは既存通りBackendの各要求ヘッダーにのみ置かれ、URL・ETag・診断ログへ含めない。Frontendに画像バイトキャッシュや独自共有機構は追加しない。再検証のたびにImmich画像GETは発生するため、P3が削減するのはBackendからブラウザへの同一画像本文の再転送である。接続再利用と実トラフィックの影響はP7で測る。
 
 ## 5. 合意済み補正サムネイル表示仕様
 
@@ -118,13 +138,13 @@ HTTPキャッシュはWindowsの認証付きユーザー・Immich接続プロフ
 
 **目的**：認証・接続先境界を守りながら、画面間で同一サムネイルをブラウザが安全に再利用できるようにする。
 
-**実装範囲**：通常画像、補正済み画像、Immersive Previewについて、URLの版識別とCache-Controlを明確にする。DockerとWindowsのレスポンス境界を比較し、Windows LocalHostが全画像を `no-store` に上書きする挙動を改善対象として評価する。資格情報・profile変更時にキャッシュを再利用しない方式は未確定。private cache、ユーザー／profileを跨がない版URL、適切なno-store境界等からP1/P2の結果をもとに決める。
+**実装範囲**：通常thumbnail／Previewに内容ETagとprivate revalidationを使う。補正済み／Immersive／originalはP5までno-storeを維持する。Backend画像エラーもno-storeとする。Windows LocalHostは許可済み通常画像ヘッダーだけを通し、Docker nginxはBackendのCache-Controlを変更しない。共有HTTPX clientはImmich Cookieを保存・再送しない。
 
-**依存関係**：P1で配信経路を確認し、P2で接続・資格境界を整理する。
+**依存関係**：P1で配信経路を確認し、P2で接続・資格境界を整理する。実装完了。実機ブラウザのCache revalidationはP7で検証する。
 
-**維持する既存仕様**：共有proxyへユーザー画像を漏らさない。通常画像の短い鮮度期限と、Recipe公開版が一致する表示要件を維持する。Windows認証・Origin制御を弱めない。
+**維持する既存仕様**：共有proxyへユーザー画像を漏らさない。通常画像はprivate cacheに保持し、Asset状態・権限は再検証する。P5の公開版管理前に補正済み画像をcacheしない。Windows認証・Origin制御を弱めない。
 
-**受入条件**：同一画面・画面間で再利用可能な画像は二度目の取得が抑制される。Recipeの公開版更新とResetで旧画像を誤表示しない。Windowsの資格profile切替後に前接続の画像を配信しない。Docker・Windows双方でHTTPヘッダーと実際のキャッシュ再利用を確認する。
+**受入条件**：同一画像の再検証で304となり、異なる画像は新本文となる。エラー・削除Assetにキャッシュ本文を返さない。Windowsでは通常画像の許可済みヘッダーだけが反映され、他レスポンスはno-store。Docker nginxがBackend headerを変更せず共有proxy cacheを行わない。HTTPXにCookieが保持・再送されない。補正済み画像はno-storeを維持する。実機profile変更とブラウザ再検証はP7で確認する。
 
 ### P4：Frontendサムネイル表示コンポーネント共通化
 
@@ -180,9 +200,9 @@ HTTPキャッシュはWindowsの認証付きユーザー・Immich接続プロフ
 |---|---|---|
 | 欠落の正確な境界 | P1で実機確認済み。Windows・Docker双方の同一写真がImmich本体でも欠損し、「欠落」生成ジョブ234件完了後に表示。直接原因はImmich側サムネイル欠損。欠損理由は未調査。 | P1完了 |
 | ブラウザlazy loadingを置き換える必要性 | 独立スクロール領域や全DOM展開は既知だが、根本原因とは未証明。 | P1の原因とP7の負荷測定後 |
-| HTTP clientの所有範囲・接続上限 | P2で通常画像・Preview・詳細GET・JPEG補正サムネイル生成にlifespan共有clientを導入。原本streamingとExport書込みは分離。接続上限はHTTPX既定値で、実負荷計測後に判断する。 | P7で評価 |
+| HTTP clientの所有範囲・接続上限 | P2で通常画像・Preview・詳細GET・JPEG補正サムネイル生成にlifespan共有clientを導入。P3でImmich Cookie非送信・Set-Cookie非保持を追加。原本streamingとExport書込みは分離。接続上限はHTTPX既定値で、実負荷計測後に判断する。 | P7で評価 |
 | 詳細API問い合わせの省略可否 | Recipe判定／生成ワーカーとcache miss時の重複detail取得をP2で除去。生成予約とcache hitのAsset存在確認は維持。実機Immich通信量の比較は未実施。 | P2完了／P7計測 |
-| ブラウザキャッシュの認証境界 | profile切替・起動時切替・ユーザー変更に耐えるURL/HTTP policyは未決定。 | P3 |
+| ブラウザ画像キャッシュのprofile分離 | P3でfresh cacheを避け、各表示で現行Immich接続先／資格情報による再検証を行う。ETagは画像内容のみから導出する。 | P3完了／P7実機確認 |
 | Asset公開版の伝達方式 | 版付きURL＋現在状態の読取りを基本にし、pushか他の既存通知方式かは未決定。 | P5 |
 | 旧成功画像の保持と容量整理 | 最新成功版を失敗時まで保持する。別世代を併存する場合の容量・削除ルールは未確定。新規キャッシュ機構を先行導入しない。 | P5の必要性評価、P7実測 |
 | 大量表示でDOM仮想化が必要か | 1,000枚を含む実測値が判断材料。合意として導入を前提にしない。 | P7 |
@@ -193,8 +213,8 @@ HTTPキャッシュはWindowsの認証付きユーザー・Immich接続プロフ
 |---|---|
 | 維持 | 既存JPEG/RAW補正生成、LightCraftへのRAW処理委譲、Asset単位ディスクキャッシュ、単一生成ワーカー、デバウンス／即時生成依頼、mutation lockによる公開順序制御、Reset無効化、原子的ファイル置換、ImmersiveのPreview fallback。 |
 | 共通化 | 一覧サムネイルのURL解決、lazy/eager優先度、load/errorと回復表示、Asset公開版の購読と更新、共通ログ項目。通常画像と補正画像を同じUI状態処理で扱う。 |
-| 見直し・置換 | 要求毎に作るImmich画像用HTTP client、補正済みGETでの不要なAsset詳細取得、画面ごとに異なる `view` revisionによる擬似的な鮮度管理、Filmstripでの全画像即時要求、Windows LocalHostの画像を含む一律no-store上書き。最後の項目はP3で認証境界を確立して変更する。 |
+| 見直し・置換 | P2で要求毎のImmich画像Clientと補正済みGET／生成の不要なAsset詳細取得を置換済み。P3でWindowsの一律no-storeを許可済み通常画像／Previewの再検証cacheへ置換済み。残る対象は画面別 `view` revision、Filmstripの全画像即時要求。 |
 | 導入を保留 | 独自Frontend取得キュー、仮想スクロール、新規ディスクキャッシュ。P1の原因特定とP7の計測が必要性を示した場合だけ、別の判断根拠を記録する。 |
 
-この文書作成は設計提案であり、実装・自動テスト・WindowsまたはDockerの動的検証は行っていない。
+P1・P2・P3の実装記録と自動テスト結果を追記済み。P3のWindows LocalHostとDocker nginx構成はコード／設定テストで確認したが、Windows WebView2とDocker実ブラウザでのCache revalidation、プロファイル切替、負荷計測は未実施。これらはP7の手動検証に残す。
 

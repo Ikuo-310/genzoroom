@@ -74,10 +74,19 @@ def test_session_is_one_time_and_images_need_no_custom_headers(local, monkeypatc
         async with client(local) as http:
             token = await authenticate(http, local)
             assert (await http.get("/api/health")).json() == {"status": "ok"}
-            response = await http.get(f"/api/assets/{uuid4()}/preview")
+            asset_id = uuid4()
+            response = await http.get(f"/api/assets/{asset_id}/preview")
             assert response.content == b"jpeg-preview"
             assert response.headers["content-type"] == "image/jpeg"
-            assert response.headers["cache-control"] == "no-store"
+            assert response.headers["cache-control"] == "private, no-cache"
+            assert response.headers["etag"].startswith('"')
+            unchanged = await http.get(f"/api/assets/{asset_id}/preview",
+                                       headers={"If-None-Match": response.headers["etag"]})
+            assert unchanged.status_code == 304
+            assert unchanged.headers["cache-control"] == "private, no-cache"
+            assert (await http.get("/api/health")).headers["cache-control"] == "no-store"
+            missing = await http.get("/api/assets/not-a-uuid/thumbnail")
+            assert missing.status_code == 422 and missing.headers["cache-control"] == "no-store"
             assert (await http.post("/__local/session", json={"token": token},
                                     headers={"Origin": local.origin})).status_code == 403
         async with client(local) as fresh_browser:
@@ -86,6 +95,9 @@ def test_session_is_one_time_and_images_need_no_custom_headers(local, monkeypatc
         async with client(restarted) as next_start:
             next_start.cookies.set(local.cookie_name, local.session_token)
             assert (await next_start.get("/api/health")).status_code == 401
+            stale = await next_start.get(f"/api/assets/{asset_id}/preview",
+                                         headers={"If-None-Match": response.headers["etag"]})
+            assert stale.status_code == 401 and stale.headers["cache-control"] == "no-store"
     asyncio.run(exercise())
 
 

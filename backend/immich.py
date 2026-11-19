@@ -18,9 +18,25 @@ from backend_logging import backend_logger
 IMMICH_TIMEOUT = httpx.Timeout(5.0, connect=3.0)
 
 
-def create_immich_read_client() -> httpx.AsyncClient:
+class _ImmichCookieFreeTransport(httpx.AsyncBaseTransport):
+    def __init__(self, inner: httpx.AsyncBaseTransport | None = None):
+        self._inner = inner or httpx.AsyncHTTPTransport(trust_env=False)
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        # Immich authenticates these reads with x-api-key; its cookies must not leak across profiles.
+        request.headers.pop("cookie", None)
+        response = await self._inner.handle_async_request(request)
+        response.headers.pop("set-cookie", None)
+        return response
+
+    async def aclose(self) -> None:
+        await self._inner.aclose()
+
+
+def create_immich_read_client(transport: httpx.AsyncBaseTransport | None = None) -> httpx.AsyncClient:
     """Create the lifespan-owned pool used by non-streaming Immich reads."""
-    return httpx.AsyncClient(timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False)
+    return httpx.AsyncClient(timeout=IMMICH_TIMEOUT, follow_redirects=False, trust_env=False,
+                             transport=_ImmichCookieFreeTransport(transport))
 
 
 DEFAULT_RECENT_ASSET_LIMIT = 100

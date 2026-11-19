@@ -135,6 +135,7 @@ class OriginalTests(unittest.TestCase):
             self.assertEqual(response.content, b"x" * 65536 * 3)
             self.assertEqual(response.headers["content-type"], "image/jpeg")
             self.assertEqual(response.headers["x-accel-buffering"], "no")
+            self.assertEqual(response.headers["cache-control"], "private, no-store")
             self.assertNotIn("secret", str(response.headers))
             self.assertTrue(stream.closed)
         asyncio.run(run())
@@ -148,4 +149,5 @@ class OriginalTests(unittest.TestCase):
                         response = await client.get(f"/assets/{ASSET_ID}/original")
                 self.assertEqual(response.status_code, status)
                 self.assertEqual(response.json(), {"detail": "Safe message"})
+                self.assertEqual(response.headers["cache-control"], "private, no-store")
         asyncio.run(run())
