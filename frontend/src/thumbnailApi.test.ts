@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { frontendLogger } from './frontendLogging';
 import { requestThumbnailGeneration } from './thumbnailApi';
-import { thumbnailDiagnosticUrl, thumbnailUrl } from './thumbnailUrl';
+import { thumbnailDiagnosticUrl, thumbnailSourceUrl, thumbnailUrl } from './thumbnailUrl';
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); frontendLogger.setLevel('off'); frontendLogger.clear(); });
 
@@ -19,6 +19,9 @@ describe('thumbnail boundaries', () => {
     expect(thumbnailUrl(asset)).toBe('/api/assets/asset%2Fid/rendered-thumbnail');
     expect(thumbnailUrl(asset, false, 'ignored')).toBe('/original');
     expect(thumbnailUrl(asset, true, 'view:2')).toBe('/api/assets/asset%2Fid/rendered-thumbnail?view=view%3A2');
+    expect(thumbnailSourceUrl('asset/id', 'thumbnail')).toBe('/api/assets/asset%2Fid/thumbnail');
+    expect(thumbnailSourceUrl('asset/id', 'preview')).toBe('/api/assets/asset%2Fid/preview');
+    expect(thumbnailSourceUrl('asset/id', 'immersive-preview')).toBe('/api/assets/asset%2Fid/immersive-preview');
     expect(fetch).not.toHaveBeenCalled();
   });
 

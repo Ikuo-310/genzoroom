@@ -6,7 +6,6 @@ import { FormatBadge } from './FormatBadge';
 import type { AssetEditStatuses } from './editStatus';
 import type { ExportQueueStatus } from './exportQueueApi';
 import { revealFilmstripItem } from './filmstripNavigation';
-import { thumbnailUrl } from './thumbnailUrl';
 import { ThumbnailImage } from './ThumbnailImage';
 import { isNativeEditingTarget, matchesShortcut } from './editShortcuts';
 import { useShortcutDisplay } from './useShortcutDisplay';
@@ -88,7 +87,8 @@ export function Filmstrip({ assets, activeAssetId, recipeChangeRevision = 0, onA
         aria-description={editStatuses[asset.id] ? t('photos.edited')
           : historyOnlyStatuses[asset.id] ? t('workspace.historyRetained') : undefined}
       >
-        <ThumbnailImage src={thumbnailUrl(asset)} assetId={asset.id} surface="filmstrip" mode="rendered" alt="" />
+        <ThumbnailImage rendition="rendered-thumbnail" assetId={asset.id} surface="filmstrip" mode="rendered" alt=""
+          fetchPriority={asset.id === activeAssetId ? 'high' : undefined} />
         <FormatBadge format={asset.format} isRaw={asset.is_raw} />
       </button>
         {editStatuses[asset.id] !== true && historyOnlyStatuses[asset.id] === true

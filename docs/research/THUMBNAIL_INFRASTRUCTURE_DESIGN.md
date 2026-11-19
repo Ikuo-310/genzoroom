@@ -226,3 +226,41 @@ P3後の通常 `/thumbnail` と `/preview` は両環境で `private, no-cache` �
 
 P1・P2・P3の実装記録と自動テスト結果を追記済み。P3のWindows LocalHostとDocker nginx構成はコード／設定テストで確認したが、Windows WebView2とDocker実ブラウザでのCache revalidation、プロファイル切替、負荷計測は未実施。これらはP7の手動検証に残す。
 
+## 9. P4実装記録
+
+### 確定仕様・変更内容
+
+P4の対象画面は既にP1の`ThumbnailImage`を使っていたため、各画面に別の画像部品を増やさず、共通部品に状態管理・失敗回復・URL解決を加えた。`ThumbnailImage.tsx`が画像要素の状態・診断・再試行を所有し、`thumbnailUrl.ts`の`thumbnailSourceUrl(assetId, rendition, revision?)`がAsset IDから通常サムネイル、補正済みサムネイル、Preview、Immersive PreviewのURLを解決する。既存`thumbnailUrl()`は補正済みURL用の互換ラッパーとして同じ解決処理を使う。STACKの補正表示OFFとCalendar APIの代表URLのように既存URLをそのまま使う経路は明示的な`src`指定を保つ。
+
+| 画面／経路 | P4の利用方法 |
+|---|---|
+| Gallery Recent／Albums内一覧／Calendar内一覧／Favorites | `PhotoCard`を通じて共通部品を利用。補正済み表示と既存`thumbnailRefreshKey`を`rendered-thumbnail`とrevisionとして解決し、lazyを維持。 |
+| STACK管理 | 共通部品を継続利用。補正表示ONはAsset ID＋既存revisionから補正済みURLを解決、OFFはAssetのImmich URLを維持。Format badge、COVER、選択、STACKドラッグ制御を保持。 |
+| Export管理 | 共通部品から補正済みURLを解決し、既存Export画面revisionとlazyを維持。表示GETは生成を起動しない。 |
+| 暗室フィルムストリップ | 共通部品からAsset IDで補正済みURLを解決。現在のアクティブ画像に`fetchPriority=high`を付ける。P6前の現行読込範囲は変えず、lazy導入・可視範囲最適化は保留。 |
+| アルバム代表画像 | Asset IDから通常サムネイルURLを解決し、lazyを維持。 |
+| カレンダー代表画像 | Backendが返す既存URLとAsset IDを使用し、lazyを維持。URL自体を再構成せず、Backend契約を保つ。 |
+| Immersive Preview | 共通部品のURL・状態・診断を使用し、`preview`／`immersive-preview`の切替をAsset IDから解決。大画像表示固有のレイアウトは`ImmersivePreview`に残し、eager/highで読み込む。 |
+
+### 状態遷移・イベント保護
+
+表示状態はAsset ID・解決URL・任意の公開版識別子・手動再試行番号を単位に`loading`、`loaded`、`failed`へ遷移する。`data-thumbnail-state`で画面テストと開発者診断から状態を識別できる。ソース／公開版が変わると新しい画像要素に切り替え、古い要素のload/errorイベントは現在の要求keyとの照合で捨てる。アンマウント時は未完了要求をP1の`image.elementReleased`で記録する。ブラウザの`img`要素を外した後に独自Abortやキューを追加せず、世代照合で遅延イベントの状態汚染を防ぐ。
+
+読み込み失敗時は画像枠内に控えめな再取得アイコンを表示する。画像要素をクリック、またはフォーカスしてEnter／Spaceを押すとその要素だけを再マウントし、同じURLを再要求する。操作イベントは親へ伝播しないため、Galleryの選択、STACK構成／選択、Export操作を変えない。他Assetの要素key・URLは変わらない。自動Retryはなく、GETから補正サムネイル生成を起動しない。再試行ごとにP1診断IDが新しくなり、URLは診断ログへ記録しない。
+
+### P5接続境界と維持仕様
+
+`ThumbnailImageProps.publicationVersion?: string | number | null`を追加し、将来Asset単位の公開版識別子が変わった際に、対象Assetの画像要素のみを再評価できる。P4では公開版の通知・購読、状態管理、公開版をURLやHTTP cache keyへ適用する処理は実装していない。既存のGallery／STACK／Export `view` revisionは残し、置換はP5まで行わない。補正画像HTTP cache policyもP3契約のまま維持する。
+
+補正サムネイル生成予約、Recipe保存／Reset、保存順序制御、Asset単位ディスクキャッシュ、原子的置換と無効化には変更なし。標準lazy loading、各画面レイアウト・アスペクト比・badge／overlay、選択・複数選択・ドラッグ、Stack補正OFF、Gallery filter、Filmstripアクティブ表示・scroll、Preview fallbackを維持した。
+
+### 検証結果
+
+- 共通表示部品・URL helper、PhotoCard、STACK、Export、Filmstrip、Gallery Albums／Calendar、Gallery Preview、暗室関連のFrontend回帰テスト11ファイル411件が成功。
+- Frontend TypeScriptチェックとProduction buildが成功。既存のbundle size warningとReact Routerの`use client` directive warningは出力された。
+- Frontend全テストは4329件中4188件成功、2件skip、139件失敗（4ファイル）だった。うち`ExportEngineDiagnostics.test.tsx`の2件はP1由来のThumbnailImage診断ログが従来の「ログが空」というテスト想定と競合したため、Export固有ログのみ空であることを検査するよう意図を維持して更新し、単独テストを含むP4関連11ファイル411件が成功した。残る失敗には`RawPointColorControls.test.tsx`の`raw.setPointColorRangeIndex is not a function`があり、単独実行でも再現した。ほかの失敗もP4対象外のRAW調整ファイルで発生した。RAW調整領域は本変更外であり、Frontend全体の再実行はしていない。
+- P1診断ログは共通部品内で維持し、URL・認証情報を記録しない。サーバー側生成APIを追加せず、再試行もGETのみであることを既存URL／画面テストで確認した。
+- WebView2／Dockerでの実画像障害時の手動回復、画面間のブラウザHTTP cache hit、1,000枚負荷、メモリ・待ち時間はP7の実機検証に残す。
+
+P4は実装完了。P5の公開版通知・Asset単位更新、P6のFilmstrip読込範囲最適化、P7の大量画像実機検証は未着手。
+

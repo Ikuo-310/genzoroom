@@ -149,7 +149,8 @@ export function ImmersivePreview({ assets, startAssetId, selectedAssetIds = new 
       {isMac ? position : closeButton}
     </header>
     <main className="immersive-preview-photo" onClick={handlePhotoClick}>
-      <ThumbnailImage src={`/api/assets/${encodeURIComponent(asset.id)}/${useEditedPreview ? 'immersive-preview' : 'preview'}`} assetId={asset.id} surface="immersive" mode="preview" alt={asset.filename} draggable={false} />
+      <ThumbnailImage rendition={useEditedPreview ? 'immersive-preview' : 'preview'} assetId={asset.id} surface="immersive" mode="preview" alt={asset.filename}
+        loading="eager" fetchPriority="high" draggable={false} />
     </main>
     <footer className="immersive-preview-bottombar">
       {source === 'gallery' && <button type="button" aria-pressed={selected} onClick={() => onToggleSelection?.(asset.id)}>

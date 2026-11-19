@@ -52,6 +52,9 @@
   "app": {
     "title": "GenzoRoom"
   },
+  "thumbnail": {
+    "retry": "Image unavailable. Activate to retry."
+  },
   "immersivePreview": {
     "title": "Immersive preview",
     "close": "Close preview",

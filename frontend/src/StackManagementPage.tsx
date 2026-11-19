@@ -23,7 +23,6 @@ import { StackTrashMenu } from './StackTrashMenu';
 import { buildStackWritePlan, sendStackWritePlan, type StackWriteResult } from './stackWrite';
 import { canCreateStackFromUnmatchedDrop, canDropStackPayload, isStackDrag, parseStackDragPayload, readStackDragPayload, STACK_DRAG_TYPE, type StackDragPayload } from './stackDragDrop';
 import { frontendLogger } from './frontendLogging';
-import { thumbnailUrl } from './thumbnailUrl';
 import { ThumbnailImage } from './ThumbnailImage';
 import { ImmersivePreview } from './ImmersivePreview';
 import { isPrimaryModifier } from './shortcutModifiers';
@@ -869,7 +868,9 @@ function StackPhoto({ asset, selected, editedPreview = false, thumbnailRefreshKe
       if (event.detail === 1 && (member || deferSelection && !event.shiftKey && !isPrimaryModifier(event.nativeEvent)) && onDeferClick) onDeferClick(onToggle);
       else onToggle();
     }}>
-    <div className="stack-thumbnail">{/* Keep the custom Stack payload on the parent instead of starting a native image drag. */}<ThumbnailImage src={thumbnailUrl(asset, editedPreview, thumbnailRefreshKey)} assetId={asset.id} surface="stack" mode={editedPreview ? 'rendered' : 'original'} alt="" loading="lazy" draggable={false} /><FormatBadge format={asset.format} isRaw={asset.is_raw} />
+    <div className="stack-thumbnail">{/* Keep the custom Stack payload on the parent instead of starting a native image drag. */}<ThumbnailImage
+      src={editedPreview ? undefined : asset.thumbnail_url} rendition={editedPreview ? 'rendered-thumbnail' : undefined} revision={editedPreview ? thumbnailRefreshKey : undefined}
+      assetId={asset.id} surface="stack" mode={editedPreview ? 'rendered' : 'original'} alt="" loading="lazy" draggable={false} /><FormatBadge format={asset.format} isRaw={asset.is_raw} />
       {trash && <span className="stack-trash-overlay" aria-label={t('stackManagement.trash')}><svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7" /></svg></span>}
       {cover && <span className="stack-cover-badge" title={t('stackManagement.cover')}>COVER</span>}
     </div>

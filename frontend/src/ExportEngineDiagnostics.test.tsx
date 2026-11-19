@@ -100,7 +100,7 @@ it.each(['en', 'ja'])('compares the saved snapshot, shows safe values, and clean
   expect(diagnostic).not.toContain('PRIVATE'); expect(diagnostic).toContain('95');
   const report = JSON.stringify(createDiagnosticsReport(collectDiagnosticsEnvironment(), createWebGpuReport(false, null)));
   expect(report).not.toContain('PRIVATE'); expect(report).not.toContain('private-save');
-  expect(frontendLogger.getEntries()).toEqual([]);
+  expect(frontendLogger.getEntries().filter(entry => entry.component !== 'thumbnail')).toEqual([]);
   await click(run()); await settle();
   expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:diagnostic-2');
   await click(host.querySelectorAll<HTMLButtonElement>('.developer-jpeg-candidates button')[1]);
