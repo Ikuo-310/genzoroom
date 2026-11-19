@@ -4,6 +4,7 @@ import { fetchRecentAssets } from './api';
 import type { RecentAsset } from './assets';
 import { JPEG_CASES, RealJpegRunner, recentJpegCandidates, type JpegDiagnosticsDependencies, type JpegRunState } from './jpegDiagnostics';
 import { emptyJpegReport, type JpegReport } from './jpegDiagnosticsReport';
+import { ThumbnailImage } from './ThumbnailImage';
 
 export function RealJpegDiagnostics({ onReport, dependencies, onExport, exportError }: {
   onReport?: (report: JpegReport) => void; dependencies?: Partial<JpegDiagnosticsDependencies>;
@@ -71,7 +72,7 @@ export function RealJpegDiagnostics({ onReport, dependencies, onExport, exportEr
     {candidates.length > 0 && <div className="developer-jpeg-candidates" role="group" aria-label={t('jpegDiagnostics.candidateLabel')}>
       {candidates.map((asset, index) => <button type="button" key={asset.id} disabled={busy} aria-pressed={manual?.id === asset.id}
         onClick={() => { setManual(asset); setTargetFilename(asset.filename); }}>
-        <img src={asset.thumbnail_url} alt={t('jpegDiagnostics.candidateAlt', { number: index + 1 })} loading="lazy" />
+        <ThumbnailImage src={asset.thumbnail_url} assetId={asset.id} surface="jpegDiagnostics" mode="original" alt={t('jpegDiagnostics.candidateAlt', { number: index + 1 })} loading="lazy" />
         <span>{asset.filename}</span>
       </button>)}
     </div>}

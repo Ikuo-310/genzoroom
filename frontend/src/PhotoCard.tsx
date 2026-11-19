@@ -14,6 +14,7 @@ import { formatPhotoDate, type AppLanguage } from './i18n';
 import { isPrimaryModifier } from './shortcutModifiers';
 import { isGenzoRoomExported } from './photoFilters';
 import { thumbnailUrl } from './thumbnailUrl';
+import { ThumbnailImage } from './ThumbnailImage';
 
 export type { RecentAsset } from './assets';
 
@@ -164,7 +165,7 @@ export function PhotoCard({
         aria-description={edited ? t('photos.edited') : undefined}
       >
         <div className="thumbnail">
-          <img src={thumbnailUrl(asset, true, thumbnailRefreshKey)} alt="" loading="lazy" />
+          <ThumbnailImage src={thumbnailUrl(asset, true, thumbnailRefreshKey)} assetId={asset.id} surface="gallery" mode="rendered" alt="" loading="lazy" />
           {!(asset.stackId && Number.isSafeInteger(asset.stackAssetCount) && asset.stackAssetCount! >= 1) &&
             <div className="photo-format-badges"><FormatBadge format={asset.format} isRaw={asset.is_raw} /></div>}
         </div>

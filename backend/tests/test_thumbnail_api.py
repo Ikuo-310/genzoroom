@@ -7,6 +7,7 @@ from uuid import uuid4
 import httpx
 import pytest
 
+from backend_logging import backend_logger
 import edit_store
 import main
 from edit_store import StoreUnavailable
@@ -73,6 +74,29 @@ def test_save_debounce_history_only_replay_reset_and_conflict(setup):
             assert cache.read(ASSET) is None and not scheduler._deadlines
             generate.assert_not_called()
     asyncio.run(run())
+
+
+def test_thumbnail_http_diagnostics_correlate_frontend_id_and_response(setup):
+    _, _, _, _, _ = setup
+    backend_logger.clear()
+    backend_logger.set_level("debug")
+    diagnostic_id = str(uuid4())
+
+    async def run():
+        async with client() as api:
+            response = await api.get(f"/assets/{ASSET}/thumbnail", params={"__diag": diagnostic_id})
+            assert response.status_code == 200
+            assert response.content == b"original"
+
+    try:
+        asyncio.run(asyncio.wait_for(run(), timeout=5))
+        events = [entry for entry in backend_logger.get_entries() if entry["component"] == "thumbnail_http"]
+        assert [entry["event"] for entry in events] == ["request.received", "response.completed"]
+        assert all(entry["context"]["requestId"] == diagnostic_id for entry in events)
+        assert events[-1]["context"]["httpStatus"] == 200
+    finally:
+        backend_logger.set_level("off")
+        backend_logger.clear()
 
 
 def test_store_failure_never_reserves(setup, monkeypatch):

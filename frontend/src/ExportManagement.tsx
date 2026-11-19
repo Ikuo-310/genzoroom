@@ -11,6 +11,7 @@ import { isPrimaryModifier } from './shortcutModifiers';
 import { useShortcutDisplay } from './useShortcutDisplay';
 import { StackRedetectDialog } from './StackRedetectDialog';
 import { thumbnailUrl } from './thumbnailUrl';
+import { ThumbnailImage } from './ThumbnailImage';
 import type { RecentAsset } from './assets';
 import { useStackColumns } from './useStackColumns';
 
@@ -106,7 +107,7 @@ function ExportQueueCard({ entry: { item, asset }, management, onPreviewRequest,
       onDoubleClick={() => { onCancelDeferredSelection?.(); onPreviewRequest?.(asset); }}
       aria-label={label} aria-pressed={selected} aria-description={disabled ? disabledReason : armed ? t('exportManagement.armed') : undefined}>
     <div className="thumbnail">
-      <img src={thumbnailUrl(asset, true, thumbnailRefreshKey)} alt="" loading="lazy" />
+      <ThumbnailImage src={thumbnailUrl(asset, true, thumbnailRefreshKey)} assetId={asset.id} surface="export" mode="rendered" alt="" loading="lazy" />
       <FormatBadge format={asset.format} isRaw={asset.is_raw} />
       {item.status !== 'queued' ? <span className={`export-status-bar export-status-${stopPending ? 'stop' : item.status}`}
         role="status">{t(`exportManagement.${stopPending ? 'stopping' : item.status}`)}</span>

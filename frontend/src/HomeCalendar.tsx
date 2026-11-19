@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import type { CalendarViewMode } from './homeReturn';
+import { ThumbnailImage } from './ThumbnailImage';
 
 export type CalendarDay = { date: string; hasAssets: boolean; count: number; thumbnail_url?: string | null };
 export type CalendarHeatmap = { year: number; month: number | null; days: CalendarDay[] };
@@ -139,7 +140,7 @@ function CalendarMonthGrid({ year, month, daysByDate, weekStart, loading, showTh
         return <button key={date} type="button" className={`calendar-day${available ? ' has-assets' : ''}${thumbnail ? ' has-thumbnail' : ''}${date === todayKey ? ' today' : ''}`}
           disabled={!available} aria-label={available ? t('calendar.dayWithAssets', { date }) : t('calendar.dayLabel', { date })}
           onClick={() => onDayOpen(date)}>
-          {thumbnail && <img className="calendar-day-thumbnail" src={thumbnail} alt="" loading="lazy" />}
+          {thumbnail && <ThumbnailImage className="calendar-day-thumbnail" src={thumbnail} assetId={thumbnail.match(/\/assets\/([^/]+)\/thumbnail/)?.[1] ?? 'unknown'} surface="calendar" mode="original" alt="" loading="lazy" />}
           <span className="calendar-day-number">{day}</span>
       </button>;
       })}

@@ -7,6 +7,7 @@ import { isNativeEditingTarget, matchesShortcut, shortcutBindings, type Shortcut
 import { isGenzoRoomExported } from './photoFilters';
 import { shortcutPlatform } from './shortcutModifiers';
 import { useShortcutDisplay } from './useShortcutDisplay';
+import { ThumbnailImage } from './ThumbnailImage';
 
 export type ImmersiveQueueControlState = EditedQueueControlState;
 
@@ -148,7 +149,7 @@ export function ImmersivePreview({ assets, startAssetId, selectedAssetIds = new 
       {isMac ? position : closeButton}
     </header>
     <main className="immersive-preview-photo" onClick={handlePhotoClick}>
-      <img src={`/api/assets/${encodeURIComponent(asset.id)}/${useEditedPreview ? 'immersive-preview' : 'preview'}`} alt={asset.filename} draggable={false} />
+      <ThumbnailImage src={`/api/assets/${encodeURIComponent(asset.id)}/${useEditedPreview ? 'immersive-preview' : 'preview'}`} assetId={asset.id} surface="immersive" mode="preview" alt={asset.filename} draggable={false} />
     </main>
     <footer className="immersive-preview-bottombar">
       {source === 'gallery' && <button type="button" aria-pressed={selected} onClick={() => onToggleSelection?.(asset.id)}>

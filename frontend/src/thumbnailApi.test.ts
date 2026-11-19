@@ -1,11 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { frontendLogger } from './frontendLogging';
 import { requestThumbnailGeneration } from './thumbnailApi';
-import { thumbnailUrl } from './thumbnailUrl';
+import { thumbnailDiagnosticUrl, thumbnailUrl } from './thumbnailUrl';
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); frontendLogger.setLevel('off'); frontendLogger.clear(); });
 
+
 describe('thumbnail boundaries', () => {
+  it('adds a correlated diagnostic ID only when debug logging is enabled', () => {
+    expect(thumbnailDiagnosticUrl('/thumb', 'trace')).toBe('/thumb');
+    frontendLogger.setLevel('debug');
+    expect(thumbnailDiagnosticUrl('/thumb?view=1', 'trace')).toBe('/thumb?view=1&__diag=trace');
+  });
+
   it('selects display URLs without requesting generation and encodes Asset IDs and refresh keys', () => {
     const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
     const asset = { id: 'asset/id', thumbnail_url: '/original' };

@@ -3,7 +3,8 @@ import json
 import copy
 from contextlib import asynccontextmanager
 from datetime import date
-from uuid import UUID
+from time import monotonic
+from uuid import UUID, uuid4
 from typing import Literal
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request, Response
@@ -62,6 +63,46 @@ from immich import (
     get_asset_thumbnail,
     get_recent_assets,
 )
+
+
+def thumbnail_diagnostic_start(request: Request, asset_id: UUID, surface: str):
+    if backend_logger.get_level() != "debug":
+        return None
+    diagnostic_id = request.query_params.get("__diag")
+    try:
+        diagnostic_id = str(UUID(diagnostic_id)) if diagnostic_id else None
+    except ValueError:
+        diagnostic_id = None
+    context = {"requestId": diagnostic_id or uuid4().hex, "assetId": str(asset_id),
+               "surface": surface, "correlated": diagnostic_id is not None}
+    started = monotonic()
+    thumbnail_log("request.received", component="thumbnail_http", **context)
+    return context, started
+
+
+def thumbnail_diagnostic_finish(diagnostic, status: int):
+    if diagnostic is None:
+        return
+    context, started = diagnostic
+    level = "debug" if status < 400 else "warn"
+    thumbnail_log("response.completed" if status < 400 else "response.failed", level=level,
+                  component="thumbnail_http", **context, httpStatus=status,
+                  durationMs=round((monotonic() - started) * 1000))
+
+
+def thumbnail_diagnostic_error(diagnostic, error: Exception):
+    if diagnostic is None:
+        return
+    context, _ = diagnostic
+    thumbnail_log("response.interrupted", level="error", component="thumbnail_http",
+                  **context, errorCode=type(error).__name__)
+
+
+def thumbnail_diagnostic_event(diagnostic, event: str, **details):
+    if diagnostic is None:
+        return
+    context, _ = diagnostic
+    thumbnail_log(event, component="thumbnail_http", **context, **details)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -637,7 +678,8 @@ async def calendar_day_assets(selected_day: date, background_tasks: BackgroundTa
 
 
 @app.get("/assets/{asset_id}/thumbnail")
-async def asset_thumbnail(asset_id: UUID) -> Response:
+async def asset_thumbnail(asset_id: UUID, request: Request) -> Response:
+    diagnostic = thumbnail_diagnostic_start(request, asset_id, "thumbnail")
     try:
         thumbnail = await get_asset_thumbnail(
             os.getenv("IMMICH_URL"),
@@ -645,13 +687,19 @@ async def asset_thumbnail(asset_id: UUID) -> Response:
             asset_id,
         )
     except ImmichRequestError as error:
+        thumbnail_diagnostic_error(diagnostic, error)
         raise _upstream_error(error) from error
+    except Exception as error:
+        thumbnail_diagnostic_error(diagnostic, error)
+        raise
 
-    return Response(
+    response = Response(
         content=thumbnail.content,
         media_type=thumbnail.media_type,
         headers={"Cache-Control": "private, max-age=300"},
     )
+    thumbnail_diagnostic_finish(diagnostic, response.status_code)
+    return response
 
 
 async def generate_saved_thumbnail(asset_id, *, immich_url, api_key):
@@ -703,38 +751,65 @@ async def request_rendered_thumbnail(asset_id: UUID, request: Request) -> Respon
 
 @app.get("/assets/{asset_id}/rendered-thumbnail")
 async def rendered_thumbnail(asset_id: UUID, request: Request) -> Response:
+    diagnostic = thumbnail_diagnostic_start(request, asset_id, "rendered-thumbnail")
     cache = getattr(request.app.state, "thumbnail_cache", None)
     try:
         reason = await thumbnail_recipe_reason(asset_id)
     except StoreUnavailable as error:
+        thumbnail_diagnostic_error(diagnostic, error)
         raise _store_error(error) from error
+    except Exception as error:
+        thumbnail_diagnostic_error(diagnostic, error)
+        raise
     has_recipe = reason is None
     content = await run_in_threadpool(cache.read, asset_id) if cache is not None and has_recipe else None
     if content is not None:
-        return Response(content=content, media_type="image/jpeg", headers={"Cache-Control": "private, no-store"})
+        thumbnail_diagnostic_event(diagnostic, "cache.hit")
+        response = Response(content=content, media_type="image/jpeg", headers={"Cache-Control": "private, no-store"})
+        thumbnail_diagnostic_finish(diagnostic, response.status_code)
+        return response
     # A cache miss only reads Immich's original thumbnail; display never schedules generation.
-    response = await asset_thumbnail(asset_id)
+    thumbnail_diagnostic_event(diagnostic, "fallback.selected", fallback="immich_thumbnail",
+                               recipeReason=reason or "cache_miss")
+    response = await asset_thumbnail(asset_id, request)
     response.headers["Cache-Control"] = "private, no-store"
+    thumbnail_diagnostic_finish(diagnostic, response.status_code)
     return response
 
 
 @app.get("/assets/{asset_id}/immersive-preview")
 async def immersive_preview(asset_id: UUID, request: Request) -> Response:
+    diagnostic = thumbnail_diagnostic_start(request, asset_id, "immersive-preview")
     cache = getattr(request.app.state, "thumbnail_cache", None)
     try:
         reason = await thumbnail_recipe_reason(asset_id)
     except StoreUnavailable as error:
+        thumbnail_diagnostic_error(diagnostic, error)
         raise _store_error(error) from error
+    except Exception as error:
+        thumbnail_diagnostic_error(diagnostic, error)
+        raise
     has_recipe = reason is None
     content = await run_in_threadpool(cache.read, asset_id) if cache is not None and has_recipe else None
     if content is not None:
-        return Response(content=content, media_type="image/jpeg", headers={"Cache-Control": "private, no-store"})
+        thumbnail_diagnostic_event(diagnostic, "cache.hit")
+        response = Response(content=content, media_type="image/jpeg", headers={"Cache-Control": "private, no-store"})
+        thumbnail_diagnostic_finish(diagnostic, response.status_code)
+        return response
+    thumbnail_diagnostic_event(diagnostic, "fallback.selected", fallback="immich_preview",
+                               recipeReason=reason or "cache_miss")
     try:
         preview = await get_asset_preview(os.getenv("IMMICH_URL"), os.getenv("IMMICH_API_KEY"), asset_id)
     except ImmichRequestError as error:
+        thumbnail_diagnostic_error(diagnostic, error)
         raise _upstream_error(error) from error
-    return Response(content=preview.content, media_type=preview.media_type,
-                    headers={"Cache-Control": "private, no-store"})
+    except Exception as error:
+        thumbnail_diagnostic_error(diagnostic, error)
+        raise
+    response = Response(content=preview.content, media_type=preview.media_type,
+                        headers={"Cache-Control": "private, no-store"})
+    thumbnail_diagnostic_finish(diagnostic, response.status_code)
+    return response
 
 
 @app.get(
@@ -754,7 +829,8 @@ async def asset_detail(asset_id: UUID) -> AssetDetail:
 
 
 @app.get("/assets/{asset_id}/preview")
-async def asset_preview(asset_id: UUID) -> Response:
+async def asset_preview(asset_id: UUID, request: Request) -> Response:
+    diagnostic = thumbnail_diagnostic_start(request, asset_id, "preview")
     try:
         preview = await get_asset_preview(
             os.getenv("IMMICH_URL"),
@@ -762,13 +838,19 @@ async def asset_preview(asset_id: UUID) -> Response:
             asset_id,
         )
     except ImmichRequestError as error:
+        thumbnail_diagnostic_error(diagnostic, error)
         raise _upstream_error(error) from error
+    except Exception as error:
+        thumbnail_diagnostic_error(diagnostic, error)
+        raise
 
-    return Response(
+    response = Response(
         content=preview.content,
         media_type=preview.media_type,
         headers={"Cache-Control": "private, max-age=300"},
     )
+    thumbnail_diagnostic_finish(diagnostic, response.status_code)
+    return response
 
 
 
