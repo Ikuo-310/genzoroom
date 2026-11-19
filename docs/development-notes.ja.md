@@ -2456,4 +2456,25 @@ F15〜F19の個別修正は次のCommitで記録した。
 
 各工程で指示範囲のFocusedテスト、関連回帰、TypeScriptチェック、必要なproduction build／`git diff --check`を実施した。件数は工程ごとに対象範囲が異なるため合算していない。直近のF18は7 test files・434 tests、F19は7 test files・439 testsが成功し、F19のTypeScriptチェック、Frontend production build、`git diff --check`も成功した。Buildには既存の大容量chunkおよびReact Router module directive警告がある。これらは自動テスト結果であり、実Native／実Desktopの確認とは区別する。
 
-本記録時点で、ユーザーはWindows Desktopで通常のPoint Color操作を確認し、使用した範囲では問題を認めなかったと報告した。通信断や全ての終了・Recovery異常系を実機で再現したわけではなく、多くはMock／自動テストで検証している。Backend create応答が失われworkspace IDを取得できない場合、Frontendだけでは作成済みworkspaceを特定できない。保存結果が不明な場合は安全側に保留し、workspace終了と後続openを遅らせることがある。Point Colorの「範囲を表示」は未実装で、別工程の調査対象である。
+本記録時点で、ユーザーはWindows Desktopで通常のPoint Color操作を確認し、使用した範囲では問題を認めなかったと報告した。通信断や全ての終了・Recovery異常系を実機で再現したわけではなく、多くはMock／自動テストで検証している。Backend create応答が失われworkspace IDを取得できない場合、Frontendだけでは作成済みworkspaceを特定できない。保存結果が不明な場合は安全側に保留し、workspace終了と後続openを遅らせることがある。Point Color範囲表示は後続P1-A〜P2-Bで実装済みであり、次節に記録する。
+
+## Point Color「範囲を表示」実装完了（2026-11-19）
+
+P1-A〜P2-BでWindows DesktopのPoint Color「範囲を表示 / Show Range」を実装した。採色済み項目に既存チェックボックスで表示し、削除ボタンと同じ行の左側に配置する。初期状態はOFF。選択中の1項目をLightCraftの既存`Overlay::PointColorRange(index)`で可視化する。RAW／非RAW共通のWindows Native Previewに対応し、Docker JPEG経路は対象外。
+
+範囲表示はFrontendの一時UI状態で、Native settings／revision、History、Recipe、appSettingsに保存しない。Whole／Region／Point Color interaction Draftの既存Preview経路を使う。ON/OFFとスウォッチ切替は同じNative revisionでもPreview更新を要求する。要求・応答identityとRegion tile/cache identityにはindexを含め、通常Previewと範囲表示Preview、別indexの結果を混在させない。Before／Crop編集／採色中は一時停止し、再開前にOFF条件が成立した場合は再開しない。Color OFF／折りたたみ、写真切替、全項目削除でOFF。ズーム・パン中は維持し、Undo／Redoは既存選択index補正に従う。Export／サムネイルにはOverlay指定を送らない。
+
+### Native patchの移植記録
+
+- 対象managed patch：[`0001-v0.20.0-whole-frame.patch`](../native/lightcraft/patches/0001-v0.20.0-whole-frame.patch)。LightCraft v0.20.0の固定upstream commitは`192ff72923c39e6623f2c7ff67ab3a119deb8071`、統合Commitは`b612afa`、更新後patch SHA-256は`5d67916cb9ed3b554e73bf21d3ac69614c4c75956fed1e5bab5f5c74b4efd564`。
+- patchの目的はHeadless／MCP公開契約の拡張。`crates/mcp/src/tools.rs`でWhole `render_preview`とRegion `render_region_preview`のschema／引数を追加し、`crates/mcp/src/headless.rs`で既存Whole／Region render jobへ`RenderJob::with_overlay(Overlay::PointColorRange(index))`を適用する。Region引数は`target`の外側で、planでは受け付けない。
+- 適用結果をWhole／Region metadataの`pointColorRangeIndex`で識別できるよう拡張した。managed patch統合時に`pointColorRangeContract: 1`をmanifest、build probe、receipt、Native成果物照合へ追加した。
+- 変更対象はMCP tool schema、Headless描画接続、関連テスト等17 Nativeファイル。既存のOverlay描画処理、現像アルゴリズム、GPU／CPU経路には変更を加えていない。将来LightCraftを更新するときは、固定upstreamの変更箇所とDesktopの`Overlay::PointColorRange`呼出しを照合し、MCP／Headlessに同等の引数・metadata・適用条件が上流実装されたか確認する。等価機能がなければpatchを移植し、上流で契約も満たされていれば重複適用せずmanifest・probe・receiptの整合性を確認して採否を決める。
+
+### 工程別検証記録
+
+工程が異なるためテスト件数は合算しない。P1-Aは隔離Native CLIのWhole／Region schema・画像応答・Draft／Full・index 0と別index・通常描画・metadata・設定不変を実CLIで確認。P1-Bは正式Native CLIのpatch適用状態、manifest／patch SHA、receipt、公開契約を照合。P2-AはBackendのWhole／Region／interaction Draft伝搬、不正入力、metadata mismatch、`frame_only`、Region plan非伝搬、Export／thumbnail非伝搬を集中テストと正式CLI境界probeで確認。P2-BはFrontend関連テスト、TypeScript、production buildと差分チェックを実施した。
+
+`AnshitsuRawPreview.test.tsx`の失敗比較は、P2-B前`11916df`が56 pass／84 fail、P2-B後`5443777`の回帰修正前が56 pass／85 fail。失敗名と主要エラーを比較すると84件は前後で同じ。追加の1件は新規Show Range test内のnull要素参照で、P2-B追加修正で直した後は57 pass／84 failとなった。調査ではCurveテストが意図的なcommit失敗mockをretryせず残し、fixture／mock状態が後続テストへ残留することを確認した。従って元の84件はP2-B実装前から存在する失敗であり、今回修正対象には含めていない。
+
+Commit `7673ed2`ではShow Range一時停止中に通常のPoint Color Draftまで拒否される条件と、共有`curveTarget`からPoint Color専用Overlay引数が他interactionへ伝わり得る型・経路を修正した。Focused tests、TypeScript、production build、`git diff --check`を再実行して成功。Windows Desktopでのユーザー実動作確認では問題の報告なし。これはユーザーによる実機確認であり、自動テストとは別の結果である。

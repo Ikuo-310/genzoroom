@@ -14,6 +14,8 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
+- Windows Desktop adds a transient Point Color `Show Range` Preview for the selected swatch, using LightCraft's existing range Overlay in Whole and Region views, including slider Drafts. The setting is not saved to History or Recipes and does not affect Export or rendered thumbnails. Available for RAW and Native-accepted non-RAW images; Docker is unchanged.
+
 - Windows Desktop adds Point Color sampling and editing with ordered color swatches, eight adjustment controls, per-control Reset, color deletion and full Point Color Reset, integrated with History, Recipe and RAW Export settings.
 
 - Windows Desktop Color Mixer Hue sliders show a gradient for each color band to indicate the direction of the hue shift.

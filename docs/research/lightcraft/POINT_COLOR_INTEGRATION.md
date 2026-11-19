@@ -1,6 +1,6 @@
 # LightCraft Point Color 統合調査 P0
 
-## 現行統合状態（2026-11-16）
+## 現行統合状態（2026-11-19）
 
 本節以降のP0・段階記録は調査時点の記録であり、未実装・提案と記された過去の状態は現行仕様ではない。Windows LightCraft v0.20.0に対するPoint Color統合は、Backendのsnapshot validation、既存History API／SQLite保存、完全Recipe復元・Export設定伝搬、Frontend表示、Viewer採色、8項目編集、個別Reset、スウォッチ削除、配列全体Resetまで実装済みである。History operationは`pointColorPick`、`pointColorDelete`、`pointColorControl`、`pointColorControlReset`、`pointColorReset`を既存`/history/operate`経路で扱う。Point Colorの状態はNativeの順序付き`point_colors`配列で、個別永続IDは追加していない。
 
@@ -10,13 +10,13 @@ Document離脱では`RawWorkspaceTermination`がhook寿命から独立してwork
 
 F1〜F19の監査修正は本書末尾の「最終監査修正 F12〜F19」に追記した。通常操作のWindows Desktopユーザー確認では、使用した範囲で問題がなかったとの報告を受けている。通信断など全異常系を実機で再現したわけではなく、多くはMock Native／Frontend自動テストによる確認である。Backend create応答が失われworkspace ID自体を得られない場合はFrontendだけではworkspaceを特定できず、保存結果が不明な場合は終了と後続openを安全側に保留することがある。
 
-**Point Color「範囲を表示」は未実装で、今後の調査対象である。** LightCraft v0.20.0内部の`Overlay::PointColorRange(index)`と`visualize::point_color_range`は確認済みだが、現在のHeadless／MCP公開契約はPoint Color overlayのindex引数・結果metadataを公開していない。P0時点で提案したmanaged patchは歴史的な案であり、現行実装には含まれない。本更新でNative調査やpatch開発は行っていない。
+**Point Color「範囲を表示」はP1-A〜P2-Bで実装済み。** LightCraft v0.20.0既存の`Overlay::PointColorRange(index)`をHeadless／MCPのWhole・Region描画契約へ公開し、GenzoRoom BackendとFrontendから選択中の範囲を一時表示する。Native契約番号は`pointColorRangeContract: 1`。古いP0節の未実装・提案記述は当時の記録であり、現行仕様は本書末尾の「Point Color Range実装記録」を参照する。
 
 ## 1. 調査対象バージョン・固定 Commit
 
 - GenzoRoom の基準は `main` の `2874ebda76506d7191a88fb2efc8e211619bc312`。調査開始時の作業ツリーは clean で、ローカルの `origin/main` と一致。
 - [manifest](../../../native/lightcraft/manifest.json) の LightCraft は v0.20.0、固定 SHA は `192ff72923c39e6623f2c7ff67ab3a119deb8071`（`Release 0.20.0`）。以下の Native ソース参照は `.tmp/lightcraft-0.20.0-p3` のこの checkout relative。
-- [build.py](../../../native/lightcraft/build.py) の `manifest()` と書き込みなしの `prepare(..., apply=False)` が `patched` を返した。HEAD、upstream Cargo version、patch の SHA-256 と 17 targets、完全 diff、未追跡・staged source、Region schema を照合済み。patch は `0001-v0.20.0-whole-frame.patch` 1 件、SHA-256 は `ca30ff958ff5fbbd04e8e50b31c7c01a6319b7864b49ef8e506c3f20acc5f2ab`。Whole/Crop・Before/After・Draft/Full・Region・WB を公開するが Point Color の設定や Overlay は拡張していない。
+- 当時のP0調査時点ではPoint Color Overlay公開契約は未実装だった。正式managed patchの現行SHA-256およびOverlay追加内容は、本書末尾の「Point Color Range実装記録」に記録する。
 - 実行した既存 `target-p3-wb/release/lightcraft-cli.exe` の SHA-256 `30fa30913ceca0f3083ea05d0ebce27fb5668c00b1e78f9d6c2365e43686aa04`、隣接 receipt の tuple・契約番号と実測 SHA を照合した。MCP handshake も v0.20.0。
 
 「ソース確認」はこの固定版の記述、「実 CLI」は §13 の隔離 probe、「提案」は P1 以降の設計判断を指す。
@@ -126,7 +126,7 @@ RenderJob／CPU/GPU 描画機能は共通コードに存在し、CLI/MCP の公�
 
 ## 10. GenzoRoom UI統合（P0時点の方針と現行実装）
 
-以下の「提案」は実装前のP0記録である。現在はPoint Colorの表示、Viewer採色、8項目編集、Reset、削除が既存Frontend／History経路に接続済み。「範囲を表示」だけが未実装であり、先頭の現行状態節を参照すること。
+以下の「提案」は実装前のP0記録である。現在はPoint Colorの表示、Viewer採色、8項目編集、Reset、削除に加え、「範囲を表示」も既存Frontend／History・Preview経路へ接続済みである。P0時点との差分は先頭および本書末尾の現行状態節を参照すること。
 
 **提案**。[RawAdjustmentControls](../../../frontend/src/RawAdjustmentControls.tsx) の Color 内で Mixer／Grading と同じ折りたたみ・Reset・ロックの形を再利用。空ではスポイトと採色案内、採色後に最大 8 スウォッチ、8 個のスライダー、選択色の削除、独立した範囲表示のチェック項目を置く。幅が狭い場合にスウォッチを折り返し、入力行は内容に応じて伸縮させる。Point Color 独立 ON/OFF は設けない。Undo/Redo や写真切替時の index と checkbox は写真編集 UI で管理し、`appSettings.ts` に保存する場合も flyout の開閉設定だけを対象とする。
 
@@ -143,7 +143,7 @@ Viewer の crosshair と [ViewerPointLoupe](../../../frontend/src/ViewerPointLou
 ## 12. 採用可能な実装方式
 
 1. **既存 Native コマンド＋完全 snapshot**。採色、削除、数値編集、配列 Reset、通常 Preview、Recipe/History/Export を同じ開発設定に接続できる。混在操作の許可条件と保存失敗後の再試行は既存 GenzoRoom の所有権で管理。
-2. **P0時点の歴史的な提案（現行未実装）**。Preview 専用の最小 Native 公開 patchでDesktopと共通の`RenderJob::with_overlay`をHeadless Wholeへ公開する案を検討した。現行のv0.20.0 Headless／MCP契約にはPoint Color overlay引数がないため、範囲表示は未実装であり、この案を実装済み仕様と解釈しない。
+2. **P0時点の歴史的な提案**。Preview 専用の最小 Native 公開 patchでDesktopと共通の`RenderJob::with_overlay`をHeadless Wholeへ公開する案を検討した。この提案はP1-A／P1-Bで実装され、現在の公開契約は本書末尾に記録している。
 3. **成立しない経路**。既存 `render_preview` の設定変更だけで同じ表示を得る方法は確認できなかった。通常 After を単純にモノクロにする方法や、全調整を書き換えて疑似表示する方法では、Desktop の選択エントリーのみを中立化して最終色から重みを再計算する処理を再現できず、永続化の境界も崩れる。
 
 ## 13. P0時点の実確認・未解決事項（後続工程で一部解消）
@@ -156,7 +156,7 @@ Viewer の crosshair と [ViewerPointLoupe](../../../frontend/src/ViewerPointLou
 
 ## 14. P1 以降の段階的実装案
 
-この段階表はP0調査時点の提案であり、現行ロードマップではない。**P1 Point Color編集・保存・Export設定引き渡し・Frontend操作は実装済み**で、通常操作のWindows Desktop確認をもって今回の開発作業は一区切りとする。**範囲表示は未実装**。LightCraft内部Overlayと現行Headless／MCP公開契約の差を踏まえ、別工程で必要性・公開契約を調査する。P0時のpatch候補を実施予定として扱わない。
+この段階表はP0調査時点の提案であり、現行ロードマップではない。**Point Color編集・保存・Export設定引き渡し・Frontend操作・範囲表示はP1-A〜P2-Bで実装済み**。現在の確定契約・実装経路・検証状況は本書末尾の実装記録を参照し、P0時のpatch候補を将来作業として扱わない。
 
 ## 15. 主要ソース
 
@@ -527,4 +527,42 @@ P1〜P3-BおよびF15〜F19の各段階で、Deferred Promiseを用いたFocused
 - Backend create応答が失われworkspace IDを取得できない場合、Frontendだけでは作成済みworkspaceを特定できない。
 - History／Native保存結果が不明の場合は、データ保護のためworkspace終了と次Document openを保留することがある。
 - 多くの異常系はMock／自動テストであり、Windows Desktopで全て実機再現していない。
-- Point Colorの「範囲を表示」は未実装。LightCraft v0.20.0内部には`Overlay::PointColorRange(index)`があるが、現行Headless／MCP公開契約には対応する公開引数がない。追加Native調査・managed patchは本記録更新の対象外。
+- P0調査時点ではPoint Colorの「範囲を表示」は未実装だった。公開契約は後続のP1-A／P1-Bで追加され、本書末尾に実装・検証結果を記録した。
+
+## Point Color Range実装記録（P1-A〜P2-B、2026-11-19）
+
+### 現行の利用者向け仕様
+
+Windows Desktopでは、採色済みPoint Color項目に「範囲を表示 / Show Range」チェックボックスを表示する。削除ボタンと同じ行の左側に配置し、既存チェックボックスの見た目に従う。初期値はOFFで、未採色時は表示しない。スウォッチ切替、スライダーDraft、ズーム・パン中は対象範囲を追従する。BeforeとCrop編集、採色中は一時停止し、終了後に再開する。Point Color／親Colorの折りたたみ、Color OFF、写真切替、全項目削除はOFFにする。Undo／Redoは既存のスウォッチ選択・補正を用い、選択項目がある場合は範囲表示を維持する。ショートカットは追加しない。
+
+範囲表示は一時的なUI状態で、Native settings、History、Recipe、appSettingsには保存しない。LightCraftの既存`Overlay::PointColorRange(index)`を選択中の1項目へ適用する。Nativeの現像アルゴリズムやOverlay描画処理をGenzoRoomへ複製していない。Windows版のRAW／非RAW共通Previewで利用し、Docker版は対象外。
+
+### Native公開契約とmanaged patch
+
+- LightCraft v0.20.0固定upstream commitは`192ff72923c39e6623f2c7ff67ab3a119deb8071`。
+- managed patchは[`0001-v0.20.0-whole-frame.patch`](../../../native/lightcraft/patches/0001-v0.20.0-whole-frame.patch)、P1-B統合Commitは`b612afa`、更新後SHA-256は`5d67916cb9ed3b554e73bf21d3ac69614c4c75956fed1e5bab5f5c74b4efd564`。
+- patchの変更目的はHeadless／MCPへPoint Color Rangeを公開し、既存Preview描画経路で呼出元が結果を識別可能にすること。LightCraft既存のOverlay描画処理、現像アルゴリズム、CPU／GPU経路、キャッシュ、メモリ管理には変更を加えていない。
+- 主なNative対象は`crates/mcp/src/tools.rs`（`render_preview`／`render_region_preview` schema・引数）、`crates/mcp/src/headless.rs`（Whole／Region描画ジョブへのOverlay適用）、およびMCPテスト。既存の`RenderJob::with_overlay(Overlay::PointColorRange(index))`を利用する。
+- Whole `render_preview`では任意の整数`point_color_range_index`（0〜7）を受け、通常のWhole render jobへ適用する。Region `render_region_preview`では`render`操作の`target`外側に同じ任意引数を置き、既存target schemaとplan操作を変えない。両方ともDraft／Fullを許可する。引数省略時は通常描画。
+- 適用条件違反（不正／不存在index、Before、crop_edit、Region plan等）は明示エラーとし、Overlay指定を黙って通常画像へフォールバックしない。適用時だけ結果metadataへ`pointColorRangeIndex`を追加する。Frame、Geometry、品質、画像応答形式は維持する。
+- managed patch統合時にはmanifestへ`pointColorRangeContract: 1`を追加し、build probe・build receipt・Native成果物照合処理から同契約を確認する。現行manifestとpatch記録のSHA-256は一致する。
+
+### GenzoRoom統合経路
+
+- Backend Whole Previewは任意`pointColorRangeIndex`をNativeのsnake_case形式の引数へ変換し、結果metadataが要求indexと一致することを検証する。HTTP応答は`X-Raw-Point-Color-Range-Index`で結果を返す。Full `frame_only`分岐も指定を維持する。
+- Region renderは`target.pointColorRangeIndex`を公開schemaに沿ってNative引数のtarget外へ移し、Native metadataを既存Region応答検証へ渡す。`X-Raw-Region` metadataにも適用indexを含める。planにはOverlay指定を送らない。
+- Point Color interaction updateとACKに紐づくWhole Draftは既存interaction ID／sequence、ticket、更新集約を再利用する。範囲表示条件が変わって旧Draftが失効しても、Native編集操作そのものは失敗扱いにしない。interaction中Regionは追加せず、終了後はFull／Regionへ戻る。
+- Frontendは`useRawDocument`の一時UI状態と既存選択indexを使い、Whole／Region／Draft要求に有効なindexを渡す。通常表示では省略する。要求identity、応答metadata、decode後の採用境界、Region cache／tile再利用identityへindexを含め、異なる表示条件の応答やタイルを混在させない。BeforeとCropでは送らず、ズーム・パンは選択indexを保持する。
+- Overlay切替とスウォッチ切替はNative settings revisionを変えずにPreviewを更新する。History／Recipe保存、Export、サムネイル要求に範囲表示状態を伝搬しない。
+
+### 実装・検証履歴
+
+工程ごとに対象が異なるため、テスト件数は相互に合算しない。
+
+- **P1-A（Native契約）**：隔離LightCraft checkoutでMCP schema・Headless Whole／Region引数・metadataを実装し、Native CLIをビルド。Draft／Full、index 0と別index、通常描画省略、拒否条件、Frame／Geometry維持、設定不変をWhole／Region実CLI probeで確認した。現像・Overlayの画素品質検証は行っていない。
+- **P1-B（正式Native成果物）**：P1-A差分を管理patchへ統合し、`pointColorRangeContract: 1`をmanifest、build probe、receipt、成果物照合へ反映。正式managed patchからCLIをビルドし、固定commit・patch適用・SHA・receipt・公開schema／Whole／Region probeを照合した。managed patch SHA-256は上記の値。
+- **P2-A（Backend）**：Whole／Region／Point Color Draftへ任意indexを接続し、Native結果metadataとHTTP応答を照合。不正入力、metadata mismatch、Full `frame_only`、Region plan非伝搬、Export／thumbnail非伝搬などの対象API回帰を集中テストで確認し、正式CLIによるBackend公開境界probeを実施した。
+- **P2-B（Frontend）**：UI状態、Before／Crop pause、Whole／Region cache identity、古い応答の拒否、Draft接続、設定／History非変更を関連Frontend testsで確認し、TypeScript check、production build、差分チェックを実施。Windows Desktopのユーザー実動作確認では問題の報告なし。
+- **P2-B追加回帰修正（`7673ed2`）**：一時停止中に通常のPoint Color Draftまで拒否しないよう採用条件を修正し、共有`curveTarget`からPoint Color専用引数が他interactionへ漏れないよう型・呼出経路を限定した。関連集中テスト、TypeScript、production build、差分チェックを再実行した。
+
+`AnshitsuRawPreview.test.tsx`の84件失敗は、P2-B前の`11916df`で56 pass／84 fail、P2-B後`5443777`の追加修正前は56 pass／85 failだった。差分比較では元の失敗テスト名とエラーが84件すべて一致し、P2-B固有の追加失敗はShow Rangeテスト1件（null要素参照）だった。そのテストを移動・修正した後は`5443777`比較が57 pass／84 failとなり、`11916df`の失敗集合と一致した。再現調査では、既存Curveテストが意図的なcommit失敗mockをretryせずに残し、後続テストへ状態を持ち越すfixture／mock残留を確認した。84件は実装前から存在し、P2-B回帰には分類されない。今回のP3ではその既存失敗を修正していない。
