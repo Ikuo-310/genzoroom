@@ -2,7 +2,7 @@
   "patches": [
     {
       "file": "patches/0001-v0.20.0-whole-frame.patch",
-      "purpose": "Expose Whole/Crop Frame, Before/After, Draft/Full, standard Engine Region rendering and read-only WB candidate estimation",
+      "purpose": "Expose Whole/Crop Frame, Before/After, Draft/Full, Region rendering, WB candidate and Point Color Range",
       "targets": [
         "Cargo.lock",
         "crates/engine/src/cmd/develop.rs",
@@ -22,20 +22,21 @@
         "crates/pipeline/src/lib.rs",
         "crates/ui-egui/src/render.rs"
       ],
-      "sha256": "ca30ff958ff5fbbd04e8e50b31c7c01a6319b7864b49ef8e506c3f20acc5f2ab",
+      "sha256": "5d67916cb9ed3b554e73bf21d3ac69614c4c75956fed1e5bab5f5c74b4efd564",
       "files": 17,
-      "insertions": 626,
+      "insertions": 750,
       "deletions": 35
     }
   ],
   "commit": "192ff72923c39e6623f2c7ff67ab3a119deb8071",
   "version": "0.20.0",
   "wholeFrameContract": 1,
-  "developmentTargetDir": "target-p3-wb",
+  "developmentTargetDir": "target-p3-range",
   "cropEditContract": 1,
   "beforeAfterContract": 1,
   "draftContract": 1,
   "regionContract": 1,
   "geometryDescriptorContract": 2,
-  "wbContract": 1
+  "wbContract": 1,
+  "pointColorRangeContract": 1
 }

@@ -47,6 +47,7 @@ def test_whole_frame_receipt_claims_only_managed_preview_contracts(tmp_path):
     assert receipt['geometryDescriptorContract'] == 2
     assert not {'beforeContract', 'previewContract'} & receipt.keys()
     assert receipt['wbContract'] == 1
+    assert receipt['pointColorRangeContract'] == 1
 
 
 def test_archived_010_manifest_and_patch_remain_reproducible():

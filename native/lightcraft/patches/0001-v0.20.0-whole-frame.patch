@@ -216,10 +216,10 @@ index b05dae56ff5fccab298fc6dee10239ddd47ed4b9..2de01852f042f6d57040223c2e9764fd
 +sha2 = { workspace = true }
  log = { workspace = true }
 diff --git a/crates/mcp/src/headless.rs b/crates/mcp/src/headless.rs
-index 11de914173043a86ea701ee0f9d55a89e92f2add..4c6a61225b5ecb60f6a330bfc571eb1529e9c5a6 100644
+index 11de914173043a86ea701ee0f9d55a89e92f2add..52efb6534ca03d35c7e94601b14ee615265c36c8 100644
 --- a/crates/mcp/src/headless.rs
 +++ b/crates/mcp/src/headless.rs
-@@ -139,15 +139,147 @@ impl Backend for Headless {
+@@ -139,15 +139,190 @@ impl Backend for Headless {
                  Ok(Value::Array(v))
              }
              "ui.render" => {
@@ -239,6 +239,16 @@ index 11de914173043a86ea701ee0f9d55a89e92f2add..4c6a61225b5ecb60f6a330bfc571eb15
 +                    return Err("invalid before".into());
 +                }
 +                let before = p.get("before").and_then(Value::as_bool).unwrap_or(false);
++                let point_color_range_index = match p.get("point_color_range_index") {
++                    None => None,
++                    Some(value) => Some(value.as_u64().filter(|index| *index <= 7)
++                        .ok_or("invalid point_color_range_index")? as u8),
++                };
++                if point_color_range_index.is_some()
++                    && (before || p.get("crop_edit") == Some(&json!(true)))
++                {
++                    return Err("point_color_range_after_only".into());
++                }
 +                let quality = match p.get("quality").and_then(Value::as_str).unwrap_or("full") {
 +                    "draft" => lightcraft_engine::pipeline::Quality::Draft,
 +                    "full" => lightcraft_engine::pipeline::Quality::Full,
@@ -255,6 +265,14 @@ index 11de914173043a86ea701ee0f9d55a89e92f2add..4c6a61225b5ecb60f6a330bfc571eb15
 +                }
 +                let apply_crop = p.get("crop_edit") != Some(&json!(true));
 +                let mut job = self.session.render_job(id, size, size, before, apply_crop).ok_or("no such photo")?;
++                if let Some(index) = point_color_range_index {
++                    if !job.settings.section_enabled("color")
++                        || index as usize >= job.settings.point_colors.len()
++                    {
++                        return Err("invalid point_color_range_index".into());
++                    }
++                    job = job.with_overlay(lightcraft_engine::pipeline::Overlay::PointColorRange(index));
++                }
 +                if quality == lightcraft_engine::pipeline::Quality::Draft {
 +                    job = job.draft();
 +                }
@@ -265,6 +283,9 @@ index 11de914173043a86ea701ee0f9d55a89e92f2add..4c6a61225b5ecb60f6a330bfc571eb15
 +                let mut result = json!({"width": img.width, "height": img.height});
 +                result["kind"] = json!(if before { "before" } else { "after" });
 +                result["quality"] = json!(if quality == lightcraft_engine::pipeline::Quality::Draft { "draft" } else { "full" });
++                if let Some(index) = point_color_range_index {
++                    result["pointColorRangeIndex"] = json!(index);
++                }
 +                if p.get("crop_edit") == Some(&json!(true)) {
 +                    result["cropEdit"] = json!(true);
 +                }
@@ -300,6 +321,14 @@ index 11de914173043a86ea701ee0f9d55a89e92f2add..4c6a61225b5ecb60f6a330bfc571eb15
 +                    _ => return Err("invalid region quality".into()),
 +                };
 +                let operation = p.get("operation").and_then(Value::as_str).ok_or("invalid region operation")?;
++                let point_color_range_index = match p.get("point_color_range_index") {
++                    None => None,
++                    Some(value) => Some(value.as_u64().filter(|index| *index <= 7)
++                        .ok_or("invalid point_color_range_index")? as u8),
++                };
++                if point_color_range_index.is_some() && before {
++                    return Err("point_color_range_after_only".into());
++                }
 +                let photo = self.session.catalog.photo(id).ok_or("no such photo")?.clone();
 +                let settings = if before { self.session.before_settings(&photo) } else { (*photo.develop).clone() };
 +                let frame = lightcraft_engine::pipeline::geometry::Frame::with_lens(
@@ -320,8 +349,7 @@ index 11de914173043a86ea701ee0f9d55a89e92f2add..4c6a61225b5ecb60f6a330bfc571eb15
 +                    let height = target.get("fullHeight").and_then(Value::as_u64).ok_or("invalid region size")? as usize;
 +                    if width == 0 || height == 0 || width > 65536 || height > 65536 {
 +                        return Err("invalid region size".into());
-                     }
--                    None => Ok(json!({"width": img.width, "height": img.height})),
++                    }
 +                    (width, height)
 +                };
 +                let full_geometry = crate::preview::frame_metadata(&frame, (photo.width as usize, photo.height as usize), &source, full_w, full_h)?;
@@ -329,6 +357,9 @@ index 11de914173043a86ea701ee0f9d55a89e92f2add..4c6a61225b5ecb60f6a330bfc571eb15
 +                    return Err("preview_geometry_mismatch".into());
 +                }
 +                if operation == "plan" {
++                    if point_color_range_index.is_some() {
++                        return Err("point_color_range_plan_unsupported".into());
++                    }
 +                    return Ok(json!({"kind":kind,"quality":quality,"geometryId":target["geometryId"],
 +                        "nativeWidth":native.0.round().max(1.0) as u64,"nativeHeight":native.1.round().max(1.0) as u64,
 +                        "fullWidth":full_w,"fullHeight":full_h}));
@@ -345,6 +376,15 @@ index 11de914173043a86ea701ee0f9d55a89e92f2add..4c6a61225b5ecb60f6a330bfc571eb15
 +                    self.session.region_job(id, full_w, full_h, requested, true)
 +                }
 +                .ok_or("region_unavailable")?;
++                if let Some(index) = point_color_range_index {
++                    if !job.settings.section_enabled("color")
++                        || index as usize >= job.settings.point_colors.len()
++                    {
++                        return Err("invalid point_color_range_index".into());
+                     }
+-                    None => Ok(json!({"width": img.width, "height": img.height})),
++                    job = job.with_overlay(lightcraft_engine::pipeline::Overlay::PointColorRange(index));
++                }
 +                if draft {
 +                    job = job.draft();
 +                }
@@ -362,11 +402,14 @@ index 11de914173043a86ea701ee0f9d55a89e92f2add..4c6a61225b5ecb60f6a330bfc571eb15
 +                    || img.height != requested.h
 +                {
 +                    return Err("preview_geometry_mismatch".into());
-                 }
-+                let response = json!({"kind":kind,"quality":quality,"geometryId":target["geometryId"],
++                }
++                let mut response = json!({"kind":kind,"quality":quality,"geometryId":target["geometryId"],
 +                    "fullWidth":full_w,"fullHeight":full_h,
 +                    "window":{"x":requested.x,"y":requested.y,"w":img.width,"h":img.height},
 +                    "width":img.width,"height":img.height});
++                if let Some(index) = point_color_range_index {
++                    response["pointColorRangeIndex"] = json!(index);
+                 }
 +                let path = p.get("path").and_then(Value::as_str).ok_or("missing region output path")?;
 +                self.session.check_write_target(path)?;
 +                write_image(Path::new(path), &img, 92)?;
@@ -538,7 +581,7 @@ index 0000000000000000000000000000000000000000..6b3a5371dfef3a3337a7fbe2afc68414
 +  }
 +}
 diff --git a/crates/mcp/src/tests.rs b/crates/mcp/src/tests.rs
-index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..87bfa7f32454d9bb13133e167743a420d21d171c 100644
+index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..5dec4aa3eb00e95ac7b80d737f4362520516defc 100644
 --- a/crates/mcp/src/tests.rs
 +++ b/crates/mcp/src/tests.rs
 @@ -79,6 +79,27 @@ fn tools_list_has_helpers_and_every_command() {
@@ -569,7 +612,17 @@ index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..87bfa7f32454d9bb13133e167743a420
  /// The `import` helper passes the copy options through: a folder template files the copy.
  #[test]
  fn import_tool_copies_with_a_folder_template() {
-@@ -602,3 +623,108 @@ fn render_and_screenshot_pngs_go_through_a_private_folder() {
+@@ -421,6 +442,9 @@ fn core_tools_have_hints_and_reject_unknown_keys() {
+             assert!(r["error"]["message"].as_str().unwrap().contains("misspelled"), "{r}");
+         }
+         let preview = tools.iter().find(|t| t["name"] == "render_preview").unwrap();
++        assert_eq!(preview["inputSchema"]["properties"]["point_color_range_index"],
++            json!({"type":"integer","minimum":0,"maximum":7,
++                "description":"Visualize the selected Point Color range (After only; requires Color enabled)"}));
+         assert_eq!(preview["annotations"]["readOnlyHint"], true);
+         assert!(preview["inputSchema"]["properties"].get("path").is_none());
+         let writer = tools.iter().find(|t| t["name"] == "render_photo").unwrap();
+@@ -602,3 +626,170 @@ fn render_and_screenshot_pngs_go_through_a_private_folder() {
          folders.push(dir);
      }
  }
@@ -625,15 +678,57 @@ index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..87bfa7f32454d9bb13133e167743a420
 +}
 +
 +#[test]
++fn point_color_range_preview_is_explicit_and_read_only() {
++    let mut h = Headless::demo();
++    let id = h.session.active().unwrap().0;
++    let settings = json!({"point_colors":[
++        {"lum":0.5,"chroma":0.1,"hue":30.0},
++        {"lum":0.6,"chroma":0.12,"hue":210.0}
++    ]});
++    h.session.execute("develop.merge", &json!({"settings":settings})).unwrap();
++    let before = h.session.execute("develop.get", &json!({"id":id})).unwrap();
++    let geometry_id = serde_json::from_str::<Value>(call_tool(&mut h, "render_preview",
++        &json!({"id":id,"max_side":64,"include_frame":true})).content[1]["text"].as_str().unwrap()).unwrap()
++        ["frame"]["geometryId"].clone();
++    for (quality, index) in [("draft", 0), ("full", 1)] {
++        let result = call_tool(&mut h, "render_preview", &json!({"id":id,"max_side":64,"include_frame":true,
++            "quality":quality,"point_color_range_index":index}));
++        assert!(!result.is_error, "{result:?}");
++        let meta: Value = serde_json::from_str(result.content[1]["text"].as_str().unwrap()).unwrap();
++        assert_eq!(meta["pointColorRangeIndex"], index);
++        assert_eq!(meta["quality"], quality);
++        assert_eq!(meta["frame"]["window"], Value::Null);
++        assert_eq!(result.image().unwrap().1, "image/png");
++        if quality == "full" { assert_eq!(meta["frame"]["geometryId"], geometry_id); }
++    }
++    let normal = call_tool(&mut h, "render_preview", &json!({"id":id,"max_side":64,"include_frame":true}));
++    assert!(!normal.is_error, "{normal:?}");
++    let normal_meta: Value = serde_json::from_str(normal.content[1]["text"].as_str().unwrap()).unwrap();
++    assert!(normal_meta.get("pointColorRangeIndex").is_none());
++    assert_eq!(normal_meta["frame"]["geometryId"], geometry_id);
++    assert!(call_tool(&mut h,"render_preview",&json!({"id":id,"max_side":64,"before":true,"point_color_range_index":0})).is_error);
++    assert!(call_tool(&mut h,"render_preview",&json!({"id":id,"max_side":64,"crop_edit":true,"point_color_range_index":0})).is_error);
++    assert!(call_tool(&mut h,"render_preview",&json!({"id":id,"max_side":64,"point_color_range_index":2})).is_error);
++    assert!(call_tool(&mut h,"render_preview",&json!({"id":id,"max_side":64,"point_color_range_index":1.5})).is_error);
++    assert_eq!(before, h.session.execute("develop.get", &json!({"id":id})).unwrap());
++}
++
++#[test]
 +fn region_plan_and_render_use_engine_frame_and_standard_region_jobs() {
 +    let mut h = Headless::demo();
 +    let id = h.session.active().unwrap().0;
++    let colors = json!({"point_colors":[
++        {"lum":0.5,"chroma":0.1,"hue":30.0},
++        {"lum":0.6,"chroma":0.12,"hue":210.0}
++    ]});
++    h.session.execute("develop.merge", &json!({"settings":colors})).unwrap();
++    let settings_before = h.session.execute("develop.get", &json!({"id":id})).unwrap();
 +    let whole = call_tool(&mut h, "render_preview", &json!({"id":id,"max_side":64,"include_frame":true}));
 +    assert!(!whole.is_error, "{whole:?}");
 +    let whole_meta: Value = serde_json::from_str(whole.content[1]["text"].as_str().unwrap()).unwrap();
 +    let args = |operation: &str, target: Value| json!({"id":id.to_string(),"region_contract":1,"operation":operation,"target":target});
 +    let plan_target = json!({"kind":"after","quality":"full","geometryId":whole_meta["frame"]["geometryId"],"desiredLongEdge":64});
-+    let plan = call_tool(&mut h, "render_region_preview", &args("plan", plan_target));
++    let plan = call_tool(&mut h, "render_region_preview", &args("plan", plan_target.clone()));
 +    assert!(!plan.is_error, "{plan:?}");
 +    let planned: Value = serde_json::from_str(plan.content[0]["text"].as_str().unwrap()).unwrap();
 +    assert_eq!(plan.structured.as_ref().unwrap(), &planned);
@@ -644,7 +739,7 @@ index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..87bfa7f32454d9bb13133e167743a420
 +    let (x, y, w, hgt) = (full_w / 4, full_h / 4, (full_w / 2).max(1), (full_h / 2).max(1));
 +    let target = json!({"kind":"after","quality":"full","geometryId":planned["geometryId"],
 +        "fullWidth":full_w,"fullHeight":full_h,"window":{"x":x,"y":y,"w":w,"h":hgt}});
-+    let rendered = call_tool(&mut h, "render_region_preview", &args("render", target));
++    let rendered = call_tool(&mut h, "render_region_preview", &args("render", target.clone()));
 +    assert!(!rendered.is_error, "{rendered:?}");
 +    let meta: Value = serde_json::from_str(rendered.content[1]["text"].as_str().unwrap()).unwrap();
 +    let (encoded, mime) = rendered.image().unwrap();
@@ -658,6 +753,26 @@ index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..87bfa7f32454d9bb13133e167743a420
 +    assert_eq!(meta["window"]["y"], y);
 +    assert_eq!(meta["window"]["w"], w);
 +    assert_eq!(meta["window"]["h"], hgt);
++    let mut overlay_args = args("render", target.clone());
++    overlay_args["point_color_range_index"] = json!(1);
++    let overlay = call_tool(&mut h, "render_region_preview", &overlay_args);
++    assert!(!overlay.is_error, "{overlay:?}");
++    let overlay_meta: Value = serde_json::from_str(overlay.content[1]["text"].as_str().unwrap()).unwrap();
++    assert_eq!(overlay_meta["pointColorRangeIndex"], 1);
++    assert_eq!(overlay_meta["geometryId"], target["geometryId"]);
++    assert_eq!(overlay_meta["window"], target["window"]);
++    let mut plan_overlay = args("plan", plan_target.clone());
++    plan_overlay["point_color_range_index"] = json!(0);
++    assert!(call_tool(&mut h,"render_region_preview",&plan_overlay).is_error);
++    let mut invalid_overlay = args("render", target.clone());
++    invalid_overlay["point_color_range_index"] = json!(7);
++    assert!(call_tool(&mut h,"render_region_preview",&invalid_overlay).is_error);
++    let mut before_overlay = target.clone();
++    before_overlay["kind"] = json!("before");
++    let mut invalid_before = args("render", before_overlay);
++    invalid_before["point_color_range_index"] = json!(0);
++    assert!(call_tool(&mut h,"render_region_preview",&invalid_before).is_error);
++    assert_eq!(settings_before, h.session.execute("develop.get", &json!({"id":id})).unwrap());
 +}
 +
 +#[test]
@@ -679,7 +794,7 @@ index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..87bfa7f32454d9bb13133e167743a420
 +    assert_eq!(h.session.execute("develop.get", &json!({"id": id})).unwrap(), before);
 +}
 diff --git a/crates/mcp/src/tools.rs b/crates/mcp/src/tools.rs
-index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..f83c3091f24a803327943f2429cd58b6427aacce 100644
+index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..9115f9d0ce374f638701fd2fdd518e83da6f95cc 100644
 --- a/crates/mcp/src/tools.rs
 +++ b/crates/mcp/src/tools.rs
 @@ -78,7 +78,29 @@ fn ids_schema(what: &str) -> Value {
@@ -712,7 +827,7 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..f83c3091f24a803327943f2429cd58b6
          tool(
              "command_list",
              "List commands",
-@@ -120,6 +142,10 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
+@@ -120,6 +142,12 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
              json!({
                  "id": {"type": "integer", "description": "Photo id (default: the active photo); selection is unchanged"},
                  "max_side": {"type": "integer", "description": "Long edge in pixels (default 1024, max 4096)"},
@@ -720,10 +835,12 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..f83c3091f24a803327943f2429cd58b6
 +                "crop_edit": {"type": "boolean", "description": "Render the uncropped image for crop editing"},
 +                "before": {"type": "boolean", "description": "Render the import baseline"},
 +                "quality": {"type": "string", "enum": ["draft", "full"], "description": "Render quality"},
++                "point_color_range_index": {"type": "integer", "minimum": 0, "maximum": 7,
++                    "description": "Visualize the selected Point Color range (After only; requires Color enabled)"},
                  "format": {"type": "string", "enum": ["png", "jpeg"], "description": "Image encoding (default png; jpeg is smaller)"},
              }),
              &[],
-@@ -219,6 +245,10 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
+@@ -219,6 +247,10 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
              json!({
                  "id": {"type": "integer", "description": "Photo id (default: the active photo); selection is unchanged"},
                  "size": {"type": "integer", "description": "Long edge in pixels (default 1024, max 4096)"},
@@ -734,7 +851,7 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..f83c3091f24a803327943f2429cd58b6
                  "format": {"type": "string", "enum": ["png", "jpeg"], "description": "Image encoding (default png; jpeg is smaller)"},
                  "path": {"type": "string", "description": "Also save the rendered file here"}
              }),
-@@ -334,6 +364,21 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
+@@ -334,6 +366,23 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
              ),
          ]);
      }
@@ -747,6 +864,8 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..f83c3091f24a803327943f2429cd58b6
 +            "id": {"type": "string"},
 +            "region_contract": {"type": "integer", "enum": [1]},
 +            "operation": {"type": "string", "enum": ["plan", "render"]},
++            "point_color_range_index": {"type": "integer", "minimum": 0, "maximum": 7,
++                "description": "Visualize the selected Point Color range (render operation, After only; requires Color enabled)"},
 +            "target": {"oneOf": [region_schema["$defs"]["frameRequest"].clone(), region_schema["$defs"]["request"].clone()]}
 +        }),
 +        &["id", "region_contract", "operation", "target"],
@@ -756,7 +875,7 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..f83c3091f24a803327943f2429cd58b6
      v
  }
  
-@@ -378,6 +423,7 @@ fn annotations(name: &str, title: &str) -> Value {
+@@ -378,6 +427,7 @@ fn annotations(name: &str, title: &str) -> Value {
              | "list_commands"
              | "doc_inspect"
              | "render_preview"
@@ -764,7 +883,7 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..f83c3091f24a803327943f2429cd58b6
              | "query_photos"
              | "list_controls"
              | "get_develop"
-@@ -557,11 +603,29 @@ fn render_photo(b: &mut dyn Backend, args: &Value) -> ToolResult {
+@@ -557,11 +607,29 @@ fn render_photo(b: &mut dyn Backend, args: &Value) -> ToolResult {
          Err(e) => return ToolResult::error(e),
      };
      let path = tmp.file.to_string_lossy().to_string();
@@ -776,7 +895,7 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..f83c3091f24a803327943f2429cd58b6
 +    if let Some(crop_edit) = args.get("crop_edit") {
 +        request["crop_edit"] = crop_edit.clone();
 +    }
-+    for key in ["before", "quality"] {
++    for key in ["before", "quality", "point_color_range_index"] {
 +        if let Some(value) = args.get(key) {
 +            request[key] = value.clone();
 +        }
@@ -795,7 +914,7 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..f83c3091f24a803327943f2429cd58b6
      meta["id"] = json!(id);
      image_result(&tmp.file, None, args.get("format").and_then(Value::as_str).unwrap_or("png"), args.get("path").and_then(Value::as_str), meta)
  }
-@@ -609,6 +673,76 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
+@@ -609,6 +677,88 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
          return ToolResult::from(exec(b, &rest.replace('_', "."), args.clone()));
      }
      match name {
@@ -858,13 +977,25 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..f83c3091f24a803327943f2429cd58b6
 +                _ => return ToolResult::error("invalid region operation"),
 +            };
 +            if operation == "plan" {
++                if args.get("point_color_range_index").is_some() {
++                    return ToolResult::error("point_color_range_plan_unsupported");
++                }
 +                return ToolResult::from(b.call("ui.region", json!({"id":id,"operation":operation,"target":target})));
 +            }
++            let point_color_range_index = match args.get("point_color_range_index") {
++                None => None,
++                Some(value) => match value.as_u64().filter(|index| *index <= 7) {
++                    Some(index) => Some(index),
++                    None => return ToolResult::error("invalid point_color_range_index"),
++                },
++            };
 +            let tmp = match TempPng::new("region") {
 +                Ok(t) => t,
 +                Err(e) => return ToolResult::error(e),
 +            };
-+            match b.call("ui.region", json!({"id":id,"operation":operation,"target":target,"path":tmp.file.to_string_lossy()})) {
++            let mut request = json!({"id":id,"operation":operation,"target":target,"path":tmp.file.to_string_lossy()});
++            if let Some(index) = point_color_range_index { request["point_color_range_index"] = json!(index); }
++            match b.call("ui.region", request) {
 +                Ok(meta) => image_result(&tmp.file, None, "png", None, meta),
 +                Err(error) => ToolResult::error(error),
 +            }
@@ -872,12 +1003,12 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..f83c3091f24a803327943f2429cd58b6
          "list_commands" | "command_list" => {
              let filter = s("filter").unwrap_or("").to_lowercase();
              let enabled_only = args.get("enabled_only").and_then(Value::as_bool).unwrap_or(false);
-@@ -664,7 +798,7 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
+@@ -664,7 +814,7 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
          }
          "doc_inspect" => ToolResult::from(doc_inspect(b)),
          "render_preview" => {
 -            let mut a = obj(args, &["id", "format"]);
-+            let mut a = obj(args, &["id", "format", "include_frame", "crop_edit", "before", "quality"]);
++            let mut a = obj(args, &["id", "format", "include_frame", "crop_edit", "before", "quality", "point_color_range_index"]);
              if let Some(m) = args.get("max_side") {
                  a["size"] = m.clone();
              }
