@@ -947,6 +947,37 @@ describe('RAW document lifetime', () => {
     await flush();
   }
 
+  it('keeps the curve Draft target plain while Whole Preview shows a Point Color range', async () => {
+    vi.mocked(api.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), point_colors: [pointColor] }));
+    vi.mocked(api.rawPreview).mockResolvedValue(pointFrame);
+    await render('a'); await flush();
+    act(() => current!.setPointColorRangeIndex(0)); await flush();
+    expect(vi.mocked(api.rawPreview).mock.calls.at(-1)?.[4]?.pointColorRangeIndex).toBe(0);
+    act(() => current!.beginCurveInteraction('master')); await flush();
+    act(() => current!.updateCurveInteraction([{ x: 0, y: 0 }, { x: .5, y: .7 }, { x: 1, y: 1 }]));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 65)); });
+    const curveCall = vi.mocked(api.rawPreview).mock.calls.find(call => call[5]);
+    expect(curveCall?.[4]).toMatchObject({ quality: 'draft' });
+    expect(curveCall?.[4]).not.toHaveProperty('pointColorRangeIndex');
+    act(() => current!.cancelCurveInteraction()); await flush();
+  });
+
+  it('adopts a plain Point Color Draft while Show Range is paused for Before', async () => {
+    await beginPointColor();
+    const previous = current!.url;
+    act(() => current!.setPointColorRangeIndex(0));
+    await render('a', true);
+    vi.mocked(api.rawPreview).mockResolvedValueOnce({ ...pointFrame, quality: 'draft', interactionSequence: 1 });
+    act(() => current!.updatePointColorInteraction(38));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 65)); });
+    await flush();
+    expect(vi.mocked(api.updateRawPointColorInteraction).mock.calls[0]?.[3].pointColorRangeIndex).toBeUndefined();
+    expect(current!.quality).toBe('draft');
+    expect(current!.url).not.toBe(previous);
+    await act(async () => { current!.cancelPointColorInteraction(); });
+    await flush();
+  });
+
   it('cancels an acknowledged Point Color draft before explicit discard', async () => {
     await beginPointColor();
     await act(async () => { await current!.discardChanges(); });

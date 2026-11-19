@@ -78,7 +78,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   if (pointColorRangeRef.current?.assetId !== assetId) pointColorRangeRef.current = null;
   useEffect(() => { setPointColorRange(null); }, [assetId]);
   const rangePausedRef = useRef(beforeRequested);
-  rangePausedRef.current = beforeRequested;
+  const effectivePointColorRange = () => !rangePausedRef.current && pointColorRangeRef.current?.assetId === assetId
+    ? pointColorRangeRef.current.index : undefined;
   const [curveChannel, setCurveChannel] = useState<import('./rawApi').RawCurveChannel>('master');
   const [targetedCurveActive, setTargetedCurveActive] = useState(false);
   const [mixerTargetActive, setMixerTargetActive] = useState<import('./rawApi').RawMixerTarget | null>(null);
@@ -90,7 +91,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   const [targetedCurvePoints, setTargetedCurvePoints] = useState<{channel: import('./rawApi').RawCurveChannel; points: import('./rawApi').RawCurvePoint[]; sequence: number} | undefined>();
   const [urls] = useState(() => new RawPreviewUrls());
   const wholeSurfaces = useRef<{ after?: RawWholeSurface; before?: RawWholeSurface }>({});
-  const curveTarget = useRef<RawDisplayTarget>({ quality: 'draft', mode: 'whole', maxSide: 1024, viewGeneration: 0, geometryId: null });
+  const curveTarget = useRef<Omit<RawDisplayTarget, 'pointColorRangeIndex'>>({ quality: 'draft', mode: 'whole', maxSide: 1024, viewGeneration: 0, geometryId: null });
   const curvePresentation = useRef<{ active: boolean; sequence: number; displayedSequence: number; url?: string; baseline?: {
     url?: string; width?: number; height?: number; frame?: RawGeometry; quality?: 'draft' | 'full';
     imageRevision?: number; surface?: RawWholeSurface;
@@ -513,8 +514,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       // A gesture keeps its selected size; the final Full re-evaluates the latest view.
       if (!editor?.interacting && !latestView?.interacting && latestView) side = rawWholeSide(latestView, side) ?? side;
       const quality = editor?.interacting || latestView?.interacting ? 'draft' : 'full';
-      const requestedRange = pointColorRangeRef.current?.assetId === assetId ? pointColorRangeRef.current.index : undefined;
-      const rangeIndex = !rangePausedRef.current && !cropMode && editor?.confirmed.sections.color
+      const requestedRange = effectivePointColorRange();
+      const rangeIndex = !cropMode && editor?.confirmed.sections.color
         && requestedRange !== undefined && !!editor.confirmed.point_colors[requestedRange] ? requestedRange : undefined;
       const key = `${cropMode}:${doc.documentToken}:${doc.revision}:${quality}:${side}:${viewGeneration}:${rangeIndex ?? 'plain'}`;
       if (key === displayTargetKey) return;
@@ -524,8 +525,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       displayTargetKey = key;
       const geometryId = publishedFrame?.revision === doc.revision && publishedFrame.quality === quality
         ? publishedFrame.frame.geometryId : null;
-      curveTarget.current = { quality: 'draft', mode: 'whole', maxSide: Math.min(side, 512), viewGeneration, geometryId,
-        ...(rangeIndex === undefined ? {} : { pointColorRangeIndex: rangeIndex }) };
+      curveTarget.current = { quality: 'draft', mode: 'whole', maxSide: Math.min(side, 512), viewGeneration, geometryId };
       const owner = editor, view = viewGeneration;
       const acknowledged = () => valid() && editor === owner && !editor?.mutating && view === viewGeneration
         && editor?.confirmed.generation === doc.generation && editor.confirmed.documentToken === doc.documentToken
@@ -735,14 +735,14 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         },
         pointColorPreview: (frame, doc, sequence, target) => {
           const owner = curvePresentation.current;
-          const selectedRange = pointColorRangeRef.current?.assetId === assetId ? pointColorRangeRef.current.index : undefined;
-          const rangeCurrent = !rangePausedRef.current && selectedRange === target.pointColorRangeIndex;
-          if (!owner.active || sequence <= owner.displayedSequence || !current() || !rangeCurrent) return;
+          // A pause selects the ordinary bitmap, which can still belong to the active gesture.
+          const valid = () => owner === curvePresentation.current && owner.active && sequence > owner.displayedSequence
+            && current() && doc.generation === editor?.confirmed.generation
+            && doc.documentToken === editor?.confirmed.documentToken
+            && effectivePointColorRange() === target.pointColorRangeIndex;
+          if (!valid()) return;
           void decodeFrame(frame, controller.signal, urls).then(candidate => {
-            if (!owner.active || sequence <= owner.displayedSequence || !current()
-              || doc.generation !== editor?.confirmed.generation || doc.documentToken !== editor?.confirmed.documentToken
-              || rangePausedRef.current || (pointColorRangeRef.current?.assetId === assetId
-                ? pointColorRangeRef.current.index : undefined) !== target.pointColorRangeIndex) {
+            if (!valid()) {
               urls.release(candidate); return;
             }
             owner.displayedSequence = sequence;
@@ -759,7 +759,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
               imageRevision: doc.revision, displayError: undefined } : previous);
             overlay.refresh();
           }).catch(cause => {
-            if (owner.active && sequence >= owner.displayedSequence) {
+            if (valid()) {
               const code = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
               setState(previous => previous && ({ ...previous, displayError: code }));
             }
@@ -1493,6 +1493,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   };
   const cancelTargetedGesture = () => {
     setTargetedCurvePoints(undefined);
+    // Before also calls this while a Point Color slider still owns the Draft presentation.
+    if (saverRef.current?.pointColorInteracting) return;
     curvePresentation.current.active = false;
     if (saverRef.current?.curveInteracting) void saverRef.current.cancelCurveInteraction();
   };
@@ -1818,8 +1820,11 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     },
     updatePointColorInteraction: (value: number) => {
       const saver = saverRef.current;
-      if (callbackEditor() && saver?.pointColorInteracting && !frozen.current && curvePresentation.current.active)
-        saver.updatePointColorInteraction(value, curveTarget.current);
+      if (callbackEditor() && saver?.pointColorInteracting && !frozen.current && curvePresentation.current.active) {
+        const index = effectivePointColorRange();
+        saver.updatePointColorInteraction(value, index === undefined ? curveTarget.current
+          : { ...curveTarget.current, pointColorRangeIndex: index });
+      }
     },
     finishPointColorInteraction: () => {
       const saver = saverRef.current;

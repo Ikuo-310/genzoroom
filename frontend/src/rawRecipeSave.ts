@@ -209,20 +209,22 @@ export class RawRecipeSave {
   private async pumpPointColorInteraction(gesture: PointColorGesture) {
     while (gesture.pending !== undefined && this.active && this.pointColorGesture === gesture) {
       const value = gesture.pending;
+      // An update and its preview share one target even if input changes before the ACK.
+      const target = gesture.display!;
       gesture.pending = undefined;
       const id = await gesture.started;
       const sequence = ++gesture.sequence;
-      const applied = await updateRawPointColorInteraction(gesture.doc, sequence, gesture.controller.signal, gesture.display!,
+      const applied = await updateRawPointColorInteraction(gesture.doc, sequence, gesture.controller.signal, target,
         { id, sequence, control: gesture.control, value });
       if (applied !== sequence) throw new RawApiError('raw_point_color_interaction_conflict');
       if (!this.active || this.pointColorGesture !== gesture || applied <= gesture.displayedSequence) continue;
       gesture.appliedValue = value;
       gesture.appliedSequence = applied;
       gesture.displayedSequence = applied;
-      const preview = rawPreview(gesture.doc, sequence, gesture.controller.signal, 'after', gesture.display,
+      const preview = rawPreview(gesture.doc, sequence, gesture.controller.signal, 'after', target,
         undefined, undefined, undefined, { id, sequence: applied }).then(frame => {
-        if (this.active && this.pointColorGesture === gesture && frame.interactionSequence === gesture.displayedSequence)
-          this.options.pointColorPreview?.(frame, gesture.doc, applied, gesture.display!);
+        if (this.active && this.pointColorGesture === gesture && frame.interactionSequence === applied && applied === gesture.displayedSequence)
+          this.options.pointColorPreview?.(frame, gesture.doc, applied, target);
       }).catch(cause => {
         // Delivery can be superseded even though Native acknowledged the final update.
         if (!(cause instanceof RawSuperseded)) throw cause;
