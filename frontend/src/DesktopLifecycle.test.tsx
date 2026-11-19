@@ -2,6 +2,11 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+const { stopPublicationStream, resumePublicationStream } = vi.hoisted(() => ({
+  stopPublicationStream: vi.fn(), resumePublicationStream: vi.fn(),
+}));
+vi.mock('./thumbnailPublication', () => ({ closeThumbnailPublicationStream: stopPublicationStream,
+  resumeThumbnailPublicationStream: resumePublicationStream }));
 import { DesktopLifecycleProvider, useDesktopCloseGuard } from './DesktopLifecycle';
 import i18n from './i18n';
 
@@ -34,6 +39,7 @@ beforeEach(async () => {
   await i18n.changeLanguage('en');
   respond.mockReset().mockResolvedValue(undefined);
   prepare.mockReset(); resume.mockReset();discard.mockReset().mockResolvedValue();
+  stopPublicationStream.mockReset(); resumePublicationStream.mockReset();
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   await act(async () => root.render(<DesktopLifecycleProvider><GuardedApp /></DesktopLifecycleProvider>));
 });
@@ -76,6 +82,17 @@ it('keeps the existing close guard active when a save fails', async () => {
   expect(respond).toHaveBeenCalledWith({ kind: 'closeResult', requestId, saved: false });
   expect(resume).toHaveBeenCalledOnce();
   expect(document.body.textContent).toContain('Closing was cancelled');
+});
+
+it('closes publication SSE after a successful save and resumes it when host shutdown is cancelled', async () => {
+  prepare.mockResolvedValue(true);
+  const requestId = 'f'.repeat(64);
+  await act(async () => event('genzoroom:close-request', { requestId }));
+  await flush();
+  expect(stopPublicationStream).toHaveBeenCalledOnce();
+  expect(stopPublicationStream.mock.invocationCallOrder[0]).toBeLessThan(respond.mock.invocationCallOrder[1]);
+  await act(async () => event('genzoroom:close-cancelled', { requestId, code: 'backend_shutdown_failed' }));
+  expect(resumePublicationStream).toHaveBeenCalledOnce();
 });
 
 it('does not let a delayed rejection for an old closeResult cancel the current request', async () => {

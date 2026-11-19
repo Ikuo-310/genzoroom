@@ -2,6 +2,7 @@ import { RawFailure,rawFailureCode } from './RawFailure';
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
+import { closeThumbnailPublicationStream, resumeThumbnailPublicationStream } from './thumbnailPublication';
 
 type CloseGuard = { prepare: (retry?:boolean) => Promise<boolean>; resume: () => void; discard?:()=>Promise<void>; failureCode?:()=>string|undefined };
 type Message = { kind: 'ready' | 'restart' | 'close' } | { kind: 'closeResult'; requestId: string; saved: boolean; discarded?:true };
@@ -77,8 +78,9 @@ export function DesktopLifecycleProvider({ children }: { children: ReactNode }) 
         if (!mounted || pending.current !== requestId) return;
         if (saved || discarded) setPhase('waiting');
         else fail();
+        if (saved || discarded) closeThumbnailPublicationStream();
         try { await bridge.respond({ kind: 'closeResult', requestId, saved, ...(discarded?{discarded:true as const}:{}) }); }
-        catch { fail(false, requestId); }
+        catch { resumeThumbnailPublicationStream(); fail(false, requestId); }
       })();
     };
     const cancelled = (event: Event) => {
@@ -87,6 +89,7 @@ export function DesktopLifecycleProvider({ children }: { children: ReactNode }) 
       if (typeof requestId === 'string') {
         if (pending.current !== requestId) return;
       } else if (pending.current) return;
+      resumeThumbnailPublicationStream();
       fail(detail?.code === 'backend_exited_unexpectedly', typeof requestId === 'string' ? requestId : undefined);
     };
     window.addEventListener('genzoroom:close-request', request);

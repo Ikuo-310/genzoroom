@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { getThumbnailPublication, subscribeThumbnailPublication } from './thumbnailPublication';
+import { closeThumbnailPublicationStream, getThumbnailPublication, subscribeThumbnailPublication } from './thumbnailPublication';
 
 const generation = 'a'.repeat(32);
 const nextGeneration = 'b'.repeat(32);
@@ -94,4 +94,21 @@ it('retries a failed shared batch at bounded intervals and resynchronizes on rec
   requests[4].reply(5, '5');
   await vi.advanceTimersByTimeAsync(0);
   expect(getThumbnailPublication('a')?.publicationVersion).toBe('5');
+});
+
+it('closes the shared stream and aborts all synchronization during application shutdown', async () => {
+  const requests = deferredStatus();
+  watch(['shutdown-asset']);
+  const stream = Stream.latest;
+  await vi.advanceTimersByTimeAsync(25);
+  expect(requests).toHaveLength(1);
+  closeThumbnailPublicationStream();
+  expect(stream.close).toHaveBeenCalledOnce();
+  expect(requests[0].signal.aborted).toBe(true);
+  stream.emit(generation, 1, 'shutdown-asset', '2');
+  watch(['late-asset']);
+  await vi.advanceTimersByTimeAsync(10000);
+  expect(requests).toHaveLength(1);
+  expect(getThumbnailPublication('shutdown-asset')).toBeUndefined();
+  expect(Stream.latest).toBe(stream);
 });

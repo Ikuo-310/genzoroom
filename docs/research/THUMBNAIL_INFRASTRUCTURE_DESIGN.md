@@ -402,3 +402,11 @@ Filmstripの全AssetでP4共通の`ThumbnailImage`とP5のAsset公開版購読�
 
 単体テストは画像属性を検証するが、実際にブラウザーが何件の画像を取得するかは検証しない。WebView2でのlazy loading、横スクロール距離・速度と取得件数、初期取得数、アクティブ切替時の待ち時間、画像要素の再取得数、メモリ使用量はP7の大量画像実測で確認する。
 
+## P5追加回帰対応：Windows終了時のSSE切断
+
+Windows Desktopのclose requestでは、Frontendが保存ガードを完了して`closeResult`を返した後にTauriがBackend shutdownを開始する。P5の共有EventSourceは画面遷移用の1秒猶予で維持され、closeResult前に停止していなかった。WebView2破棄とHTTP disconnectがshutdown開始に追いつかないと、Uvicornが開いているSSE responseの終了を待ち、終了UIがBackend終了待ちのままになる経路があった。SSE購読以外のRecipe保存・Export終了待機には変更を加えていない。
+
+保存ガード成功または明示Discard完了の後、Frontendは共有EventSource listenerを解除し、`close()`で自動再接続を止め、状態取得fetchをabortし、再同期・Retry・idle timerを解除する。終了フラグ中の再購読は無効化する。Hostからclose-cancelledが返る場合はSSEを再作成して購読中Assetの状態を再同期する。保存失敗時はEventSourceを止めず、Retry可能状態を維持する。BackendのSSE generatorはHTTP disconnect/cancellation時の既存finallyでsubscriber queueを解放する。
+
+Frontendのclose順序、保存失敗時の維持、shutdown cancel時の再開、終了中の再購読抑止、状態要求のabortを自動テストで確認した。BackendではSSE response iterator終了時にsubscriberが解放されることを確認した。Frontend関連42件、Backend関連84件、TypeScriptチェック、本番build、`git diff --check`が成功した。Windows EXEでの終了時間実測はユーザー環境で未確認。
+

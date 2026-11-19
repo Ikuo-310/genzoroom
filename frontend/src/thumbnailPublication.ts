@@ -19,6 +19,7 @@ let controller: AbortController | null = null;
 let activeChunk: string[] = [];
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let idleTimer: ReturnType<typeof setTimeout> | null = null;
+let shuttingDown = false;
 
 function resetSynchronization() {
   streamGeneration += 1;
@@ -183,6 +184,7 @@ function ensureEventSource() {
 }
 
 export function subscribeThumbnailPublication(assetId: string, listener: () => void): () => void {
+  if (shuttingDown) return () => {};
   let assetListeners = listeners.get(assetId);
   if (!assetListeners) { assetListeners = new Set(); listeners.set(assetId, assetListeners); }
   assetListeners.add(listener);
@@ -219,6 +221,34 @@ export function subscribeThumbnailPublication(assetId: string, listener: () => v
       source?.close();
     }, 1000);
   };
+}
+
+export function closeThumbnailPublicationStream() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  controller?.abort();
+  controller = null;
+  if (reconcileTimer !== null) clearTimeout(reconcileTimer);
+  reconcileTimer = null;
+  if (retryTimer !== null) clearTimeout(retryTimer);
+  retryTimer = null;
+  if (idleTimer !== null) clearTimeout(idleTimer);
+  idleTimer = null;
+  pendingIds.clear();
+  retryIds.clear();
+  retries.clear();
+  streamListeners?.abort();
+  streamListeners = null;
+  eventSource?.close();
+  eventSource = null;
+  activeChunk = [];
+}
+
+export function resumeThumbnailPublicationStream() {
+  if (!shuttingDown) return;
+  shuttingDown = false;
+  ensureEventSource();
+  scheduleReconciliation();
 }
 
 export function refreshThumbnailPublication(assetId: string) {

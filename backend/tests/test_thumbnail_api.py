@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
+from starlette.requests import Request
 
 from backend_logging import backend_logger
 import edit_store
@@ -572,4 +573,22 @@ def test_api_reset_during_generation_never_resurrects_cache(setup):
         finally:
             release.set()
             await scheduler.close()
+    asyncio.run(run())
+
+
+def test_closing_sse_response_releases_backend_subscriber(setup):
+    _, _, _, _, _ = setup
+    hub = main.app.state.thumbnail_publication_hub
+
+    async def run():
+        request = Request({"type": "http", "method": "GET", "path": "/thumbnail-publications/events",
+                          "headers": [], "query_string": b"", "server": ("test", 80),
+                          "client": ("test", 1), "scheme": "http", "app": main.app})
+        response = await main.thumbnail_publication_events(request)
+        iterator = response.body_iterator
+        assert await anext(iterator) == b": connected\n\n"
+        assert len(hub._subscribers) == 1
+        await iterator.aclose()
+        assert len(hub._subscribers) == 0
+
     asyncio.run(run())
