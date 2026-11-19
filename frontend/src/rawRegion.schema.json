@@ -231,6 +231,11 @@
         "requestId": {
           "type": "string",
           "pattern": "^[a-f0-9]{32}$"
+        },
+        "pointColorRangeIndex": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 7
         }
       }
     },
@@ -469,6 +474,11 @@
             "after",
             "before"
           ]
+        },
+        "pointColorRangeIndex": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 7
         }
       }
     },

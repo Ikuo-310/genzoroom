@@ -44,6 +44,8 @@ def validate_target(target, operation):
             raise ValueError()
         if target['identity']['kind'] == 'after' and target['identity']['revision'] != target['documentRevision']:
             raise ValueError()
+        if 'pointColorRangeIndex' in target and target['identity']['kind'] != 'after':
+            raise ValueError()
         if operation == 'render':
             w, fw, fh, c = target['window'], target['fullWidth'], target['fullHeight'], target['context']
             if w['w'] * w['h'] > MAX_PIXELS or w['x'] + w['w'] > fw or w['y'] + w['h'] > fh:
@@ -103,7 +105,12 @@ def validate_result(result, target, operation, photo_id):
         native_keys = ({'kind','quality','geometryId','nativeWidth','nativeHeight','fullWidth','fullHeight'}
                        if operation == 'plan' else
                        {'kind','quality','geometryId','fullWidth','fullHeight','window','width','height'})
+        if 'pointColorRangeIndex' in target:
+            native_keys.add('pointColorRangeIndex')
         if not isinstance(meta, dict) or set(meta) != native_keys:
+            raise ValueError()
+        if 'pointColorRangeIndex' in target and (type(meta['pointColorRangeIndex']) is not int
+                or meta['pointColorRangeIndex'] != target['pointColorRangeIndex']):
             raise ValueError()
         mismatches = [key for key, expected in (('geometryId',target['geometryId']),
             ('quality',target['quality']),('kind',target['identity']['kind'])) if meta.get(key) != expected]

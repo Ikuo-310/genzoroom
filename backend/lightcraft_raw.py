@@ -98,6 +98,7 @@ class PreviewFrame:
     _crop_json: str | None = field(default=None, repr=False)
     interaction_id: str | None = None
     interaction_sequence: int | None = None
+    point_color_range_index: int | None = None
 
     @property
     def crop_display(self):
@@ -323,6 +324,7 @@ class PreviewTicket:
         self.region_document_token = None
         self.interaction_id = None
         self.interaction_sequence = None
+        self.point_color_range_index = None
         self.reason = "replaced"
         self._future = asyncio.get_running_loop().create_future()
         self._future.add_done_callback(lambda f: None if f.cancelled() else f.exception())
@@ -522,7 +524,7 @@ def _source_info(value):
         raise LightCraftError("raw_source_unavailable") from None
 
 
-def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=None, geometry=None, quality=None, frame_only=False):
+def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=None, geometry=None, quality=None, frame_only=False, point_color_range_index=None):
     try:
         content = result["content"]
         if len(content) != 2 or any(not isinstance(c, dict) for c in content):
@@ -539,6 +541,8 @@ def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=N
             raise ValueError()
         metadata = _decode(text.encode("utf-8"))
         allowed = {"id", "width", "height"}
+        if point_color_range_index is not None:
+            allowed.add('pointColorRangeIndex')
         if kind == "before":
             allowed |= {"kind", "beforeFingerprint", "geometry"}
         if isinstance(metadata, dict) and "kind" in metadata:
@@ -551,6 +555,9 @@ def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=N
             allowed.add("frame")
         if not isinstance(metadata, dict) or set(metadata) != allowed or \
                 type(metadata["id"]) is not int or metadata["id"] != photo_id:
+            raise ValueError()
+        if point_color_range_index is not None and (type(metadata['pointColorRangeIndex']) is not int
+                or metadata['pointColorRangeIndex'] != point_color_range_index):
             raise ValueError()
         if metadata.get("kind", "after") != kind:
             raise ValueError()
@@ -1924,12 +1931,16 @@ class LightCraftRawSession:
             raise
 
     async def update_point_color_interaction(self, handle, interaction_id, expected_revision, sequence, value, *,
-                                             max_side=DEFAULT_PREVIEW_SIDE, view_generation=0, geometry_id=None):
+                                             max_side=DEFAULT_PREVIEW_SIDE, view_generation=0, geometry_id=None, point_color_range_index=None):
         from raw_controls import validate_point_color_value, validate_point_colors
         interaction = self._point_color_interaction
         if interaction is None or interaction.interaction_id != interaction_id or interaction.handle != handle \
                 or interaction.state != "open":
             raise LightCraftError("raw_point_color_interaction_stale")
+        if point_color_range_index is not None:
+            from raw_controls import validate_point_color_delete
+            colors = json.loads(interaction.working_settings_json).get('point_colors', [])
+            validate_point_color_delete(point_color_range_index, len(colors))
         if type(expected_revision) is not int or expected_revision != interaction.baseline_revision or \
                 type(sequence) is not int or sequence != interaction.latest_sequence + 1:
             raise LightCraftError("raw_revision_conflict")
@@ -1979,21 +1990,21 @@ class LightCraftRawSession:
             interaction.value = validated
             interaction.working_settings_json = encoded
             ticket = self.request_point_color_interaction_preview(handle, interaction_id, sequence,
-                max_side, view_generation, geometry_id)
+                max_side, view_generation, geometry_id, point_color_range_index)
             interaction.preview_tickets[sequence] = ticket
             for old_sequence in sorted(interaction.preview_tickets)[:-2]:
                 interaction.preview_tickets.pop(old_sequence, None)
             return PointColorInteractionUpdate(interaction_id, sequence, validated, ticket)
 
     def request_point_color_interaction_preview(self, handle, interaction_id, sequence, max_side=DEFAULT_PREVIEW_SIDE,
-                                                view_generation=0, geometry_id=None):
+                                                view_generation=0, geometry_id=None, point_color_range_index=None):
         interaction = self._point_color_interaction
         if interaction is None or interaction.interaction_id != interaction_id or interaction.handle != handle \
                 or interaction.state != "open" or sequence != interaction.latest_sequence or sequence != interaction.applied_sequence:
             raise LightCraftError("raw_point_color_interaction_stale")
         return self.request_preview(handle, interaction.baseline_revision, max_side, kind="after", quality="draft",
             view_generation=view_generation, geometry_id=geometry_id, interaction_id=interaction_id,
-            interaction_sequence=sequence)
+            interaction_sequence=sequence, point_color_range_index=point_color_range_index)
 
     async def end_point_color_interaction(self, handle, interaction_id, expected_revision, control, value):
         from raw_controls import validate_point_color_value
@@ -2826,8 +2837,11 @@ class LightCraftRawSession:
 
     def request_preview(self, handle, expected_revision, max_side=DEFAULT_PREVIEW_SIDE, *, kind="after",
                         quality=None, serial=0, view_generation=0, geometry_id=None, mode="whole",
-                        interaction_id=None, interaction_sequence=None):
+                        interaction_id=None, interaction_sequence=None, point_color_range_index=None):
         photo = self._photo(handle, active=True)
+        if point_color_range_index is not None and (type(point_color_range_index) is not int
+                or not 0 <= point_color_range_index <= 7 or kind != 'after' or mode != 'whole'):
+            raise LightCraftError('raw_invalid_preview_request')
         interaction = self._ensure_curve_interaction_owner(interaction_id)
         mixer = self._mixer_interaction
         mixer = mixer if mixer is not None and mixer.interaction_id == interaction_id else None
@@ -2897,6 +2911,7 @@ class LightCraftRawSession:
             # v0.20 reports its immutable import fingerprint with the rendered Before metadata.
             quality = "full"
         ticket.mode = mode
+        ticket.point_color_range_index = point_color_range_index
         ticket.quality, ticket.adaptive = quality or "full", quality is not None
         ticket.serial, ticket.view_generation, ticket.geometry_id = serial, view_generation, geometry_id
         if self._worker is None or self._worker.done():
@@ -3075,6 +3090,8 @@ class LightCraftRawSession:
                                       and await self.manager._raw_frame_supported(self._generation))
                         if frame_only:
                             args = {"include_frame": True}
+                        if ticket.point_color_range_index is not None:
+                            args['point_color_range_index'] = ticket.point_color_range_index
                         native_started = monotonic()
                         try:
                             if ticket.region_operation is not None:
@@ -3117,9 +3134,11 @@ class LightCraftRawSession:
                             _validation_job=(_validate_simple_crop_png, (result,photo.photo_id,ticket.max_side,crop_expected)) if simple_crop
                             else (_validate_crop_png, (result,photo.photo_id,ticket.max_side,ticket.quality,crop_expected)))
                     else:
-                        image = await self._image(result, photo.photo_id, ticket.max_side, ticket.kind,
-                                              photo.before_fingerprint, geometry,
-                                              *([ticket.quality] if ticket.adaptive and not frame_only else []), frame_only=frame_only)
+                        image = await self._image(result, photo.photo_id, ticket.max_side,
+                            _validation_job=(_validate_png, (result, photo.photo_id, ticket.max_side, ticket.kind,
+                                photo.before_fingerprint, geometry,
+                                ticket.quality if ticket.adaptive and not frame_only else None,
+                                frame_only, ticket.point_color_range_index)))
                     validation_ms = (monotonic() - validation_started) * 1000
                     del result
                     data, w, h = image[:3]
@@ -3151,7 +3170,8 @@ class LightCraftRawSession:
                                                  "pngSha256": digest})
                                                  if self._diagnostics and metadata else None,
                                              interaction_id=ticket.interaction_id,
-                                             interaction_sequence=ticket.interaction_sequence)
+                                             interaction_sequence=ticket.interaction_sequence,
+                                             point_color_range_index=ticket.point_color_range_index)
                         if ticket.kind == "before":
                             self._before_cache = frame
                         ticket._finish(frame)

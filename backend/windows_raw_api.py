@@ -466,7 +466,7 @@ class RawPreviewApi:
         # A replaced, unsent ticket owns no bitmap; its terminal 204 can leave the image pool.
         doc = self.document
         kind = body.get("kind", "after")
-        if set(body) - {"kind"} != {"workspaceId", "generation", "documentToken", "revision", "serial", "quality", "mode", "maxSide", "viewGeneration", "geometryId"} or \
+        if set(body) - {"kind", "pointColorRangeIndex"} != {"workspaceId", "generation", "documentToken", "revision", "serial", "quality", "mode", "maxSide", "viewGeneration", "geometryId"} or \
                 not doc or request.path_params.get("handle") != doc["handle"] or \
                 any(type(body.get(k)) is not int for k in ("generation", "revision")) or \
                 any(body.get(k) != doc[k] for k in ("workspaceId", "generation", "documentToken", "revision")) or \
@@ -779,7 +779,7 @@ class RawPreviewApi:
             kind = body.get("kind", "after")
             adaptive = "quality" in body
             extra = {"quality", "mode", "maxSide", "viewGeneration", "geometryId"} if adaptive else set()
-            if set(body) - {"kind"} - extra != {"workspaceId", "generation", "documentToken", "revision", "serial"} \
+            if set(body) - {"kind", "pointColorRangeIndex"} - extra != {"workspaceId", "generation", "documentToken", "revision", "serial"} \
                     or kind not in ("before", "after") \
                     or any(type(body.get(key)) is not int for key in ("generation", "revision")) \
                     or any(body.get(key) != doc[key] for key in ("generation", "documentToken", "revision")) \
@@ -789,8 +789,14 @@ class RawPreviewApi:
                 raise LightCraftError("raw_invalid_preview_request")
             if body.get('mode') == 'crop-edit' and kind != 'after':
                 raise LightCraftError('raw_invalid_preview_request')
+            if 'pointColorRangeIndex' in body and (type(body['pointColorRangeIndex']) is not int
+                    or not 0 <= body['pointColorRangeIndex'] <= 7 or kind != 'after'
+                    or body.get('mode', 'whole') != 'whole'):
+                raise LightCraftError('raw_invalid_preview_request')
             handle = self._raw_handle
             options = {"kind": kind} if kind == "before" else {}
+            if 'pointColorRangeIndex' in body:
+                options['point_color_range_index'] = body['pointColorRangeIndex']
             if adaptive:
                 supported = await self.manager._raw_preview_supported(doc["generation"])
                 if body.get("mode") == "crop-edit":
@@ -996,20 +1002,26 @@ class RawPreviewApi:
             await self.raw.cancel_point_color_interaction(self._raw_handle, body["interactionId"], doc["revision"])
             return Response(status_code=204, headers={"Cache-Control": "no-store"})
         common = {"interactionId", "serial", "maxSide", "viewGeneration", "geometryId"}
-        if set(body) != identity | common | ({"interactionSequence"} if action == "preview" else {"sequence", "value"}) or \
+        if set(body) - {"pointColorRangeIndex"} != identity | common | ({"interactionSequence"} if action == "preview" else {"sequence", "value"}) or \
                 type(body.get("interactionId")) is not str or re.fullmatch(r"[a-f0-9]{32}", body["interactionId"]) is None or \
                 type(body.get("serial")) is not int or not 0 <= body["serial"] <= 2**31 - 1 or \
                 type(body.get("maxSide")) is not int or not 16 <= body["maxSide"] <= MAX_PREVIEW_SIDE or \
                 type(body.get("viewGeneration")) is not int or body["viewGeneration"] < 0 or \
                 not (body["geometryId"] is None or type(body["geometryId"]) is str and re.fullmatch(r"[a-f0-9]{64}", body["geometryId"])):
             raise LightCraftError("raw_invalid_request")
+        if 'pointColorRangeIndex' in body and (type(body['pointColorRangeIndex']) is not int
+                or not 0 <= body['pointColorRangeIndex'] <= 7):
+            raise LightCraftError('raw_invalid_preview_request')
         if action == "update":
             if type(body.get("sequence")) is not int or not 1 <= body["sequence"] <= 2**31 - 1 or \
                     type(body.get("value")) not in (int, float) or not math.isfinite(body["value"]):
                 raise LightCraftError("raw_invalid_request")
+            if 'pointColorRangeIndex' in body and not await self.manager._raw_point_color_range_supported(doc['generation']):
+                raise LightCraftError('raw_preview_unsupported')
             update = await self.raw.update_point_color_interaction(self._raw_handle, body["interactionId"],
                 doc["revision"], body["sequence"], body["value"], max_side=body["maxSide"],
-                view_generation=body["viewGeneration"], geometry_id=body["geometryId"])
+                view_generation=body["viewGeneration"], geometry_id=body["geometryId"],
+                point_color_range_index=body.get('pointColorRangeIndex'))
             return JSONResponse({"interactionId": update.interaction_id, "interactionSequence": update.sequence,
                 "value": update.value}, headers={"Cache-Control": "no-store"})
         if action != "preview" or type(body.get("interactionSequence")) is not int or \
@@ -1018,11 +1030,22 @@ class RawPreviewApi:
         interaction = self.raw._point_color_interaction
         if interaction is None or interaction.interaction_id != body["interactionId"] or interaction.handle != self._raw_handle:
             raise LightCraftError("raw_point_color_interaction_stale")
-        ticket = interaction.preview_tickets.pop(body["interactionSequence"], None)
+        ticket = interaction.preview_tickets.get(body["interactionSequence"])
         if ticket is None:
+            for pending in (self.raw._running, self.raw._pending):
+                if pending is not None and pending.interaction_id == body['interactionId'] \
+                        and pending.interaction_sequence == body['interactionSequence'] \
+                        and pending.point_color_range_index != body.get('pointColorRangeIndex'):
+                    pending.abandoned = True
             if body["interactionSequence"] <= interaction.latest_sequence:
                 return Response(status_code=204, headers={"X-Raw-Superseded-Reason": "replaced", "Cache-Control": "no-store"})
             raise LightCraftError("raw_point_color_interaction_stale")
+        if ticket.point_color_range_index != body.get('pointColorRangeIndex'):
+            # The changed display target retires this ACK's bitmap, including any waiter already in flight.
+            ticket.abandoned = True
+            interaction.preview_tickets.pop(body["interactionSequence"], None)
+            return Response(status_code=204, headers={"X-Raw-Superseded-Reason": "replaced", "Cache-Control": "no-store"})
+        interaction.preview_tickets.pop(body["interactionSequence"], None)
         frame = await ticket
         if frame is SUPERSEDED:
             return Response(status_code=204, headers={"X-Raw-Superseded-Reason": "replaced", "Cache-Control": "no-store"})
@@ -1032,7 +1055,8 @@ class RawPreviewApi:
                 return Response(status_code=204, headers={"X-Raw-Superseded-Reason": "cancelled", "Cache-Control": "no-store"})
             response = self._preview_response(frame, doc, {"revision": doc["revision"], "serial": body["serial"],
                 "quality": "draft", "mode": "whole", "viewGeneration": body["viewGeneration"],
-                "maxSide": body["maxSide"], "geometryId": body["geometryId"]}, "after", self._raw_handle)
+                "maxSide": body["maxSide"], "geometryId": body["geometryId"],
+                **({'pointColorRangeIndex': body['pointColorRangeIndex']} if 'pointColorRangeIndex' in body else {})}, "after", self._raw_handle)
             if isinstance(response, _ImageResponse):
                 response.headers["X-Raw-Interaction-Id"] = frame.interaction_id
                 response.headers["X-Raw-Interaction-Sequence"] = str(frame.interaction_sequence)
@@ -1048,12 +1072,16 @@ class RawPreviewApi:
             raise LightCraftError("raw_stale_handle")
         if (body.get('mode') == 'crop-edit') != (frame.crop_display is not None):
             raise LightCraftError('lightcraft_invalid_preview')
+        if frame.point_color_range_index != body.get('pointColorRangeIndex'):
+            raise LightCraftError('lightcraft_invalid_preview')
         headers = {"X-Raw-Generation": str(frame.handle.generation), "X-Raw-Token": frame.handle.document_token,
                    "X-Raw-Revision": str(body["revision"]), "X-Raw-Epoch": str(frame.selection_epoch),
                    "X-Raw-Sequence": str(frame.sequence), "X-Raw-Serial": str(body["serial"]),
                    "X-Raw-Width": str(frame.width), "X-Raw-Height": str(frame.height),
                    "Cache-Control": "no-store"}
         headers["X-Raw-Kind"] = frame.kind
+        if frame.point_color_range_index is not None:
+            headers['X-Raw-Point-Color-Range-Index'] = str(frame.point_color_range_index)
         if "quality" in body:
             headers.update({"X-Raw-Quality": frame.quality, "X-Raw-Mode": "whole",
                             "X-Raw-Preview-Contract": "1" if frame.frame is not None else "0",

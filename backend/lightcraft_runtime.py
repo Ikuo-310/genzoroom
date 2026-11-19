@@ -62,6 +62,7 @@ class _Session:
     whole_frame: bool | None = None
     crop_edit: bool | None = None
     region_preview: bool | None = None
+    point_color_range: bool | None = None
     white_balance: bool | None = None
 
 
@@ -674,6 +675,27 @@ class LightCraftManager:
                 for tool in (items if isinstance(items, list) else []))
         return session.crop_edit
 
+    async def _raw_point_color_range_supported(self, generation):
+        session = self._raw_session(generation)
+        if session.point_color_range is None:
+            result = await session.client.request('tools/list', timeout=self._timeouts.request)
+            self._check_raw_session(session)
+            items = result.get('tools', []) if isinstance(result, dict) else []
+            if not isinstance(items, list):
+                items = []
+            session.point_color_range = all(any(
+                isinstance(tool, dict) and tool.get('name') == name
+                and isinstance(tool.get('inputSchema'), dict)
+                and isinstance(tool['inputSchema'].get('properties'), dict)
+                and isinstance(tool['inputSchema']['properties'].get('point_color_range_index'), dict)
+                and tool['inputSchema']['properties']['point_color_range_index'].get('type') == 'integer'
+                and type(tool['inputSchema']['properties']['point_color_range_index'].get('minimum')) is int
+                and type(tool['inputSchema']['properties']['point_color_range_index'].get('maximum')) is int
+                and tool['inputSchema']['properties']['point_color_range_index'].get('minimum') == 0
+                and tool['inputSchema']['properties']['point_color_range_index'].get('maximum') == 7
+                for tool in items) for name in ('render_preview', 'render_region_preview'))
+        return session.point_color_range
+
     async def _raw_region(self, generation, photo_id, operation, target, *, timeout):
         from raw_region import validate_target
         validate_target(target, operation)
@@ -686,6 +708,10 @@ class LightCraftManager:
         else:
             native_target.update(fullWidth=target['fullWidth'], fullHeight=target['fullHeight'], window=target['window'])
         args = {'id':str(photo_id), 'region_contract':1, 'operation':operation, 'target':native_target}
+        if 'pointColorRangeIndex' in target:
+            if not await self._raw_point_color_range_supported(generation):
+                raise LightCraftError('raw_preview_unsupported')
+            args['point_color_range_index'] = target['pointColorRangeIndex']
         try:
             result = await session.client.call_tool_result('render_region_preview', args, timeout=timeout)
             self._check_raw_session(session)
@@ -699,11 +725,15 @@ class LightCraftManager:
 
     async def _raw_preview(self, generation, photo_id, max_side, *, timeout, before=False,
                            quality=None, stage_cache="off", stage_cache_budget_bytes=None, crop_edit=None, include_frame=False,
-                           simple_crop=False):
+                           simple_crop=False, point_color_range_index=None):
         session = self._raw_session(generation)
         if before and not await self._raw_before_supported(generation):
             raise LightCraftError("raw_before_unsupported")
         options = {}
+        if point_color_range_index is not None:
+            if not await self._raw_point_color_range_supported(generation):
+                raise LightCraftError('raw_preview_unsupported')
+            options['point_color_range_index'] = point_color_range_index
         if include_frame:
             if crop_edit is not None or not await self._raw_frame_supported(generation):
                 raise LightCraftError("raw_preview_unsupported")
