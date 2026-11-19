@@ -398,7 +398,9 @@ Filmstripの全AssetでP4共通の`ThumbnailImage`とP5のAsset公開版購読�
 
 表示範囲外Assetも既存の共有SSE／状態同期に購読したままなので、公開版更新は当該AssetのURLにだけ反映される。ResetはP5の通常画像fallbackに従う。Filmstrip独自の通知、取得キュー、先読み、仮想スクロールは追加しない。Recipe保存、写真切替・暗室終了時の即時生成依頼、非ブロッキング移動、History、横スクロール、アクティブ写真の自動可視化、手動Retryを維持する。
 
-`AnshitsuPage.test.tsx`と`ImageViewer.test.tsx`のFilmstrip関連4テストが成功。全Frontend比較ではP6前の`c04fe66`とP6作業ツリーがともに4,201 passed／138 failed／2 skippedだった。失敗138件のテスト名に追加・解消はなく、正規化後のエラー内容にも差がなかった。失敗は既知のRAW関連テスト群である。TypeScriptチェックと本番build、`git diff --check`が成功した。全体テスト失敗の詳細には全体実行時に再現しない5秒timeoutが含まれる。
+`Filmstrip.test.tsx`はP6時に約436行の既存回帰テストを誤って置き換えていた。P6 commitのdiffは38 insertions／430 deletionsで、新規テスト追加だけを確認して既存テスト維持を見落とした。前回の全体比較報告も失敗名を中心に照合し、このテストファイルの全件数・成功テストの保持を検証できていなかったため、同一件数という誤った結論になった。今回`c04fe66`から既存ファイルを復元し、読み込み優先度移行・img要素・URL維持のテスト1件を追加した。既存テスト内容は削除・無効化していない。
+
+復元した`Filmstrip.test.tsx`はbaseline 47件すべて成功し、復元後は48件すべて成功。`Filmstrip.test.tsx`、`AnshitsuPage.test.tsx`、`ImageViewer.test.tsx`は175件成功した。全Frontend同条件比較はbaseline 4,201 passed／138 failed／2 skipped、復元後4,204 passed／138 failed／2 skippedだった。失敗テスト名138件と正規化後のエラー本文はすべて一致し、新規失敗・解消失敗はなかった。既知のRAWテスト137件に加え、全体実行でtimeoutとなる1件もbaseline/current両方で同じ失敗だった。TypeScriptチェックと本番build、`git diff --check`が成功した。
 
 単体テストは画像属性を検証するが、実際にブラウザーが何件の画像を取得するかは検証しない。WebView2でのlazy loading、横スクロール距離・速度と取得件数、初期取得数、アクティブ切替時の待ち時間、画像要素の再取得数、メモリ使用量はP7の大量画像実測で確認する。
 
