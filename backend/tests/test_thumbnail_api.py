@@ -13,6 +13,7 @@ import main
 from edit_store import StoreUnavailable
 from immich import ImmichRequestError, ImmichThumbnail
 from thumbnail_cache import ThumbnailCache
+from thumbnail_publication import ThumbnailPublicationHub
 from thumbnail_scheduler import ThumbnailScheduler
 from tests.test_thumbnail_generator import ASSET, snapshot
 from tests.test_thumbnail_scheduler import until
@@ -28,9 +29,11 @@ def setup(tmp_path, monkeypatch):
     cache = ThumbnailCache(tmp_path / "thumbnails")
     now = [0]
     generate = AsyncMock(return_value=b"rendered")
-    scheduler = ThumbnailScheduler(cache, generate, clock=lambda: now[0])
+    hub = ThumbnailPublicationHub()
+    scheduler = ThumbnailScheduler(cache, generate, clock=lambda: now[0], publication_hub=hub)
     monkeypatch.setattr(main.app.state, "thumbnail_scheduler", scheduler, raising=False)
     monkeypatch.setattr(main.app.state, "thumbnail_cache", cache, raising=False)
+    monkeypatch.setattr(main.app.state, "thumbnail_publication_hub", hub, raising=False)
     original = AsyncMock(return_value=ImmichThumbnail(b"original", "image/jpeg"))
     monkeypatch.setattr(main, "get_asset_thumbnail", original)
     monkeypatch.setattr(main, "get_asset_detail", AsyncMock(return_value=SimpleNamespace(is_raw=False)))
@@ -240,6 +243,7 @@ def test_optional_maintenance_failure_does_not_fail_committed_save(setup, monkey
 
 def test_default_recipe_after_delete_failure_falls_back_to_original(setup, monkeypatch):
     cache, scheduler, _, generate, original = setup
+    subscriber = main.app.state.thumbnail_publication_hub.subscribe()
     def fail_delete(*args, **kwargs):
         raise OSError("private failure")
     async def run():
@@ -257,6 +261,11 @@ def test_default_recipe_after_delete_failure_falls_back_to_original(setup, monke
         assert original.await_count == 1
         generate.assert_not_called()
         assert not scheduler._pending and not scheduler._deadlines
+        events = []
+        while not subscriber.empty():
+            events.append(subscriber.get_nowait())
+        assert events[-1]["state"] == "reset" and events[-1]["publicationVersion"] is None
+        main.app.state.thumbnail_publication_hub.unsubscribe(subscriber)
     asyncio.run(run())
 
 
@@ -280,6 +289,10 @@ def test_get_only_reads_cache_or_original_and_never_generates(setup):
     cache, scheduler, _, generate, original = setup
     async def run():
         async with client() as api:
+            missing = await api.post("/thumbnail-publications/status", json={"assetIds": [str(ASSET)]})
+            assert missing.json()["items"][str(ASSET)] == {
+                "recipeRevision": None, "state": "recipe_missing", "publicationVersion": None,
+            }
             assert (await put(api, snapshot(1))).status_code == 200
             scheduler._deadlines.clear()
             result = await api.get(PATH)
@@ -287,11 +300,15 @@ def test_get_only_reads_cache_or_original_and_never_generates(setup):
             assert result.headers["cache-control"] == "private, no-store"
             cache.store(ASSET, b"rendered")
             scheduler._active = ASSET
-            result = await api.get(PATH)
+            redirect = await api.get(PATH)
+            assert redirect.status_code == 307 and redirect.headers["cache-control"] == "private, no-store"
+            assert f"publication={cache.version(ASSET)}" in redirect.headers["location"]
+            result = await api.get(PATH, params={"publication": cache.version(ASSET)})
             assert result.content == b"rendered" and result.headers["content-type"] == "image/jpeg"
-            assert result.headers["cache-control"] == "private, no-store"
+            assert result.headers["cache-control"] == "private, no-cache"
             cache.store(ASSET, b"updated")
-            assert (await api.get(PATH)).content == b"updated"
+            updated_version = cache.version(ASSET)
+            assert (await api.get(PATH, params={"publication": updated_version})).content == b"updated"
             source = await api.get(f"/assets/{ASSET}/thumbnail")
             assert source.content == b"original"
             assert source.headers["cache-control"] == "private, no-cache"
@@ -300,6 +317,45 @@ def test_get_only_reads_cache_or_original_and_never_generates(setup):
         assert main.get_asset_detail.await_count == 2
         generate.assert_not_called()
         assert not scheduler._pending and not scheduler._deadlines
+    asyncio.run(run())
+
+
+def test_publication_status_and_versioned_image_follow_saved_recipe_and_reset(setup):
+    cache, scheduler, _, generate, original = setup
+    async def run():
+        async with client() as api:
+            missing = await api.post("/thumbnail-publications/status", json={"assetIds": [str(ASSET)]})
+            assert missing.json()["items"][str(ASSET)] == {
+                "recipeRevision": None, "state": "recipe_missing", "publicationVersion": None,
+            }
+            assert (await put(api, snapshot(1))).status_code == 200
+            cache.store(ASSET, b"published")
+            status = await api.post("/thumbnail-publications/status", json={"assetIds": [str(ASSET)]})
+            assert status.status_code == 200
+            publication = status.json()["items"][str(ASSET)]
+            assert publication == {"recipeRevision": 1, "state": "reserved",
+                                  "publicationVersion": cache.version(ASSET)}
+            assert status.headers["cache-control"] == "private, no-store"
+
+            current = await api.get(PATH, params={"publication": publication["publicationVersion"]})
+            assert current.status_code == 200 and current.content == b"published"
+            assert current.headers["cache-control"] == "private, no-cache"
+            assert current.headers["etag"].startswith('"')
+
+            stale = await api.get(PATH, params={"publication": "1"})
+            assert stale.status_code == 409 and stale.headers["cache-control"] == "private, no-store"
+            assert original.await_count == 0
+
+            assert (await put(api, snapshot(0), 1)).status_code == 200
+            reset = await api.post("/thumbnail-publications/status", json={"assetIds": [str(ASSET)]})
+            assert reset.json()["items"][str(ASSET)] == {
+                "recipeRevision": 2, "state": "recipe_default", "publicationVersion": None,
+            }
+            fallback = await api.get(PATH)
+            assert fallback.status_code == 200 and fallback.content == b"original"
+            assert fallback.headers["cache-control"] == "private, no-store"
+        generate.assert_not_called()
+        assert scheduler.generation_state(ASSET) == "reset"
     asyncio.run(run())
 
 
@@ -371,8 +427,11 @@ def test_immersive_preview_prefers_only_saved_edited_cache(setup, monkeypatch, s
             pending_before = dict(scheduler._pending)
             deadlines_before = dict(scheduler._deadlines)
             result = await api.get(IMMERSIVE_PATH)
+            if expected == b"cached-jpeg":
+                assert result.status_code == 307 and result.headers["cache-control"] == "private, no-store"
+                result = await api.get(IMMERSIVE_PATH, params={"publication": cache.version(ASSET)})
             assert result.status_code == 200 and result.content == expected
-            assert result.headers["cache-control"] == "private, no-store"
+            assert result.headers["cache-control"] == ("private, no-cache" if expected == b"cached-jpeg" else "private, no-store")
             assert scheduler._pending == pending_before and scheduler._deadlines == deadlines_before
             if expected == b"cached-jpeg":
                 preview.assert_not_awaited()
@@ -386,6 +445,7 @@ def test_immersive_preview_cache_read_failure_falls_back_and_preview_failure_map
     cache, _, _, generate, _ = setup
     monkeypatch.setattr(main, "get_asset_preview", AsyncMock(return_value=ImmichThumbnail(b"preview", "image/jpeg")))
     class BrokenPath:
+        def stat(self): raise OSError("private cache failure")
         def read_bytes(self): raise OSError("private cache failure")
     monkeypatch.setattr(cache, "_path", lambda _asset_id: BrokenPath())
     async def run():
@@ -457,7 +517,9 @@ def test_api_reset_during_generation_never_resurrects_cache(setup):
                 cache.store(ASSET, b"previous output")
                 assert (await api.post(PATH)).status_code == 202
                 await entered.wait()
-                assert (await api.get(PATH)).content == b"previous output"
+                redirect = await api.get(PATH)
+                assert redirect.status_code == 307
+                assert (await api.get(PATH, params={"publication": cache.version(ASSET)})).content == b"previous output"
                 assert (await put(api, snapshot(0), 1)).status_code == 200
                 assert cache.read(ASSET) is None
                 release.set()

@@ -2,9 +2,11 @@ import os
 import json
 import copy
 import hashlib
+import asyncio
 from contextlib import asynccontextmanager
 from datetime import date
 from time import monotonic
+from urllib.parse import urlencode
 from uuid import UUID, uuid4
 from typing import Literal
 
@@ -12,7 +14,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request, Res
 from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import request_validation_exception_handler
 from starlette.concurrency import run_in_threadpool
-from starlette.responses import PlainTextResponse, StreamingResponse
+from starlette.responses import PlainTextResponse, RedirectResponse, StreamingResponse
 from starlette.responses import JSONResponse
 from starlette.background import BackgroundTask
 from pydantic import BaseModel, ConfigDict, Field
@@ -32,11 +34,12 @@ from stack_write import StackApplyRequest, StackApplyResponse, apply_stacks
 from edit_store import (
     StoreConflict, StoreUnavailable, QueueRejected, get_edit_state, put_edit_state, get_edit_statuses,
     list_export_queue, enqueue_export_assets, dequeue_export_asset, initialize_database,
-    put_edit_state_with_recipe_change,
+    put_edit_state_with_recipe_change, get_thumbnail_recipe_states,
 )
 from thumbnail_cache import ThumbnailCache, thumbnail_log
 from thumbnail_generator import generate_thumbnail
 from thumbnail_scheduler import ThumbnailScheduler
+from thumbnail_publication import ThumbnailPublicationHub
 from raw_recipe_store import get_raw_saved_state
 
 from immich import (
@@ -171,13 +174,15 @@ async def lifespan(app: FastAPI):
     app.state.export_runtime = runtime
     app.state.tag_repair = GenzoRoomTagRepair(url, key)
     cache = ThumbnailCache()
+    publication_hub = ThumbnailPublicationHub()
     async def generate(asset_id):
         return await generate_saved_thumbnail(asset_id, immich_url=url, api_key=key,
                                               client=immich_read_client)
-    scheduler = ThumbnailScheduler(cache, generate)
+    scheduler = ThumbnailScheduler(cache, generate, publication_hub=publication_hub)
     immich_read_client = create_immich_read_client()
     app.state.immich_read_client = immich_read_client
     app.state.thumbnail_cache = cache
+    app.state.thumbnail_publication_hub = publication_hub
     app.state.thumbnail_scheduler = scheduler
     try:
         await runtime.recover()
@@ -428,6 +433,11 @@ class EditStatusRequest(BaseModel):
     assetIds: list[UUID] = Field(max_length=100)
 
 
+class ThumbnailPublicationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    assetIds: list[UUID] = Field(min_length=1, max_length=1000)
+
+
 class ExportQueueRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     assetIds: list[UUID] = Field(min_length=1, max_length=100)
@@ -544,6 +554,71 @@ def asset_edit_statuses(payload: EditStatusRequest) -> dict:
         return {"edited": get_edit_statuses(payload.assetIds)}
     except StoreUnavailable as error:
         raise _store_error(error) from error
+
+
+@app.post("/thumbnail-publications/status")
+async def thumbnail_publication_status(payload: ThumbnailPublicationRequest, request: Request) -> Response:
+    if len(set(payload.assetIds)) != len(payload.assetIds):
+        raise _edit_error(422, "duplicate_asset_ids")
+    scheduler = getattr(request.app.state, "thumbnail_scheduler", None)
+    cache = getattr(request.app.state, "thumbnail_cache", None)
+    hub = getattr(request.app.state, "thumbnail_publication_hub", None)
+    if scheduler is None or cache is None or hub is None:
+        raise _edit_error(503, "thumbnail_scheduler_unavailable")
+    try:
+        async with scheduler.mutation_lock:
+            recipe_states = await run_in_threadpool(get_thumbnail_recipe_states, payload.assetIds)
+            versions = await run_in_threadpool(cache.versions, payload.assetIds)
+            items = {}
+            for asset_id in payload.assetIds:
+                key = str(asset_id)
+                recipe = recipe_states[key]
+                edited = recipe["edited"]
+                recipe_revision = recipe["recipeRevision"]
+                state = scheduler.generation_state(asset_id)
+                version = versions.get(key) if edited is True else None
+                if edited is None:
+                    visible_state = "recipe_unknown"
+                elif edited is not True:
+                    visible_state = "recipe_missing" if recipe_revision is None else "recipe_default"
+                elif version is None:
+                    visible_state = "cache_missing" if state in (None, "published", "cache_missing") else state
+                else:
+                    visible_state = state or "published"
+                items[key] = {"recipeRevision": recipe_revision,
+                              "state": visible_state, "publicationVersion": version}
+            generation_id, sequence = hub.position()
+    except StoreUnavailable as error:
+        raise _store_error(error) from error
+    return JSONResponse({"generationId": generation_id, "sequence": sequence, "items": items},
+                        headers={"Cache-Control": "private, no-store"})
+
+
+@app.get("/thumbnail-publications/events")
+async def thumbnail_publication_events(request: Request) -> Response:
+    hub = getattr(request.app.state, "thumbnail_publication_hub", None)
+    if hub is None:
+        raise _edit_error(503, "thumbnail_scheduler_unavailable")
+    queue = hub.subscribe()
+
+    async def events():
+        try:
+            yield b": connected\n\n"
+            while not await request.is_disconnected():
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=15)
+                except TimeoutError:
+                    yield b": keepalive\n\n"
+                    continue
+                event_name = "resync" if event.get("type") == "resync" else "publication"
+                payload = json.dumps(event, separators=(",", ":")).encode("utf-8")
+                yield b"event: " + event_name.encode("ascii") + b"\ndata: " + payload + b"\n\n"
+        finally:
+            hub.unsubscribe(queue)
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers={
+        "Cache-Control": "private, no-store", "X-Accel-Buffering": "no", "Connection": "keep-alive",
+    })
 
 
 @app.get("/assets/{asset_id}/edit-state")
@@ -797,6 +872,66 @@ async def thumbnail_recipe_reason(asset_id):
     return "recipe_missing" if state is None else "recipe_default" if not has_non_default_recipe(state) else None
 
 
+def _stale_publication_response():
+    return Response(status_code=409, headers={"Cache-Control": "private, no-store"})
+
+
+async def corrected_thumbnail_cache_response(asset_id: UUID, request: Request, cache, diagnostic):
+    requested_version = request.query_params.get("publication")
+    if requested_version is not None and (not requested_version.isdecimal() or len(requested_version) > 24):
+        raise HTTPException(status_code=400, detail={"code": "invalid_thumbnail_publication"})
+    try:
+        reason = await thumbnail_recipe_reason(asset_id)
+    except StoreUnavailable as error:
+        thumbnail_diagnostic_error(diagnostic, error)
+        raise _store_error(error) from error
+    except Exception as error:
+        thumbnail_diagnostic_error(diagnostic, error)
+        raise
+    cached = await run_in_threadpool(cache.read_versioned, asset_id) if cache is not None and reason is None else None
+    if requested_version is None and cached is not None:
+        query = {"publication": cached[1]}
+        diagnostic_id = request.query_params.get("__diag")
+        if diagnostic_id and len(diagnostic_id) <= 64 and all(char.isalnum() or char in "-_" for char in diagnostic_id):
+            query["__diag"] = diagnostic_id
+        response = RedirectResponse("?" + urlencode(query), status_code=307,
+                                    headers={"Cache-Control": "private, no-store"})
+        thumbnail_diagnostic_event(diagnostic, "publication.redirected", publicationVersion=cached[1])
+        thumbnail_diagnostic_finish(diagnostic, response.status_code)
+        return response, reason
+    if requested_version is not None and (cached is None or requested_version != cached[1]):
+        try:
+            await require_immich_asset(asset_id, request)
+        except Exception as error:
+            thumbnail_diagnostic_error(diagnostic, error)
+            raise
+        thumbnail_diagnostic_event(diagnostic, "publication.stale", requestedVersion=requested_version,
+                                   currentVersion=cached[1] if cached is not None else None)
+        response = _stale_publication_response()
+        thumbnail_diagnostic_finish(diagnostic, response.status_code)
+        return response, reason
+    if cached is None:
+        return None, reason
+    content, version = cached
+    try:
+        await require_immich_asset(asset_id, request)
+    except Exception as error:
+        thumbnail_diagnostic_error(diagnostic, error)
+        raise
+    # A concurrent Reset or replacement may finish while Immich access is being checked.
+    current_version = await run_in_threadpool(cache.version, asset_id)
+    if current_version != version:
+        thumbnail_diagnostic_event(diagnostic, "publication.stale", requestedVersion=requested_version,
+                                   currentVersion=current_version)
+        response = _stale_publication_response()
+        thumbnail_diagnostic_finish(diagnostic, response.status_code)
+        return response, reason
+    thumbnail_diagnostic_event(diagnostic, "cache.hit")
+    response = asset_image_response(request, content, "image/jpeg", cacheable=True)
+    thumbnail_diagnostic_finish(diagnostic, response.status_code)
+    return response, reason
+
+
 @app.post("/assets/{asset_id}/rendered-thumbnail", status_code=202)
 async def request_rendered_thumbnail(asset_id: UUID, request: Request) -> Response:
     scheduler = getattr(request.app.state, "thumbnail_scheduler", None)
@@ -826,25 +961,8 @@ async def request_rendered_thumbnail(asset_id: UUID, request: Request) -> Respon
 async def rendered_thumbnail(asset_id: UUID, request: Request) -> Response:
     diagnostic = thumbnail_diagnostic_start(request, asset_id, "rendered-thumbnail")
     cache = getattr(request.app.state, "thumbnail_cache", None)
-    try:
-        reason = await thumbnail_recipe_reason(asset_id)
-    except StoreUnavailable as error:
-        thumbnail_diagnostic_error(diagnostic, error)
-        raise _store_error(error) from error
-    except Exception as error:
-        thumbnail_diagnostic_error(diagnostic, error)
-        raise
-    has_recipe = reason is None
-    content = await run_in_threadpool(cache.read, asset_id) if cache is not None and has_recipe else None
-    if content is not None:
-        try:
-            await require_immich_asset(asset_id, request)
-        except Exception as error:
-            thumbnail_diagnostic_error(diagnostic, error)
-            raise
-        thumbnail_diagnostic_event(diagnostic, "cache.hit")
-        response = Response(content=content, media_type="image/jpeg", headers={"Cache-Control": "private, no-store"})
-        thumbnail_diagnostic_finish(diagnostic, response.status_code)
+    response, reason = await corrected_thumbnail_cache_response(asset_id, request, cache, diagnostic)
+    if response is not None:
         return response
     # A cache miss only reads Immich's original thumbnail; display never schedules generation.
     thumbnail_diagnostic_event(diagnostic, "fallback.selected", fallback="immich_thumbnail",
@@ -859,25 +977,8 @@ async def rendered_thumbnail(asset_id: UUID, request: Request) -> Response:
 async def immersive_preview(asset_id: UUID, request: Request) -> Response:
     diagnostic = thumbnail_diagnostic_start(request, asset_id, "immersive-preview")
     cache = getattr(request.app.state, "thumbnail_cache", None)
-    try:
-        reason = await thumbnail_recipe_reason(asset_id)
-    except StoreUnavailable as error:
-        thumbnail_diagnostic_error(diagnostic, error)
-        raise _store_error(error) from error
-    except Exception as error:
-        thumbnail_diagnostic_error(diagnostic, error)
-        raise
-    has_recipe = reason is None
-    content = await run_in_threadpool(cache.read, asset_id) if cache is not None and has_recipe else None
-    if content is not None:
-        try:
-            await require_immich_asset(asset_id, request)
-        except Exception as error:
-            thumbnail_diagnostic_error(diagnostic, error)
-            raise
-        thumbnail_diagnostic_event(diagnostic, "cache.hit")
-        response = Response(content=content, media_type="image/jpeg", headers={"Cache-Control": "private, no-store"})
-        thumbnail_diagnostic_finish(diagnostic, response.status_code)
+    response, reason = await corrected_thumbnail_cache_response(asset_id, request, cache, diagnostic)
+    if response is not None:
         return response
     thumbnail_diagnostic_event(diagnostic, "fallback.selected", fallback="immich_preview",
                                recipeReason=reason or "cache_miss")

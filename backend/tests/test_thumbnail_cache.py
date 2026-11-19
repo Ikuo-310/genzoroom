@@ -13,6 +13,22 @@ def test_atomic_replacement_read_and_delete(tmp_path):
     cache = ThumbnailCache(tmp_path / "thumbnails")
     cache.initialize()
     assert cache.read(A) is None
+
+
+def test_publication_version_is_stable_across_restart_and_changes_on_atomic_replacement(tmp_path):
+    cache = ThumbnailCache(tmp_path)
+    cache.store(A, b"first")
+    first = cache.version(A)
+    assert first is not None and cache.read_versioned(A) == (b"first", first)
+
+    restarted = ThumbnailCache(tmp_path)
+    assert restarted.version(A) == first
+    restarted.store(A, b"second")
+    second = restarted.version(A)
+    assert second is not None and int(second) > int(first)
+    assert restarted.read_versioned(A) == (b"second", second)
+    assert restarted.delete(A) is True
+    assert restarted.version(A) is None
     cache.store(A, b"old")
     cache.store(A, b"new")
     assert cache.read(A) == b"new"

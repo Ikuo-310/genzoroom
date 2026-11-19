@@ -27,7 +27,6 @@ function stackFormatList(asset: RecentAsset) {
 
 type PhotoCardProps = {
   asset: RecentAsset;
-  thumbnailRefreshKey?: string;
   language: AppLanguage;
   onSelect: () => void;
   onToggleSelection: () => void;
@@ -64,7 +63,6 @@ type PhotoCardProps = {
 
 export function PhotoCard({
   asset,
-  thumbnailRefreshKey,
   language,
   onSelect,
   onToggleSelection,
@@ -165,7 +163,7 @@ export function PhotoCard({
         aria-description={edited ? t('photos.edited') : undefined}
       >
         <div className="thumbnail">
-          <ThumbnailImage rendition="rendered-thumbnail" revision={thumbnailRefreshKey} assetId={asset.id} surface="gallery" mode="rendered" alt="" loading="lazy" />
+          <ThumbnailImage rendition="rendered-thumbnail" assetId={asset.id} surface="gallery" mode="rendered" alt="" loading="lazy" />
           {!(asset.stackId && Number.isSafeInteger(asset.stackAssetCount) && asset.stackAssetCount! >= 1) &&
             <div className="photo-format-badges"><FormatBadge format={asset.format} isRaw={asset.is_raw} /></div>}
         </div>

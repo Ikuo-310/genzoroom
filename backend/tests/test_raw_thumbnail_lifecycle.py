@@ -63,10 +63,14 @@ def test_raw_get_eligibility_and_legacy_jpeg_never_overrides(lifecycle, kind, en
     async def run():
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="http://test") as http:
             response = await http.get(f"/assets/{ASSET}/{endpoint}")
+            if kind == "edited" and cached:
+                assert response.status_code == 307 and response.headers["cache-control"] == "private, no-store"
+                response = await http.get(f"/assets/{ASSET}/{endpoint}", params={"publication": cache.version(ASSET)})
             assert response.status_code == 200
             assert response.content == (b"cached" if kind == "edited" and cached else
                 b"thumbnail" if endpoint == "rendered-thumbnail" else b"preview")
-            assert response.headers["cache-control"] == "private, no-store"
+            assert response.headers["cache-control"] == (
+                "private, no-cache" if kind == "edited" and cached else "private, no-store")
         assert not scheduler._pending and not scheduler._deadlines
         generate.assert_not_called()
     asyncio.run(run())

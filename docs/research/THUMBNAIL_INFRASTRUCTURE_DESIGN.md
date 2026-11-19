@@ -305,3 +305,74 @@ baselineだけで失敗していた13件（`AnshitsuPage.test.tsx`のFilmstrip�
 
 この追加監査記録は上記「状態遷移・イベント保護」と以前のP4全体テスト数値を補足・更新する。P5以降の作業範囲は変わらない。
 
+## P5実装記録：補正済みサムネイルのAsset単位公開版管理
+
+### 確認済みの既存仕様
+
+- Recipeの保存とサムネイル生成は別の処理であり、既存の単一ワーカー、60秒デバウンス、即時生成依頼、`mutation_lock`、生成中Reset／再保存時のpublication fence、JPEGの原子的ファイル置換を維持した。
+- 生成成果物は既存のAsset単位`.jpg`キャッシュへ保存する。1GiB上限と最古成果物からの容量整理は変更していない。新規の永続キャッシュ、Recipe schema変更、永続Job queueは追加していない。
+- Windows Desktopは選択中の接続profileごとにDB・サムネイル保存先を分離する。Dockerはデプロイ単位の保存VolumeとImmich環境変数を使う。両環境で通知・公開版の実装は共通Backend／Frontendを使う。
+
+### 公開状態と所有境界
+
+保存Recipe revisionと画像公開版を区別する。公開状態の所有者はBackendであり、Recipe revisionは既存SQLite store、公開成果物は既存`ThumbnailCache`、生成中の予約／実行状態は既存`ThumbnailScheduler`が管理する。Frontendは通知・状態snapshotを保持する表示用storeで、生成状態の所有者にはならない。
+
+| 情報 | 所有者・保存先 | 意味と更新条件 |
+|---|---|---|
+| `recipeRevision` | JPEG edit storeまたはLightCraft raw recipe store | Recipe保存revision。生成完了を意味しない。未保存は`null`。 |
+| Scheduler state | Backend process内の既存Scheduler | `reserved`／`queued`／`running`／`failed`／`reset`等の現在状態。プロセス再起動後は成果物とRecipeから状態を再構成する。 |
+| `publicationVersion` | 既存キャッシュ`.jpg`の`st_mtime_ns` | Recipe revisionとは独立した画像identity。原子的置換の直前に前版より大きい時刻値を設定し、プロセス再起動後もファイルから同じ値を得る。公開成功時だけ変化する。キャッシュなし・Reset・未現像は`null`。 |
+| SSE `generationId`／`sequence` | Backend process内の通知Hub | 接続中の通知順序とプロセス再起動を識別する。永続状態ではなく、切断・順序飛びは状態snapshotで修復する。 |
+| Frontend publication snapshot | 共通Frontend module store（Asset ID単位） | 表示中AssetのRecipe revision、状態、publicationVersionを保持し、同Assetの全表示を更新する。画像データやbyte cacheは保持しない。 |
+
+ファイルmtimeを公開版として使うのは、既存ディスクキャッシュを置き換えず、追加DB／sidecarを作らず、生成物と同時に原子的に確定し、再起動後も読めるidentityを持たせるためである。Recipe保存、予約、生成開始、失敗ではmtimeを変えない。生成中は前の正常ファイルと公開版を維持する。
+
+### 状態遷移と表示契約
+
+- Recipe未保存は`recipe_missing`、既定値として保存済みの状態は`recipe_default`、Recipe読取不可は`recipe_unknown`。保存済みRecipeがある場合、キャッシュ版の有無とScheduler stateを別々に返す。
+- 初回生成の予約／Queue／実行中は公開版なしでImmich通常サムネイルを表示する。初回成功時に`.jpg`を原子的に置換し、そのmtime identityを`published`通知する。
+- 再生成の予約／実行中／失敗では以前の正常なファイルとidentityを維持する。再生成成功時のみ版が変わる。失敗状態はFrontend状態snapshotに出るが、既存表示画像のURLは変わらない。
+- Resetは既存保存の確定後にキャッシュを無効化する。Reset通知は常にpublicationVersion `null`とする。ファイル削除が失敗してもReset状態を通知し、Recipeが既定値ならGETは古い補正画像を配信しない。
+- 容量整理で消えたAssetには`cache_missing`を通知し、状態snapshotでは公開版なしとなる。Backend再起動後もRecipeとファイルの存在／mtimeから現在状態を復元する。キャッシュ消失はImmich通常画像へ戻る。
+- GETは通常どおりキャッシュ読み出しまたはImmich fallbackだけを行い、生成を予約・開始しない。STACK補正表示OFFと通常サムネイルmodeはpublication購読・URLに影響されない。
+
+### Backend通知・Frontend購読
+
+新しい外部通信基盤は導入せず、同一OriginのSSEを1接続だけ共有する。Backend `ThumbnailPublicationHub`はbounded fanoutを行い、queue overflow時は個々の古いイベントを無制限保持せず`resync`イベントへ畳み込む。Docker nginxは該当SSE routeだけproxy buffering/cacheを無効にする。Windows LocalHostは認証済み同一Origin APIとして同じrouteを中継し、SSE本文をバッファリングしない。
+
+Frontendは`ThumbnailImage`からAsset単位で購読し、表示中IDを25msでまとめて最大1,000件ずつ`POST /thumbnail-publications/status`へ問い合わせる。購読hookを安定化し、状態更新ごとの再購読を防ぐ。状態照会は同時に1 batchだけを実行し、処理中に到着した追加Assetを次のbatchへまとめる。コンポーネントごとのpollingやAssetごとのHTTP status requestはない。SSEの`generationId`／`sequence`で重複・古いeventを捨て、連番の欠落も検出する。open／再接続、Backend世代変更、sequence gap、queue overflow、protocol不一致時は表示中Assetのbatch snapshotを再取得し、切断中の変更を同期する。状態snapshotは`private, no-store`。
+
+公開版変更は共通`ThumbnailImage.publicationVersion`へ接続し、補正済みthumbnail／Immersive PreviewのAsset URLに`publication` queryを付ける。Recipe保存／予約では旧URLを維持し、公開成功・Reset・cache eviction時のみ対象AssetのURLを更新する。同AssetのGallery／STACK／Export／Filmstrip／Immersive等の表示は同一storeを購読し、それぞれ追随する。別Assetおよび通常画像modeのimg elementは再作成しない。初期batch sync前に既存成果物を見つけたversionなしGETは、正確なURLへ307 redirectし、無版URLへ画像内容を返さない。これにより初期fallback取得を避け、ブラウザcache keyと公開版内容を一致させる。
+
+### URL・HTTP cache契約と接続profile
+
+| 取得状態 | URL／配信 | Cache-Control |
+|---|---|---|
+| 通常サムネイル／Preview | 既存URL | `private, no-cache`とETag。認可・Asset状態を毎回再検証する。 |
+| Immich fallback、補正画像未生成、Reset、cacheなし | 通常URLへのfallback | `private, no-store`。エラーも非cache。 |
+| 公開版あり、版なしの初期取得 | `307`で同一pathの`?publication=<version>`へredirect | redirectは`private, no-store`。画像bytesは含まない。 |
+| 補正済みthumbnail／Immersive Previewの公開cache hit | `?publication=<file mtime ns>` | `private, no-cache`と内容ETag。ブラウザは画面間で保存内容を再利用できるが、Backend再検証なしのfresh応答にはしない。 |
+| 古い／存在しない公開版を指定 | `409`、no-store | 旧公開内容を返さない。FrontendはSSEまたは再接続snapshotで現在版へ同期する。 |
+
+P3のCookie非保持HTTPX client、認証profile、Asset存在／アクセス確認、304再検証条件を維持した。補正cache hitの応答前にもAsset確認を行い、削除・権限変更で古いブラウザcacheを304として再利用させない。秘密情報はURL、publication identity、状態API、診断ログに含めない。Windows LocalHostは正常なprivate/no-cache画像かつETagを持つimage responseだけBackend cache policyを通し、Fallback・error・status API・SSE・設定／HTMLはno-storeを維持する。Docker nginxはSSE以外のcache headerを上書きしない。
+
+### 暗室および画面別revision
+
+Recipe保存と既存の即時生成依頼の順序、写真切替・暗室終了時の依頼、生成完了を待たず次写真へ移動する動作を変更していない。Draft／slider更新から生成を起動しない。Reset完了通知で通常画像へ戻し、Filmstrip専用更新経路は追加していない。Filmstripの読込範囲・優先順位最適化はP6に残す。
+
+Gallery／STACK／Exportで補正画像の再取得を強制していた画面別`view` revision state／props／URL queryを削除した。Galleryの手動更新はAsset一覧など現在の画面データを再取得するが、publicationVersion不変の画像URLを変更しない。画像更新はAsset単位の公開版通知に集約した。P4のRetry、自動Retryなし、選択状態／Stack構成を変えない動作は維持する。
+
+### 実装・検証結果
+
+主な変更はBackendの`thumbnail_publication.py`、`thumbnail_cache.py`、`thumbnail_scheduler.py`、`edit_store.py`、`raw_recipe_store.py`、`main.py`、Windows LocalHostのcache response allow rule、Docker／release nginxのSSE中継、Frontendの`thumbnailPublicationApi.ts`／`thumbnailPublication.ts`／`ThumbnailImage.tsx`とGallery／STACK／Exportのrevision除去である。P1診断、P2 client reuse、P3 error/ETag/cache boundary、原本・Export stream cleanupを保持した。
+
+| 検証 | 結果 |
+|---|---|
+| Backend公開版／cache／scheduler／API／Windows LocalHost／RAW lifecycle／edit status | 147 passed、15 subtests passed。Python 3.14 repository `.venv`で実施。 |
+| Frontend公開版・URL・Gallery／STACK／Export／Retry関連 | 6 files、308 tests passed。 |
+| TypeScript・Frontend production build | `npm run build`成功（`tsc --noEmit`を含む）。既存の大きいbundleとReact Router `use client`警告あり。 |
+| 全Frontend（P4 baseline `7886537`、同じVitest設定・Node・依存関係） | baseline: 4,199 passed／137 failed／2 skipped（4,338）。P5後: 4,199 passed／138 failed／2 skipped（4,339）。差分は`AnshitsuRawPreview.test.tsx`の1テストがP5全体実行時に5秒timeoutとなったこと。該当テストをbaseline/current双方で単独実行すると両方成功したため、全体実行時の時間揺れと判断し、再現性のあるP5回帰は確認されなかった。P4報告のbaseline 137件と同一条件のbaseline再実行は一致した。 |
+| Vitest failing test files | `AnshitsuRawPreview.test.tsx`、`RawPointColorControls.test.tsx`、`RawVignetteControls.test.tsx`。Baseline/currentの両方で同じ3 files。current全体実行の1件の追加timeoutは単独再実行で再現せず、他の失敗名はbaselineと一致。 |
+
+Windows WebView2、Docker実機、Immich実サービス、大量画像でのメモリ／通信量の実機測定は行っていない。これらとFilmstripの1,000枚規模実表示はP7およびユーザー側の実機確認に残す。`git diff --check`はcommit前に実行する。
+

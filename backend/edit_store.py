@@ -345,6 +345,31 @@ def get_edit_statuses(asset_ids: list[UUID]) -> dict[str, bool]:
     return result
 
 
+def get_thumbnail_recipe_states(asset_ids: list[UUID]) -> dict[str, dict]:
+    from storage import development_engine
+    if development_engine() == "lightcraft":
+        from raw_recipe_store import get_raw_thumbnail_recipe_states
+        return get_raw_thumbnail_recipe_states(asset_ids)
+    result = {str(asset_id): {"recipeRevision": None, "edited": False} for asset_id in asset_ids}
+    if not asset_ids:
+        return result
+    placeholders = ",".join("?" for _ in asset_ids)
+    with _connection() as connection:
+        rows = connection.execute(
+            f"""SELECT asset_id, state_format_version, recipe_version, processing_version,
+            current_recipe_json, history_json, history_cursor, source_identity_json, revision
+            FROM asset_edit_states WHERE asset_id IN ({placeholders})""", tuple(result)
+        )
+        for row in rows:
+            asset_id = UUID(row["asset_id"])
+            snapshot = _snapshot(row, asset_id)
+            result[str(asset_id)] = {
+                "recipeRevision": row["revision"],
+                "edited": has_non_default_recipe(snapshot),
+            }
+    return result
+
+
 def put_edit_state(asset_id: UUID, expected_revision: int, save_id: UUID, state: dict) -> dict:
     return put_edit_state_with_recipe_change(asset_id, expected_revision, save_id, state)[0]
 

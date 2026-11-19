@@ -84,10 +84,10 @@ afterEach(() => {
 });
 
 describe('Home Export management', () => {
-  it('refreshes rendered thumbnail URLs only on Export entry, preserving Gallery URLs and Queue UI state', async () => {
+  it('reuses rendered thumbnail URLs across Gallery and Export without changing Queue state', async () => {
     await openQueue([queued('a'), queued('b')]);
     expect(exportCard('a').querySelector('img')?.getAttribute('src'))
-      .toBe('/api/assets/a/rendered-thumbnail?view=1');
+      .toBe('/api/assets/a/rendered-thumbnail');
 
     const queueReads = api.queue.mock.calls.length;
     const firstExportUrl = exportCard('b').querySelector('img')?.getAttribute('src');
@@ -103,10 +103,11 @@ describe('Home Export management', () => {
 
     await key('r');
     const galleryUrl = host.querySelector('.photo-card img')?.getAttribute('src');
-    expect(galleryUrl).toContain('/rendered-thumbnail?view=');
+    expect(galleryUrl).toContain('/rendered-thumbnail');
+    expect(galleryUrl).not.toContain('?view=');
     await key('e');
     expect(exportCard('b').querySelector('img')?.getAttribute('src'))
-      .toBe('/api/assets/b/rendered-thumbnail?view=2');
+      .toBe('/api/assets/b/rendered-thumbnail');
     await key('r');
     expect(host.querySelector('.photo-card img')?.getAttribute('src')).toBe(galleryUrl);
   });
@@ -281,7 +282,7 @@ const previewPosition = () => host.querySelector('.immersive-preview-position')?
 
 it('uses rendered thumbnails and the same Viewer endpoint for a mixed RAW/JPEG export queue', async () => {
   await openQueue([queued('a'), queued('b')], 'b');
-  expect(exportCard('b').querySelector('img')?.getAttribute('src')).toBe('/api/assets/b/rendered-thumbnail?view=1');
+  expect(exportCard('b').querySelector('img')?.getAttribute('src')).toBe('/api/assets/b/rendered-thumbnail');
   await cardClick('b'); await key('v');
   expect(previewImage().alt).toBe('b.dng');
   expect(previewImage().getAttribute('src')).toBe('/api/assets/b/immersive-preview');

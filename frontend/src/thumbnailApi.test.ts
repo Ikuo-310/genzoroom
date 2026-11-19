@@ -13,15 +13,15 @@ describe('thumbnail boundaries', () => {
     expect(thumbnailDiagnosticUrl('/thumb?view=1', 'trace')).toBe('/thumb?view=1&__diag=trace');
   });
 
-  it('selects display URLs without requesting generation and encodes Asset IDs and refresh keys', () => {
+  it('selects display URLs without requesting generation and encodes Asset IDs and publication versions', () => {
     const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
     const asset = { id: 'asset/id', thumbnail_url: '/original' };
     expect(thumbnailUrl(asset)).toBe('/api/assets/asset%2Fid/rendered-thumbnail');
     expect(thumbnailUrl(asset, false, 'ignored')).toBe('/original');
-    expect(thumbnailUrl(asset, true, 'view:2')).toBe('/api/assets/asset%2Fid/rendered-thumbnail?view=view%3A2');
+    expect(thumbnailUrl(asset, true, '12345')).toBe('/api/assets/asset%2Fid/rendered-thumbnail?publication=12345');
     expect(thumbnailSourceUrl('asset/id', 'thumbnail')).toBe('/api/assets/asset%2Fid/thumbnail');
     expect(thumbnailSourceUrl('asset/id', 'preview')).toBe('/api/assets/asset%2Fid/preview');
-    expect(thumbnailSourceUrl('asset/id', 'immersive-preview')).toBe('/api/assets/asset%2Fid/immersive-preview');
+    expect(thumbnailSourceUrl('asset/id', 'immersive-preview', '67890')).toBe('/api/assets/asset%2Fid/immersive-preview?publication=67890');
     expect(fetch).not.toHaveBeenCalled();
   });
 

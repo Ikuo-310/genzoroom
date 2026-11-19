@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { frontendLogger } from './frontendLogging';
 import { thumbnailDiagnosticUrl, thumbnailSourceUrl, type ThumbnailRendition } from './thumbnailUrl';
+import { useThumbnailPublication } from './thumbnailPublication';
 
 type ThumbnailMode = 'original' | 'rendered' | 'preview';
 type ThumbnailPhase = 'loading' | 'loaded' | 'failed';
@@ -10,11 +11,10 @@ type ThumbnailPhase = 'loading' | 'loaded' | 'failed';
 type ThumbnailImageProps = Omit<ImgHTMLAttributes<HTMLImageElement>, 'src' | 'onLoad' | 'onError'> & {
   src?: string;
   rendition?: ThumbnailRendition;
-  revision?: string;
   assetId: string;
   surface: string;
   mode: ThumbnailMode;
-  /** Asset publication identity reserved for P5; it invalidates only this Asset's image element. */
+  /** The current Asset publication identity; changing it resets only this image request. */
   publicationVersion?: string | number | null;
   onLoad?: ImgHTMLAttributes<HTMLImageElement>['onLoad'];
   onError?: ImgHTMLAttributes<HTMLImageElement>['onError'];
@@ -53,10 +53,13 @@ function restoreCardFocus(host: HTMLElement | null, retryButton: HTMLButtonEleme
   focusThumbnailAction(host);
 }
 
-export function ThumbnailImage({ src, rendition, revision, assetId, surface, mode, publicationVersion, onLoad, onError, ...imageProps }: ThumbnailImageProps) {
+export function ThumbnailImage({ src, rendition, assetId, surface, mode, publicationVersion, onLoad, onError, ...imageProps }: ThumbnailImageProps) {
   const { t } = useTranslation();
-  const resolvedSrc = src ?? thumbnailSourceUrl(assetId, rendition ?? (mode === 'preview' ? 'preview' : 'thumbnail'), revision);
-  const sourceKey = JSON.stringify([assetId, resolvedSrc, publicationVersion ?? null]);
+  const usesPublication = rendition === 'rendered-thumbnail' || rendition === 'immersive-preview';
+  const publication = useThumbnailPublication(assetId, usesPublication);
+  const selectedPublicationVersion = publicationVersion !== undefined ? publicationVersion : publication?.publicationVersion;
+  const resolvedSrc = src ?? thumbnailSourceUrl(assetId, rendition ?? (mode === 'preview' ? 'preview' : 'thumbnail'), selectedPublicationVersion);
+  const sourceKey = JSON.stringify([assetId, resolvedSrc, selectedPublicationVersion ?? null]);
   const [attempt, setAttempt] = useState(0);
   const [phaseState, setPhaseState] = useState<{ key: string; phase: ThumbnailPhase } | null>(null);
   const [retryControl, setRetryControl] = useState<{ sourceKey: string; visible: boolean } | null>(null);
@@ -110,7 +113,7 @@ export function ThumbnailImage({ src, rendition, revision, assetId, surface, mod
     startedAt.current = performance.now();
     settled.current = false;
     log({ level: 'debug', component: 'thumbnail', event: 'image.sourceAssigned',
-      context: { diagnosticId, assetId, surface, mode, attempt, publicationVersion: publicationVersion ?? null } });
+      context: { diagnosticId, assetId, surface, mode, attempt, publicationVersion: selectedPublicationVersion ?? null } });
     return () => {
       if (!settled.current && isDebugLogging()) {
         log({ level: 'debug', component: 'thumbnail', event: 'image.elementReleased',

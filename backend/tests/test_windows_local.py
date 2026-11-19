@@ -20,7 +20,9 @@ import edit_store
 import main
 import storage
 from immich import ImmichThumbnail
+from thumbnail_cache import ThumbnailCache
 from windows_local import FRONTEND_DIST, LocalHost, LocalServer, reserve_listener
+from tests.test_thumbnail_generator import ASSET, snapshot
 
 
 @pytest.fixture
@@ -98,6 +100,34 @@ def test_session_is_one_time_and_images_need_no_custom_headers(local, monkeypatc
             stale = await next_start.get(f"/api/assets/{asset_id}/preview",
                                          headers={"If-None-Match": response.headers["etag"]})
             assert stale.status_code == 401 and stale.headers["cache-control"] == "no-store"
+    asyncio.run(exercise())
+
+
+def test_versioned_corrected_thumbnail_keeps_backend_cache_contract_in_localhost(local, tmp_path, monkeypatch):
+    cache = ThumbnailCache(tmp_path / "thumbnails")
+    cache.store(ASSET, b"corrected-jpeg")
+    storage.initialize_storage()
+    edit_store.initialize_database()
+    edit_store.put_edit_state(ASSET, 0, uuid4(), snapshot())
+    monkeypatch.setattr(main.app.state, "thumbnail_cache", cache, raising=False)
+    monkeypatch.setattr(main, "development_engine", lambda: "jpeg")
+    monkeypatch.setattr(main, "get_asset_detail", AsyncMock(return_value=type("Detail", (), {"is_raw": False})()))
+
+    async def exercise():
+        async with client(local) as http:
+            await authenticate(http, local)
+            response = await http.get(f"/api/assets/{ASSET}/rendered-thumbnail",
+                                      params={"publication": cache.version(ASSET)})
+            assert response.status_code == 200 and response.content == b"corrected-jpeg"
+            assert response.headers["cache-control"] == "private, no-cache"
+            assert response.headers["etag"].startswith('"')
+            unchanged = await http.get(f"/api/assets/{ASSET}/rendered-thumbnail",
+                                       params={"publication": cache.version(ASSET)},
+                                       headers={"If-None-Match": response.headers["etag"]})
+            assert unchanged.status_code == 304
+            assert unchanged.headers["cache-control"] == "private, no-cache"
+            stale = await http.get(f"/api/assets/{ASSET}/rendered-thumbnail", params={"publication": "1"})
+            assert stale.status_code == 409 and stale.headers["cache-control"] == "no-store"
     asyncio.run(exercise())
 
 

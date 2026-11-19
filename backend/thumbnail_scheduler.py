@@ -10,11 +10,13 @@ from thumbnail_cache import thumbnail_log
 from thumbnail_generator import ThumbnailGenerationError
 
 DEBOUNCE_SECONDS = 60
+_USE_CACHE_VERSION = object()
 
 
 class ThumbnailScheduler:
-    def __init__(self, cache, generate, *, clock=monotonic):
+    def __init__(self, cache, generate, *, clock=monotonic, publication_hub=None):
         self.cache, self._generate, self._clock = cache, generate, clock
+        self.publication_hub = publication_hub
         self._deadlines = {}
         self._pending = OrderedDict()
         self._wake = asyncio.Event()
@@ -22,6 +24,7 @@ class ThumbnailScheduler:
         self._closed = False
         self._active = None
         self._invalidated = False
+        self._states = {}
         # Save+notification and publication share ordering; reset cannot be overtaken by old output.
         self.mutation_lock = asyncio.Lock()
 
@@ -41,12 +44,16 @@ class ThumbnailScheduler:
             self._deadlines.pop(asset_id, None)
             self._pending.setdefault(asset_id, None)
             event = "queued"
+            state = "queued"
         else:
             self._pending.pop(asset_id, None)
             self._deadlines[asset_id] = self._clock() + DEBOUNCE_SECONDS
             event = "reserved"
+            state = "reserved"
+        self._states[asset_id] = state
         thumbnail_log(event, component="thumbnail_scheduler", assetId=str(asset_id),
                       delaySeconds=0 if immediate else DEBOUNCE_SECONDS)
+        self._publish(asset_id, state)
         self._wake.set()
 
     async def reset(self, asset_id):
@@ -56,7 +63,27 @@ class ThumbnailScheduler:
         if self._active == asset_id:
             self._invalidated = True
         self._wake.set()
-        await run_in_threadpool(self.cache.delete, asset_id)
+        try:
+            await run_in_threadpool(self.cache.delete, asset_id)
+        finally:
+            # A committed Recipe reset must stop clients from requesting an old public URL,
+            # even when the best-effort disk deletion fails.
+            self._states[asset_id] = "reset"
+            self._publish(asset_id, "reset", None)
+
+    def generation_state(self, asset_id):
+        if asset_id == self._active:
+            return "running"
+        if asset_id in self._pending:
+            return "queued"
+        if asset_id in self._deadlines:
+            return "reserved"
+        return self._states.get(asset_id)
+
+    def _publish(self, asset_id, state, publication_version=_USE_CACHE_VERSION):
+        if self.publication_hub is not None:
+            version = self.cache.version(asset_id) if publication_version is _USE_CACHE_VERSION else publication_version
+            self.publication_hub.publish(asset_id, state, version)
 
     def _promote_due(self):
         now = self._clock()
@@ -64,7 +91,9 @@ class ThumbnailScheduler:
             if deadline <= now:
                 del self._deadlines[asset_id]
                 self._pending.setdefault(asset_id, None)
+                self._states[asset_id] = "queued"
                 thumbnail_log("queued", component="thumbnail_scheduler", assetId=str(asset_id))
+                self._publish(asset_id, "queued")
 
     async def _serve(self):
         while not self._closed:
@@ -79,20 +108,30 @@ class ThumbnailScheduler:
                 continue
             asset_id, _ = self._pending.popitem(last=False)
             self._active, self._invalidated = asset_id, False
+            self._states[asset_id] = "running"
             started = self._clock()
             thumbnail_log("started", component="thumbnail_scheduler", assetId=str(asset_id))
+            self._publish(asset_id, "running")
             try:
                 content = await self._generate(asset_id)
                 async with self.mutation_lock:
                     if not self._invalidated:
-                        await run_in_threadpool(self.cache.store, asset_id, content)
+                        evicted = await run_in_threadpool(self.cache.store, asset_id, content)
+                        for evicted_id in evicted or ():
+                            self._states[evicted_id] = "cache_missing"
+                            self._publish(evicted_id, "cache_missing")
+                        self._states[asset_id] = "published"
                         thumbnail_log("completed", component="thumbnail_scheduler", assetId=str(asset_id),
                                       payloadBytes=len(content), durationMs=round((self._clock() - started) * 1000))
+                        self._publish(asset_id, "published")
                     else:
                         thumbnail_log("discarded", component="thumbnail_scheduler", assetId=str(asset_id),
                                       errorCode="generation_invalidated")
             except Exception as error:
                 code = error.code if isinstance(error, ThumbnailGenerationError) else "thumbnail_generation_failed"
+                if not self._invalidated:
+                    self._states[asset_id] = "failed"
+                    self._publish(asset_id, "failed")
                 thumbnail_log("failed", level="warn", component="thumbnail_scheduler", assetId=str(asset_id),
                               errorCode=code, durationMs=round((self._clock() - started) * 1000))
             finally:

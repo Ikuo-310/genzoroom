@@ -290,6 +290,22 @@ def get_raw_edit_statuses(asset_ids: list[UUID]) -> dict[str, bool | None]:
         return result
 
 
+def get_raw_thumbnail_recipe_states(asset_ids: list[UUID]) -> dict[str, dict]:
+    if not asset_ids:
+        return {}
+    with _connection() as connection:
+        connection.execute("BEGIN")
+        result = {}
+        for asset_id in asset_ids:
+            state = select_raw_export_state(connection, asset_id)
+            result[str(asset_id)] = {
+                "recipeRevision": state["revision"] if state is not None else None,
+                "edited": state["exportEligible"] if state is not None else False,
+            }
+        connection.commit()
+        return result
+
+
 def validate_raw_recipe(recipe: dict) -> dict:
     """Revalidate a DB recipe at the engine boundary using the C3-A format and limits."""
     if type(recipe) is not dict or set(recipe) != {*IDENTITY_FIELDS, "settings"}:

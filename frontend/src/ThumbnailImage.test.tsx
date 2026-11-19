@@ -27,9 +27,9 @@ afterEach(() => {
 
 describe('ThumbnailImage diagnostics', () => {
   it('resolves the selected Asset rendition in the shared component', async () => {
-    await act(async () => root.render(<div data-thumbnail-retry-host><button data-thumbnail-action><ThumbnailImage rendition="rendered-thumbnail" revision="view:2" assetId="asset/id"
+    await act(async () => root.render(<div data-thumbnail-retry-host><button data-thumbnail-action><ThumbnailImage rendition="rendered-thumbnail" publicationVersion="12345" assetId="asset/id"
       surface="gallery" mode="rendered" alt="" /></button></div>));
-    expect(host.querySelector('img')?.getAttribute('src')).toBe('/api/assets/asset%2Fid/rendered-thumbnail?view=view%3A2');
+    expect(host.querySelector('img')?.getAttribute('src')).toBe('/api/assets/asset%2Fid/rendered-thumbnail?publication=12345');
   });
 
   it('correlates image lifecycle and records load failures without exposing image URLs', async () => {
@@ -137,5 +137,78 @@ describe('ThumbnailImage diagnostics', () => {
     ]));
     expect(frontendLogger.getEntries().some(entry => entry.event === 'image.loadFailed')).toBe(false);
     expect(JSON.stringify(frontendLogger.getEntries())).not.toContain('/private/path');
+  });
+
+  it('shares one publication stream, updates duplicate Assets only, and resynchronizes after reconnect', async () => {
+    const sources: Array<{ emit: (name: string, data?: string) => void }> = [];
+    class FakeEventSource {
+      private listeners = new Map<string, Array<(event: MessageEvent<string>) => void>>();
+      constructor(_url: string) { sources.push(this); }
+      addEventListener(name: string, listener: EventListener) {
+        const callbacks = this.listeners.get(name) ?? [];
+        callbacks.push(listener as (event: MessageEvent<string>) => void);
+        this.listeners.set(name, callbacks);
+      }
+      emit(name: string, data = '') {
+        for (const listener of this.listeners.get(name) ?? []) listener({ data } as MessageEvent<string>);
+      }
+      close() {}
+      get emitEvent() { return this.emit.bind(this); }
+    }
+    vi.stubGlobal('EventSource', FakeEventSource);
+    let aVersion = '1';
+    let statusSequence = 0;
+    const generationId = 'a'.repeat(32);
+    const fetch = vi.fn(async (_url: string, init?: RequestInit) => {
+      const { assetIds } = JSON.parse(String(init?.body)) as { assetIds: string[] };
+      return new Response(JSON.stringify({ generationId, sequence: statusSequence, items: Object.fromEntries(assetIds.map(assetId => [assetId, {
+        recipeRevision: 4, state: 'published', publicationVersion: assetId === 'a' ? aVersion : '10',
+      }])) }));
+    });
+    vi.stubGlobal('fetch', fetch);
+    const view = () => <>
+      <div data-thumbnail-retry-host><ThumbnailImage rendition="rendered-thumbnail" assetId="a" surface="gallery" mode="rendered" alt="" /></div>
+      <div data-thumbnail-retry-host><ThumbnailImage rendition="rendered-thumbnail" assetId="a" surface="export" mode="rendered" alt="" /></div>
+      <div data-thumbnail-retry-host><ThumbnailImage rendition="rendered-thumbnail" assetId="b" surface="stack" mode="rendered" alt="" /></div>
+      <div data-thumbnail-retry-host><ThumbnailImage rendition="thumbnail" assetId="normal" surface="stack" mode="original" alt="" /></div>
+    </>;
+    vi.useFakeTimers();
+    await act(async () => root.render(view()));
+    expect(sources).toHaveLength(1);
+    sources[0].emit('open');
+    await act(async () => { await vi.advanceTimersByTimeAsync(30); });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [firstA, secondA, b, normal] = [...host.querySelectorAll('img')];
+    expect(firstA.getAttribute('src')).toBe('/api/assets/a/rendered-thumbnail?publication=1');
+    expect(secondA.getAttribute('src')).toBe('/api/assets/a/rendered-thumbnail?publication=1');
+    expect(b.getAttribute('src')).toBe('/api/assets/b/rendered-thumbnail?publication=10');
+    expect(normal.getAttribute('src')).toBe('/api/assets/normal/thumbnail');
+    const bElement = b, normalElement = normal;
+    for (const image of [...host.querySelectorAll('img')]) await act(async () => image.dispatchEvent(new Event('load')));
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    sources[0].emit('publication', JSON.stringify({ generationId, sequence: 1, assetId: 'a',
+      state: 'published', publicationVersion: '2' }));
+    await act(async () => {});
+    expect([...host.querySelectorAll('img')].slice(0, 2).map(image => image.getAttribute('src'))).toEqual([
+      '/api/assets/a/rendered-thumbnail?publication=2', '/api/assets/a/rendered-thumbnail?publication=2',
+    ]);
+    expect(host.querySelectorAll('img')[2]).toBe(bElement);
+    expect(host.querySelectorAll('img')[3]).toBe(normalElement);
+    expect(bElement.getAttribute('src')).toBe('/api/assets/b/rendered-thumbnail?publication=10');
+
+    aVersion = '3';
+    statusSequence = 2;
+    sources[0].emit('open');
+    await act(async () => { await vi.advanceTimersByTimeAsync(30); });
+    expect(host.querySelectorAll('img')[0].getAttribute('src')).toBe('/api/assets/a/rendered-thumbnail?publication=3');
+    statusSequence = 4;
+    aVersion = '4';
+    sources[0].emit('publication', JSON.stringify({ generationId, sequence: 4, assetId: 'a',
+      state: 'published', publicationVersion: '4' }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(30); });
+    expect(host.querySelectorAll('img')[0].getAttribute('src')).toBe('/api/assets/a/rendered-thumbnail?publication=4');
+    expect(sources).toHaveLength(1);
+    expect(fetch).toHaveBeenCalledTimes(3);
   });
 });

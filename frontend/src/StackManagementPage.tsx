@@ -79,10 +79,6 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
     pendingClick.current = window.setTimeout(() => { pendingClick.current = null; action(); }, 400);
   };
   useEffect(() => cancelPendingClick, [cancelPendingClick]);
-  const [thumbnailViewRevision, setThumbnailViewRevision] = useState(0);
-  useEffect(() => {
-    if (active) setThumbnailViewRevision(revision => revision + 1);
-  }, [active]);
   const navigate = useNavigate();
   const navigation = useMemo(() => readNavigation(location.state), [location.state]);
   // Home owns Stack generations; routed Anshitsu changes must not invalidate that live session.
@@ -715,7 +711,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
             {addTargetStackId === group.id && <span className="visually-hidden">{t('stackManagement.addTarget')}</span>}
           </header>
           <div className="stack-group-members">{group.members.map(asset => <StackPhoto key={asset.id} asset={asset}
-            editedPreview={editedPreview} thumbnailRefreshKey={String(thumbnailViewRevision)}
+            editedPreview={editedPreview}
             selected={false} member trash={group.trashAssetIds?.includes(asset.id)}
             onContextMenu={event => { if (!canEdit || !canReserveStackTrash(group, asset.id)) return; event.preventDefault(); setTrashMenu({ groupId: group.id, assetId: asset.id, x: event.clientX, y: event.clientY }); }} cover={asset.id === group.coverAssetId} disabled={!canEdit || isSingletonImmichStack(group)} toggleDisabled={!!group.trashAssetIds?.length} dragDisabled={!!group.trashAssetIds?.length}
             dragging={dragging?.assetId === asset.id && dragging.sourceGroupId === group.id}
@@ -756,7 +752,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
         onDrop={event => acceptDrop(event, null)}>
         <h2 id="stack-unmatched-heading">{t('stackManagement.unmatched')}</h2>
         {displayed.unmatched.length ? <div className="stack-unmatched-grid">{displayed.unmatched.map(asset => <StackPhoto
-          editedPreview={editedPreview} thumbnailRefreshKey={String(thumbnailViewRevision)}
+          editedPreview={editedPreview}
           key={asset.id} asset={asset} selected={selectedIds.has(asset.id)} disabled={!canEdit}
           dropTarget={dropTarget === `unmatched:${asset.id}`}
           onDropTargetDragOver={event => {
@@ -829,12 +825,12 @@ function StackEvidenceHeader({ group, result, retryAllowed }: { group: DraftStac
   })}</div>;
 }
 
-function StackPhoto({ asset, selected, editedPreview = false, thumbnailRefreshKey, cover = false, member = false, disabled = false, toggleDisabled = false, dragDisabled = false,
+function StackPhoto({ asset, selected, editedPreview = false, cover = false, member = false, disabled = false, toggleDisabled = false, dragDisabled = false,
   purgeDisabled = false, dragging = false, dropTarget = false,
   trash = false, previewDisabled = true, deferSelection = false, onPreviewRequest, onBeforeClick, onCancelPendingClick, onDeferClick,
   onContextMenu, onDragStart, onDragEnd, onToggle, onPurge, onDropTargetDragOver, onDropTargetDragLeave, onDropTargetDrop }: {
   asset: RecentAsset; selected: boolean; trash?: boolean; onContextMenu?: (event: React.MouseEvent<HTMLButtonElement>) => void; cover?: boolean; member?: boolean; disabled?: boolean;
-  editedPreview?: boolean; thumbnailRefreshKey?: string;
+  editedPreview?: boolean;
   previewDisabled?: boolean; deferSelection?: boolean; onPreviewRequest?: () => void; onBeforeClick?: () => void;
   onCancelPendingClick?: () => void; onDeferClick?: (action: () => void) => void;
   toggleDisabled?: boolean; dragDisabled?: boolean; purgeDisabled?: boolean;
@@ -877,7 +873,7 @@ function StackPhoto({ asset, selected, editedPreview = false, thumbnailRefreshKe
       else onToggle();
     }}>
     <div className="stack-thumbnail">{/* Keep the custom Stack payload on the parent instead of starting a native image drag. */}<ThumbnailImage
-      src={editedPreview ? undefined : asset.thumbnail_url} rendition={editedPreview ? 'rendered-thumbnail' : undefined} revision={editedPreview ? thumbnailRefreshKey : undefined}
+      src={editedPreview ? undefined : asset.thumbnail_url} rendition={editedPreview ? 'rendered-thumbnail' : undefined}
       assetId={asset.id} surface="stack" mode={editedPreview ? 'rendered' : 'original'} alt="" loading="lazy" draggable={false} /><FormatBadge format={asset.format} isRaw={asset.is_raw} />
       {trash && <span className="stack-trash-overlay" aria-label={t('stackManagement.trash')}><svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7" /></svg></span>}
       {cover && <span className="stack-cover-badge" title={t('stackManagement.cover')}>COVER</span>}

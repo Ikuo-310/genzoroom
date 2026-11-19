@@ -144,10 +144,10 @@ class LocalHost:
                 content_type = next((value for key, value in headers if key.lower() == b"content-type"), b"")
                 etag = next((value for key, value in headers if key.lower() == b"etag"), b"")
                 path = request.url.path.strip("/").split("/")
-                # Corrected and original images remain uncacheable until their identity is versioned.
+                # Only explicitly version-identified image responses may use browser revalidation.
                 cacheable_image = request.method in ("GET", "HEAD") and message.get("status") in (200, 304) \
                     and len(path) == 4 and path[:2] == ["api", "assets"] \
-                    and path[3] in ("thumbnail", "preview") \
+                    and path[3] in ("thumbnail", "preview", "rendered-thumbnail", "immersive-preview") \
                     and (content_type.lower().startswith(b"image/") or message.get("status") == 304) \
                     and cache_control == b"private, no-cache" and etag.startswith(b'"')
                 headers = [(key, value) for key, value in message.get("headers", [])

@@ -9,13 +9,15 @@ export function thumbnailDiagnosticUrl(url: string, diagnosticId: string): strin
 
 export type ThumbnailRendition = 'thumbnail' | 'rendered-thumbnail' | 'preview' | 'immersive-preview';
 
-export function thumbnailSourceUrl(assetId: string, rendition: ThumbnailRendition, revision?: string): string {
+export function thumbnailSourceUrl(assetId: string, rendition: ThumbnailRendition, publicationVersion?: string | number | null): string {
   const url = `/api/assets/${encodeURIComponent(assetId)}/${rendition}`;
-  return rendition === 'rendered-thumbnail' && revision !== undefined ? `${url}?view=${encodeURIComponent(revision)}` : url;
+  return (rendition === 'rendered-thumbnail' || rendition === 'immersive-preview')
+    && publicationVersion !== undefined && publicationVersion !== null
+    ? `${url}?publication=${encodeURIComponent(String(publicationVersion))}` : url;
 }
 
-export function thumbnailUrl(asset: Pick<RecentAsset, 'id' | 'thumbnail_url'>, edited = true, refreshKey?: string): string {
+export function thumbnailUrl(asset: Pick<RecentAsset, 'id' | 'thumbnail_url'>, edited = true, publicationVersion?: string | number | null): string {
   if (!edited) return asset.thumbnail_url;
   // Backend saved-state eligibility and fallback apply equally to RAW and JPEG, regardless of UI badges.
-  return thumbnailSourceUrl(asset.id, 'rendered-thumbnail', refreshKey);
+  return thumbnailSourceUrl(asset.id, 'rendered-thumbnail', publicationVersion);
 }
