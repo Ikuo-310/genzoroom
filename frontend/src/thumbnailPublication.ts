@@ -6,11 +6,49 @@ const listeners = new Map<string, Set<() => void>>();
 const snapshots = new Map<string, ThumbnailPublication>();
 const pendingIds = new Set<string>();
 let eventSource: EventSource | null = null;
+let streamListeners: AbortController | null = null;
 let reconcileTimer: ReturnType<typeof setTimeout> | null = null;
 let reconciliationRunning = false;
 let streamGeneration = 0;
 let backendGenerationId: string | null = null;
 let lastSequence = -1;
+const assetSequences = new Map<string, number>();
+const retries = new Map<string, number>();
+const retryIds = new Set<string>();
+let controller: AbortController | null = null;
+let activeChunk: string[] = [];
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+function resetSynchronization() {
+  streamGeneration += 1;
+  controller?.abort();
+  lastSequence = -1;
+  backendGenerationId = null;
+  assetSequences.clear();
+  retries.clear();
+  retryIds.clear();
+  if (retryTimer !== null) clearTimeout(retryTimer);
+  retryTimer = null;
+}
+
+function queueRetry(ids: string[]) {
+  for (const id of ids) {
+    if (!listeners.has(id)) continue;
+    const count = Math.min(4, (retries.get(id) ?? 0) + 1);
+    retries.set(id, count);
+    if (count <= 3) retryIds.add(id);
+  }
+  if (retryTimer !== null || !retryIds.size) return;
+  let delay = 500;
+  for (const id of retryIds) delay = Math.max(delay, 500 * 2 ** ((retries.get(id) ?? 1) - 1));
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    const queued = [...retryIds];
+    retryIds.clear();
+    scheduleReconciliation(queued);
+  }, delay);
+}
 
 function logSyncFailure(error: unknown) {
   try {
@@ -30,8 +68,8 @@ function publishSnapshot(assetId: string, next: ThumbnailPublication) {
 function activeAssetIds() { return [...listeners.keys()]; }
 
 function scheduleReconciliation(assetIds: Iterable<string> = activeAssetIds()) {
-  for (const assetId of assetIds) pendingIds.add(assetId);
-  if (reconcileTimer !== null) clearTimeout(reconcileTimer);
+  for (const assetId of assetIds) if (listeners.has(assetId)) pendingIds.add(assetId);
+  if (reconcileTimer !== null || !pendingIds.size) return;
   reconcileTimer = setTimeout(() => {
     reconcileTimer = null;
     void reconcile([...pendingIds]);
@@ -47,27 +85,42 @@ async function reconcile(assetIds: string[]) {
   reconciliationRunning = true;
   pendingIds.clear();
   const expectedStreamGeneration = streamGeneration;
-  const controller = new AbortController();
+  const request = new AbortController();
+  controller = request;
   try {
     for (let offset = 0; offset < assetIds.length; offset += 1000) {
-      let result;
+      const chunk = assetIds.slice(offset, offset + 1000).filter(id => listeners.has(id));
+      if (!chunk.length) continue;
+      activeChunk = chunk;
+      const owners = chunk.map(id => listeners.get(id));
       try {
-        const chunk = assetIds.slice(offset, offset + 1000);
-        result = await fetchThumbnailPublications(chunk, controller.signal);
-        if (expectedStreamGeneration !== streamGeneration) return;
-        if (backendGenerationId !== result.generationId) {
-          backendGenerationId = result.generationId;
-          lastSequence = -1;
+        const result = await fetchThumbnailPublications(chunk, request.signal);
+        if (expectedStreamGeneration !== streamGeneration || request.signal.aborted) return;
+        if (backendGenerationId !== null && backendGenerationId !== result.generationId) {
+          queueRetry(chunk);
+          continue;
         }
-        if (result.sequence < lastSequence) continue;
-        lastSequence = result.sequence;
-        for (const [assetId, publication] of Object.entries(result.items)) publishSnapshot(assetId, publication);
+        backendGenerationId = result.generationId;
+        // A snapshot covers only its requested Assets, never the whole SSE stream.
+        for (const [index, id] of chunk.entries()) {
+          if (listeners.get(id) !== owners[index]) continue;
+          const publication = result.items[id];
+          if (!publication) { queueRetry([id]); continue; }
+          retries.delete(id);
+          retryIds.delete(id);
+          if (result.sequence < (assetSequences.get(id) ?? -1)) continue;
+          assetSequences.set(id, result.sequence);
+          publishSnapshot(id, publication);
+        }
       } catch (error) {
-        if (!(error instanceof DOMException && error.name === 'AbortError')) logSyncFailure(error);
-        return;
+        if (request.signal.aborted) return;
+        logSyncFailure(error);
+        queueRetry(chunk);
       }
     }
   } finally {
+    activeChunk = [];
+    controller = null;
     reconciliationRunning = false;
     if (pendingIds.size) scheduleReconciliation([]);
   }
@@ -82,8 +135,8 @@ function onPublication(event: MessageEvent<string>) {
     scheduleReconciliation(); return;
   }
   if (message.generationId !== backendGenerationId) {
+    resetSynchronization();
     backendGenerationId = message.generationId;
-    lastSequence = -1;
     scheduleReconciliation();
   }
   const sequence = message.sequence as number;
@@ -97,6 +150,8 @@ function onPublication(event: MessageEvent<string>) {
       && /^\d{1,24}$/.test(message.publicationVersion))) {
     scheduleReconciliation(); return;
   }
+  if (!listeners.has(message.assetId) || sequence <= (assetSequences.get(message.assetId) ?? -1)) return;
+  assetSequences.set(message.assetId, sequence);
   const previous = snapshots.get(message.assetId);
   publishSnapshot(message.assetId, {
     recipeRevision: previous?.recipeRevision ?? null,
@@ -110,15 +165,18 @@ function ensureEventSource() {
   try {
     const source = new EventSource('/api/thumbnail-publications/events');
     eventSource = source;
+    streamListeners = new AbortController();
+    const options = { signal: streamListeners.signal };
     source.addEventListener('open', () => {
-      streamGeneration += 1;
+      if (eventSource !== source) return;
+      resetSynchronization();
       scheduleReconciliation();
-    });
-    source.addEventListener('publication', event => onPublication(event as MessageEvent<string>));
-    source.addEventListener('resync', event => onPublication(event as MessageEvent<string>));
-    source.onerror = () => {
-      // EventSource owns reconnect timing; every successful reopen triggers a status resync.
+    }, options);
+    const receive = (event: Event) => {
+      if (eventSource === source) onPublication(event as MessageEvent<string>);
     };
+    source.addEventListener('publication', receive, options);
+    source.addEventListener('resync', receive, options);
   } catch (error) {
     logSyncFailure(error);
   }
@@ -128,13 +186,44 @@ export function subscribeThumbnailPublication(assetId: string, listener: () => v
   let assetListeners = listeners.get(assetId);
   if (!assetListeners) { assetListeners = new Set(); listeners.set(assetId, assetListeners); }
   assetListeners.add(listener);
+  if (idleTimer !== null) clearTimeout(idleTimer);
+  idleTimer = null;
   ensureEventSource();
   if (eventSource) scheduleReconciliation([assetId]);
   return () => {
     const current = listeners.get(assetId);
     current?.delete(listener);
-    if (current?.size === 0) listeners.delete(assetId);
+    if (current?.size !== 0) return;
+    listeners.delete(assetId);
+    snapshots.delete(assetId);
+    assetSequences.delete(assetId);
+    pendingIds.delete(assetId);
+    retries.delete(assetId);
+    retryIds.delete(assetId);
+    if (activeChunk.length && !activeChunk.some(id => listeners.has(id))) {
+      controller?.abort();
+      // The request owns the remaining batches too, so preserve their pending work.
+      scheduleReconciliation();
+    }
+    if (listeners.size) return;
+    resetSynchronization();
+    if (reconcileTimer !== null) clearTimeout(reconcileTimer);
+    reconcileTimer = null;
+    // Keep the transport across route transitions without retaining Asset state.
+    idleTimer = setTimeout(() => {
+      idleTimer = null;
+      const source = eventSource;
+      eventSource = null;
+      streamListeners?.abort();
+      streamListeners = null;
+      source?.close();
+    }, 1000);
   };
+}
+
+export function refreshThumbnailPublication(assetId: string) {
+  retries.delete(assetId);
+  scheduleReconciliation([assetId]);
 }
 
 export function getThumbnailPublication(assetId: string): ThumbnailPublication | undefined {

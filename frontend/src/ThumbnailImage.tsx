@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { frontendLogger } from './frontendLogging';
 import { thumbnailDiagnosticUrl, thumbnailSourceUrl, type ThumbnailRendition } from './thumbnailUrl';
-import { useThumbnailPublication } from './thumbnailPublication';
+import { refreshThumbnailPublication, useThumbnailPublication } from './thumbnailPublication';
 
 type ThumbnailMode = 'original' | 'rendered' | 'preview';
 type ThumbnailPhase = 'loading' | 'loaded' | 'failed';
@@ -58,7 +58,9 @@ export function ThumbnailImage({ src, rendition, assetId, surface, mode, publica
   const usesPublication = rendition === 'rendered-thumbnail' || rendition === 'immersive-preview';
   const publication = useThumbnailPublication(assetId, usesPublication);
   const selectedPublicationVersion = publicationVersion !== undefined ? publicationVersion : publication?.publicationVersion;
-  const resolvedSrc = src ?? thumbnailSourceUrl(assetId, rendition ?? (mode === 'preview' ? 'preview' : 'thumbnail'), selectedPublicationVersion);
+  const effectiveRendition = rendition === 'rendered-thumbnail' && selectedPublicationVersion === null
+    ? 'thumbnail' : rendition ?? (mode === 'preview' ? 'preview' : 'thumbnail');
+  const resolvedSrc = src ?? thumbnailSourceUrl(assetId, effectiveRendition, selectedPublicationVersion);
   const sourceKey = JSON.stringify([assetId, resolvedSrc, selectedPublicationVersion ?? null]);
   const [attempt, setAttempt] = useState(0);
   const [phaseState, setPhaseState] = useState<{ key: string; phase: ThumbnailPhase } | null>(null);
@@ -88,6 +90,7 @@ export function ThumbnailImage({ src, rendition, assetId, surface, mode, publica
   const showRetry = retryControl?.sourceKey === sourceKey && retryControl.visible;
   const startedAt = useRef(0);
   const settled = useRef(false);
+  const checkedFailure = useRef<string | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -151,12 +154,18 @@ export function ThumbnailImage({ src, rendition, assetId, surface, mode, publica
       diagnosticId, assetId, surface, mode, attempt, complete: image.complete, naturalWidth: image.naturalWidth,
       durationMs: startedAt.current ? Math.round(performance.now() - startedAt.current) : null,
     } });
+    if (usesPublication && !src && publicationVersion === undefined && selectedPublicationVersion
+      && checkedFailure.current !== sourceKey) {
+      checkedFailure.current = sourceKey;
+      refreshThumbnailPublication(assetId);
+    }
     onError?.(event);
   };
 
   const retry = () => {
     if (!isCurrentRequest() || phase !== 'failed') return;
     log({ level: 'info', component: 'thumbnail', event: 'image.retryRequested', context: { assetId, surface, mode, attempt: attempt + 1 } });
+    if (usesPublication && !src && publicationVersion === undefined) refreshThumbnailPublication(assetId);
     setPhaseState(null);
     setRetryControl({ sourceKey, visible: true });
     setAttempt(value => value + 1);

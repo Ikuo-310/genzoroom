@@ -156,7 +156,7 @@ describe('ThumbnailImage diagnostics', () => {
       get emitEvent() { return this.emit.bind(this); }
     }
     vi.stubGlobal('EventSource', FakeEventSource);
-    let aVersion = '1';
+    let aVersion: string | null = '1';
     let statusSequence = 0;
     const generationId = 'a'.repeat(32);
     const fetch = vi.fn(async (_url: string, init?: RequestInit) => {
@@ -202,13 +202,34 @@ describe('ThumbnailImage diagnostics', () => {
     sources[0].emit('open');
     await act(async () => { await vi.advanceTimersByTimeAsync(30); });
     expect(host.querySelectorAll('img')[0].getAttribute('src')).toBe('/api/assets/a/rendered-thumbnail?publication=3');
-    statusSequence = 4;
+    sources[0].emit('publication', JSON.stringify({ generationId, sequence: 3, assetId: 'b',
+      state: 'published', publicationVersion: '10' }));
+    statusSequence = 5;
     aVersion = '4';
-    sources[0].emit('publication', JSON.stringify({ generationId, sequence: 4, assetId: 'a',
+    sources[0].emit('publication', JSON.stringify({ generationId, sequence: 5, assetId: 'a',
       state: 'published', publicationVersion: '4' }));
     await act(async () => { await vi.advanceTimersByTimeAsync(30); });
     expect(host.querySelectorAll('img')[0].getAttribute('src')).toBe('/api/assets/a/rendered-thumbnail?publication=4');
     expect(sources).toHaveLength(1);
     expect(fetch).toHaveBeenCalledTimes(3);
+
+    // A status response for A must not consume B's still in-flight SSE event.
+    statusSequence = 9;
+    aVersion = '9';
+    await act(async () => host.querySelectorAll('img')[0].dispatchEvent(new Event('error')));
+    await act(async () => { await vi.advanceTimersByTimeAsync(30); });
+    expect(JSON.parse(String(fetch.mock.lastCall?.[1]?.body)).assetIds).toEqual(['a']);
+    sources[0].emit('publication', JSON.stringify({ generationId, sequence: 6, assetId: 'b',
+      state: 'published', publicationVersion: '11' }));
+    await act(async () => {});
+    expect(host.querySelectorAll('img')[2].getAttribute('src')).toContain('publication=11');
+
+    statusSequence = 10;
+    aVersion = null;
+    const unaffected = host.querySelectorAll('img')[2];
+    await act(async () => host.querySelectorAll('img')[0].dispatchEvent(new Event('error')));
+    await act(async () => { await vi.advanceTimersByTimeAsync(30); });
+    expect(host.querySelectorAll('img')[0].getAttribute('src')).toBe('/api/assets/a/thumbnail');
+    expect(host.querySelectorAll('img')[2]).toBe(unaffected);
   });
 });

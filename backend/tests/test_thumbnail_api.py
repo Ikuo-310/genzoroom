@@ -50,6 +50,48 @@ async def put(client, state=None, revision=0, save_id=None):
                                             **(state if state is not None else snapshot())})
 
 
+def test_reset_cleanup_failure_cannot_republish_after_reedit_or_restart(setup, monkeypatch):
+    from pathlib import Path
+
+    cache, _, _, generate, _ = setup
+    unlink = Path.unlink
+
+    def deny_jpeg(path, *args, **kwargs):
+        if path.name == f"{ASSET}.jpg":
+            raise PermissionError()
+        return unlink(path, *args, **kwargs)
+
+    async def run():
+        async with client() as api:
+            assert (await put(api)).status_code == 200
+            cache.store(ASSET, b"before reset")
+            old = cache.version(ASSET)
+            with monkeypatch.context() as disk:
+                disk.setattr(Path, "unlink", deny_jpeg)
+                assert (await put(api, snapshot(0), 1)).status_code == 200
+            assert cache._path(ASSET).exists()
+            restarted_cache = ThumbnailCache(cache.root)
+            hub = ThumbnailPublicationHub()
+            generate.side_effect = RuntimeError("render failed")
+            worker = ThumbnailScheduler(restarted_cache, generate, publication_hub=hub)
+            monkeypatch.setattr(main.app.state, "thumbnail_cache", restarted_cache)
+            monkeypatch.setattr(main.app.state, "thumbnail_scheduler", worker)
+            monkeypatch.setattr(main.app.state, "thumbnail_publication_hub", hub)
+            await worker.start()
+            try:
+                assert (await put(api, snapshot(2), 2)).status_code == 200
+                assert (await api.post(PATH)).status_code == 202
+                await until(lambda: worker.generation_state(ASSET) == "failed")
+                status = await api.post("/thumbnail-publications/status", json={"assetIds": [str(ASSET)]})
+                assert status.json()["items"][str(ASSET)]["publicationVersion"] is None
+                assert (await api.get(PATH, params={"publication": old})).status_code == 409
+                assert (await api.get(PATH)).content == b"original"
+            finally:
+                await worker.close()
+
+    asyncio.run(run())
+
+
 def test_save_debounce_history_only_replay_reset_and_conflict(setup):
     cache, scheduler, now, generate, _ = setup
     async def run():
@@ -447,6 +489,7 @@ def test_immersive_preview_cache_read_failure_falls_back_and_preview_failure_map
     class BrokenPath:
         def stat(self): raise OSError("private cache failure")
         def read_bytes(self): raise OSError("private cache failure")
+        def open(self, *_): raise OSError("private cache failure")
     monkeypatch.setattr(cache, "_path", lambda _asset_id: BrokenPath())
     async def run():
         async with client() as api:

@@ -599,9 +599,8 @@ async def thumbnail_publication_events(request: Request) -> Response:
     hub = getattr(request.app.state, "thumbnail_publication_hub", None)
     if hub is None:
         raise _edit_error(503, "thumbnail_scheduler_unavailable")
-    queue = hub.subscribe()
-
     async def events():
+        queue = hub.subscribe()
         try:
             yield b": connected\n\n"
             while not await request.is_disconnected():
@@ -665,6 +664,12 @@ async def save_asset_edit_state(asset_id: UUID, request: Request) -> dict:
         if scheduler is None:
             return await run_in_threadpool(put_edit_state, asset_id, revision, save_id, payload)
         async with scheduler.mutation_lock:
+            if has_non_default_recipe(payload) and await thumbnail_recipe_reason(asset_id) == "recipe_default":
+                # Recover a reset interrupted after its Recipe commit but before cache fencing.
+                try:
+                    await run_in_threadpool(scheduler.cache.fence_reset, asset_id)
+                except OSError as error:
+                    raise _edit_error(503, "thumbnail_scheduler_unavailable") from error
             result, recipe_changed = await run_in_threadpool(
                 put_edit_state_with_recipe_change, asset_id, revision, save_id, payload)
             try:

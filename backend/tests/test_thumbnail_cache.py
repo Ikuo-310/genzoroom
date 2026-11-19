@@ -127,3 +127,56 @@ def test_read_failure_falls_back(tmp_path, monkeypatch):
         raise PermissionError()
     monkeypatch.setattr(Path, "read_bytes", fail)
     assert ThumbnailCache(tmp_path).read(A) is None
+
+
+def test_failed_reset_delete_fences_old_file_after_restart(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    cache = ThumbnailCache(tmp_path)
+    cache.store(A, b"before reset")
+    old = cache.version(A)
+    unlink = Path.unlink
+
+    def deny_old_jpeg(path, *args, **kwargs):
+        if path.name == f"{A}.jpg":
+            raise PermissionError()
+        return unlink(path, *args, **kwargs)
+
+    with monkeypatch.context() as disk:
+        disk.setattr(Path, "unlink", deny_old_jpeg)
+        with pytest.raises(PermissionError):
+            cache.delete(A)
+    restarted = ThumbnailCache(tmp_path)
+    assert (tmp_path / f"{A}.jpg").exists()
+    assert restarted.versions([A]) == {str(A): None}
+    assert restarted.read_versioned(A) is None
+    monkeypatch.setattr(module, "time_ns", lambda: int(old))
+    restarted.store(A, b"after reset")
+    new = restarted.version(A)
+    assert new != old
+    assert restarted.read_versioned(A) == (b"after reset", new)
+    (tmp_path / f"{A}.jpg").unlink()
+    assert restarted.versions([A]) == {str(A): None}
+
+
+def test_partial_prune_reports_each_successful_eviction(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    cache = ThumbnailCache(tmp_path)
+    cache.store(A, b"aaaa")
+    cache.store(B, b"bbbb")
+    os.utime(tmp_path / f"{A}.jpg", (10, 10))
+    os.utime(tmp_path / f"{B}.jpg", (20, 20))
+    monkeypatch.setattr(module, "MAX_CACHE_BYTES", 8)
+    unlink = Path.unlink
+
+    def deny_first(path, *args, **kwargs):
+        if path.name == f"{A}.jpg":
+            raise PermissionError()
+        return unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", deny_first)
+    assert cache.store(C, b"cccc") == [B]
+    assert cache.version(A) is not None
+    assert cache.version(B) is None
+    assert cache.version(C) is not None

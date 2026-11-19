@@ -8,6 +8,7 @@ from starlette.concurrency import run_in_threadpool
 async def mutate_raw_edits(scheduler, asset_id, operation, *args, **kwargs):
     # Windows chooses its storage profile after importing the RAW API module.
     from raw_recipe_store import get_raw_saved_state
+    from edit_store import StoreUnavailable
     from thumbnail_cache import thumbnail_log
 
     if scheduler is None:
@@ -16,9 +17,17 @@ async def mutate_raw_edits(scheduler, asset_id, operation, *args, **kwargs):
     async with scheduler.mutation_lock:
         try:
             before = await run_in_threadpool(get_raw_saved_state, asset_id)
+            known_before = True
         except Exception:
             # Optional cache bookkeeping cannot prevent the authoritative store operation.
             before = None
+            known_before = False
+        if known_before and (before is None or before["exportEligible"] is False):
+            # A previous reset may have committed just before the process stopped.
+            try:
+                await run_in_threadpool(scheduler.cache.fence_reset, asset_id)
+            except OSError as error:
+                raise StoreUnavailable() from error
         result = await run_in_threadpool(operation, *args, **kwargs)
         try:
             after = await run_in_threadpool(get_raw_saved_state, asset_id)
