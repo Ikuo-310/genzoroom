@@ -10,7 +10,7 @@ export type RegionIdentity = Readonly<{ assetId: string; sourceId: string; gener
   ({ kind: 'after'; revision: number } | { kind: 'before'; beforeKey: string })>;
 export type RegionRequest = Readonly<{ contractVersion: 1; mode: 'region'; quality: RegionQuality; geometryId: string;
   fullWidth: number; fullHeight: number; window: RegionWindow; validRegion: RegionWindow; context: number; prefetch: number;
-  identity: RegionIdentity; documentRevision: number; viewGeneration: number; requestId: string }>;
+  identity: RegionIdentity; documentRevision: number; viewGeneration: number; requestId: string; pointColorRangeIndex?: number }>;
 export type RegionResponse = RegionRequest & Readonly<{ width: number; height: number; kind: 'after' | 'before' }>;
 export type RegionCapability = Readonly<{ regionContract: 1 }>;
 // Preflight asks LC to round/fit once; its confirmed F is the only input to the coordinate planner.
@@ -21,6 +21,8 @@ export type RegionFrameResponse = RegionFrameRequest & Readonly<{ nativeWidth: n
 type RecordValue = Record<string, unknown>;
 const object = (v: unknown): v is RecordValue => !!v && typeof v === 'object' && !Array.isArray(v);
 const exact = (v: RecordValue, keys: readonly string[]) => Object.keys(v).length === keys.length && keys.every(k => Object.hasOwn(v, k));
+const exactWithOptional = (v: RecordValue, keys: readonly string[], optional: readonly string[]) =>
+  keys.every(k => Object.hasOwn(v, k)) && Object.keys(v).every(k => keys.includes(k) || optional.includes(k));
 const hash = (v: unknown): v is string => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
 const opaque = (v: unknown): v is string => typeof v === 'string' && /^[a-f0-9]{32}$/.test(v);
 const count = (v: unknown, min = 0): v is number => typeof v === 'number' && regionInteger(v, min);
@@ -38,6 +40,8 @@ function boundedWindow(v: unknown, fw: number, fh: number): v is RegionWindow {
 }
 function target(v: RecordValue): boolean {
   if (v.contractVersion !== RAW_REGION_CONTRACT || v.mode !== 'region' || !['draft', 'full'].includes(v.quality as string)
+    || v.pointColorRangeIndex !== undefined && (!count(v.pointColorRangeIndex) || v.pointColorRangeIndex > 7
+      || !object(v.identity) || v.identity.kind !== 'after')
     || !hash(v.geometryId) || !count(v.fullWidth, 1) || !count(v.fullHeight, 1)
     || Math.max(v.fullWidth, v.fullHeight) > B.maxFullSide
     || !count(v.context) || v.context > B.maxFullSide || !count(v.prefetch) || v.prefetch > B.maxFullSide
@@ -53,10 +57,10 @@ function target(v: RecordValue): boolean {
   return equalWindow(valid, { x, y, w: right - x, h: bottom - y });
 }
 export function validateRegionRequest(v: unknown): v is RegionRequest {
-  return object(v) && exact(v, spec.requestFields) && target(v);
+  return object(v) && exactWithOptional(v, spec.requestFields, spec.requestOptionalFields) && target(v);
 }
 export function validateRegionResponse(v: unknown): v is RegionResponse {
-  return object(v) && exact(v, spec.responseFields) && target(v) && object(v.window) && object(v.identity)
+  return object(v) && exactWithOptional(v, spec.responseFields, spec.responseOptionalFields) && target(v) && object(v.window) && object(v.identity)
     && count(v.width, 1) && count(v.height, 1) && v.width === v.window.w && v.height === v.window.h && v.kind === v.identity.kind;
 }
 export function validateRegionFrameRequest(v: unknown): v is RegionFrameRequest {
@@ -109,7 +113,7 @@ function canonical(value: unknown): string {
 function ownerKey(i: RegionIdentity) { return [i.assetId, i.sourceId, i.generation, i.documentToken]; }
 function contentOwnerKey(r: RegionRequest) { return [...ownerKey(r.identity), r.identity.kind,
   r.identity.kind === 'after' ? r.identity.revision : r.identity.beforeKey, r.contractVersion, r.mode, r.quality,
-  r.geometryId, r.fullWidth, r.fullHeight, spec.outputProfile]; }
+  r.geometryId, r.fullWidth, r.fullHeight, r.pointColorRangeIndex ?? null, spec.outputProfile]; }
 export function regionCacheKey(r: RegionRequest): string {
   return JSON.stringify([...contentOwnerKey(r), r.window.x, r.window.y, r.window.w, r.window.h,
     r.validRegion.x, r.validRegion.y, r.validRegion.w, r.validRegion.h]);

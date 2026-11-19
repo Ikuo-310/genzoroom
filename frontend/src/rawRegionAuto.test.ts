@@ -47,10 +47,23 @@ function harness(nativeWidth = 4000, nativeHeight = 3000) {
   return { auto, overlay, delivery, send, decode, connect, urls, view, update, getOwner: () => owner!,
     setOwner: (value?: RegionDeliveryOwner) => { owner = value; }, getWhole: () => after,
     setWholeBitmap: (width: number, height: number) => { after = { ...after, frame: { ...after.frame, fullWidth: width, fullHeight: height } }; },
+    setWholeRange: (index?: number) => { after = { ...after, ...(index === undefined ? { pointColorRangeIndex: undefined } : { pointColorRangeIndex: index }) }; },
     setWhole: (quality: 'draft' | 'full') => { after = { ...after, quality, doc: { ...owner!.doc } }; if (before) before = { ...before, quality, doc: { ...owner!.doc } }; },
     compare: () => { comparing = true; before = whole(); }, gesture: (value: boolean) => { interacting = value; },
     gate: (value?: () => Promise<void>) => { gate = value; }, maxInFlight: () => maxInFlight };
 }
+
+it('carries the selected Point Color range through Whole Region planning and keeps Before unmodified', async () => {
+  const h = harness(); h.setWholeRange(0); h.update({ scale: 1 }); await tick();
+  const plan = h.send.mock.calls.find(([, item]) => 'desiredLongEdge' in item)?.[1];
+  expect(plan).toBeDefined(); expect(plan).not.toHaveProperty('pointColorRangeIndex');
+  const render = h.send.mock.calls.find(([, item]) => !('desiredLongEdge' in item))?.[1];
+  expect(render).toMatchObject({ pointColorRangeIndex: 0, identity: { kind: 'after' } });
+  expect(h.overlay.display?.after.metadata.pointColorRangeIndex).toBe(0);
+  const paired = harness(); paired.setWholeRange(0); paired.compare(); paired.update({ scale: 1 }); await tick();
+  const before = paired.send.mock.calls.find(([, item]) => !('desiredLongEdge' in item) && item.identity.kind === 'before')?.[1];
+  expect(before).toBeDefined(); expect(before).not.toHaveProperty('pointColorRangeIndex');
+});
 
 it('uses Whole at Fit, starts a genuinely denser Native frame, keeps hysteresis, then removes only the overlay', async () => {
   const h = harness(); h.update({ scale: .4, fit: true }); await tick();

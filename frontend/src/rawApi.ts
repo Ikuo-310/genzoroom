@@ -14,11 +14,12 @@ export type RawDocument = {
 };
 export type RawGeometry = { geometryId: string; nativeWidth: number; nativeHeight: number; aspect: number;
   fullWidth: number; fullHeight: number; window: null };
-export type RawDisplayTarget = { quality: 'draft' | 'full'; mode: 'whole' | 'crop-edit'; maxSide: number; viewGeneration: number; geometryId: string | null };
+export type RawDisplayTarget = { quality: 'draft' | 'full'; mode: 'whole' | 'crop-edit'; maxSide: number; viewGeneration: number; geometryId: string | null;
+  pointColorRangeIndex?: number };
 export type RawCropDisplay = { canonicalGeometry: { crop: RawCrop; orientation: string }; bitmapSpace: 'oriented-warped-unstraightened-flipped'; settingsFingerprint: string };
 export type RawFrame = { blob: Blob; width: number; height: number; epoch: number; sequence: number; kind?: 'before' | 'after'; key?: string;
   quality?: 'draft' | 'full'; frame?: RawGeometry; cropDisplay?: RawCropDisplay; interactionId?: string; interactionSequence?: number;
-  curvePoints?: RawCurvePoint[] };
+  curvePoints?: RawCurvePoint[]; pointColorRangeIndex?: number };
 export class RawSuperseded extends Error {
   constructor(public readonly reason: 'revision' | 'replaced' | 'cancelled') { super(reason); }
 }
@@ -691,10 +692,13 @@ export async function updateRawPointColorInteraction(doc: RawSettings, serial: n
   target: RawDisplayTarget, interaction: { id: string; sequence: number; control: RawPointColorControlId; value: number }): Promise<number> {
   if (!opaque(interaction.id) || !Number.isSafeInteger(interaction.sequence) || interaction.sequence < 1
     || !validRawPointColorControlValue(interaction.control, interaction.value) || !Number.isSafeInteger(serial)
-    || target.mode !== 'whole') throw new RawApiError('raw_invalid_request');
+    || target.mode !== 'whole' || target.pointColorRangeIndex !== undefined
+      && (!Number.isSafeInteger(target.pointColorRangeIndex) || target.pointColorRangeIndex < 0 || target.pointColorRangeIndex > 7))
+    throw new RawApiError('raw_invalid_request');
   const response = await request(`/documents/${doc.handle}/point-color-interaction/update`, { ...post({ ...identityBody(doc),
     documentRevision: doc.revision, interactionId: interaction.id, sequence: interaction.sequence, value: interaction.value,
-    serial, maxSide: target.maxSide, viewGeneration: target.viewGeneration, geometryId: target.geometryId }),
+    serial, maxSide: target.maxSide, viewGeneration: target.viewGeneration, geometryId: target.geometryId,
+    ...(target.pointColorRangeIndex === undefined ? {} : { pointColorRangeIndex: target.pointColorRangeIndex }) }),
     signal: AbortSignal.any([signal, AbortSignal.timeout(90_000)]) });
   if (response.status !== 200 || response.headers.get('content-type')?.split(';')[0] !== 'application/json') throw new RawApiError('raw_invalid_response');
   let value: any;
@@ -752,7 +756,9 @@ export async function rawPreview(doc: RawDocument, serial: number, signal: Abort
   interaction?: { id: string; points: RawCurveCommandPoint[] },
   targetedInteraction?: { id: string; target: { x: number; y: number }; steps: number[] } | { id: string; sequence: number },
   mixerInteraction?: { id: string; sequence: number }, pointColorInteraction?: { id: string; sequence: number }): Promise<RawFrame> {
-  if (target && (!Number.isInteger(target.maxSide) || target.maxSide < 16 || target.maxSide > RAW_PREVIEW_MAX_SIDE))
+  if (target && (!Number.isInteger(target.maxSide) || target.maxSide < 16 || target.maxSide > RAW_PREVIEW_MAX_SIDE
+    || target.pointColorRangeIndex !== undefined && (!Number.isSafeInteger(target.pointColorRangeIndex)
+      || target.pointColorRangeIndex < 0 || target.pointColorRangeIndex > 7 || target.mode !== 'whole' || kind !== 'after')))
     throw new RawApiError('raw_invalid_preview_request');
   if (targetedInteraction && 'steps' in targetedInteraction) {
     if (!target || kind !== 'after') throw new RawApiError('raw_invalid_preview_request');
@@ -772,7 +778,9 @@ export async function rawPreview(doc: RawDocument, serial: number, signal: Abort
         : mixerInteraction ? { interactionSequence: mixerInteraction.sequence }
         : previewSequence ? { interactionSequence: previewSequence } : { points: interaction!.points }),
       serial, maxSide: target?.maxSide ?? RAW_PREVIEW_MAX_SIDE, viewGeneration: target?.viewGeneration ?? 0,
-      geometryId: target?.geometryId ?? null } : { revision: doc.revision, serial, ...target, ...(kind === 'before' ? { kind } : {}) }) }),
+      geometryId: target?.geometryId ?? null,
+      ...(target?.pointColorRangeIndex === undefined ? {} : { pointColorRangeIndex: target.pointColorRangeIndex }) }
+      : { revision: doc.revision, serial, ...target, ...(kind === 'before' ? { kind } : {}) }) }),
     signal: AbortSignal.any([signal, AbortSignal.timeout(90_000)]) });
   try {
     const responseStarted = performance.now();
@@ -816,6 +824,10 @@ export async function rawPreview(doc: RawDocument, serial: number, signal: Abort
         } catch { throw new RawApiError('raw_invalid_response'); }
       }
     }
+    const rangeText = response.headers.get('x-raw-point-color-range-index');
+    if (target?.pointColorRangeIndex === undefined
+      ? rangeText !== null
+      : rangeText !== String(target.pointColorRangeIndex)) throw new RawApiError('raw_invalid_response');
     const numeric = (name: string) => {
       const text = response.headers.get(`x-raw-${name}`);
       if (!text || !/^\d{1,16}$/.test(text) || !integer(Number(text))) throw new RawApiError('raw_invalid_response');
@@ -860,7 +872,8 @@ export async function rawPreview(doc: RawDocument, serial: number, signal: Abort
     check();
     if (![137, 80, 78, 71, 13, 10, 26, 10].every((byte, index) => bytes[index] === byte)) throw new RawApiError('raw_invalid_response');
     return { blob: new Blob([bytes], { type: 'image/png' }), width, height, epoch, sequence,
-      kind, quality, frame, cropDisplay, ...(activeInteraction ? { interactionId: activeInteraction.id, interactionSequence } : {}), ...(curvePoints ? { curvePoints } : {}),
+      kind, quality, frame, cropDisplay, ...(rangeText === null ? {} : { pointColorRangeIndex: Number(rangeText) }),
+      ...(activeInteraction ? { interactionId: activeInteraction.id, interactionSequence } : {}), ...(curvePoints ? { curvePoints } : {}),
       ...(kind === 'before' ? { key: doc.beforeKey! } : {}) };
   } finally { await response.body?.cancel().catch(() => {}); }
 }

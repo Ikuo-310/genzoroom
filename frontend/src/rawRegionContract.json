@@ -13,6 +13,8 @@
   },
   "requestFields": ["contractVersion", "mode", "quality", "geometryId", "fullWidth", "fullHeight", "window", "validRegion", "context", "prefetch", "identity", "documentRevision", "viewGeneration", "requestId"],
   "responseFields": ["contractVersion", "mode", "quality", "geometryId", "fullWidth", "fullHeight", "window", "validRegion", "context", "prefetch", "identity", "documentRevision", "viewGeneration", "requestId", "width", "height", "kind"],
+  "requestOptionalFields": ["pointColorRangeIndex"],
+  "responseOptionalFields": ["pointColorRangeIndex"],
   "coordinateOrder": ["visible", "prefetch/context", "floor/ceil", "grid-snap", "clamp", "budget-center", "context-inset"],
   "outputProfile": "srgb-u8"
 }

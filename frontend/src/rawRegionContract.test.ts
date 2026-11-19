@@ -15,8 +15,8 @@ function tools() { return { tools: [{ name: 'render_region_preview', inputSchema
 
 it('keeps the JSON schemas, typed validator fields, capability and initial budgets aligned', () => {
   expect(spec.contractVersion).toBe(1);
-  expect(Object.keys(schemaRequest.properties)).toEqual(spec.requestFields);
-  expect(Object.keys(schemaResponse.properties)).toEqual(spec.responseFields);
+  expect(Object.keys(schemaRequest.properties)).toEqual([...spec.requestFields, ...spec.requestOptionalFields]);
+  expect(Object.keys(schemaResponse.properties)).toEqual([...spec.responseFields, ...spec.responseOptionalFields]);
   expect(schemaRequest.additionalProperties).toBe(false);
   expect(schemaResponse.additionalProperties).toBe(false);
   expect(schemaRequest.properties.fullWidth.maximum).toBe(C1_REGION_BUDGET.maxFullSide);
@@ -27,6 +27,16 @@ it('keeps the JSON schemas, typed validator fields, capability and initial budge
     expect(validateRegionResponse(response(r))).toBe(true);
     expect(checkRegionResponse(r, response(r)).status).toBe('accepted');
   }
+});
+it('binds Point Color range identity to render metadata and forbids it for Before', () => {
+  const plain = request(), ranged = request({ pointColorRangeIndex: 0 });
+  expect(validateRegionRequest(ranged)).toBe(true);
+  expect(validateRegionResponse(response(ranged))).toBe(true);
+  expect(checkRegionResponse(ranged, response(ranged)).status).toBe('accepted');
+  expect(regionCacheKey(ranged)).not.toBe(regionCacheKey(plain));
+  expect(checkRegionResponse(ranged, response(plain)).status).toBe('stale');
+  expect(validateRegionRequest({ ...ranged, pointColorRangeIndex: 8 })).toBe(false);
+  expect(validateRegionRequest({ ...ranged, identity: { ...ranged.identity, kind: 'before', beforeKey: 'b'.repeat(64) } })).toBe(false);
 });
 it('uses a separate capability with exact contract schema, never adaptive preview alone', () => {
   expect(regionCapability(tools())).toEqual({ regionContract: 1 });

@@ -17,7 +17,8 @@ export class RawPreviewUrls {
   get size() { return this.refs.size; }
   owns(url: string) { return this.refs.has(url); }
 }
-export type RawWholeSurface = { url: string; doc: RawDocument; frame: RawGeometry; quality: 'draft' | 'full'; maxSide?: number };
+export type RawWholeSurface = { url: string; doc: RawDocument; frame: RawGeometry; quality: 'draft' | 'full'; maxSide?: number;
+  pointColorRangeIndex?: number };
 export type RawRegionLayer = { url: string; metadata: RegionResponse; planGeneration: number;
   nativePlacement: RegionRect; validNativeRect: RegionRect };
 export type RawRegionDisplay = { after: RawRegionLayer; before?: RawRegionLayer;
@@ -51,6 +52,7 @@ function matchesWhole(layer: RawRegionLayer, whole: RawWholeSurface | undefined,
   return !!whole && sameDocument(whole.doc, owner.doc) && i.assetId === owner.doc.assetId && i.sourceId === owner.sourceId
     && i.generation === owner.doc.generation && i.documentToken === owner.doc.documentToken && r.documentRevision === owner.doc.revision
     && r.geometryId === whole.frame.geometryId && r.geometryId === owner.geometry.geometryId && r.quality === whole.quality
+    && r.pointColorRangeIndex === whole.pointColorRangeIndex
     && whole.frame.nativeWidth === owner.geometry.nativeWidth && whole.frame.nativeHeight === owner.geometry.nativeHeight
     // C2-C can overlay a denser F only after Native preflight confirms that separate frame.
     && r.fullWidth === (full?.fullWidth ?? whole.frame.fullWidth) && r.fullHeight === (full?.fullHeight ?? whole.frame.fullHeight)

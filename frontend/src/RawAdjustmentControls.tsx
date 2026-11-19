@@ -82,10 +82,12 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
   const pointColorDocument = settings
     ? JSON.stringify([settings.workspaceId, settings.assetId, settings.handle, settings.generation, settings.documentToken]) : null;
   const pointColorCount = settings?.point_colors.length ?? 0;
+  const initialPointColorIndex = pointColorCount && raw.pointColorRangeIndex !== null
+    && raw.pointColorRangeIndex < pointColorCount ? raw.pointColorRangeIndex : pointColorCount ? 0 : null;
   const currentPointColorTarget = useRef({ document: pointColorDocument, revision: settings?.revision,
-    index: pointColorCount ? 0 : null });
+    index: initialPointColorIndex });
   const [pointColorSelection, setPointColorSelection] = useState<{ document: string | null; index: number | null }>(
-    { document: pointColorDocument, index: pointColorCount ? 0 : null });
+    { document: pointColorDocument, index: initialPointColorIndex });
   const pointColorDraftRef = useRef<PointColorDraft | null>(null);
   const [pointColorDraft, setPointColorDraft] = useState<PointColorDraft | null>(null);
   const [pointColorEditEpoch, setPointColorEditEpoch] = useState(0);
@@ -95,6 +97,13 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
   const selectedPointColorIndex = pointColorCount === 0 ? null
     : pointColorSelection.document !== pointColorDocument ? 0
       : Math.min(pointColorSelection.index ?? 0, pointColorCount - 1);
+  useEffect(() => {
+    if (raw.pointColorRangeIndex === null) return;
+    if (selectedPointColorIndex === null || !settings?.sections.color || !panelUi.categories.color || !panelUi.subcategories.pointColor)
+      raw.setPointColorRangeIndex(null);
+    else if (raw.pointColorRangeIndex !== selectedPointColorIndex) raw.setPointColorRangeIndex(selectedPointColorIndex);
+  }, [raw.pointColorRangeIndex, selectedPointColorIndex, settings?.sections.color,
+    panelUi.categories.color, panelUi.subcategories.pointColor]);
   currentPointColorTarget.current = { document: pointColorDocument, revision: settings?.revision,
     index: selectedPointColorIndex };
   useEffect(() => {
@@ -263,12 +272,12 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
     </label>
     {settings && bindings.map(({ category, controls, ids }) => <RawCategory key={category} category={category}
       expanded={panelUi.categories[category]} onExpandedChange={open => { if (category === 'color' && !open) {
-        raw.toggleMixerTarget(null); raw.cancelPointColorPick();
+        raw.toggleMixerTarget(null); raw.cancelPointColorPick(); raw.setPointColorRangeIndex(null);
       } setCategoryOpen(category, open); }}
       enabled={category === 'curves' || settings.sections[sections[category]]} disabled={actionsLocked}
       resetDisabled={actionsLocked || category === 'color' && !settings.wb.available}
       onToggle={() => { if (category !== 'curves') operate({ kind: 'sectionToggle', metadata: { section: sections[category],
-        enabled: !settings.sections[sections[category]] } }); }}
+        enabled: !settings.sections[sections[category]] } }); if (category === 'color' && settings.sections.color) raw.setPointColorRangeIndex(null); }}
       onReset={category === 'effects' || category === 'curves' ? undefined : () => {
         if (category === 'color') operate({ kind: 'colorReset', metadata: {} });
         else operate({ kind: 'sectionReset', metadata: { section: sections[category] } });
@@ -360,6 +369,7 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
         })); }} locked={actionsLocked || !settings.sections.color}
         onReset={() => operate({ kind: 'sectionReset', metadata: { section: 'mixer' } })} operate={operate} panel={panel} />}
       {category === 'color' && <RawPointColorPicker colors={settings.point_colors} selectedIndex={selectedPointColorIndex}
+        showRange={raw.pointColorRangeIndex !== null} onRangeChange={raw.setPointColorRangeIndex}
         valueDraft={pointColorDraft} editEpoch={pointColorEditEpoch} document={pointColorDocument} revision={settings.revision}
         controlsDisabled={actionsLocked || !settings.sections.color}
         sliderDisabled={(actionsLocked && !raw.pointColorInputEnabled) || !settings.sections.color}
@@ -373,10 +383,10 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
         pickActive={raw.pointColorPickActive} pickDisabled={actionsLocked || !raw.pointColorPickAvailable}
         onPickToggle={() => { if (panel.current) commitAdjustmentEdits(panel.current); raw.togglePointColorPick(); }}
         onPickCancel={raw.cancelPointColorPick}
-        onSelect={index => { if (panel.current) commitAdjustmentEdits(panel.current); setPointColorSelection({ document: pointColorDocument, index }); }}
-        open={panelUi.subcategories.pointColor} onOpenChange={pointColor => updateRawDevelopmentPanelUi(current => ({
-          ...current, subcategories: { ...current.subcategories, pointColor },
-        }))} />}
+        onSelect={index => { if (panel.current) commitAdjustmentEdits(panel.current); setPointColorSelection({ document: pointColorDocument, index });
+          if (raw.pointColorRangeIndex !== null) raw.setPointColorRangeIndex(index); }}
+        open={panelUi.subcategories.pointColor} onOpenChange={pointColor => { if (!pointColor) raw.setPointColorRangeIndex(null);
+          updateRawDevelopmentPanelUi(current => ({ ...current, subcategories: { ...current.subcategories, pointColor } })); }} />}
       {category === 'color' && <RawColorGrading raw={raw} band={panelUi.selection.gradingBand} onBandChange={gradingBand =>
         updateRawDevelopmentPanelUi(current => ({ ...current, selection: { ...current.selection, gradingBand } }))}
         open={panelUi.subcategories.grading} onOpenChange={grading => updateRawDevelopmentPanelUi(current => ({
@@ -576,10 +586,10 @@ function RawColorGrading({ raw, band, onBandChange, open, onOpenChange, locked, 
   </section>;
 }
 
-function RawPointColorPicker({ colors, selectedIndex, valueDraft, editEpoch, document, revision, controlsDisabled, sliderDisabled = controlsDisabled, deletePending, resetPending,
+function RawPointColorPicker({ colors, selectedIndex, showRange, onRangeChange, valueDraft, editEpoch, document, revision, controlsDisabled, sliderDisabled = controlsDisabled, deletePending, resetPending,
   onResetAll, onDeleteSelected, onSwatchContextMenu, onAdjustmentBegin, onAdjustmentChange, onAdjustmentCommit, onAdjustmentCancel, onAdjustmentReset,
   pickActive, pickDisabled, onPickToggle, onPickCancel, onSelect, open, onOpenChange }: {
-  colors: RawPointColor[]; selectedIndex: number | null; onSelect: (index: number) => void;
+  colors: RawPointColor[]; selectedIndex: number | null; showRange: boolean; onRangeChange: (index: number | null) => void; onSelect: (index: number) => void;
   valueDraft: PointColorDraft | null; editEpoch: number; document: string | null; revision: number; controlsDisabled: boolean; sliderDisabled?: boolean;
   deletePending: boolean; resetPending: boolean; onResetAll: () => void;
   onDeleteSelected: (index: number) => void; onSwatchContextMenu: (index: number, event: ReactMouseEvent<HTMLButtonElement>) => void;
@@ -654,6 +664,11 @@ function RawPointColorPicker({ colors, selectedIndex, valueDraft, editEpoch, doc
             })}
           </div>}
           {selectedIndex !== null && colors[selectedIndex] && <div className="raw-point-color-actions">
+            <label className="raw-optics-flag raw-point-color-range">
+              <input type="checkbox" checked={showRange} disabled={controlsDisabled || deletePending}
+                onChange={event => onRangeChange(event.currentTarget.checked ? selectedIndex : null)} />
+              <span>{t('workspace.rawPreview.pointColor.showRange')}</span>
+            </label>
             <button type="button" className="adjustment-category-reset" disabled={controlsDisabled || deletePending}
               aria-label={t('workspace.rawPreview.pointColor.delete')} title={t('workspace.rawPreview.pointColor.delete')}
               onClick={() => onDeleteSelected(selectedIndex)} onFocus={focusAdjustmentCategory}

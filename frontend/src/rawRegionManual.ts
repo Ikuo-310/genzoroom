@@ -47,10 +47,12 @@ export async function requestManualRegion(delivery: RawRegionDelivery, whole: Ra
     if (plan.mode !== 'region') throw new Error('raw_region_whole_fallback');
     const after: RegionRequest = { contractVersion: 1, mode: 'region', quality, identity,
       ...full, window: plan.contextWindow, validRegion: plan.validRegion, context: input.context, prefetch: input.prefetch,
-      documentRevision: doc.revision, viewGeneration, requestId: requestId() };
+      documentRevision: doc.revision, viewGeneration, requestId: requestId(),
+      ...(whole.pointColorRangeIndex === undefined ? {} : { pointColorRangeIndex: whole.pointColorRangeIndex }) };
     if (input.compare) {
       if (!doc.beforeKey) throw new Error('raw_region_pair_waiting');
-      const beforeRequest: RegionRequest = { ...after, requestId: requestId(), identity: {
+      const { pointColorRangeIndex: _rangeIndex, ...beforeBase } = after;
+      const beforeRequest: RegionRequest = { ...beforeBase, requestId: requestId(), identity: {
         assetId: identity.assetId, sourceId: identity.sourceId, generation: identity.generation,
         documentToken: identity.documentToken, kind: 'before', beforeKey: doc.beforeKey } };
       return delivery.submit({ planGeneration: planGeneration + 1, items: [after, beforeRequest] });

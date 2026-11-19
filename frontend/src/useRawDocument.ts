@@ -72,6 +72,13 @@ async function decodeFrame(frame: RawFrame, signal: AbortSignal, urls: RawPrevie
 }
 
 export function useRawDocument(assetId: string | null, beforeRequested = false) {
+  // Keep this display-only intent document-scoped so it never enters Native settings or edit persistence.
+  const [pointColorRange, setPointColorRange] = useState<{ assetId: string; index: number } | null>(null);
+  const pointColorRangeRef = useRef<{ assetId: string; index: number } | null>(null);
+  if (pointColorRangeRef.current?.assetId !== assetId) pointColorRangeRef.current = null;
+  useEffect(() => { setPointColorRange(null); }, [assetId]);
+  const rangePausedRef = useRef(beforeRequested);
+  rangePausedRef.current = beforeRequested;
   const [curveChannel, setCurveChannel] = useState<import('./rawApi').RawCurveChannel>('master');
   const [targetedCurveActive, setTargetedCurveActive] = useState(false);
   const [mixerTargetActive, setMixerTargetActive] = useState<import('./rawApi').RawMixerTarget | null>(null);
@@ -112,6 +119,15 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   const invalidateBeforeRef = useRef<() => void>(() => {});
   const resyncPreviewRef = useRef<() => void>(() => {});
   const suspendDisplayRef = useRef<() => void>(() => {});
+  const setPointColorRangeIndex = (index: number | null) => {
+    if (index !== null && (!Number.isSafeInteger(index) || index < 0 || index > 7)) return;
+    const next = index === null || !assetId ? null : { assetId, index };
+    const current = pointColorRangeRef.current;
+    if (current?.assetId === next?.assetId && current?.index === next?.index) return;
+    pointColorRangeRef.current = next;
+    setPointColorRange(next);
+    viewRef.current();
+  };
   const [cropPresentation,setCropPresentation]=useState<CropPresentation|null>(null);
   const [straightenTool,setStraightenTool]=useState(false);
   const [overlay,setOverlay]=useState<import('./rawCropOverlay').CropOverlay>('thirds');
@@ -144,7 +160,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     let viewTimer: ReturnType<typeof setTimeout> | undefined;
     let viewAggregationAt = 0;
     let displayGeneration = 0, viewGeneration = 0, displayRunning = false;
-    let displayPending: { doc: RawDocument; valid: () => boolean; generation: number; quality: 'draft' | 'full'; geometryId: string | null; side: number; mode: 'whole' | 'crop-edit' } | undefined;
+    let displayPending: { doc: RawDocument; valid: () => boolean; generation: number; quality: 'draft' | 'full'; geometryId: string | null;
+      side: number; mode: 'whole' | 'crop-edit'; pointColorRangeIndex?: number } | undefined;
     let transmitted: { doc: RawDocument; serial: number } | undefined;
     let displayTargetKey: string | undefined;
     let revisionResyncs = 0;
@@ -377,7 +394,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       if (transmitted) void cancelRawPreview(transmitted.doc, 'after', transmitted.serial).catch(() => {});
     };
     suspendDisplayRef.current = invalidateDisplay;
-    const renderPreview = async (doc: RawDocument, quality: 'draft' | 'full', geometryId: string | null, maxSide: number, valid = current, mode: 'whole' | 'crop-edit' = 'whole') => {
+    const renderPreview = async (doc: RawDocument, quality: 'draft' | 'full', geometryId: string | null, maxSide: number,
+      valid = current, mode: 'whole' | 'crop-edit' = 'whole', pointColorRangeIndex?: number) => {
       if (!valid()) return;
       let candidate: string | undefined;
       const metrics = editor?.metrics, ackAt = metrics?.ackAt;
@@ -389,7 +407,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         const requestSerial = ++frameSerial;
         transmitted = { doc, serial: requestSerial };
         const frame = await rawPreview(doc, requestSerial, controller.signal, 'after', {
-          quality, mode, maxSide, geometryId, viewGeneration });
+          quality, mode, maxSide, geometryId, viewGeneration,
+          ...(pointColorRangeIndex === undefined ? {} : { pointColorRangeIndex }) });
         if (!valid()) return;
         candidate = await decodeFrame(frame, controller.signal, urls);
         if (!valid()) return;
@@ -405,7 +424,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         url = candidate;
         candidate = undefined;
         if (frame.frame) publishedFrame = { revision: doc.revision, quality: frame.quality ?? quality, frame: frame.frame };
-        wholeSurfaces.current.after = mode === 'whole' && frame.frame ? { url, doc: { ...doc }, frame: frame.frame, quality: frame.quality ?? quality, maxSide } : undefined;
+        wholeSurfaces.current.after = mode === 'whole' && frame.frame ? { url, doc: { ...doc }, frame: frame.frame,
+          quality: frame.quality ?? quality, maxSide, ...(pointColorRangeIndex === undefined ? {} : { pointColorRangeIndex }) } : undefined;
         const baseline = wholeSurfaces.current.before;
         if (baseline && frame.frame && baseline.doc.assetId === doc.assetId && baseline.doc.handle === doc.handle
           && baseline.doc.generation === doc.generation && baseline.doc.documentToken === doc.documentToken
@@ -454,7 +474,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       if (!valid()) return;
       displayRunning = true;
       // This slot owns failures and URL cleanup; mutation/save queues never join image work.
-      void renderPreview(intent.doc, intent.quality, intent.geometryId, intent.side, valid, intent.mode).catch(cause => {
+      void renderPreview(intent.doc, intent.quality, intent.geometryId, intent.side, valid, intent.mode, intent.pointColorRangeIndex).catch(cause => {
         if (!valid()) return;
         if (cause instanceof RawSuperseded) {
           if (cause.reason === 'revision') resyncPreview(valid);
@@ -493,7 +513,10 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       // A gesture keeps its selected size; the final Full re-evaluates the latest view.
       if (!editor?.interacting && !latestView?.interacting && latestView) side = rawWholeSide(latestView, side) ?? side;
       const quality = editor?.interacting || latestView?.interacting ? 'draft' : 'full';
-      const key = `${cropMode}:${doc.documentToken}:${doc.revision}:${quality}:${side}:${viewGeneration}`;
+      const requestedRange = pointColorRangeRef.current?.assetId === assetId ? pointColorRangeRef.current.index : undefined;
+      const rangeIndex = !rangePausedRef.current && !cropMode && editor?.confirmed.sections.color
+        && requestedRange !== undefined && !!editor.confirmed.point_colors[requestedRange] ? requestedRange : undefined;
+      const key = `${cropMode}:${doc.documentToken}:${doc.revision}:${quality}:${side}:${viewGeneration}:${rangeIndex ?? 'plain'}`;
       if (key === displayTargetKey) return;
       // New ACKs replace the pending slot, not a running ACK image merely because
       // desired changed. Native revision and ownership checks still gate adoption.
@@ -501,12 +524,14 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       displayTargetKey = key;
       const geometryId = publishedFrame?.revision === doc.revision && publishedFrame.quality === quality
         ? publishedFrame.frame.geometryId : null;
-      curveTarget.current = { quality: 'draft', mode: 'whole', maxSide: Math.min(side, 512), viewGeneration, geometryId };
+      curveTarget.current = { quality: 'draft', mode: 'whole', maxSide: Math.min(side, 512), viewGeneration, geometryId,
+        ...(rangeIndex === undefined ? {} : { pointColorRangeIndex: rangeIndex }) };
       const owner = editor, view = viewGeneration;
       const acknowledged = () => valid() && editor === owner && !editor?.mutating && view === viewGeneration
         && editor?.confirmed.generation === doc.generation && editor.confirmed.documentToken === doc.documentToken
         && editor.confirmed.revision === doc.revision;
-      displayPending = { doc, valid: acknowledged, generation: displayGeneration, quality, geometryId, side, mode: cropMode ? 'crop-edit' : 'whole' };
+      displayPending = { doc, valid: acknowledged, generation: displayGeneration, quality, geometryId, side,
+        mode: cropMode ? 'crop-edit' : 'whole', ...(rangeIndex === undefined ? {} : { pointColorRangeIndex: rangeIndex }) };
       pumpDisplay();
       region.refresh();
       overlay.refresh();
@@ -710,10 +735,14 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         },
         pointColorPreview: (frame, doc, sequence, target) => {
           const owner = curvePresentation.current;
-          if (!owner.active || sequence <= owner.displayedSequence || !current()) return;
+          const selectedRange = pointColorRangeRef.current?.assetId === assetId ? pointColorRangeRef.current.index : undefined;
+          const rangeCurrent = !rangePausedRef.current && selectedRange === target.pointColorRangeIndex;
+          if (!owner.active || sequence <= owner.displayedSequence || !current() || !rangeCurrent) return;
           void decodeFrame(frame, controller.signal, urls).then(candidate => {
             if (!owner.active || sequence <= owner.displayedSequence || !current()
-              || doc.generation !== editor?.confirmed.generation || doc.documentToken !== editor?.confirmed.documentToken) {
+              || doc.generation !== editor?.confirmed.generation || doc.documentToken !== editor?.confirmed.documentToken
+              || rangePausedRef.current || (pointColorRangeRef.current?.assetId === assetId
+                ? pointColorRangeRef.current.index : undefined) !== target.pointColorRangeIndex) {
               urls.release(candidate); return;
             }
             owner.displayedSequence = sequence;
@@ -722,7 +751,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
             if (frame.frame) {
               publishedFrame = { revision: doc.revision, quality: frame.quality ?? 'draft', frame: frame.frame };
               wholeSurfaces.current.after = { url: candidate, doc: { ...doc }, frame: frame.frame,
-                quality: frame.quality ?? 'draft', maxSide: target.maxSide };
+                quality: frame.quality ?? 'draft', maxSide: target.maxSide,
+                ...(target.pointColorRangeIndex === undefined ? {} : { pointColorRangeIndex: target.pointColorRangeIndex }) };
             }
             setState(previous => previous && previous.assetId === assetId ? { ...previous, url: candidate,
               width: frame.width, height: frame.height, frame: frame.frame, quality: frame.quality ?? 'draft',
@@ -1432,6 +1462,11 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   const pickModeActive = pickActive || pointColorPickActive;
   const pickModeOwnsViewer = () => pickModeActive || pendingPickOwner.current === pickTag
     || pendingPickOwner.current === pointColorPickTag;
+  // Temporary comparison, crop and sampling modes pause the overlay while preserving its checked state.
+  rangePausedRef.current = beforeRequested || !!visible?.cropMode || pickModeOwnsViewer();
+  useEffect(() => {
+    if (pointColorRangeRef.current?.assetId === assetId && callbackEditor()) viewRef.current();
+  }, [assetId, beforeRequested, visible?.cropMode, pickOwner]);
   useEffect(() => {
     // Settling a prior gesture briefly marks the document pending, so only identity or mode exits cancel a pending start.
     const pendingPointColorInvalid = pendingPickOwner.current === pointColorPickTag
@@ -1601,6 +1636,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     const ticket = ++pickStart.current;
     if (pointColorPickActive) { pendingPickOwner.current = null; setPickOwner(null); return; }
     pendingPickOwner.current = pointColorPickTag;
+    rangePausedRef.current = true;
+    viewRef.current();
     setTargetedCurveActive(false);
     mixerTargetMode.current = null;
     setMixerTargetActive(null);
@@ -1610,9 +1647,16 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       if (pickStart.current !== ticket || pendingPickOwner.current !== pointColorPickTag) return;
       pendingPickOwner.current = null;
       if (callbackEditor() === editor && !frozen.current && !saver.locked) setPickOwner(pointColorPickTag);
-    }).catch(() => { if (pickStart.current === ticket) pendingPickOwner.current = null; });
+    }).catch(() => {
+      if (pickStart.current === ticket) {
+        pendingPickOwner.current = null;
+        rangePausedRef.current = beforeRequested || !!visible?.cropMode || pickModeActive;
+        viewRef.current();
+      }
+    });
   };
-  return visible && { ...visible,
+  return visible && { ...visible, pointColorRangeIndex: pointColorRange?.assetId === assetId ? pointColorRange.index : null,
+    setPointColorRangeIndex,
     crop: { operation: cropSaver?.cropOperation, overlay,setOverlay, straightenTool, setStraightenTool:(value:boolean)=>setStraightenTool(value),
       operate: (operation: RawGeometryOperation, action?: import('./rawApi').RawGeometryAction) => {
         cancelPick();
@@ -1685,8 +1729,13 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       }).catch(() => {});
     },
     cancelPointColorPick: () => {
+      const cancelled = pendingPickOwner.current === pointColorPickTag || pickOwner === pointColorPickTag;
       if (pendingPickOwner.current === pointColorPickTag) { pickStart.current++; pendingPickOwner.current = null; }
       if (pickOwner === pointColorPickTag) setPickOwner(null);
+      if (cancelled) {
+        rangePausedRef.current = beforeRequested || !!visible?.cropMode || pickActive;
+        viewRef.current();
+      }
     },
     togglePointColorPick: togglePointColorPickMode,
     pickTargets: { after: pickTarget('after'), before: pickTarget('before') },

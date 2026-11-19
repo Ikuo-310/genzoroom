@@ -157,10 +157,11 @@ export class RawRegionAuto {
     if (s.comparing && (!s.before || s.before.quality !== whole.quality || s.before.doc.revision !== whole.doc.revision
       || s.before.frame.geometryId !== whole.frame.geometryId)) { overlay.clear(); this.record('region_hold', 'before_waiting'); return; }
     const desiredLongEdge = this.desiredSide(v);
-    const key = JSON.stringify([owner.doc.assetId, owner.doc.generation, owner.doc.documentToken, owner.doc.revision,
+    const fullKey = JSON.stringify([owner.doc.assetId, owner.doc.generation, owner.doc.documentToken, owner.doc.revision,
       owner.doc.beforeKey, owner.sourceId, v.geometryId, whole.quality, whole.frame.fullWidth, whole.frame.fullHeight, desiredLongEdge, s.comparing]);
+    const key = `${fullKey}:${whole.pointColorRangeIndex ?? 'plain'}`;
     const intent = `${key}:${this.generation}`;
-    if (key === this.fullKey && this.full && Math.min(this.full.fullWidth / v.nativeWidth, this.full.fullHeight / v.nativeHeight) <= this.report.wholeDensity!) {
+    if (fullKey === this.fullKey && this.full && Math.min(this.full.fullWidth / v.nativeWidth, this.full.fullHeight / v.nativeHeight) <= this.report.wholeDensity!) {
       this.active = false; overlay.clear(); this.record('region_disable', 'no_density_gain'); return;
     }
     if (intent === this.intent) {
@@ -169,7 +170,7 @@ export class RawRegionAuto {
       return;
     }
     this.intent = intent;
-    if (key !== this.fullKey) { this.full = undefined; this.fullKey = key; }
+    if (fullKey !== this.fullKey) { this.full = undefined; this.fullKey = fullKey; }
     const identity = { assetId: owner.doc.assetId, sourceId: owner.sourceId, generation: owner.doc.generation,
       documentToken: owner.doc.documentToken, kind: 'after' as const, revision: owner.doc.revision };
     const base = { contractVersion: 1 as const, mode: 'region' as const, identity, quality: whole.quality,
@@ -190,9 +191,12 @@ export class RawRegionAuto {
       window: { ...plan.contextWindow }, validRegion: { ...plan.validRegion }, limited: plan.limited,
       context: REGION_AUTO_PROVISIONAL.context, prefetch: REGION_AUTO_PROVISIONAL.prefetch,
     } }); } catch { /* Optional diagnostics. */ }
-    const after: RegionRequest = { ...base, ...this.full, requestId: id(), window: plan.contextWindow, validRegion: plan.validRegion,
+    const after: RegionRequest = { ...base, ...this.full,
+      ...(whole.pointColorRangeIndex === undefined ? {} : { pointColorRangeIndex: whole.pointColorRangeIndex }),
+      requestId: id(), window: plan.contextWindow, validRegion: plan.validRegion,
       context: REGION_AUTO_PROVISIONAL.context, prefetch: REGION_AUTO_PROVISIONAL.prefetch };
-    const before: RegionRequest | undefined = s.comparing && owner.doc.beforeKey ? { ...after, requestId: id(), identity: {
+    const { pointColorRangeIndex: _rangeIndex, ...beforeBase } = after;
+    const before: RegionRequest | undefined = s.comparing && owner.doc.beforeKey ? { ...beforeBase, requestId: id(), identity: {
       assetId: identity.assetId, sourceId: identity.sourceId, generation: identity.generation, documentToken: identity.documentToken,
       kind: 'before', beforeKey: owner.doc.beforeKey } } : undefined;
     if (!validateRegionRequest(after) || before && !validateRegionRequest(before)) { this.record('region_hold', 'invalid_owner'); return; }

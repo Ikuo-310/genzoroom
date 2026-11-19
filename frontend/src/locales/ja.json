@@ -402,7 +402,7 @@
         "pickHistory": "ポイントカラー採色",
         "controlHistory": "ポイントカラー調整",
         "controlResetHistory": "ポイントカラー調整をリセット",
-        "delete": "削除", "deleteHistory": "ポイントカラー削除",
+        "delete": "削除", "showRange": "範囲を表示", "deleteHistory": "ポイントカラー削除",
         "resetHistory": "ポイントカラーをリセット",
         "empty": "スポイトで写真の色を選択してください。",
         "entriesLabel": "ポイントカラーの項目", "entry": "ポイントカラー {{index}}",

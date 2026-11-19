@@ -152,6 +152,18 @@ it('keeps logical geometry separate from bitmap dimensions and sends display ide
   const init = (fetch.mock.calls[0] as unknown as [string, RequestInit])[1];
   expect(JSON.parse(init.body as string)).toMatchObject(adaptiveTarget);
 });
+it('sends the optional Whole Point Color range index and requires its exact echoed metadata', async () => {
+  const target = { ...adaptiveTarget, pointColorRangeIndex: 0 };
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => response({ ...adaptiveHeaders(), 'X-Raw-Point-Color-Range-Index': '0' }));
+  vi.stubGlobal('fetch', fetch);
+  const frame = await rawPreview(doc, 3, new AbortController().signal, 'after', target);
+  expect(frame.pointColorRangeIndex).toBe(0);
+  expect(JSON.parse((fetch.mock.calls[0][1] as RequestInit).body as string)).toMatchObject({ pointColorRangeIndex: 0 });
+  vi.stubGlobal('fetch', vi.fn(async () => response(adaptiveHeaders())));
+  await expect(rawPreview(doc, 3, new AbortController().signal, 'after', target)).rejects.toThrow();
+  await expect(rawPreview(doc, 3, new AbortController().signal, 'after', { ...target, pointColorRangeIndex: 8 })).rejects.toThrow();
+  await expect(rawPreview({ ...doc, beforeKey: 'b'.repeat(64) }, 3, new AbortController().signal, 'before', target)).rejects.toThrow();
+});
 it('routes temporary curve updates through the existing adaptive Draft Preview contract', async () => {
   const settings = rawSettings(doc), interactionId = 'd'.repeat(32);
   const fetch = vi.fn<typeof globalThis.fetch>()

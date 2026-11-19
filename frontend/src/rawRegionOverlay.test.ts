@@ -107,6 +107,16 @@ it('keeps a Draft base and overlay until a complete Full pair is ready', async (
   expect(revoke).toHaveBeenCalledWith(draft.wholeAfter.url); expect(revoke).toHaveBeenCalledWith(draft.wholeBefore!.url);
 });
 
+it('never composites a Region from another Point Color range onto the Whole base', async () => {
+  const h = harness();
+  h.setWhole({ ...h.whole(), pointColorRangeIndex: 1 });
+  const plain = h.candidate(); h.overlay.offer(plain); h.decodes[0].resolve(); await tick();
+  expect(h.overlay.display).toBeUndefined();
+  const ranged = h.candidate('after', 'full', { pointColorRangeIndex: 1 }); h.overlay.offer(ranged);
+  h.decodes[1].resolve(); await tick();
+  expect(h.overlay.display?.after.metadata.pointColorRangeIndex).toBe(1);
+});
+
 it('waits for both Full Whole bases when Full Region arrives first', async () => {
   const h = harness(true); h.setWhole(h.whole('draft'), h.whole('draft'));
   h.overlay.offer(h.candidate('after', 'draft')); h.overlay.offer(h.candidate('before', 'draft'));

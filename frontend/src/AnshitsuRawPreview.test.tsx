@@ -2261,6 +2261,7 @@ it('does not optimistically add a Point Color entry or resend after a failed His
       fullWidth: 16, fullHeight: 12, aspect: 4 / 3, window: null } }));
   await mount();
   act(() => host.querySelector<HTMLButtonElement>('.raw-point-color-title')!.click());
+  expect(host.querySelector('.raw-point-color-range')).toBeNull();
   const picker = host.querySelector<HTMLButtonElement>('.raw-point-color-pick')!;
   act(() => picker.click()); await flush();
   const viewport = host.querySelector<HTMLElement>('.viewer-viewport')!;
@@ -2279,10 +2280,43 @@ it('does not optimistically add a Point Color entry or resend after a failed His
   expect(host.querySelector('.raw-point-color-empty')?.textContent).toContain('Use the eyedropper');
 });
 
+it('pauses Show Range for Before and resumes the selected index without editing Native settings', async () => {
+  const point = { lum: .42, chroma: .13, hue: 207.5, hue_shift: 0, sat_shift: 0, lum_shift: 0, variance: 0,
+    range: 55, hue_range: 44, sat_range: 66, lum_range: 33 };
+  vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), beforeKey: 'b'.repeat(64), point_colors: [point] }));
+  vi.mocked(rawApi.rawPreview).mockImplementation(async (_doc, sequence, _signal, kind = 'after', target) => ({
+    blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence, kind,
+    ...(kind === 'before' ? { key: 'b'.repeat(64) } : {}), quality: target?.quality ?? 'full',
+    frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000,
+      fullWidth: 16, fullHeight: 12, aspect: 4 / 3, window: null } }));
+  await mount();
+  const pointColorTitle = host.querySelector<HTMLButtonElement>('.raw-point-color-title')!;
+  if (pointColorTitle.getAttribute('aria-expanded') !== 'true') act(() => pointColorTitle.click());
+  const range = () => host.querySelector<HTMLInputElement>('.raw-point-color-range input')!;
+  act(() => range().click()); await flush();
+  expect(vi.mocked(rawApi.rawPreview).mock.calls.at(-1)?.[4]).toMatchObject({ pointColorRangeIndex: 0 });
+  const beforeToggle = host.querySelector<HTMLButtonElement>('[aria-label="Before and after adjustments"]')!;
+  const beforeCallStart = vi.mocked(rawApi.rawPreview).mock.calls.length;
+  act(() => beforeToggle.click()); await flush();
+  const duringBeforeCalls = vi.mocked(rawApi.rawPreview).mock.calls.slice(beforeCallStart);
+  expect(duringBeforeCalls.some(([, , , kind]) => kind === 'before')).toBe(true);
+  expect(duringBeforeCalls.some(([, , , kind, target]) => kind === 'after' && target?.pointColorRangeIndex === undefined)).toBe(true);
+  expect(range().checked).toBe(true);
+  const beforeOffStart = vi.mocked(rawApi.rawPreview).mock.calls.length;
+  act(() => beforeToggle.click()); await flush();
+  expect(vi.mocked(rawApi.rawPreview).mock.calls.slice(beforeOffStart).some(([, , , kind, target]) =>
+    kind === 'after' && target?.pointColorRangeIndex === 0)).toBe(true);
+  act(() => pointColorTitle.click()); await flush();
+  expect(host.querySelector('.raw-point-color-range')).toBeNull();
+  act(() => pointColorTitle.click()); await flush();
+  expect(range().checked).toBe(false);
+  expect(commitHistory).not.toHaveBeenCalled(); expect(rawApi.setRawControls).not.toHaveBeenCalled();
+});
+
 it('starts the Point Color Native interaction and forwards numeric slider drafts', async () => {
   const point = { lum: .42, chroma: .13, hue: 207.5, hue_shift: 0, sat_shift: 0, lum_shift: 0, variance: 0,
     range: 55, hue_range: 44, sat_range: 66, lum_range: 33 };
-  vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), point_colors: [point] }));
+  vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), point_colors: [point, { ...point, hue: 120 }] }));
   vi.mocked(rawApi.rawPreview).mockImplementation(async (_doc, sequence, _signal, kind = 'after', target) => ({
     blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence, interactionSequence: sequence, kind,
     quality: target?.quality ?? 'full', frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000,
@@ -2292,6 +2326,21 @@ it('starts the Point Color Native interaction and forwards numeric slider drafts
   vi.useFakeTimers();
   const pointColorTitle = host.querySelector<HTMLButtonElement>('.raw-point-color-title')!;
   if (pointColorTitle.getAttribute('aria-expanded') !== 'true') act(() => pointColorTitle.click());
+  const showRange = () => host.querySelector<HTMLInputElement>('.raw-point-color-range input')!;
+  expect(showRange().checked).toBe(false);
+  act(() => showRange().click()); await flush();
+  expect(showRange().checked).toBe(true);
+  expect(vi.mocked(rawApi.rawPreview).mock.calls.some(([, , , , target]) => target?.pointColorRangeIndex === 0)).toBe(true);
+  act(() => host.querySelector<HTMLButtonElement>('[data-point-color-index="1"]')!.click()); await flush();
+  expect(vi.mocked(rawApi.rawPreview).mock.calls.some(([, , , , target]) => target?.pointColorRangeIndex === 1)).toBe(true);
+  act(() => showRange().click()); await flush();
+  expect(showRange().checked).toBe(false);
+  expect(vi.mocked(rawApi.rawPreview).mock.calls.at(-1)?.[4]).not.toHaveProperty('pointColorRangeIndex');
+  expect(commitHistory).not.toHaveBeenCalled(); expect(rawApi.setRawControls).not.toHaveBeenCalled();
+  act(() => showRange().click()); await flush();
+  expect(showRange().checked).toBe(true);
+  act(() => host.querySelector<HTMLButtonElement>('[data-point-color-index="0"]')!.click()); await flush();
+  expect(vi.mocked(rawApi.rawPreview).mock.calls.at(-1)?.[4]).toMatchObject({ pointColorRangeIndex: 0 });
   let number = host.querySelector<HTMLInputElement>('[data-adjustment-id="pointColor.0.hueShift"]')!
     .closest('.adjustment-control')!.querySelector<HTMLInputElement>('.adjustment-number')!;
   act(() => number.focus());
@@ -2310,10 +2359,10 @@ it('starts the Point Color Native interaction and forwards numeric slider drafts
   expect(rawApi.beginRawPointColorInteraction).toHaveBeenCalledOnce();
   expect(rawApi.updateRawPointColorInteraction).toHaveBeenCalledOnce();
   expect(rawApi.updateRawPointColorInteraction).toHaveBeenCalledWith(expect.objectContaining({ handle: 'handle', revision: 1 }),
-    expect.any(Number), expect.any(AbortSignal), expect.objectContaining({ quality: 'draft', mode: 'whole' }),
+    expect.any(Number), expect.any(AbortSignal), expect.objectContaining({ quality: 'draft', mode: 'whole', pointColorRangeIndex: 0 }),
     expect.objectContaining({ id: 'a'.repeat(32), sequence: 1, control: 'pointColor.0.hueShift', value: 38 }));
   expect(rawApi.rawPreview).toHaveBeenCalledWith(expect.objectContaining({ handle: 'handle', revision: 1 }),
-    expect.any(Number), expect.any(AbortSignal), 'after', expect.objectContaining({ quality: 'draft', mode: 'whole' }),
+    expect.any(Number), expect.any(AbortSignal), 'after', expect.objectContaining({ quality: 'draft', mode: 'whole', pointColorRangeIndex: 0 }),
     undefined, undefined, undefined, expect.objectContaining({ id: 'a'.repeat(32), sequence: 1 }));
   expect(commitHistory).not.toHaveBeenCalled();
   expect(rawApi.saveRawHistory).not.toHaveBeenCalledWith(expect.objectContaining({ operation: expect.anything() }));
