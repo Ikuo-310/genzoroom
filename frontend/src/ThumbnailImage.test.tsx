@@ -1,14 +1,15 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, type MouseEvent as ReactMouseEvent } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { frontendLogger } from './frontendLogging';
-import { ThumbnailImage } from './ThumbnailImage';
+import { isThumbnailRetryTarget, ThumbnailImage } from './ThumbnailImage';
 
 let host: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   frontendLogger.setLevel('off');
   frontendLogger.clear();
   host = document.createElement('div');
@@ -21,19 +22,20 @@ afterEach(() => {
   host.remove();
   frontendLogger.setLevel('off');
   frontendLogger.clear();
+  vi.unstubAllGlobals();
 });
 
 describe('ThumbnailImage diagnostics', () => {
   it('resolves the selected Asset rendition in the shared component', async () => {
-    await act(async () => root.render(<ThumbnailImage rendition="rendered-thumbnail" revision="view:2" assetId="asset/id"
-      surface="gallery" mode="rendered" alt="" />));
+    await act(async () => root.render(<div data-thumbnail-retry-host><button data-thumbnail-action><ThumbnailImage rendition="rendered-thumbnail" revision="view:2" assetId="asset/id"
+      surface="gallery" mode="rendered" alt="" /></button></div>));
     expect(host.querySelector('img')?.getAttribute('src')).toBe('/api/assets/asset%2Fid/rendered-thumbnail?view=view%3A2');
   });
 
   it('correlates image lifecycle and records load failures without exposing image URLs', async () => {
     frontendLogger.setLevel('debug');
-    await act(async () => root.render(<ThumbnailImage src="/private/image" assetId="asset" surface="stack"
-      mode="original" alt="" loading="lazy" />));
+    await act(async () => root.render(<div data-thumbnail-retry-host><button data-thumbnail-action><ThumbnailImage src="/private/image" assetId="asset" surface="stack"
+      mode="original" alt="" loading="lazy" /></button></div>));
     const image = host.querySelector('img')!;
     const diagnosticId = new URL(image.src).searchParams.get('__diag');
     expect(diagnosticId).toBeTruthy();
@@ -46,38 +48,76 @@ describe('ThumbnailImage diagnostics', () => {
   });
 
   it('tracks loading, success and failure, then retries only the failed image on explicit activation', async () => {
-    const unrelatedLoad = vi.fn(), parentAction = vi.fn();
-    await act(async () => root.render(<><button onClick={parentAction}><ThumbnailImage src="/photo/a" assetId="a" surface="gallery" mode="original" alt="" /></button>
-      <button onClick={parentAction}><ThumbnailImage src="/photo/b" assetId="b" surface="gallery" mode="original" alt="" onLoad={unrelatedLoad} /></button></>));
+    const unrelatedLoad = vi.fn(), parentAction = vi.fn(), parentCapture = vi.fn();
+    const capture = (event: ReactMouseEvent<HTMLDivElement>) => { if (!isThumbnailRetryTarget(event.target)) parentCapture(); };
+    await act(async () => root.render(<><div data-thumbnail-retry-host onClickCapture={capture}><button data-thumbnail-action onClick={parentAction}>
+      <ThumbnailImage src="/photo/a" assetId="a" surface="gallery" mode="original" alt="" /></button></div>
+      <div data-thumbnail-retry-host onClickCapture={capture}><button data-thumbnail-action onClick={parentAction}>
+        <ThumbnailImage src="/photo/b" assetId="b" surface="gallery" mode="original" alt="" onLoad={unrelatedLoad} /></button></div></>));
     const [failed, healthy] = host.querySelectorAll('img');
     expect(failed.dataset.thumbnailState).toBe('loading');
     await act(async () => healthy.dispatchEvent(new Event('load')));
     expect(healthy.dataset.thumbnailState).toBe('loaded');
+    await act(async () => healthy.closest('button')!.click());
+    expect(parentAction).toHaveBeenCalledOnce();
+    expect(parentCapture).toHaveBeenCalledOnce();
+    parentAction.mockClear(); parentCapture.mockClear();
     await act(async () => failed.dispatchEvent(new Event('error')));
     expect(failed.dataset.thumbnailState).toBe('failed');
     expect(failed.getAttribute('src')).toContain('data:image/svg+xml');
 
-    await act(async () => failed.click());
+    const retryButton = host.querySelector<HTMLButtonElement>('[data-thumbnail-retry]')!;
+    expect(retryButton.parentElement?.hasAttribute('data-thumbnail-retry-host')).toBe(true);
+    expect(retryButton.closest('button[data-thumbnail-action]')).toBeNull();
+    retryButton.focus();
+    await act(async () => retryButton.click());
     expect(parentAction).not.toHaveBeenCalled();
+    expect(parentCapture).not.toHaveBeenCalled();
     const retried = host.querySelectorAll('img')[0];
     expect(retried).not.toBe(failed);
     expect(retried.dataset.thumbnailState).toBe('loading');
     expect(retried.getAttribute('src')).toBe('/photo/a');
     expect(host.querySelectorAll('img')[1].dataset.thumbnailState).toBe('loaded');
     expect(unrelatedLoad).toHaveBeenCalledOnce();
+
+    await act(async () => retryButton.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 })));
+    await act(async () => retryButton.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, detail: 2 })));
+    expect(host.querySelectorAll('img')[0]).toBe(retried);
+    expect(parentAction).not.toHaveBeenCalled();
+    expect(parentCapture).not.toHaveBeenCalled();
+    await act(async () => retried.dispatchEvent(new Event('load')));
+    expect(document.activeElement).toBe(host.querySelector('button[data-thumbnail-action]'));
+  });
+
+  it.each(['Enter', ' '])('retries from %s and prevents the parent card key action', async key => {
+    const parentKey = vi.fn();
+    await act(async () => root.render(<div data-thumbnail-retry-host onKeyDown={parentKey}>
+      <button data-thumbnail-action><ThumbnailImage src="/keyboard" assetId="keyboard" surface="gallery" mode="original" alt="" /></button>
+    </div>));
+    const image = host.querySelector('img')!;
+    await act(async () => image.dispatchEvent(new Event('error')));
+    const retryButton = host.querySelector<HTMLButtonElement>('[data-thumbnail-retry]')!;
+    retryButton.focus();
+    await act(async () => retryButton.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })));
+    expect(host.querySelector('img')).not.toBe(image);
+    expect(host.querySelector('img')?.dataset.thumbnailState).toBe('loading');
+    expect(parentKey).not.toHaveBeenCalled();
   });
 
   it('ignores events from an old source and resets when source or publication version changes', async () => {
-    await act(async () => root.render(<ThumbnailImage src="/photo/old" assetId="asset" surface="gallery" mode="rendered" alt="" publicationVersion="1" />));
+    const renderImage = (src: string, publicationVersion: string) => <div data-thumbnail-retry-host>
+      <button data-thumbnail-action><ThumbnailImage src={src} assetId="asset" surface="gallery" mode="rendered" alt="" publicationVersion={publicationVersion} /></button>
+    </div>;
+    await act(async () => root.render(renderImage('/photo/old', '1')));
     const oldImage = host.querySelector('img')!;
-    await act(async () => root.render(<ThumbnailImage src="/photo/new" assetId="asset" surface="gallery" mode="rendered" alt="" publicationVersion="1" />));
+    await act(async () => root.render(renderImage('/photo/new', '1')));
     const newImage = host.querySelector('img')!;
     await act(async () => oldImage.dispatchEvent(new Event('error')));
     expect(newImage.dataset.thumbnailState).toBe('loading');
     expect(newImage.getAttribute('src')).toBe('/photo/new');
 
     await act(async () => newImage.dispatchEvent(new Event('load')));
-    await act(async () => root.render(<ThumbnailImage src="/photo/new" assetId="asset" surface="gallery" mode="rendered" alt="" publicationVersion="2" />));
+    await act(async () => root.render(renderImage('/photo/new', '2')));
     const nextVersion = host.querySelector('img')!;
     expect(nextVersion).not.toBe(newImage);
     expect(nextVersion.dataset.thumbnailState).toBe('loading');
@@ -86,7 +126,7 @@ describe('ThumbnailImage diagnostics', () => {
 
   it('keeps lifecycle diagnostics through unmount without exposing request URLs', async () => {
     frontendLogger.setLevel('debug');
-    await act(async () => root.render(<ThumbnailImage src="/private/path" assetId="asset" surface="stack" mode="original" alt="" />));
+    await act(async () => root.render(<div data-thumbnail-retry-host><button data-thumbnail-action><ThumbnailImage src="/private/path" assetId="asset" surface="stack" mode="original" alt="" /></button></div>));
     const image = host.querySelector('img')!;
     const diagnosticId = new URL(image.src).searchParams.get('__diag');
     await act(async () => root.render(null));

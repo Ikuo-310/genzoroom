@@ -41,6 +41,18 @@ it('uses rendered thumbnails for queued photos without issuing generation POSTs'
     .toEqual(['a', 'b'].map(id => `/api/assets/${id}/rendered-thumbnail`));
   expect(fetch).not.toHaveBeenCalled();
 });
+it('keeps Export selection independent from thumbnail retry and double-click', async () => {
+  await render([item('a')]);
+  const image = host.querySelector<HTMLImageElement>('.photo-card img')!;
+  await act(async () => image.dispatchEvent(new Event('error')));
+  const retry = host.querySelector<HTMLButtonElement>('[data-thumbnail-retry]')!;
+  await act(async () => retry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 })));
+  await act(async () => retry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 2 })));
+  await act(async () => retry.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, detail: 2 })));
+  expect(host.querySelector('.photo-card-button')?.getAttribute('aria-pressed')).toBe('false');
+  await act(async () => host.querySelector<HTMLButtonElement>('.photo-card-button')!.click());
+  expect(host.querySelector('.photo-card-button')?.getAttribute('aria-pressed')).toBe('true');
+});
 it('shows waiting/activity/failed bars while runtime cards remain locked', async () => {
   await render([item('a', 'waiting'), item('b', 'encoding'), item('c', 'registering'), item('d', 'failed')]);
   expect(host.querySelector('.export-status-waiting')?.textContent).toBe('Waiting');

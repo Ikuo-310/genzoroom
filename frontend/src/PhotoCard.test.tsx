@@ -48,6 +48,27 @@ it('uses rendered thumbnails and refreshes the image URL without changing card s
   expect(fetch).not.toHaveBeenCalled();
 });
 
+it('keeps retry click sequences independent from Gallery select and immersive-preview actions', async () => {
+  const onSelect = vi.fn(), onToggleSelection = vi.fn(), onExtendSelection = vi.fn(), onPreviewRequest = vi.fn();
+  const onCancelDeferredSelection = vi.fn();
+  await act(async () => root.render(<PhotoCard asset={interactionAsset} language="en" onSelect={onSelect}
+    onToggleSelection={onToggleSelection} onExtendSelection={onExtendSelection} onPreviewRequest={onPreviewRequest}
+    onCancelDeferredSelection={onCancelDeferredSelection} />));
+  const image = host.querySelector<HTMLImageElement>('.photo-card img')!;
+  await act(async () => image.dispatchEvent(new Event('error')));
+  const retry = host.querySelector<HTMLButtonElement>('[data-thumbnail-retry]')!;
+  await act(async () => retry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 })));
+  await act(async () => retry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 2 })));
+  await act(async () => retry.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, detail: 2 })));
+  expect(onSelect).not.toHaveBeenCalled();
+  expect(onToggleSelection).not.toHaveBeenCalled();
+  expect(onExtendSelection).not.toHaveBeenCalled();
+  expect(onPreviewRequest).not.toHaveBeenCalled();
+  expect(onCancelDeferredSelection).not.toHaveBeenCalled();
+  await act(async () => host.querySelector<HTMLButtonElement>('.photo-card-button')!.click());
+  expect(onSelect).toHaveBeenCalledOnce();
+});
+
 function renderBadge(format: string, isRaw: boolean, filename = `photo.${format.toLowerCase()}`, edited?: boolean, stackId?: string, stackAssetCount?: number | null,
   stackFormats?: RecentAsset['stackFormats']) {
   const asset: RecentAsset = {
@@ -385,7 +406,7 @@ describe('PhotoCard format badge', () => {
     ))}</div>);
 
     expect(markup.match(/<article/g)).toHaveLength(100);
-    expect(markup.match(/<img src="\/api\/assets\/asset-\d+\/rendered-thumbnail"/g)).toHaveLength(100);
+    expect(markup.match(/<img\b[^>]*src="\/api\/assets\/asset-\d+\/rendered-thumbnail"/g)).toHaveLength(100);
     expect(markup.match(/class="format-badge"/g)).toHaveLength(100);
     expect(markup).toContain('photo-100.jpg');
   });

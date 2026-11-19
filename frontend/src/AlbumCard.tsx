@@ -10,16 +10,18 @@ export function AlbumCard({ album, onOpen }: { album: AlbumSummary; onOpen: () =
   const end = formatAlbumMonth(album.endDate, undefined, compactJapanese);
   const period = start && end && start !== end ? t('albums.dateRange', { start, end }) : start || end;
 
-  return <button type="button" className="album-card" onClick={onOpen} aria-label={t('albums.open', { name: album.albumName })}>
-    <span className="album-cover">
-      {album.albumThumbnailAssetId
-        ? <ThumbnailImage rendition="thumbnail" assetId={album.albumThumbnailAssetId} surface="album" mode="original" alt="" loading="lazy" />
-        : <span className="album-cover-placeholder">{t('albums.noCover')}</span>}
-    </span>
-    <span className="album-info">
-      <span className="album-name">{album.albumName}</span>
-      {period && <span className="album-period">{period}</span>}
-      <span className="album-count">{t('albums.itemCount', { count: album.assetCount })}</span>
-    </span>
-  </button>;
+  return <div className="album-card-frame" data-thumbnail-retry-host>
+    <button data-thumbnail-action type="button" className="album-card" onClick={onOpen} aria-label={t('albums.open', { name: album.albumName })}>
+      <span className="album-cover">
+        {album.albumThumbnailAssetId
+          ? <ThumbnailImage rendition="thumbnail" assetId={album.albumThumbnailAssetId} surface="album" mode="original" alt="" loading="lazy" />
+          : <span className="album-cover-placeholder">{t('albums.noCover')}</span>}
+      </span>
+      <span className="album-info">
+        <span className="album-name">{album.albumName}</span>
+        {period && <span className="album-period">{period}</span>}
+        <span className="album-count">{t('albums.itemCount', { count: album.assetCount })}</span>
+      </span>
+    </button>
+  </div>;
 }

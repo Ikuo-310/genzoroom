@@ -264,3 +264,44 @@ P4の対象画面は既にP1の`ThumbnailImage`を使っていたため、各画
 
 P4は実装完了。P5の公開版通知・Asset単位更新、P6のFilmstrip読込範囲最適化、P7の大量画像実機検証は未着手。
 
+### P4追加監査記録：Retry操作の独立性・アクセシビリティ・回帰比較
+
+#### F1/F2 確定仕様と実装
+
+失敗画像そのものを`role="button"`にする方式を廃止した。`ThumbnailImage`は失敗時に共通のRetry用`button`を生成し、各画面が用意する`data-thumbnail-retry-host`へPortalで配置する。DOM上でカード操作ボタンの兄弟となるため、Gallery／Export／STACK／Filmstrip／Immersive Preview／Album／Calendarの既存アクションボタンとインタラクティブ要素が入れ子にならない。失敗画像は操作対象でなくなり、カードのレイアウトと画像枠を維持する。
+
+Retry操作は失敗した画像の`attempt`だけを進め、正常AssetのURL・key・選択状態は変更しない。クリックはdetailが1を超えるイベントで再取得を開始せず、click／dblclick／pointer／Enter／Spaceの伝播を共通ボタンで抑止する。再取得開始後500msは同じRetryボタンを`aria-disabled`状態で残す。この間の連続クリックやダブルクリックが、loadingへの再描画後に背後のカード操作として処理されることを防ぐ。自動Retryは行わず、画像GETから生成を開始しない。
+
+捕捉フェーズのGallery／Export／STACK処理はRetry targetを無視する。アプリ全体のショートカット判定では共通`isNativeEditingTarget`がRetry controlをローカル操作として除外する。STACKのドラッグ・dropとImmersive Previewのクリック移動もRetry上では実行されない。正常画像に対するカードclick／dblclick、選択、COVER変更、Filmstrip移動、Preview起動、ショートカットは従来どおり。
+
+キーボードRetryはボタンにフォーカスしてEnter／Spaceで実行できる。再取得中はフォーカスをRetry controlに保持し、成功時またはRetry controlを外すsource/publicationVersion変更時に同じhost内の`data-thumbnail-action`へ戻す。再取得が失敗した場合はRetry controlを表示し、再試行可能状態を保つ。公開版識別子のP5向けinterfaceと現行画面別revisionは維持した。
+
+対象hostはGallery／Exportカード、StackPhoto、Filmstrip項目、Immersiveの写真領域、AlbumCard、Calendar日付セルおよびDeveloper診断候補に配置した。Album／Calendarは操作ボタンを包むhostを追加したため、該当するDOM位置を前提にした既存テストselectorも新しい構造に合わせた。
+
+#### F3 Frontend全体テスト比較
+
+同じWindows環境・Frontend依存関係・`npm test`を用い、実装前のclean `355b61f` worktreeと修正後ツリーを比較した。実装前のテスト定義からはRetry関連12件のテストを追加し、表示DOM変更に伴うselector／SSR属性順序の期待値を更新している。
+
+| 状態 | Test Files | Tests |
+|---|---:|---:|
+| 実装前 `355b61f` | 7 failed / 168 passed (175) | 150 failed / 4174 passed / 2 skipped (4326) |
+| Retry修正後 | 3 failed / 172 passed (175) | 137 failed / 4199 passed / 2 skipped (4338) |
+
+失敗テスト名を比較した結果、修正後だけに現れた失敗は0件で、残る137件は実装前と同一のRAW関連テストだった。失敗ファイルとエラー境界は以下のとおりであり、P4外のRAW実装・テストは変更していない。
+
+- `AnshitsuRawPreview.test.tsx`：84件。DOM lookupの`null`／`undefined`参照（例：`closest`、`click`、`dispatchEvent`、`disabled`等）。失敗テスト名とエラー内容はいずれもbaselineと一致。
+- `RawPointColorControls.test.tsx`：50件。`TypeError: raw.setPointColorRangeIndex is not a function`（`RawAdjustmentControls.tsx:103`）。
+- `RawVignetteControls.test.tsx`：3件。同じ`setPointColorRangeIndex`欠落エラー。失敗名は「persists independent RAW panel folds and selections across remount and asset changes without edit operations」「uses desired amount for dependents and preserves values/mode while inactive in ja」「… in en」。
+
+baselineだけで失敗していた13件（`AnshitsuPage.test.tsx`のFilmstrip属性順序1件、`PhotoCard.test.tsx`のSSR属性順序1件、`ExportEngineDiagnostics.test.tsx`の診断ログ期待2件、`ExportManagement.test.tsx`のlogger mock由来9件）は修正後に成功した。SSR属性順序テストはDOM構造に依存しない判定へ変更し、ログテストはP1 ThumbnailImage診断記録とExport固有ログを区別した。共通診断レベル取得はlogger mockが`getLevel`を提供しない場合にも画像処理を失敗させない。
+
+#### 検証結果・残存事項
+
+- Retry／親操作の関連回帰テスト8ファイル335件が成功。Gallery／Homeのhost追加で更新したDOM selectorを含む2ファイル108件も成功。
+- 単クリック、detail付き連続click／dblclick、capture handler、Enter／Space、フォーカス復帰、source/publicationVersion変更、アンマウントを共通コンポーネントテストで確認。Gallery選択とPreview、Export選択、STACKの遅延COVER変更、Filmstrip／Immersiveのキーボード移動に対する独立性を個別テストで確認。
+- `npm run build`（`tsc --noEmit`を含む）成功。既存の大きいbundle、React Router `use client`警告あり。
+- `git diff --check`はコミット前に実施する。
+- DOMイベントと自動テストで確認したが、Windows WebView2／Docker実ブラウザでの実操作確認は未実施。これはユーザー側の手動検証に残す。
+
+この追加監査記録は上記「状態遷移・イベント保護」と以前のP4全体テスト数値を補足・更新する。P5以降の作業範囲は変わらない。
+

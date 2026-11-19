@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { editClipboardShortcut, editSelectionShortcut, matchesShortcut, matchesShortcutKey, shortcutBindings, undoShortcut, type ShortcutId } from './editShortcuts';
+import { editClipboardShortcut, editSelectionShortcut, isNativeEditingTarget, matchesShortcut, matchesShortcutKey, shortcutBindings, undoShortcut, type ShortcutId } from './editShortcuts';
 import { isPrimaryModifier, type ShortcutPlatform } from './shortcutModifiers';
 
 function event(key: string, options: KeyboardEventInit = {}, altGraph = false) {
@@ -10,6 +10,11 @@ function event(key: string, options: KeyboardEventInit = {}, altGraph = false) {
 }
 
 describe('command shortcut bindings', () => {
+  it('treats the shared thumbnail retry control as a local input target', () => {
+    const retry = document.createElement('button');
+    retry.dataset.thumbnailRetry = '';
+    expect(isNativeEditingTarget(retry)).toBe(true);
+  });
   it.each(['other', 'mac'] as const)('refreshes only with Shift+R on %s', platform => {
     for (let mask = 0; mask < 16; mask++) {
       const options = { ctrlKey: !!(mask & 1), metaKey: !!(mask & 2), altKey: !!(mask & 4), shiftKey: !!(mask & 8) };

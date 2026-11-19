@@ -1,9 +1,9 @@
 import { isPrimaryModifier, shortcutPlatform, type ShortcutPlatform } from './shortcutModifiers';
 
-// Preserve native text editing, selection widgets, and IME composition.
+// Keep local editors and recovery controls out of application-wide commands.
 export function isNativeEditingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
-  return !!target.closest('textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], input:not([type="range"]):not([type="button"]):not([type="checkbox"]):not([type="radio"]):not([type="submit"])');
+  return !!target.closest('textarea, select, [data-thumbnail-retry], [contenteditable]:not([contenteditable="false"]), [role="textbox"], input:not([type="range"]):not([type="button"]):not([type="checkbox"]):not([type="radio"]):not([type="submit"])');
 }
 
 export type ShortcutBinding = Readonly<{

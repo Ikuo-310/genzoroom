@@ -71,7 +71,8 @@
     "notConfiguredStatus": "Immich未設定"
   },
   "thumbnail": {
-    "retry": "画像を表示できません。選択して再取得します。"
+    "retry": "画像を再取得",
+    "retrying": "画像を再取得中"
   },
   "immersivePreview": {
     "title": "没入プレビュー",

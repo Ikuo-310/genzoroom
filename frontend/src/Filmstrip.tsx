@@ -77,10 +77,11 @@ export function Filmstrip({ assets, activeAssetId, recipeChangeRevision = 0, onA
   }, [activeAssetId, recipeChangeRevision]);
   return <section className="filmstrip" aria-label={t('workspace.filmstrip')}>
     <div ref={scroll} className="filmstrip-scroll">
-      {assets.map((asset) => <div key={asset.id} className="filmstrip-entry"><button
+      {assets.map((asset) => <div key={asset.id} data-thumbnail-retry-host className="filmstrip-entry"><button
         type="button"
         disabled={disabled}
         className={`filmstrip-item${asset.id === activeAssetId ? ' active' : ''}`}
+        data-thumbnail-action
         onClick={() => onActivate(asset.id)}
         aria-current={asset.id === activeAssetId ? 'true' : undefined}
         aria-label={asset.filename}

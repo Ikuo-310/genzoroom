@@ -17,6 +17,16 @@ it('uses rendered thumbnail URLs without generation POSTs', async () => {
   expect(fetch).not.toHaveBeenCalled();
 });
 
+it('keeps Filmstrip navigation shortcuts away from a focused Retry control', async () => {
+  await act(async () => root.render(<Harness />));
+  const image = host.querySelector<HTMLImageElement>('.filmstrip-item img')!;
+  await act(async () => image.dispatchEvent(new Event('error')));
+  const retry = host.querySelector<HTMLButtonElement>('[data-thumbnail-retry]')!;
+  retry.focus();
+  move('next', retry);
+  expect(current()).toBe('a.jpg');
+});
+
 it.each([true, false])('keeps mixed RAW/JPEG URLs across active changes independently of badges (edited=%s)', async edited => {
   const mixed = [assets[0], { ...assets[1], filename: 'b.dng', format: 'DNG', is_raw: true }, assets[2]];
   const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);

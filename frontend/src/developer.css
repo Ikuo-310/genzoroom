@@ -27,7 +27,9 @@
 .developer-page :focus-visible { outline: 2px solid #ececee; outline-offset: 3px; }
 .developer-jpeg-target { overflow-wrap: anywhere; }
 .developer-jpeg-candidates { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; margin-top: 16px; }
+.developer-jpeg-candidate { position: relative; min-width: 0; }
 .developer-jpeg-candidates button { min-width: 0; padding: 8px; background: #292b2e; color: inherit; border: 2px solid transparent; }
+.developer-jpeg-candidate > button { width: 100%; height: 100%; }
 .developer-jpeg-candidates button[aria-pressed="true"] { border-color: #b8bbc2; }
 .developer-jpeg-candidates img { display: block; width: 100%; height: 110px; object-fit: contain; }
 .developer-jpeg-candidates span { display: block; font-size: 0.8rem; overflow-wrap: anywhere; }

@@ -10,7 +10,7 @@ import { isMutableExportStatus, type ExportManagementState } from './useExportMa
 import { isPrimaryModifier } from './shortcutModifiers';
 import { useShortcutDisplay } from './useShortcutDisplay';
 import { StackRedetectDialog } from './StackRedetectDialog';
-import { ThumbnailImage } from './ThumbnailImage';
+import { isThumbnailRetryTarget, ThumbnailImage } from './ThumbnailImage';
 import type { RecentAsset } from './assets';
 import { useStackColumns } from './useStackColumns';
 
@@ -95,14 +95,15 @@ function ExportQueueCard({ entry: { item, asset }, management, onPreviewRequest,
     if (rangeClickHandled.current) { rangeClickHandled.current = false; return; }
     management.toggleSelection(id);
   }
-  return <article className={`photo-card export-queue-card${selected ? ' selected' : ''}${management.selectedIds.length ? ' selection-mode' : ''}`} aria-label={asset.filename}
+  return <article data-thumbnail-retry-host className={`photo-card export-queue-card${selected ? ' selected' : ''}${management.selectedIds.length ? ' selection-mode' : ''}`} aria-label={asset.filename}
     data-asset-id={item.assetId} data-queue-status={item.status} aria-disabled={locked || retryExcluded || undefined}
-    onClickCapture={onCancelDeferredSelection}>
+    onClickCapture={event => { if (!isThumbnailRetryTarget(event.target)) onCancelDeferredSelection?.(); }}>
     <label className="photo-selection-control" title={disabled ? disabledReason : label}>
       <input className="photo-selection-input" type="checkbox" checked={selected} disabled={disabled}
         onClick={handleCheckboxClick} onChange={handleCheckboxChange} aria-label={label} />
     </label>
     <button className="photo-card-button" type="button" disabled={disabled} onClick={handleCardClick}
+      data-thumbnail-action
       onDoubleClick={() => { onCancelDeferredSelection?.(); onPreviewRequest?.(asset); }}
       aria-label={label} aria-pressed={selected} aria-description={disabled ? disabledReason : armed ? t('exportManagement.armed') : undefined}>
     <div className="thumbnail">

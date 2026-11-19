@@ -283,10 +283,10 @@ describe('Home return context', () => {
     await click('.album-card'); expectScroll(0, 0); setScroll(0, 520);
     await click('#home-calendar-tab'); await click('#home-albums-tab'); expectScroll(0, 520);
     await click('#home-albums-tab'); expectScroll(0, 210);
-    await click('.album-card:last-child'); expectScroll(0, 0); setScroll(0, 730);
+    await click('.album-card-frame:last-child .album-card'); expectScroll(0, 0); setScroll(0, 730);
     await click('.album-back'); expectScroll(0, 210);
     await click('.album-card'); expectScroll(0, 520);
-    await click('.album-back'); await click('.album-card:last-child'); expectScroll(0, 730);
+    await click('.album-back'); await click('.album-card-frame:last-child .album-card'); expectScroll(0, 730);
     await click('#home-albums-tab'); await click('#home-recent-tab'); await click('#home-albums-tab');
     expect(host.querySelector('.home-toolbar-context')).toBeNull();
     expectScroll(0, 210);

@@ -37,6 +37,21 @@ afterEach(() => {
 });
 
 describe('ImmersivePreview', () => {
+  it('keeps retry clicks and navigation shortcuts independent from image movement', () => {
+    mount();
+    const photo = host.querySelector<HTMLElement>('.immersive-preview-photo')!;
+    const failed = image();
+    act(() => failed.dispatchEvent(new Event('error')));
+    const retry = host.querySelector<HTMLButtonElement>('[data-thumbnail-retry]')!;
+    act(() => retry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 })));
+    act(() => retry.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 2 })));
+    expect(host.querySelector('.immersive-preview-position')?.textContent).toBe('2 / 3');
+    retry.focus();
+    act(() => retry.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })));
+    expect(host.querySelector('.immersive-preview-position')?.textContent).toBe('2 / 3');
+    expect(host.querySelector('[data-thumbnail-retry]')?.parentElement).toBe(photo);
+  });
+
   it.each(['gallery', 'exportManagement', 'stackManagement'] as const)('keeps the opening mode across RAW/JPEG navigation for %s', source => {
     const raw = { ...b, filename: 'b.dng', format: 'DNG', is_raw: true };
     const { props } = mount({ assets: [a, raw, c], source });

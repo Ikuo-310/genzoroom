@@ -96,9 +96,9 @@ describe('Anshitsu workspace', () => {
     expect(markup).toContain('aria-current="true"');
     expect(markup).toContain('format-badge raw');
     expect(markup).toContain('>HEIC</span>');
-    expect(markup).toContain(`<img src="/api/assets/${asset.id}/rendered-thumbnail" alt=""`);
-    expect(markup).toContain(`<img src="/api/assets/${secondAsset.id}/rendered-thumbnail" alt=""`);
-    expect(markup).toContain(`src="/api/assets/${secondAsset.id}/rendered-thumbnail" alt="" fetchPriority="high"`);
+    expect(markup).toMatch(new RegExp(`<img\\b[^>]*src="/api/assets/${asset.id}/rendered-thumbnail"`));
+    expect(markup).toMatch(new RegExp(`<img\\b[^>]*src="/api/assets/${secondAsset.id}/rendered-thumbnail"`));
+    expect(markup).toContain('fetchPriority="high"');
     expect(markup.match(/filmstrip-item/g)).toHaveLength(2);
   });
 

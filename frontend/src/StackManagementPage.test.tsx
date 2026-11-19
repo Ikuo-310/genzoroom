@@ -68,6 +68,20 @@ async function mountPreviewFixtures() {
     { ...photos[1], id: 'z', filename: 'z.jpg' }] });
 }
 
+it('does not cancel a pending STACK COVER change when the thumbnail Retry control is activated', async () => {
+  await mountPreviewFixtures(); vi.useFakeTimers();
+  const group = host.querySelector('.stack-candidate-group')!;
+  const photo = stackPhotoNamed('hidden.jpg');
+  const image = photo.querySelector('img')!;
+  await pointerClick(photo);
+  await act(async () => image.dispatchEvent(new Event('error')));
+  const retry = host.querySelector<HTMLButtonElement>('[data-thumbnail-retry]')!;
+  await act(async () => retry.click());
+  await act(async () => vi.advanceTimersByTime(400));
+  expect(group.querySelector('.stack-cover .stack-filename')?.textContent).toBe('hidden.jpg');
+  expect(host.querySelector('.immersive-preview')).toBeNull();
+});
+
 it('opens the whole candidate group at COVER from blank space, retains three-photo order and stays inside the group', async () => {
   await mountPreviewFixtures();
   const group = host.querySelector<HTMLElement>(`[data-stack-id="draft:immich:${existingStackId}"]`)!;

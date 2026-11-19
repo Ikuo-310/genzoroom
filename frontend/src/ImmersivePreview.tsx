@@ -148,7 +148,7 @@ export function ImmersivePreview({ assets, startAssetId, selectedAssetIds = new 
       </div>
       {isMac ? position : closeButton}
     </header>
-    <main className="immersive-preview-photo" onClick={handlePhotoClick}>
+    <main tabIndex={-1} data-thumbnail-retry-host className="immersive-preview-photo" onClick={handlePhotoClick}>
       <ThumbnailImage rendition={useEditedPreview ? 'immersive-preview' : 'preview'} assetId={asset.id} surface="immersive" mode="preview" alt={asset.filename}
         loading="eager" fetchPriority="high" draggable={false} />
     </main>

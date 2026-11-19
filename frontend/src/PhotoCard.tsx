@@ -13,7 +13,7 @@ import type { ExportQueueStatus } from './exportQueueApi';
 import { formatPhotoDate, type AppLanguage } from './i18n';
 import { isPrimaryModifier } from './shortcutModifiers';
 import { isGenzoRoomExported } from './photoFilters';
-import { ThumbnailImage } from './ThumbnailImage';
+import { isThumbnailRetryTarget, ThumbnailImage } from './ThumbnailImage';
 
 export type { RecentAsset } from './assets';
 
@@ -136,8 +136,8 @@ export function PhotoCard({
   }
 
   return (
-    <article className={`photo-card${excluded ? ' development-excluded' : ''}${selected ? ' selected' : ''}${selectionMode ? ' selection-mode' : ''}`}
-      onClickCapture={onCancelDeferredSelection}
+    <article data-thumbnail-retry-host className={`photo-card${excluded ? ' development-excluded' : ''}${selected ? ' selected' : ''}${selectionMode ? ' selection-mode' : ''}`}
+      onClickCapture={event => { if (!isThumbnailRetryTarget(event.target)) onCancelDeferredSelection?.(); }}
       onContextMenu={event => {
         if (!asset.stackId || !stackMenu) return;
         event.preventDefault(); event.stopPropagation();
@@ -156,6 +156,7 @@ export function PhotoCard({
       <button
         ref={cardButtonRef}
         className="photo-card-button"
+        data-thumbnail-action
         type="button"
         onClick={handleCardClick}
         onDoubleClick={() => { onCancelDeferredSelection?.(); onPreviewRequest?.(); }}

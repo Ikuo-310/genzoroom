@@ -499,7 +499,7 @@ describe('Gallery manual refresh', () => {
     const pending = deferred<RecentAsset[]>(); api.album.mockReturnValueOnce(pending.promise);
     await click('.gallery-refresh'); await click('.album-back');
     api.album.mockResolvedValueOnce([{ ...photos[0], filename: 'other.jpg' }]);
-    await click('.album-card:nth-child(2)');
+    await click('.album-card-frame:nth-child(2) .album-card');
     await act(async () => pending.resolve([photos[1]]));
     expect(filenames()).toEqual(['other.jpg']); expect(host.querySelector('.home-toolbar-title')?.textContent).toBe('Other album');
   });

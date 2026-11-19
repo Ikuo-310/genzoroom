@@ -260,10 +260,10 @@ export function ExportEngineDiagnostics({ dependencies, decodeDependencies, roun
     {candidateStatus !== 'idle' && <p role="status">{t(`jpegDiagnostics.candidates.${candidateStatus}`)}</p>}
     {candidateStatus === 'failed' && <p role="alert">{t('exportEngine.error.candidate_load_failed')}</p>}
     {candidates.length > 0 && <div className="developer-jpeg-candidates" role="group" aria-label={t('jpegDiagnostics.candidateLabel')}>
-      {candidates.map((asset, index) => <button type="button" key={asset.id} disabled={busy} aria-pressed={selected?.id === asset.id} onClick={() => {
+      {candidates.map((asset, index) => <div key={asset.id} className="developer-jpeg-candidate" data-thumbnail-retry-host><button data-thumbnail-action type="button" disabled={busy} aria-pressed={selected?.id === asset.id} onClick={() => {
         if (request.current || candidateRequest.current || closed.current) return;
         reset(); setPhase('idle'); setSelected(asset); setDecodeReport(emptyDecodeComparison()); setRoundTripReport(emptyEncodeRoundTrip()); setJsonError(false);
-      }}><ThumbnailImage src={asset.thumbnail_url} assetId={asset.id} surface="exportDiagnostics" mode="original" alt={t('jpegDiagnostics.candidateAlt', { number: index + 1 })} loading="lazy" /><span>{asset.filename}</span></button>)}
+      }}><ThumbnailImage src={asset.thumbnail_url} assetId={asset.id} surface="exportDiagnostics" mode="original" alt={t('jpegDiagnostics.candidateAlt', { number: index + 1 })} loading="lazy" /><span>{asset.filename}</span></button></div>)}
     </div>}
     {selected && <p className="developer-jpeg-target">{selected.filename}</p>}
     {jsonError && <p role="alert">{t('decodeCompare.jsonFailed')}</p>}

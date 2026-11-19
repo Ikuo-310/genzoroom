@@ -23,7 +23,7 @@ import { StackTrashMenu } from './StackTrashMenu';
 import { buildStackWritePlan, sendStackWritePlan, type StackWriteResult } from './stackWrite';
 import { canCreateStackFromUnmatchedDrop, canDropStackPayload, isStackDrag, parseStackDragPayload, readStackDragPayload, STACK_DRAG_TYPE, type StackDragPayload } from './stackDragDrop';
 import { frontendLogger } from './frontendLogging';
-import { ThumbnailImage } from './ThumbnailImage';
+import { isThumbnailRetryTarget, ThumbnailImage } from './ThumbnailImage';
 import { ImmersivePreview } from './ImmersivePreview';
 import { isPrimaryModifier } from './shortcutModifiers';
 import { XIcon } from './XIcon';
@@ -626,8 +626,9 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
 
   const Container = sessionAssets ? 'div' : 'main';
   return <Container className="stack-management-page" style={{ '--stack-card-width': `${homeThumbnailWidth}px`, '--stack-effective-columns': effectiveColumns } as CSSProperties}
-    onClickCapture={cancelPendingClick} onContextMenuCapture={cancelPendingClick}
-    onDragOverCapture={event => moveDragPreview(event.clientX, event.clientY)}>
+    onClickCapture={event => { if (!isThumbnailRetryTarget(event.target)) cancelPendingClick(); }}
+    onContextMenuCapture={event => { if (!isThumbnailRetryTarget(event.target)) cancelPendingClick(); }}
+    onDragOverCapture={event => { if (!isThumbnailRetryTarget(event.target)) moveDragPreview(event.clientX, event.clientY); }}>
     {!sessionAssets && <header className="stack-management-header">
       <HomeTitle className="stack-home-title" onActivate={returnHome} />
       <h1>{t('stackManagement.title')}</h1>
@@ -677,7 +678,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
         </div>
         {/* Measure the grid's usable width after frame padding and scrollbar space. */}
         <div ref={contentRef} className="stack-candidate-grid">{displayed.groups.length ? displayed.groups.map((group, index) => <section data-stack-id={group.id}
-          onClickCapture={cancelPendingClick}
+          onClickCapture={event => { if (!isThumbnailRetryTarget(event.target)) cancelPendingClick(); }}
           onDoubleClick={event => {
             if (event.button !== 0 || !(event.target instanceof Element)
               || event.target.closest('button, input, a, select, textarea, summary, [role="button"], .stack-evidence')) return;
@@ -759,6 +760,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
           key={asset.id} asset={asset} selected={selectedIds.has(asset.id)} disabled={!canEdit}
           dropTarget={dropTarget === `unmatched:${asset.id}`}
           onDropTargetDragOver={event => {
+            if (isThumbnailRetryTarget(event.target)) return;
             if (!handleDragOver(event, { targetKind: 'unmatched-photo', targetGroupId: null, targetAssetId: asset.id }, null)) return;
             event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move'; setDropTarget(`unmatched:${asset.id}`);
           }}
@@ -766,6 +768,7 @@ export function StackManagementPage({ sessionAssets, active = true, splitRatio, 
             if (!event.currentTarget.contains(event.relatedTarget as Node) && dropTarget === `unmatched:${asset.id}`) setDropTarget(null);
           }}
           onDropTargetDrop={event => {
+            if (isThumbnailRetryTarget(event.target)) return;
             const accepted = canAcceptUnmatchedPhotoDrop(event, asset.id);
             if (!accepted) return;
             const payload = payloadFrom(event.dataTransfer)!;
@@ -847,7 +850,12 @@ function StackPhoto({ asset, selected, editedPreview = false, thumbnailRefreshKe
   const releaseSuppression = useRef<number | null>(null);
   useEffect(() => () => { if (releaseSuppression.current !== null) window.clearTimeout(releaseSuppression.current); }, []);
   // A read-only photo can still open Preview; editing and dragging keep their original guards.
-  return <div className="stack-photo-wrapper" onClickCapture={onCancelPendingClick} onDragOver={onDropTargetDragOver} onDragLeave={onDropTargetDragLeave} onDrop={onDropTargetDrop}><button disabled={disabled && previewDisabled} draggable={!disabled && !dragDisabled} className={`stack-photo${cover ? ' stack-cover' : ''}${selected && !member ? ' stack-selection-active' : ''}${toggleDisabled || dragDisabled ? ' stack-edit-disabled' : ''}${dragging ? ' stack-photo-dragging' : ''}${dropTarget ? ' stack-drop-target' : ''}`} type="button" onContextMenu={onContextMenu} aria-disabled={disabled || toggleDisabled || dragDisabled || undefined} title={toggleDisabled || dragDisabled ? t('stackManagement.cancelTrashBeforeEdit') : undefined} aria-description={toggleDisabled || dragDisabled ? t('stackManagement.cancelTrashBeforeEdit') : cover ? t('stackManagement.cover') : undefined} aria-pressed={member ? cover : selected}
+  return <div data-thumbnail-retry-host className="stack-photo-wrapper"
+    onClickCapture={event => { if (!isThumbnailRetryTarget(event.target)) onCancelPendingClick?.(); }}
+    onDragOver={event => { if (!isThumbnailRetryTarget(event.target)) onDropTargetDragOver?.(event); }}
+    onDragLeave={event => { if (!isThumbnailRetryTarget(event.target)) onDropTargetDragLeave?.(event); }}
+    onDrop={event => { if (!isThumbnailRetryTarget(event.target)) onDropTargetDrop?.(event); }}>
+    <button data-thumbnail-action disabled={disabled && previewDisabled} draggable={!disabled && !dragDisabled} className={`stack-photo${cover ? ' stack-cover' : ''}${selected && !member ? ' stack-selection-active' : ''}${toggleDisabled || dragDisabled ? ' stack-edit-disabled' : ''}${dragging ? ' stack-photo-dragging' : ''}${dropTarget ? ' stack-drop-target' : ''}`} type="button" onContextMenu={onContextMenu} aria-disabled={disabled || toggleDisabled || dragDisabled || undefined} title={toggleDisabled || dragDisabled ? t('stackManagement.cancelTrashBeforeEdit') : undefined} aria-description={toggleDisabled || dragDisabled ? t('stackManagement.cancelTrashBeforeEdit') : cover ? t('stackManagement.cover') : undefined} aria-pressed={member ? cover : selected}
     aria-label={t(member ? cover ? 'stackManagement.currentCover' : 'stackManagement.setCover' : selected ? 'photos.deselectPhoto' : 'photos.selectPhoto', { filename: asset.filename })}
     onDragStart={event => { onCancelPendingClick?.(); suppressClick.current = onDragStart(event); }}
     onDragEnd={event => {

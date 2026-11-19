@@ -137,12 +137,14 @@ function CalendarMonthGrid({ year, month, daysByDate, weekStart, loading, showTh
         const entry = daysByDate.get(date);
         const available = !loading && entry?.hasAssets === true;
         const thumbnail = available && showThumbnails ? entry.thumbnail_url : null;
-        return <button key={date} type="button" className={`calendar-day${available ? ' has-assets' : ''}${thumbnail ? ' has-thumbnail' : ''}${date === todayKey ? ' today' : ''}`}
-          disabled={!available} aria-label={available ? t('calendar.dayWithAssets', { date }) : t('calendar.dayLabel', { date })}
-          onClick={() => onDayOpen(date)}>
-          {thumbnail && <ThumbnailImage className="calendar-day-thumbnail" src={thumbnail} assetId={thumbnail.match(/\/assets\/([^/]+)\/thumbnail/)?.[1] ?? 'unknown'} surface="calendar" mode="original" alt="" loading="lazy" />}
-          <span className="calendar-day-number">{day}</span>
-      </button>;
+        return <div key={date} className="calendar-day-host" data-thumbnail-retry-host>
+          <button data-thumbnail-action type="button" className={`calendar-day${available ? ' has-assets' : ''}${thumbnail ? ' has-thumbnail' : ''}${date === todayKey ? ' today' : ''}`}
+            disabled={!available} aria-label={available ? t('calendar.dayWithAssets', { date }) : t('calendar.dayLabel', { date })}
+            onClick={() => onDayOpen(date)}>
+            {thumbnail && <ThumbnailImage className="calendar-day-thumbnail" src={thumbnail} assetId={thumbnail.match(/\/assets\/([^/]+)\/thumbnail/)?.[1] ?? 'unknown'} surface="calendar" mode="original" alt="" loading="lazy" />}
+            <span className="calendar-day-number">{day}</span>
+          </button>
+        </div>;
       })}
     </div>;
 }

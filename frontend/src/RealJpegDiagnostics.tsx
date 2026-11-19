@@ -70,11 +70,11 @@ export function RealJpegDiagnostics({ onReport, dependencies, onExport, exportEr
     {exportError && <p role="alert">{t('developer.jpegExportFailed')}</p>}
     {candidateStatus !== 'idle' && <p role="status">{t(`jpegDiagnostics.candidates.${candidateStatus}`)}</p>}
     {candidates.length > 0 && <div className="developer-jpeg-candidates" role="group" aria-label={t('jpegDiagnostics.candidateLabel')}>
-      {candidates.map((asset, index) => <button type="button" key={asset.id} disabled={busy} aria-pressed={manual?.id === asset.id}
+      {candidates.map((asset, index) => <div key={asset.id} className="developer-jpeg-candidate" data-thumbnail-retry-host><button data-thumbnail-action type="button" disabled={busy} aria-pressed={manual?.id === asset.id}
         onClick={() => { setManual(asset); setTargetFilename(asset.filename); }}>
         <ThumbnailImage src={asset.thumbnail_url} assetId={asset.id} surface="jpegDiagnostics" mode="original" alt={t('jpegDiagnostics.candidateAlt', { number: index + 1 })} loading="lazy" />
         <span>{asset.filename}</span>
-      </button>)}
+      </button></div>)}
     </div>}
     <p role="status" aria-live="polite" aria-atomic="true">{t(`jpegDiagnostics.status.${report.status}`)}
       {state.running && ` — ${t(`jpegDiagnostics.phase.${state.phase}`)}${state.currentCase ? `: ${t(`jpegDiagnostics.case.${state.currentCase}`)}` : ''}`}

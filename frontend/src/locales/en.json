@@ -53,7 +53,8 @@
     "title": "GenzoRoom"
   },
   "thumbnail": {
-    "retry": "Image unavailable. Activate to retry."
+    "retry": "Retry image",
+    "retrying": "Retrying image"
   },
   "immersivePreview": {
     "title": "Immersive preview",
