@@ -137,6 +137,76 @@ def test_asset_image_upstream_errors_are_never_cached(setup):
     asyncio.run(run())
 
 
+@pytest.mark.parametrize(("error", "status"), [
+    (ImmichRequestError("unreachable", "unreachable"), 503),
+    (ImmichRequestError("authentication_failed", "safe upstream error"), 502),
+])
+def test_asset_image_http_errors_are_never_cached(setup, error, status):
+    _, _, _, _, original = setup
+    original.side_effect = error
+
+    async def run():
+        async with client() as api:
+            response = await api.get(f"/assets/{ASSET}/thumbnail")
+            assert response.status_code == status
+            assert response.headers["cache-control"] == "private, no-store"
+    asyncio.run(run())
+
+
+def test_asset_image_validation_error_is_never_cached(setup):
+    async def run():
+        async with client() as api:
+            response = await api.get("/assets/not-a-uuid/thumbnail")
+            assert response.status_code == 422
+            assert response.headers["cache-control"] == "private, no-store"
+    asyncio.run(run())
+
+
+def test_uncaught_asset_image_exception_returns_safe_uncached_500(setup):
+    _, _, _, _, original = setup
+    original.side_effect = RuntimeError("private credential detail")
+
+    async def run():
+        transport = httpx.ASGITransport(app=main.app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as api:
+            response = await api.get(f"/assets/{ASSET}/thumbnail")
+            assert response.status_code == 500
+            assert response.headers["cache-control"] == "private, no-store"
+            assert response.text == "Internal Server Error"
+            assert "private credential detail" not in response.text
+    asyncio.run(run())
+
+
+def test_uncaught_asset_image_exception_is_still_propagated(setup):
+    _, _, _, _, original = setup
+    original.side_effect = RuntimeError("private credential detail")
+
+    async def run():
+        messages = []
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+        async def send(message):
+            messages.append(message)
+        path = f"/assets/{ASSET}/thumbnail"
+        scope = {
+            "type": "http", "asgi": {"version": "3.0", "spec_version": "2.3"},
+            "http_version": "1.1", "method": "GET", "scheme": "http", "path": path,
+            "raw_path": path.encode(), "query_string": b"", "root_path": "",
+            "headers": [(b"host", b"test")], "client": ("127.0.0.1", 12345),
+            "server": ("test", 80), "state": {},
+        }
+        with pytest.raises(RuntimeError, match="private credential detail"):
+            await main.app(scope, receive, send)
+        response_start = next(message for message in messages if message["type"] == "http.response.start")
+        response_body = b"".join(message.get("body", b"") for message in messages
+                                  if message["type"] == "http.response.body")
+        headers = {key.lower(): value for key, value in response_start["headers"]}
+        assert response_start["status"] == 500
+        assert headers[b"cache-control"] == b"private, no-store"
+        assert response_body == b"Internal Server Error"
+    asyncio.run(run())
+
+
 def test_store_failure_never_reserves(setup, monkeypatch):
     _, scheduler, _, _, _ = setup
     def fail(*args):

@@ -49,6 +49,14 @@ Windows Hostは通常サムネイル／Previewの成功200／304かつ画像Cont
 
 P3の自動検証はBackendの画像Cache-Control／ETag／304／エラー応答、Windows Hostの画像ヘッダー反映・非画像およびエラーのno-store、HTTPX shared clientのCookie非保持・再送なし、Docker nginxのCache-Control中継構成を対象とする。Recipe保存・Reset後も補正画像が `no-store` のままfallback／最新cache内容を返すことを関連API回帰テストで確認する。Windows WebView2とDocker実ブラウザでの再検証・profile変更・ユーザー切替は未実施であり、P7の手動確認に残す。P4以降には着手していない。
 
+### P3追加監査記録：F1 未捕捉例外とF2 streaming
+
+**F1**：通常のreturned 4xx／5xxはResponseを通るためCache-Control middlewareで保護できるが、未捕捉例外はFastAPIの外側の `ServerErrorMiddleware` が500を生成するため、内側の `call_next()` middlewareではレスポンスへ到達できなかった。共通Backendに未捕捉例外handlerを追加し、asset image pathでは既定の汎用本文 `Internal Server Error` に `private, no-store` を付ける。非画像の500本文・状態・ヘッダーは従来の既定動作を維持する。handlerは例外を再throwしないが、Starletteの `ServerErrorMiddleware` が送信後に元例外を再throwするため、Uvicorn側のエラー記録と失敗伝播は維持される。例外文や認証情報は応答へ含めない。
+
+**F2**：実行環境のStarlette 1.7.0で `BaseHTTPMiddleware.call_next()` の実装を確認した。本文を全量メモリへ読み切るのではなくmemory channel経由で順次yieldするが、task groupとdisconnect監視で全HTTP responseを包んでいた。画像エラー制御をPure ASGI middlewareへ置換し、asset image path以外は元の `receive`／`send` をそのまま下位appへ渡す。画像pathでもresponse-startだけを検査し、body chunkや送受信例外には介入しない。
+
+原本の所有境界は変更していない。`ImmichOriginal.chunks()` のfinallyが上流ResponseとHTTPX clientをcloseし、正常完了時の `StreamingResponse` BackgroundTaskも従来どおり実行される。追加ASGI回帰テストで先頭chunkが後続chunk生成完了前に送出されること、クライアントdisconnect後にstream generatorがcloseされることを確認した。上流ReadTimeout時の例外伝播とResponse／client解放は既存の `test_midstream_timeout_releases_connections` で再確認する。開発用roundtrip streamingはasset image middleware対象外であり、既存回帰テストで本文の連結順とCache-Controlを維持することを確認する。
+
 ## 3. 現行の取得・表示経路
 
 | 画面・機能 | 表示画像・取得先 | 現行挙動と留意点 |

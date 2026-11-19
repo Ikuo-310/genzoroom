@@ -140,6 +140,78 @@ class OriginalTests(unittest.TestCase):
             self.assertTrue(stream.closed)
         asyncio.run(run())
 
+    def test_endpoint_streams_chunks_and_closes_on_client_disconnect(self):
+        async def run(disconnect):
+            first_chunk_sent = asyncio.Event()
+            release_second_chunk = asyncio.Event()
+            incoming = asyncio.Queue()
+            incoming.put_nowait({"type": "http.request", "body": b"", "more_body": False})
+            chunks_finished = False
+            stream_closed = False
+            close_count = 0
+            messages = []
+
+            class SlowOriginal:
+                async def chunks(self):
+                    nonlocal chunks_finished
+                    try:
+                        yield b"first"
+                        await release_second_chunk.wait()
+                        chunks_finished = True
+                        yield b"second"
+                    finally:
+                        await self.close()
+
+                async def close(self):
+                    nonlocal stream_closed, close_count
+                    stream_closed = True
+                    close_count += 1
+
+            original = SlowOriginal()
+
+            async def get_original(*_args):
+                return original
+
+            async def receive():
+                return await incoming.get()
+
+            async def send(message):
+                messages.append(message)
+                if message["type"] == "http.response.body" and message.get("body") == b"first":
+                    first_chunk_sent.set()
+                    if disconnect:
+                        incoming.put_nowait({"type": "http.disconnect"})
+
+            path = f"/assets/{ASSET_ID}/original"
+            scope = {
+                "type": "http", "asgi": {"version": "3.0", "spec_version": "2.3"},
+                "http_version": "1.1", "method": "GET", "scheme": "http", "path": path,
+                "raw_path": path.encode(), "query_string": b"", "root_path": "",
+                "headers": [(b"host", b"test")], "client": ("127.0.0.1", 12345),
+                "server": ("test", 80), "state": {},
+            }
+            with patch("main.get_asset_original", new=get_original):
+                task = asyncio.create_task(app(scope, receive, send))
+                await asyncio.wait_for(first_chunk_sent.wait(), timeout=1)
+                self.assertFalse(chunks_finished)
+                self.assertIn(b"first", [message.get("body") for message in messages])
+                if disconnect:
+                    await asyncio.wait_for(task, timeout=1)
+                else:
+                    release_second_chunk.set()
+                    await asyncio.wait_for(task, timeout=1)
+
+            bodies = [message.get("body") for message in messages if message["type"] == "http.response.body"]
+            self.assertTrue(stream_closed)
+            self.assertEqual(bodies, [b"first"] if disconnect else [b"first", b"second", b""])
+            if not disconnect:
+                self.assertEqual(close_count, 2)  # Stream finalization plus the response BackgroundTask.
+            else:
+                self.assertGreaterEqual(close_count, 1)
+
+        asyncio.run(run(disconnect=False))
+        asyncio.run(run(disconnect=True))
+
     def test_endpoint_maps_upstream_errors(self):
         async def run():
             from unittest.mock import AsyncMock

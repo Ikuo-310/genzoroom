@@ -12,7 +12,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request, Res
 from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import request_validation_exception_handler
 from starlette.concurrency import run_in_threadpool
-from starlette.responses import StreamingResponse
+from starlette.responses import PlainTextResponse, StreamingResponse
 from starlette.responses import JSONResponse
 from starlette.background import BackgroundTask
 from pydantic import BaseModel, ConfigDict, Field
@@ -110,6 +110,27 @@ def is_asset_image_path(path: str) -> bool:
     }
 
 
+class AssetImageErrorCacheMiddleware:
+    """Set no-store on returned asset-image errors without touching response streams."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or not is_asset_image_path(scope.get("path", "")):
+            await self.app(scope, receive, send)
+            return
+
+        async def send_image_response(message):
+            if message["type"] == "http.response.start" and message["status"] >= 400:
+                headers = [(key, value) for key, value in message.get("headers", [])
+                           if key.lower() != b"cache-control"]
+                message = {**message, "headers": headers + [(b"cache-control", b"private, no-store")]}
+            await send(message)
+
+        await self.app(scope, receive, send_image_response)
+
+
 def thumbnail_diagnostic_finish(diagnostic, status: int):
     if diagnostic is None:
         return
@@ -181,15 +202,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 MAX_EDIT_STATE_BYTES = 8 * 1024 * 1024
-
-
-@app.middleware("http")
-async def prevent_asset_image_error_caching(request: Request, call_next):
-    response = await call_next(request)
-    if is_asset_image_path(request.url.path) and response.status_code >= 400:
-        # An error must replace any cached success instead of leaving old pixels usable.
-        response.headers["Cache-Control"] = "private, no-store"
-    return response
+app.add_middleware(AssetImageErrorCacheMiddleware)
 
 
 @app.exception_handler(RequestValidationError)
@@ -202,6 +215,13 @@ async def safe_diagnostic_validation(request: Request, error: RequestValidationE
         return JSONResponse(status_code=422, content={"detail": {"code": "invalid_diagnostic_request"}},
                             headers={"Cache-Control": "private, no-store"})
     return await request_validation_exception_handler(request, error)
+
+
+@app.exception_handler(Exception)
+async def safe_unhandled_exception(request: Request, error: Exception):
+    headers = {"Cache-Control": "private, no-store"} if is_asset_image_path(request.url.path) else None
+    # ServerErrorMiddleware still re-raises after sending this default-safe 500 for normal server logging.
+    return PlainTextResponse("Internal Server Error", status_code=500, headers=headers)
 
 
 class BackendLogLevelRequest(BaseModel):
