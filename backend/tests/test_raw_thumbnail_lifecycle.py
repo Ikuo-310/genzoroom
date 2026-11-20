@@ -1,4 +1,5 @@
 import asyncio
+import threading
 from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -113,6 +114,295 @@ def test_raw_history_only_save_advances_consistency_revision_without_publication
     generate.assert_not_called()
 
 
+def test_default_raw_history_changes_only_internal_sequence_and_replay_is_inert(lifecycle):
+    cache, scheduler, _, generate = lifecycle
+    hub = ThumbnailPublicationHub()
+    scheduler.publication_hub = hub
+    resets = []
+    reset = scheduler.reset
+
+    async def record_reset(asset_id):
+        resets.append(asset_id)
+        await reset(asset_id)
+
+    scheduler.reset = record_reset
+    key = identity(assetId=str(ASSET))
+    baseline = settings()
+    fingerprint = store._digest(store._settings_json(baseline, 1))
+    recipe_id, history_id = uuid4(), uuid4()
+    history_kwargs = {"kind": "control", "metadata": {"control": "light.exposure"},
+                      "import_defaults_fingerprint": fingerprint}
+
+    async def run():
+        initial = await mutate_raw_edits(scheduler, ASSET, store.put_raw_recipe, key, 0, recipe_id, baseline,
+                                         import_defaults_fingerprint=fingerprint)
+        assert initial["revision"] == 1
+        assert store.get_raw_saved_state(ASSET)["exportEligible"] is False
+        assert hub.consistency_position()[2] == 1 and hub.position()[1] == 1
+        assert scheduler._deadlines == {} and resets == [ASSET]
+        initial_version = cache.version(ASSET)
+
+        operation = (key, 1, history_id, baseline)
+        saved = await mutate_raw_edits(scheduler, ASSET, store.append_raw_history, *operation,
+                                       **history_kwargs)
+        assert saved["replayed"] is False
+        assert store.get_raw_saved_state(ASSET)["revision"] == 2
+        assert hub.consistency_position()[2] == 2 and hub.position()[1] == 1
+        assert scheduler._deadlines == {} and resets == [ASSET]
+        assert cache.version(ASSET) == initial_version
+
+        replay = await mutate_raw_edits(scheduler, ASSET, store.append_raw_history, *operation,
+                                        **history_kwargs)
+        assert replay["replayed"] is True
+        assert store.get_raw_saved_state(ASSET)["revision"] == 2
+        assert hub.consistency_position()[2] == 2 and hub.position()[1] == 1
+        assert scheduler._deadlines == {} and resets == [ASSET]
+        assert cache.version(ASSET) == initial_version
+
+    asyncio.run(run())
+    generate.assert_not_called()
+
+
+def test_recipe_save_result_tracks_commit_when_followup_state_read_fails(lifecycle, monkeypatch):
+    cache, scheduler, _, generate = lifecycle
+    hub = ThumbnailPublicationHub()
+    scheduler.publication_hub = hub
+    saved_state = store.get_raw_saved_state
+    calls = [0]
+
+    def fail_post_save_read(asset_id):
+        calls[0] += 1
+        if calls[0] == 2:
+            raise store.StoreUnavailable()
+        return saved_state(asset_id)
+
+    monkeypatch.setattr(store, "get_raw_saved_state", fail_post_save_read)
+    save_id = uuid4()
+    key = identity(assetId=str(ASSET))
+    current = deepcopy(settings())
+    current["light"]["exposure"] = .7
+    fingerprint = store._digest(store._settings_json(settings(), 1))
+
+    async def run():
+        # The pre-save state is readable; only the optional post-commit read fails.
+        result = await mutate_raw_edits(scheduler, ASSET, store.put_raw_recipe, key, 0, save_id, current,
+                                        import_defaults_fingerprint=fingerprint)
+        assert result["revision"] == 1
+        assert calls[0] == 2
+        assert saved_state(ASSET)["revision"] == 1
+        assert hub.consistency_position()[2] == 1
+        assert hub.position()[1] == 0
+        assert scheduler._deadlines == {}
+
+        # The same receipt is known to be a replay and must not double-count the mutation.
+        monkeypatch.setattr(store, "get_raw_saved_state", saved_state)
+        replay = await mutate_raw_edits(scheduler, ASSET, store.put_raw_recipe, key, 0, save_id, current,
+                                        import_defaults_fingerprint=fingerprint)
+        assert replay["revision"] == 1
+        assert hub.consistency_position()[2] == 1
+        assert hub.position()[1] == 0
+        assert scheduler._deadlines == {}
+
+    asyncio.run(run())
+    generate.assert_not_called()
+
+
+def test_raw_save_mutation_invalidates_a_concurrent_publication_status_snapshot(lifecycle, monkeypatch):
+    _, scheduler, _, generate = lifecycle
+    hub = ThumbnailPublicationHub()
+    scheduler.publication_hub = hub
+    monkeypatch.setattr(main.app.state, "thumbnail_publication_hub", hub, raising=False)
+    save("edited", revision=0)
+    original = main.get_thumbnail_recipe_states
+    saved_state = store.get_raw_saved_state
+    calls = [0]
+    state_calls = [0]
+    entered_loop = None
+    release_loop = None
+    entered = None
+
+    def delayed_read(asset_ids):
+        result = original(asset_ids)
+        calls[0] += 1
+        if calls[0] == 1:
+            entered_loop.call_soon_threadsafe(entered.set)
+            release_loop.wait()
+        return result
+
+    def fail_only_post_mutation_read(asset_id):
+        state_calls[0] += 1
+        if state_calls[0] == 2:
+            raise store.StoreUnavailable()
+        return saved_state(asset_id)
+
+    async def run():
+        nonlocal entered, entered_loop, release_loop
+        entered_loop = asyncio.get_running_loop()
+        release_loop = threading.Event()
+        entered = asyncio.Event()
+        monkeypatch.setattr(main, "get_thumbnail_recipe_states", delayed_read)
+        monkeypatch.setattr(store, "get_raw_saved_state", fail_only_post_mutation_read)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="http://test") as api:
+            pending = asyncio.create_task(api.post("/thumbnail-publications/status",
+                json={"assetIds": [str(ASSET)]}))
+            await asyncio.wait_for(entered.wait(), 3)
+            current = deepcopy(settings())
+            current["light"]["exposure"] = 1.2
+            await mutate_raw_edits(scheduler, ASSET, store.put_raw_recipe, identity(assetId=str(ASSET)), 1,
+                                   uuid4(), current)
+            assert state_calls[0] == 2
+            release_loop.set()
+            response = await pending
+            assert response.status_code == 200
+            assert response.json()["items"][str(ASSET)]["recipeRevision"] == 2
+            assert response.json()["items"][str(ASSET)]["state"] == "cache_missing"
+            assert calls[0] >= 2
+            assert hub.consistency_position()[2] == 1
+            assert hub.position()[1] == 0 and scheduler._deadlines == {}
+    try:
+        asyncio.run(run())
+    finally:
+        if release_loop is not None:
+            release_loop.set()
+    generate.assert_not_called()
+
+
+def test_default_edited_history_and_undo_transitions_have_targeted_notifications(lifecycle):
+    cache, scheduler, _, generate = lifecycle
+    hub = ThumbnailPublicationHub()
+    scheduler.publication_hub = hub
+    reset_ids = []
+    reset = scheduler.reset
+
+    async def record_reset(asset_id):
+        reset_ids.append(asset_id)
+        await reset(asset_id)
+
+    scheduler.reset = record_reset
+    key = identity(assetId=str(ASSET))
+    baseline = settings()
+    edited = deepcopy(baseline)
+    edited["light"]["exposure"] = .7
+    fingerprint = store._digest(store._settings_json(baseline, 1))
+    history_kwargs = {"kind": "control", "metadata": {"control": "light.exposure"},
+                      "import_defaults_fingerprint": fingerprint}
+    move_kwargs = {"import_defaults_fingerprint": fingerprint}
+    default_recipe_id, default_history_id = uuid4(), uuid4()
+    edited_step_id, edited_history_id = uuid4(), uuid4()
+
+    async def run():
+        await mutate_raw_edits(scheduler, ASSET, store.put_raw_recipe, key, 0, default_recipe_id, baseline,
+                               import_defaults_fingerprint=fingerprint)
+        assert store.get_raw_saved_state(ASSET)["exportEligible"] is False
+        assert hub.consistency_position()[2] == 1 and hub.position()[1] == 1
+        assert scheduler._deadlines == {} and reset_ids == [ASSET]
+
+        default_history = (key, 1, default_history_id, baseline)
+        await mutate_raw_edits(scheduler, ASSET, store.append_raw_history, *default_history,
+                               baseline_settings=baseline, **history_kwargs)
+        assert store.get_raw_saved_state(ASSET)["revision"] == 2
+        assert hub.consistency_position()[2] == 2 and hub.position()[1] == 1
+        assert scheduler._deadlines == {} and reset_ids == [ASSET]
+        await mutate_raw_edits(scheduler, ASSET, store.append_raw_history, *default_history,
+                               baseline_settings=baseline, **history_kwargs)
+        assert hub.consistency_position()[2] == 2 and hub.position()[1] == 1
+        assert scheduler._deadlines == {} and reset_ids == [ASSET]
+
+        edited_history = (key, 2, edited_history_id, edited)
+        step = await mutate_raw_edits(scheduler, ASSET, store.append_raw_history, *edited_history,
+                                      baseline_settings=baseline, step_id=edited_step_id, **history_kwargs)
+        assert step["replayed"] is False and step["ack"]["stepId"] == str(edited_step_id)
+        assert store.get_raw_saved_state(ASSET)["exportEligible"] is True
+        assert hub.consistency_position()[2] == 3 and hub.position()[1] == 2
+        assert scheduler._deadlines == {ASSET: 60} and reset_ids == [ASSET]
+
+        replay = await mutate_raw_edits(scheduler, ASSET, store.append_raw_history, *edited_history,
+                                       baseline_settings=baseline, step_id=edited_step_id, **history_kwargs)
+        assert replay["replayed"] is True
+        assert hub.consistency_position()[2] == 3 and hub.position()[1] == 2
+        assert scheduler._deadlines == {ASSET: 60} and reset_ids == [ASSET]
+
+        await mutate_raw_edits(scheduler, ASSET, store.append_raw_history, key, 3, uuid4(), edited,
+                               **history_kwargs)
+        assert store.get_raw_saved_state(ASSET)["revision"] == 4
+        assert hub.consistency_position()[2] == 4 and hub.position()[1] == 2
+        assert scheduler._deadlines == {ASSET: 60} and reset_ids == [ASSET]
+
+        await mutate_raw_edits(scheduler, ASSET, store.move_raw_history_cursor, key, 4, uuid4(), baseline,
+                               target_step_id=None, **move_kwargs)
+        assert store.get_raw_saved_state(ASSET)["exportEligible"] is False
+        assert hub.consistency_position()[2] == 5 and hub.position()[1] == 3
+        assert scheduler._deadlines == {} and reset_ids == [ASSET, ASSET]
+        assert cache.read(ASSET) is None
+
+        await mutate_raw_edits(scheduler, ASSET, store.move_raw_history_cursor, key, 5, uuid4(), edited,
+                               target_step_id=edited_step_id, **move_kwargs)
+        assert store.get_raw_saved_state(ASSET)["exportEligible"] is True
+        assert hub.consistency_position()[2] == 6 and hub.position()[1] == 4
+        assert scheduler._deadlines == {ASSET: 60} and reset_ids == [ASSET, ASSET]
+
+    asyncio.run(run())
+    generate.assert_not_called()
+
+
+def test_pre_save_state_read_failure_still_tracks_committed_raw_save(lifecycle, monkeypatch):
+    _, scheduler, _, generate = lifecycle
+    hub = ThumbnailPublicationHub()
+    scheduler.publication_hub = hub
+    saved_state = store.get_raw_saved_state
+    calls = [0]
+
+    def fail_pre_save_read(asset_id):
+        calls[0] += 1
+        if calls[0] == 1:
+            raise store.StoreUnavailable()
+        return saved_state(asset_id)
+
+    monkeypatch.setattr(store, "get_raw_saved_state", fail_pre_save_read)
+    result = asyncio.run(mutate_raw_edits(scheduler, ASSET, save))
+    assert result["revision"] == 1
+    assert calls[0] == 2
+    assert store.get_raw_saved_state(ASSET)["revision"] == 1
+    assert hub.consistency_position()[2] == 1
+    assert hub.position()[1] == 1
+    assert scheduler._deadlines == {ASSET: 60}
+    generate.assert_not_called()
+
+
+def test_unknown_eligibility_keeps_original_fallback_and_invalidates_old_cache(lifecycle):
+    cache, scheduler, _, generate = lifecycle
+    hub = ThumbnailPublicationHub()
+    scheduler.publication_hub = hub
+    cache.store(ASSET, b"potentially stale image")
+
+    result = asyncio.run(mutate_raw_edits(scheduler, ASSET, save, "unknown"))
+
+    assert result["revision"] == 1
+    assert store.get_raw_saved_state(ASSET)["exportEligible"] is None
+    assert hub.consistency_position()[2] == 1 and hub.position()[1] == 1
+    assert scheduler.generation_state(ASSET) == "reset"
+    assert cache.read(ASSET) is None
+    assert not scheduler._deadlines and not scheduler._pending
+    generate.assert_not_called()
+
+
+def test_raw_recipe_save_failure_does_not_advance_internal_sequence(lifecycle):
+    _, scheduler, _, _ = lifecycle
+    hub = ThumbnailPublicationHub()
+    scheduler.publication_hub = hub
+
+    def fail(*_args, **_kwargs):
+        raise store.StoreUnavailable()
+
+    async def run():
+        with pytest.raises(store.StoreUnavailable):
+            await mutate_raw_edits(scheduler, ASSET, fail)
+        assert hub.consistency_position()[2] == 0
+        assert hub.position()[1] == 0
+
+    asyncio.run(run())
+
+
 def test_raw_thumbnail_state_uses_zero_only_for_an_incompatible_engine_recipe(lifecycle, monkeypatch):
     import lightcraft_artifact
 
@@ -224,9 +514,15 @@ def test_mutation_commit_debounce_replay_failure_default_unknown_delete(lifecycl
 
 def test_cache_failure_does_not_fail_committed_save(lifecycle, monkeypatch):
     cache, scheduler, _, _ = lifecycle
+    hub = ThumbnailPublicationHub()
+    scheduler.publication_hub = hub
     monkeypatch.setattr(cache, "delete", lambda *_: (_ for _ in ()).throw(OSError()))
+    cache.store(ASSET, b"stale default-state image")
     result = asyncio.run(mutate_raw_edits(scheduler, ASSET, save, "default"))
     assert result["revision"] == 1 and store.get_raw_saved_state(ASSET)["exportEligible"] is False
+    assert hub.consistency_position()[2] == 1 and hub.position()[1] == 1
+    assert scheduler.generation_state(ASSET) == "reset"
+    assert cache._path(ASSET).exists() and cache._is_invalidated(ASSET)
 
 
 @pytest.mark.parametrize("method,endpoint", [("GET", "rendered-thumbnail"), ("POST", "rendered-thumbnail"),

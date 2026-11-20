@@ -491,8 +491,9 @@ def delete_raw_edits(asset_id: str) -> dict:
 
 
 def put_raw_recipe(identity: dict, expected_revision: int, save_id: UUID | str, settings: dict,
-                   *, import_defaults_fingerprint: str | None = None) -> dict:
-    """Atomically save confirmed readback; a saveId binds the entire normalized request forever."""
+                   *, import_defaults_fingerprint: str | None = None,
+                   _return_state_changed: bool = False) -> dict | tuple[dict, bool]:
+    """Atomically save readback with immutable saveId receipts and an optional lifecycle outcome."""
     identity = normalize_identity(identity)
     if type(expected_revision) is not int or not 0 <= expected_revision < MAX_REVISION:
         raise InvalidRawRecipe()
@@ -521,8 +522,9 @@ def put_raw_recipe(identity: dict, expected_revision: int, save_id: UUID | str, 
                     raise StoreUnavailable()
                 connection.commit()
                 # Return the original ack even after newer saves, without rolling the current row back.
-                return _result(identity, encoded, revision, save_id, updated) | {
+                result = _result(identity, encoded, revision, save_id, updated) | {
                     "importDefaultsFingerprint": current.get("importDefaultsFingerprint")}
+                return (result, False) if _return_state_changed else result
             if (0 if current is None else current["revision"]) != expected_revision:
                 raise StoreConflict()
             # A checkpoint may advance the receipt, but cannot rewrite an immutable History step.
@@ -532,7 +534,7 @@ def put_raw_recipe(identity: dict, expected_revision: int, save_id: UUID | str, 
                           import_defaults_fingerprint)
             result = _read_row(connection, identity)
             connection.commit()
-            return result
+            return (result, True) if _return_state_changed else result
         except Exception:
             connection.rollback()
             raise

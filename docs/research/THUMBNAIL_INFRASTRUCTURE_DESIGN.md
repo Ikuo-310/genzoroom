@@ -488,3 +488,23 @@ Backend関連回帰は190 passed（thumbnail API／publication／RAW thumbnail l
 
 全体実行では`AnshitsuRawPreview.test.tsx`の既知失敗84件に加え、「places all RAW optics controls after NR, uses readback History flags and preserves independent sections」が5.264秒でtimeoutし同ファイルは85 failedとなった。このテストを単独再実行すると成功した。変更対象外のRAW UIテストにおける全体実行時の時間揺れとして切り分け、RAWテスト基盤は変更していない。公開状態API、revision契約、追加8テストの失敗はない。既知RAW UI mockの代表的エラーは`raw.setPointColorRangeIndex is not a function`。buildには既存の大きなbundleとReact Router `use client`警告がある。
 
+## 総合監査対応 A2追加修正：RAW保存連携の整合性
+
+### F-04a-1：保存commitと内部mutation sequence
+
+RAW Recipe保存は内部専用の`_return_state_changed`結果を返せるようにした。通常の保存API応答は従来どおりで、同一save IDの再送は`False`、新規commitは`True`としてmutation sequence更新の判定に使う。History保存は既存の`replayed`、削除は実削除件数を利用する。DB操作が例外終了した場合は内部sequenceを更新しない。
+
+確定した状態変更は、保存後状態の再読取りやキャッシュ保守より先に、既存mutation lock内で内部sequenceへ一度だけ記録する。保存後の状態読取りが失敗しても保存応答を失敗扱いにせず、Frontend向け公開sequence／SSEは別の表示変更が確定した場合にのみ更新する。結果から変更有無を判定できない将来の操作については、読取り成功時のrevision差分を使い、読取りにも失敗した場合のみ保守的に一度記録する。
+
+回帰テストは状態取得APIのDB読取りを止めた間にRAW保存を完了させ、内部sequenceの変化を検知して再読取りすることを確認する。保存後状態読取り失敗ではDB保存成功・内部sequence更新・公開sequence不変・同一Receipt再送での二重計上なしを検証する。
+
+### F-04a-2：Recipe遷移とReset通知
+
+RAW後状態が既知の未補正（`exportEligible=False`）の場合、Resetは永続状態変更に加えてRecipe内容またはeligibilityの遷移があるときだけ行う。未補正のままのHistory-only commitは内部mutation sequenceのみ更新し、Reset／公開sequence／画像版／生成予約を変えない。同一save ID replayは永続revisionを変更しないため、内部sequence・Reset・予約・公開通知を変えない。
+
+補正済みから未補正へのHistory cursor移動では既存Resetを行い、未補正から補正済みへの移動では既存生成予約を行う。eligibilityが不明な変更は通常画像fallbackを維持し、 stale cacheを表示しないよう安全側のResetを行う。Reset失敗時にも`scheduler.reset`のterminal通知と`*.reset` publication fenceを保持し、確定済み保存を失敗させない。History-only変更で不要なReset通知を抑止することは必要な物理／論理キャッシュ無効化を省略する理由にしない。
+
+検証では初回default／edited Recipe、補正済み・未補正History-only、同一save ID再送、補正状態間のUndo／Redo遷移、eligibility不明、保存前／保存後読取り失敗、DB失敗、Reset時の物理削除失敗、公開状態取得との並行を個別に確認する。
+
+追加監査対応のBackend回帰は275 passed（RAW thumbnail lifecycle／RAW Recipe store／thumbnail API／RAW History API／Windows RAW API）。Frontend全体テストは4,214 passed／138 failed／2 skipped（4,354 tests）。A2追加時baselineの4,214 passed／138 failed／2 skippedと同じ件数で、既知RAW UI失敗が継続した。全体実行時に`AnshitsuRawPreview.test.tsx`の既知RAW UIテストが5.05秒でtimeoutしたが、同テスト単独では1 passed／140 skipped。`RawPointColorControls.test.tsx` 50件と`RawVignetteControls.test.tsx` 3件の既知失敗も継続し、代表原因はmockに`raw.setPointColorRangeIndex`がないこと。今回Frontendコードは変更しておらず、公開状態API／F-04bにも変更はない。TypeScriptチェックとFrontend本番buildは成功。buildには既存の1MB超bundle警告とReact Router `use client` module directive警告がある。`git diff --check`は成功。
+
