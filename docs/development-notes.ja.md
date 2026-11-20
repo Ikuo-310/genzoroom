@@ -1,5 +1,15 @@
 # GenzoRoom 開発ノート
 
+## サムネイル基盤 P7 最終総合監査・リリース準備（2026-11-20）
+
+P1〜P6、A1〜A5、P7の実装と監査結果は[サムネイル基盤設計・実装記録](research/THUMBNAIL_INFRASTRUCTURE_DESIGN.md#p7完了記録総合監査限定修正)に集約した。Windows／Docker共通の`ThumbnailImage`、共有Immich read client、ETag再検証、Asset単位のUUIDv4公開版とSSE同期、1 GiB cache、Reset fence、profile別永続領域を現行仕様とする。RAW Recipe／Historyの保存トランザクション結果が生成予約・無効化を駆動し、追加DB読取りに依存しない。公開後の後処理中も公開状態を`running`へ戻さない。
+
+P7-1の最終監査でRAW保存連携と公開後状態の2件を修正した。P7-2基礎修正ではRAW lifecycle／scheduler／API関連63件、追加のRAW History連携ではlifecycle／scheduler／History API関連118件が成功した。最後の修正ではPython 3.14 `.venv`を昇格実行で使用した。Frontend削除時の関連7件、TypeScript、本番buildは成功済み結果を再利用し、変更していないFrontendに対する重複検証は行っていない。各工程の細目と限定されたテスト範囲は設計記録にある。
+
+Windows版・Docker版のユーザー実機確認では、使用範囲で機能し、サムネイル取得速度の体感改善、暗室写真切替後の自動更新、Windows EXEの正常終了が確認された。暗室でRecipe変更後に写真を切り替えた際に画像読込み失敗が一度観測されたが、再現せずログ未取得のため原因と改修との関連は不明で、経過観察とした。A5では表示を遅らせない現状維持を選択した。厳密な性能測定は未実施で、仮想スクロールは導入していない。
+
+Docker v0.4.0では接続先profileごとの新しい永続領域を使う。v0.3.0以前のRecipe／History／Export Queue等は自動移行されず旧領域に残る。旧thumbnail cache形式には互換性がない。原本、出力JPEG、Stack、Albumへの影響はない。Windows Desktopの開発・検証項目はCHANGELOGのUnreleasedに残し、v0.4.0をWindows正式版として扱わない。
+
 ## Color Mixer P2-C 最終統合監査（2026-11-14）
 
 P2-A/Bと後続3修正について、Native Interactionの所有権・H/S/L readback、共通Viewerと座標変換、Draft/Full Preview、History GET・表示・復元、RecipeとExportの設定引き渡し、Color関連Resetとパネル設定を確認した。現行の上向きドラッグ入力は1 CSS pxあたり0.5ステップであり、依頼文およびP2-B当時の記述の「0.5 CSS pxで1ステップ」と差がある。今回の監査では実機受入済みの感度を維持した。

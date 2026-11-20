@@ -88,10 +88,11 @@ Adjust `IMMICH_URL` and `GENZOROOM_PERSIST_ROOT` to match your environment.
 
 GenzoRoom stores editing recipes, History, the Export Queue, and export processing state in SQLite.
 
-The database is stored at:
+The database and thumbnail cache are isolated under a profile derived from the normalized Immich URL and Immich user UUID:
 
 ```text
-/genzoroom/data/genzoroom.db
+/genzoroom/profiles/<profileId>/data/genzoroom.db
+/genzoroom/profiles/<profileId>/cache/thumbnails/
 ```
 
 Bind mount a host directory to `/genzoroom`:
@@ -107,9 +108,9 @@ volumes:
 
 Create the host directory before deployment and ensure that UID/GID `10001:10001`, used by the GenzoRoom container, has write access.
 
-For a new installation, GenzoRoom creates the `data` directory and database.
+For a new installation, GenzoRoom creates the profile directories, database and cache. The Immich API key is not part of the profile identity, so rotating the key for the same server and user keeps the same data.
 
-When updating an existing installation, use the same storage directory. Pointing the container to a different empty directory may cause GenzoRoom to start as a new installation.
+When updating from v0.3.0 or earlier, keep the existing `/genzoroom` bind mount and port settings. v0.4.0 starts using the new profile-specific paths. Existing Recipes, History, receipts, Export Queue and exclusions are not migrated and remain in the old paths. They are not automatically deleted. The old thumbnail cache format is incompatible and is regenerated as needed. Immich originals, exported JPEGs, Stacks and Albums are unaffected. Changing the Immich URL or user selects a different profile and its separate editing data.
 
 Do not run multiple GenzoRoom containers against the same database.
 

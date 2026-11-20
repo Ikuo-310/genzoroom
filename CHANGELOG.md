@@ -37,6 +37,35 @@ Internal changes are omitted unless they affect users.
 - Windows Desktop remains in development and validation; this migration does not introduce a stable general-purpose Windows installer. LightCraft decides which image originals it can read, and unsupported originals do not fall back to the Docker JPEG engine.
 - Developer RAW Preview Diagnostics still has legacy expectations for execution and StageCache metadata that the current Native preview response does not provide. This affects diagnostic reporting and its related tests, not ordinary Preview rendering.
 
+## [0.4.0] - 2026-11-20
+
+Docker release. This release does not mark Windows Desktop as a stable or generally released edition.
+
+### Added
+
+- Added a manual Retry action for an image whose thumbnail or preview failed to load.
+- Added automatic per-photo refresh of rendered thumbnails after a saved Recipe is generated and published.
+
+### Changed
+
+- Reworked the shared thumbnail loading and display paths across Gallery, Stack, Export, Filmstrip, albums, calendar and Immersive Preview.
+- Improved thumbnail display responsiveness and request reuse with a shared Immich HTTP client, browser ETag revalidation and native lazy loading with active-image priority.
+- Isolated persistent data by Immich server URL and user profile. API key rotation for the same profile keeps its data.
+- Improved rendered-thumbnail cache identity, atomic publication, Reset invalidation and capacity cleanup.
+
+### Fixed
+
+- Fixed stale rendered thumbnails remaining visible after Recipe changes or Reset.
+- Fixed mismatches between Recipe and History saves, generation scheduling and published thumbnail state.
+- Fixed thumbnail state synchronization, image authorization and shutdown lifecycle issues affecting thumbnail requests and application exit.
+
+### Breaking changes
+
+- Persistent storage now uses an Immich connection profile-specific directory under `/genzoroom/profiles/<profileId>/`.
+- Recipes, History, save receipts, Export Queue and other persistent edit data from earlier storage paths are not migrated. The old data is left in place and is not automatically deleted.
+- The previous rendered-thumbnail cache format is incompatible and will be regenerated as needed.
+- Immich photo originals, exported JPEGs, Stacks and Albums are unaffected.
+
 ## [0.3.0] - 2026-11-09
 
 ### Added

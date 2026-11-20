@@ -1,5 +1,7 @@
 # サムネイル基盤再設計
 
+> **現行仕様** P1〜P6、A1〜A5、P7の確定結果は末尾の「P7完了記録」を参照する。以下の初期節には当時の計画・監査時点の記録が含まれ、後続工程で置換された案や未確定事項を現行仕様として扱わない。
+
 2026-11-19（Asia/Tokyo）。初回監査対象コードは `bad7e48eafb356cfecf07994345765d1f5910bb1`。その後のP1実機検証でWindows版・Docker版のSTACK管理およびGalleryにおけるサムネイル欠落をImmich本体でも同一写真で再現した。Immichのサムネイル生成ジョブで「欠落」を実行し、234件のジョブ完了後に全サムネイルが表示されたことから、今回の直接原因をImmich側のサムネイル欠損と特定した。欠損が発生した理由は未調査である。以下では監査で確認した実装、合意済み表示仕様、これから選定する設計、計測で決める事項を区別する。
 
 ## 1. 目的と対象
@@ -548,4 +550,37 @@ Reset markerは物理削除失敗時だけ必要となる。Reset処理はまず
 正常生成の原子的置換、再生成中の旧成果物保持、単一worker、Asset単位SSE、Recipe revisionとの分離、Cache hit／ETag／認可順序は維持した。破壊的影響は旧派生JPEGと旧mtime URLが再利用されず、旧形式cacheは初期化時に削除されること。永続編集データは触らず、通常画像fallbackと既存スケジューラが必要な画像を再生成する。
 
 Backendのcache／scheduler／SSE／thumbnail API／RAW thumbnail lifecycle関連テストは127 passed。正常生成と再生成、再起動後ID維持、Reset成功後のmarker除去、削除失敗後のmarker維持と再起動、eviction後の同Asset再生成、mtime巻き戻し、生成中競合、版付き画像取得を確認した。Frontendのthumbnail URL／共通画像／公開状態API・SSE関連テストは32 passed。TypeScriptとFrontend production buildも成功。buildには既存の大きなbundleとReact Router `use client` directive警告がある。`git diff --check`は成功。全体テスト、Docker Smoke Test、実機確認は未実施。
+
+## P7完了記録：総合監査・限定修正
+
+### P7-1 最終総合監査
+
+基準Commit `85cf78258cd27d03fdd153b9cfc9fe81e10493aa` の静的監査で、修正対象Findingを2件確認した。P7-01はRAW Recipe保存後の補助読取り失敗で生成予約・Reset連携が失われ、実行中の旧Recipe結果が公開され得る経路。P7-02は公開イベント後、容量整理や一時ファイル後処理中の状態取得が同じAssetを`running`として返し、Frontend状態が`published`から戻り得る経路だった。どちらも個別の過去工程を再掲する監査ではなく、相互作用から特定した具体的な状態不整合である。
+
+### P7-2 修正結果
+
+`put_raw_recipe()`はDBトランザクションで確定した現行Recipe、revision、eligibilityをライフサイクル内部結果として返す。History初期化・追加・Undo／Redoも同様にトランザクション内の状態を返し、RAW編集データ削除は削除行数と空の現行状態を返す。共通`mutate_raw_edits()`はこれらを利用して内部mutation sequence、予約、生成無効化、Resetを行うため、Recipe／History変更後の補助DB再読取りに依存しない。保存APIの外部応答とHistory receiptは従来の形式を保ち、同一save ID再送やHistoryのみの変更から不要な生成・公開通知を行わない。
+
+P7-02では、生成成果物の原子的公開が確定すると、容量整理・一時ファイル後処理中にworkerが後処理所有を続けても、一括状態APIは完了状態を返す。次の生成が予約されたAssetは`queued`または`reserved`を優先する。単一worker、job所有、終了待機、Frontend sequence比較は維持した。
+
+### P7-2追加監査修正
+
+初回の昇格Backendテストで`put_raw_recipe()`の保存応答に内部eligibilityを含めてしまう契約回帰を発見した。内部ライフサイクル状態を保存応答と分離し、通常応答形式を維持した。History系の保存操作も同じ内部契約を利用する。P7-02の後処理中および後続予約中の状態遷移テストを追加した。
+
+### 検証記録
+
+- P7-2基礎修正：BackendのRAW thumbnail lifecycle、scheduler、thumbnail API関連63 passed。Python 3.14 `.venv`を指定Backend作業ディレクトリから昇格実行した。
+- P7-2 RAW History追加修正：RAW History lifecycle、scheduler、History API関連118 passed。Python 3.14 `.venv`で昇格実行した。
+- P7-2未使用Frontend関数削除時：関連Frontendテスト7 passed、TypeScriptを含むFrontend production build成功。再利用対象の成功結果であり、P7-2追加修正ではFrontendを変更していないため再実行していない。
+- 各完了時の`git diff --check`は成功。全体テスト、厳密な性能測定、Docker release Smoke Testはこの文書追随作業では実施していない。
+
+### 実機確認・残存観察
+
+Windows版・Docker版はユーザーが実使用した範囲で動作確認済みであり、サムネイル取得速度の体感改善、暗室の写真切替後の補正済みサムネイル自動更新、Windows EXEの正常終了が確認された。A5はコード上の要求経路を調査し、初期表示を待たせず現状維持とした。HTTP要求数・転送量・表示遅延を揃えた厳密な性能測定は未実施。仮想スクロールは導入していない。
+
+実機確認中、暗室でRecipe変更後に別写真へ移動した際、画像読込み失敗が一度発生した。再現せず、対応ログも取得されていないため、原因および今回の改修との関連は不明である。経過観察とし、本工程の修正対象には含めない。
+
+### 廃止・置換した実装
+
+旧WindowsランダムProfile ID、Docker共通DB／cache配置、mtime由来のpublication ID、旧raw-JPEG cache形式、画面別thumbnail revisionによる更新、画面ごとの重複画像表示状態管理は廃止または置換した。Windows／Docker共通の接続profileストレージ、UUIDv4 publication、共通`ThumbnailImage`、共有HTTPX read client、共有SSEと状態一括取得に統合した。仮想スクロール、独自画像取得キュー、Frontend画像バイトcache、新規ディスクcacheは導入していない。
 

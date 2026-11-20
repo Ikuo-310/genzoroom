@@ -1,5 +1,17 @@
 # Provisional Architecture
 
+## Thumbnail delivery and persistence (Docker v0.4.0 / shared contract)
+
+`ThumbnailImage` resolves normal thumbnails, rendered thumbnails, previews and immersive previews, tracks loading/failure and exposes a per-image manual retry. Gallery, Stack, Export, Filmstrip, Album, Calendar and immersive surfaces use native browser lazy loading by default. The active Filmstrip image is eager with high fetch priority. Retry affects only the failed image and never schedules thumbnail generation.
+
+The Backend lifespan owns a shared cookie-free Immich read client for thumbnail, preview and Asset-detail requests. Original streaming and Export retain their independent connection and cleanup ownership. Normal thumbnails and previews use private HTTP caching with ETag revalidation. Windows LocalHost forwards the permitted image cache headers. Corrected thumbnails use an Asset-scoped disk cache and UUIDv4 publication identity. Versionless requests redirect to the current publication only after Immich Asset authorization. Missing or invalidated cache entries fall back to Immich images. Errors, redirects and mixed-source fallback responses are not stored.
+
+Saved Recipe changes and History operations pass the transaction's committed RAW state to thumbnail lifecycle handling. A single worker uses the existing 60-second debounce, with immediate requests on darkroom photo changes and exit. Generation completion atomically publishes a new cache file and Asset publication event. One shared SSE connection and batched state endpoint synchronize mounted consumers. Sequence, Backend generation ID, bounded retries and state reconciliation protect updates across reconnection. Reset invalidates the publication before best-effort deletion. A reset marker remains only while an old file survives failed deletion. Cache size is capped at 1 GiB, and eviction removes oldest entries.
+
+Windows and Docker select persistent storage from normalized Immich URL plus Immich user UUID. Each profile owns its SQLite database, Export Runtime and thumbnail cache under `<deployment-root>/profiles/<profileId>/`. API key rotation preserves that profile. Changing URL or user selects a separate profile. Legacy storage and thumbnail cache are not migrated or automatically deleted. Docker v0.4.0 uses the existing `/genzoroom` bind mount and port configuration.
+
+Windows shutdown and Docker Uvicorn shutdown stop the shared publication stream before draining HTTP tasks. The Backend then closes the thumbnail worker, Export Runtime and shared client through their existing lifecycle owners. Public state metadata remains under the single-user deployment boundary. Immich authorization is enforced on image delivery; the state batch and shared SSE are not per-Asset authorization mechanisms.
+
 ## Windows common LightCraft development policy
 
 P1–P5 and P6-A verification for the v0.20.0 migration are recorded in the [upgrade plan](research/lightcraft/LIGHTCRAFT_V020_UPGRADE_PLAN.md). The user reported one pass through the P6-B Windows GUI checklist with no issues in the exercised scope; this was manual acceptance, not automated coverage. The reported Crop “Reset All” returned Crop, Aspect, Straighten and Flip to defaults while preserving 90° rotation. It does not claim exhaustive verification of every control or combination.

@@ -87,10 +87,11 @@ IMMICH_API_KEY=your-immich-api-key
 
 GenzoRoomは、編集レシピ、History、出力キュー、出力処理の状態をSQLiteに保存します。
 
-コンテナ内の保存先は以下のとおりです。
+データベースとサムネイルキャッシュは、正規化したImmich URLとImmichユーザーUUIDから決まるプロファイルごとに分離されます。
 
 ```text
-/genzoroom/data/genzoroom.db
+/genzoroom/profiles/<profileId>/data/genzoroom.db
+/genzoroom/profiles/<profileId>/cache/thumbnails/
 ```
 
 Dockerでは `/genzoroom` をホスト側のディレクトリへbind mountしてください。
@@ -106,9 +107,9 @@ volumes:
 
 ホスト側のディレクトリは事前に作成し、コンテナ内のUID/GID `10001:10001` が書き込みできるようにしてください。
 
-新規導入時はGenzoRoomが `data` ディレクトリとデータベースを作成します。
+新規導入時はGenzoRoomがプロファイル用ディレクトリ、データベース、キャッシュを作成します。同じサーバー・ユーザーのAPIキーを更新しても、保存領域は維持されます。
 
-既存のインストールを更新する場合は、同じ保存先を使用してください。別の空ディレクトリを指定すると、新規環境として起動する可能性があります。
+v0.3.0以前から更新する場合も、既存の `/genzoroom` bind mountと公開ポート設定を維持してください。v0.4.0は新しいプロファイル別パスを使用します。旧Recipe、History、保存receipt、出力キュー、開発除外情報は自動移行されず、旧保存先に残ります。自動削除もされません。旧サムネイルキャッシュ形式には互換性がなく、必要に応じて再生成されます。Immich上の原本、出力済みJPEG、Stack、Albumには影響しません。Immich URLまたはユーザーを変更すると別プロファイルになり、編集データも分離されます。
 
 同じデータベースを複数のGenzoRoomコンテナから同時に使用しないでください。
 
