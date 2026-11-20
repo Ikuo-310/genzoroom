@@ -212,10 +212,12 @@ async function request(path: string, init: RequestInit = {}) {
   return response;
 }
 
-async function json(path: string, init?: RequestInit, limit = 4096) {
+async function json(path: string, init?: RequestInit, limit: number | null = 4096) {
   const response = await request(path, init);
   if (response.headers.get('content-type')?.split(';')[0] !== 'application/json') throw new RawApiError('raw_invalid_response');
-  try { return JSON.parse(new TextDecoder().decode(await readBounded(response, limit))); }
+  try {
+    return limit === null ? await response.json() : JSON.parse(new TextDecoder().decode(await readBounded(response, limit)));
+  }
   catch { throw new RawApiError('raw_invalid_response'); }
 }
 const post = (value: unknown): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
@@ -560,7 +562,7 @@ export async function saveRawHistory(request: RawHistoryRequest): Promise<RawHis
 }
 export async function readRawHistory(doc: RawDocument): Promise<RawHistoryData> {
   const value = await json(`/documents/${doc.handle}/history`, { headers: {
-    'X-Raw-Workspace': doc.workspaceId, 'X-Raw-Generation': String(doc.generation), 'X-Raw-Token': doc.documentToken } }, 1024 * 1024);
+    'X-Raw-Workspace': doc.workspaceId, 'X-Raw-Generation': String(doc.generation), 'X-Raw-Token': doc.documentToken } }, null);
   document(value, doc.workspaceId, doc.assetId);
   const h = value.history;
   if (value.handle !== doc.handle || value.generation !== doc.generation || value.documentToken !== doc.documentToken

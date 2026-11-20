@@ -26,8 +26,6 @@ REGENERATE_AFTER_EDITS = 200
 MAX_JSON_BYTES = 4096
 # Full-precision values plus 36 control specs and the History receipt exceed 4 KiB.
 MAX_SETTINGS_RESPONSE_BYTES = 16384
-# 200 steps can each expose 36 full-precision deltas; keep the listing bounded without truncation.
-MAX_HISTORY_RESPONSE_BYTES = 1024 * 1024
 HISTORY_CONFLICTS = {"raw_history_save_pending", "raw_history_commit_required", "raw_history_client_required",
                      "raw_history_not_initialized", "raw_history_revision_conflict", "raw_history_save_id_reused",
                      "raw_history_target_missing", "raw_history_readback_mismatch", "raw_history_baseline_mismatch",
@@ -1330,9 +1328,9 @@ class RawPreviewApi:
         return changes
 
     @staticmethod
-    def _history_json(payload, limit=MAX_SETTINGS_RESPONSE_BYTES):
+    def _history_json(payload):
         response = JSONResponse(payload, headers={"Cache-Control": "no-store"})
-        if len(response.body) > limit:
+        if len(response.body) > MAX_SETTINGS_RESPONSE_BYTES:
             raise LightCraftError("raw_history_response_too_large")
         return response
 
@@ -1438,7 +1436,7 @@ class RawPreviewApi:
         return body
 
     async def _history(self, request, body, doc):
-        from raw_recipe_store import (HISTORY_LIMIT, get_raw_history_save, initialize_raw_history, append_raw_history,
+        from raw_recipe_store import (get_raw_history_save, initialize_raw_history, append_raw_history,
                                       move_raw_history_cursor, InvalidRawRecipe, StoreConflict, StoreUnavailable)
         if request.method == "GET":
             if (request.headers.get("x-raw-generation") != str(doc["generation"])
@@ -1462,7 +1460,9 @@ class RawPreviewApi:
                         step['kind'] == 'sectionReset' and step['metadata']['section'] == 'optics'):
                     public['flagChanges'] = self._history_flag_changes(step, before, step["settings"])
                 public_steps.append(public)
-            return self._history_json({**doc, **self._history_public(doc, state), "steps": public_steps}, MAX_HISTORY_RESPONSE_BYTES)
+            # The store caps retained steps and this projection exposes only bounded display fields.
+            return JSONResponse({**doc, **self._history_public(doc, state), "steps": public_steps},
+                                headers={"Cache-Control": "no-store"})
         action = request.url.path.rsplit("/", 1)[1]
         body = self._history_body(body, doc, action)
         if doc.get("recipeRecoveryPending") and action == "initialize":

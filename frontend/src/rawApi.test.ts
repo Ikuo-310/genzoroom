@@ -236,19 +236,16 @@ describe('RAW History transport', () => {
     expect(RAW_CONTROL_IDS.filter(control => control.startsWith('mixer.'))).toEqual(expected);
     expect(RAW_HISTORY_CONTROL_IDS.filter(control => control.startsWith('mixer.'))).toEqual(expected);
   });
-  it('accepts 200 steps with 36 full precision deltas above 256KiB and rejects above 1MiB', async () => {
+  it('reads all 200 steps with full precision deltas even above the former 1 MiB limit', async () => {
     const data = rawHistoryData(rawSettings(doc));
     data.steps = Array.from({ length: 200 }, (_, i) => ({ stepId: `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`,
       kind: 'allReset', metadata: {}, createdAt: '2026-10-27T00:00:00Z',
-      changes: RAW_CONTROL_IDS.filter(control => !control.startsWith('optics.' )).slice(0, 36).map(control => ({ control, before: -9.876543210987654e100, after: 1.234567890123456e200 })) }));
+      changes: RAW_HISTORY_CONTROL_IDS.map(control => ({ control, before: -9.876543210987654e100, after: 1.234567890123456e200 })) }));
     data.history = { initialized: true, cursor: 200, length: 200, selectedStepId: data.steps[199].stepId };
     const encoded = JSON.stringify(data);
-    expect(new TextEncoder().encode(encoded).length).toBeGreaterThan(256 * 1024);
-    expect(new TextEncoder().encode(encoded).length).toBeLessThan(1024 * 1024);
+    expect(new TextEncoder().encode(encoded).length).toBeGreaterThan(1024 * 1024);
     vi.stubGlobal('fetch', vi.fn(async () => new Response(encoded, { headers: { 'Content-Type': 'application/json' } })));
     expect((await readRawHistory(doc)).steps).toHaveLength(200);
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(' '.repeat(1024 * 1024) + encoded, { headers: { 'Content-Type': 'application/json' } })));
-    await expect(readRawHistory(doc)).rejects.toThrow('raw_invalid_response');
   });
   it.each<RawHistoryOperation>([
     { kind: 'controlReset', metadata: { control: 'wb.tint' } },
@@ -573,7 +570,7 @@ describe('RAW History transport', () => {
       steps: [{ kind: 'opticsFlag', flagChanges: [{ control: 'optics.remove_ca', before: false, after: true }] }] });
     else await expect(readRawHistory(result)).rejects.toMatchObject({ code: 'raw_invalid_response' });
   });
-  it.each(['generation', 'rows', 'cursor', 'metadata', 'changes', 'oversize'])('rejects invalid History %s', async invalid => {
+  it.each(['generation', 'rows', 'cursor', 'metadata', 'changes'])('rejects invalid History %s', async invalid => {
     const request = historyRequest('commit');
     const result = rawHistoryResult(request, { history: { initialized: true, cursor: 1, length: 1, selectedStepId: request.saveId } });
     const data = rawHistoryData(result);
@@ -582,8 +579,7 @@ describe('RAW History transport', () => {
     if (invalid === 'cursor') data.history = { ...data.history, selectedStepId: '00000000-0000-4000-8000-000000000009' };
     if (invalid === 'metadata') data.steps[0].metadata.control = 'native.unknown' as never;
     if (invalid === 'changes') data.steps[0].changes = [{ control: 'light.exposure', before: Number.NaN, after: 1 }];
-    const content = invalid === 'oversize' ? JSON.stringify(data) + ' '.repeat(1024 * 1024) : JSON.stringify(data);
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(content, { headers: { 'Content-Type': 'application/json' } })));
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })));
     await expect(readRawHistory(result)).rejects.toThrow('raw_invalid_response');
   });
 });

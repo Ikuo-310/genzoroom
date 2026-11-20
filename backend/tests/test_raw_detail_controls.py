@@ -27,15 +27,6 @@ NR_SPECS = [
 ]
 
 
-def test_history_listing_limit_remains_bounded():
-    from windows_raw_api import RawPreviewApi, MAX_HISTORY_RESPONSE_BYTES
-    assert MAX_HISTORY_RESPONSE_BYTES == 1024 * 1024
-    response = RawPreviewApi._history_json({'data': 'x' * (400 * 1024)}, MAX_HISTORY_RESPONSE_BYTES)
-    assert len(response.body) < MAX_HISTORY_RESPONSE_BYTES
-    with pytest.raises(LightCraftError, match='raw_history_response_too_large'):
-        RawPreviewApi._history_json({'data': 'x' * MAX_HISTORY_RESPONSE_BYTES}, MAX_HISTORY_RESPONSE_BYTES)
-
-
 @pytest.mark.parametrize('control,field,default,initial', NR_SPECS)
 def test_nr_spec_mapping_and_numeric_boundaries(control, field, default, initial):
     assert CONTROLS[control] == (0, 100, 1, default, 0)
@@ -244,34 +235,50 @@ def test_detail_reset_rejects_wrong_hidden_readback_and_rolls_back(local, tmp_pa
     asyncio.run(run())
 
 
-def test_two_hundred_full_detail_history_deltas_fit_response_budget(local, tmp_path, monkeypatch):
+def test_reads_and_navigates_two_hundred_retained_history_steps(local, tmp_path, monkeypatch):
     async def run():
         api, _, _, _ = await setup(tmp_path, local, monkeypatch)
         try:
             async with client(local) as http:
                 doc = await open_history(http, local, api)
-                baseline = store.get_raw_history(api._history_identity)
-                async def full_history(_):
-                    state = copy.deepcopy(baseline)
-                    before = state['history']['baselineSettings']
-                    steps = []
-                    for index in range(200):
-                        after = copy.deepcopy(before)
-                        for control, (lo, hi, *_) in CONTROLS.items():
-                            parent, key = control_location(after, control)
-                            parent[key] = (lo if index % 2 else hi) + (hi - lo) * (.00000001234567 if index % 2 else -.00000001234567)
-                        steps.append({'stepId': str(UUID(int=index + 1)), 'kind': 'allReset', 'metadata': {},
-                            'createdAt': '2026-10-27T00:00:00Z', 'settings': after})
-                        before = after
-                    state['history'] = {'baselineSettings': state['history']['baselineSettings'], 'cursor': 200, 'steps': steps}
-                    return state
-                monkeypatch.setattr(api, '_history_load', full_history)
+                history_identity = api._history_identity
+                saved = store.get_raw_history(history_identity)
+                settings = saved["history"]["baselineSettings"]
+                assert (await http.delete(f'/api/raw/workspaces/{doc["workspaceId"]}')).status_code == 204
+
+                # Fill the durable store with dense snapshots without simulating hundreds of Native edits.
+                step_ids = []
+                revision = saved["revision"]
+                for index in range(store.HISTORY_LIMIT):
+                    settings = copy.deepcopy(settings)
+                    for control, (lo, hi, *_) in CONTROLS.items():
+                        parent, key = control_location(settings, control)
+                        span = (hi - lo) * .00000001234567
+                        parent[key] = lo + span if index % 2 else hi - span
+                    step_id = UUID(int=index + 1)
+                    store.append_raw_history(history_identity, revision, step_id, settings, kind="allReset")
+                    revision += 1
+                    step_ids.append(str(step_id))
+
+                _, reopened = await open_asset(http, doc["assetId"])
+                assert reopened.status_code == 200, reopened.text
+                doc = await operation(http, reopened.json(), "initialize")
                 response = await http.get(url(doc), headers=headers(doc))
-                assert response.status_code == 200 and 256 * 1024 < len(response.content) <= 1024 * 1024
-                print(f'History 200 steps / {len(CONTROLS)} controls: {len(response.content)} bytes')
-                steps = response.json()['steps']
-                assert len(steps) == 200 and all(len(step['changes']) == len(CONTROLS) for step in steps)
-                assert all('settings' not in step for step in steps)
+                assert response.status_code == 200, response.text
+                assert response.headers["cache-control"] == "no-store"
+                listing = response.json()
+                assert listing["history"]["cursor"] == store.HISTORY_LIMIT
+                assert [step["stepId"] for step in listing["steps"]] == step_ids
+                assert all(len(step["changes"]) == len(CONTROLS) for step in listing["steps"])
+                assert all("settings" not in step for step in listing["steps"])
+                print(f"Retained RAW History: {len(response.content)} bytes")
+
+                undone = await operation(http, doc, "undo")
+                assert undone["history"]["selectedStepId"] == step_ids[-2]
+                assert undone["values"]["light.exposure"] != doc["values"]["light.exposure"]
+                redone = await operation(http, undone, "redo")
+                assert redone["history"]["selectedStepId"] == step_ids[-1]
+                assert redone["values"]["light.exposure"] == doc["values"]["light.exposure"]
         finally:
             await api.close()
     asyncio.run(run())
