@@ -188,11 +188,11 @@ def test_recipe_save_result_tracks_commit_when_followup_state_read_fails(lifecyc
         result = await mutate_raw_edits(scheduler, ASSET, store.put_raw_recipe, key, 0, save_id, current,
                                         import_defaults_fingerprint=fingerprint)
         assert result["revision"] == 1
-        assert calls[0] == 2
+        assert calls[0] == 1
         assert saved_state(ASSET)["revision"] == 1
         assert hub.consistency_position()[2] == 1
-        assert hub.position()[1] == 0
-        assert scheduler._deadlines == {}
+        assert hub.position()[1] == 1
+        assert scheduler._deadlines == {ASSET: 60}
 
         # The same receipt is known to be a replay and must not double-count the mutation.
         monkeypatch.setattr(store, "get_raw_saved_state", saved_state)
@@ -200,8 +200,8 @@ def test_recipe_save_result_tracks_commit_when_followup_state_read_fails(lifecyc
                                         import_defaults_fingerprint=fingerprint)
         assert replay["revision"] == 1
         assert hub.consistency_position()[2] == 1
-        assert hub.position()[1] == 0
-        assert scheduler._deadlines == {}
+        assert hub.position()[1] == 1
+        assert scheduler._deadlines == {ASSET: 60}
 
     asyncio.run(run())
     generate.assert_not_called()
@@ -250,15 +250,15 @@ def test_raw_save_mutation_invalidates_a_concurrent_publication_status_snapshot(
             current["light"]["exposure"] = 1.2
             await mutate_raw_edits(scheduler, ASSET, store.put_raw_recipe, identity(assetId=str(ASSET)), 1,
                                    uuid4(), current)
-            assert state_calls[0] == 2
+            assert state_calls[0] == 1
             release_loop.set()
             response = await pending
             assert response.status_code == 200
             assert response.json()["items"][str(ASSET)]["recipeRevision"] == 2
-            assert response.json()["items"][str(ASSET)]["state"] == "cache_missing"
+            assert response.json()["items"][str(ASSET)]["state"] == "reserved"
             assert calls[0] >= 2
             assert hub.consistency_position()[2] == 1
-            assert hub.position()[1] == 0 and scheduler._deadlines == {}
+            assert hub.position()[1] == 1 and scheduler._deadlines == {ASSET: 60}
     try:
         asyncio.run(run())
     finally:

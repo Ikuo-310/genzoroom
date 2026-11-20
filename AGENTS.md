@@ -90,6 +90,7 @@ Existing checks may be simplified or removed when they no longer serve a concret
   Example:
   `I:\code\genzoroom\.venv\Scripts\python.exe -m pytest`
 - If running this executable in the normal sandbox fails with `Permission denied` (including a `uv` trampoline error), rerun the same executable and arguments with privileged execution. Do not switch to `Activate.ps1`, `activate.bat`, or another Python environment.
+- If a Windows Backend test appears to stop during `asyncio` event-loop initialization, first check the minimal `asyncio.run()` program with the specified executable and `backend` working directory. If it stops in the sandbox, rerun that program with privileged execution. Resume Backend tests with the same executable and working directory only if the minimal program succeeds.
 
 ## Stack / Album invariants
 

@@ -1,4 +1,3 @@
-import type { RecentAsset } from './assets';
 import { frontendLogger } from './frontendLogging';
 
 export function thumbnailDiagnosticUrl(url: string, diagnosticId: string): string {
@@ -14,10 +13,4 @@ export function thumbnailSourceUrl(assetId: string, rendition: ThumbnailRenditio
   return (rendition === 'rendered-thumbnail' || rendition === 'immersive-preview')
     && publicationVersion !== undefined && publicationVersion !== null
     ? `${url}?publication=${encodeURIComponent(String(publicationVersion))}` : url;
-}
-
-export function thumbnailUrl(asset: Pick<RecentAsset, 'id' | 'thumbnail_url'>, edited = true, publicationVersion?: string | number | null): string {
-  if (!edited) return asset.thumbnail_url;
-  // Backend saved-state eligibility and fallback apply equally to RAW and JPEG, regardless of UI badges.
-  return thumbnailSourceUrl(asset.id, 'rendered-thumbnail', publicationVersion);
 }

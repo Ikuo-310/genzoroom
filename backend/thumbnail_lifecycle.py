@@ -33,7 +33,7 @@ async def mutate_raw_edits(scheduler, asset_id, operation, *args, **kwargs):
         operation_kwargs = {**kwargs, "_return_state_changed": True} if tracks_recipe_commit else kwargs
         operation_result = await run_in_threadpool(operation, *args, **operation_kwargs)
         if tracks_recipe_commit:
-            result, state_changed = operation_result
+            result, state_changed, after = operation_result
         else:
             result = operation_result
             if isinstance(result, dict) and type(result.get("replayed")) is bool:
@@ -49,7 +49,8 @@ async def mutate_raw_edits(scheduler, asset_id, operation, *args, **kwargs):
             scheduler.publication_hub.record_mutation()
             mutation_recorded = True
         try:
-            after = await run_in_threadpool(get_raw_saved_state, asset_id)
+            if not tracks_recipe_commit:
+                after = await run_in_threadpool(get_raw_saved_state, asset_id)
             after_revision = after.get("revision") if isinstance(after, dict) else None
             if state_changed is None:
                 state_changed = not known_before or before_revision != after_revision

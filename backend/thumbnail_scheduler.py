@@ -79,12 +79,12 @@ class ThumbnailScheduler:
             self._states.popitem(last=False)
 
     def generation_state(self, asset_id):
-        if asset_id == self._active:
-            return "running"
         if asset_id in self._pending:
             return "queued"
         if asset_id in self._deadlines:
             return "reserved"
+        if asset_id == self._active:
+            return "running"
         return self._states.get(asset_id)
 
     def _publish(self, asset_id, state, publication_version=KEEP_PUBLICATION_VERSION):
@@ -134,6 +134,7 @@ class ThumbnailScheduler:
                                           payloadBytes=len(content), durationMs=round((self._clock() - started) * 1000))
                             self._publish(asset_id, "published", publication_version)
                     if published:
+                        self._active = None
                         try:
                             evicted = await run_in_threadpool(self.cache.prune)
                         except OSError:

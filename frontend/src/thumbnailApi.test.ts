@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { frontendLogger } from './frontendLogging';
 import { requestThumbnailGeneration } from './thumbnailApi';
-import { thumbnailDiagnosticUrl, thumbnailSourceUrl, thumbnailUrl } from './thumbnailUrl';
+import { thumbnailDiagnosticUrl, thumbnailSourceUrl } from './thumbnailUrl';
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); frontendLogger.setLevel('off'); frontendLogger.clear(); });
 
@@ -16,10 +16,6 @@ describe('thumbnail boundaries', () => {
   it('selects display URLs without requesting generation and encodes Asset IDs and publication versions', () => {
     const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
     const publication = 'a'.repeat(32);
-    const asset = { id: 'asset/id', thumbnail_url: '/original' };
-    expect(thumbnailUrl(asset)).toBe('/api/assets/asset%2Fid/rendered-thumbnail');
-    expect(thumbnailUrl(asset, false, 'ignored')).toBe('/original');
-    expect(thumbnailUrl(asset, true, publication)).toBe(`/api/assets/asset%2Fid/rendered-thumbnail?publication=${publication}`);
     expect(thumbnailSourceUrl('asset/id', 'thumbnail')).toBe('/api/assets/asset%2Fid/thumbnail');
     expect(thumbnailSourceUrl('asset/id', 'preview')).toBe('/api/assets/asset%2Fid/preview');
     expect(thumbnailSourceUrl('asset/id', 'immersive-preview', publication)).toBe(`/api/assets/asset%2Fid/immersive-preview?publication=${publication}`);

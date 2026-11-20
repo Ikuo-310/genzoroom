@@ -11,7 +11,6 @@ from uuid import UUID, uuid4
 from backend_logging import backend_logger
 import storage
 
-THUMBNAIL_CACHE_ROOT = storage.STORAGE_ROOT / "cache" / "thumbnails"
 MAX_CACHE_BYTES = 1_073_741_824
 CACHE_HEADER_PREFIX = b"GENZOROOM-THUMBNAIL-V1 "
 CACHE_HEADER_SIZE = len(CACHE_HEADER_PREFIX) + 32 + 1
@@ -237,12 +236,6 @@ class ThumbnailCache:
                     thumbnail_log("prune.failed", level="warn", errorCode="cache_prune_failed")
         finally:
             self.discard_prepared(temporary)
-
-    def store_with_version(self, asset_id: UUID, content: bytes) -> tuple[list[UUID], str | None]:
-        # Keep the new file stable until its identity is captured for the publication event.
-        with self._lock:
-            evicted = self.store(asset_id, content)
-            return evicted or [], self.version(asset_id)
 
     def _prune(self):
         entries = []

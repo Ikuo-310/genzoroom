@@ -243,6 +243,18 @@ def _raw_thumbnail_eligibility(*, settings, fingerprint, schema, baseline):
     return _json(current) != _json(original)
 
 
+def _lifecycle_state(connection, identity):
+    current = _read_row(connection, identity)
+    if current is None:
+        return None
+    history = _read_history(connection, identity, current)
+    return {"currentRecipe": current["recipe"], "revision": current["revision"],
+            "exportEligible": _raw_thumbnail_eligibility(
+                settings=current["recipe"]["settings"], fingerprint=current["importDefaultsFingerprint"],
+                schema=identity["settingsSchemaVersion"],
+                baseline=history["baselineSettings"] if history is not None else None)}
+
+
 def select_raw_export_state(connection, asset_id):
     """Expose only the current engine tuple to Export, thumbnails and edit badges."""
     from lightcraft_artifact import ENGINE_VERSION, ENGINE_COMMIT
@@ -524,7 +536,7 @@ def put_raw_recipe(identity: dict, expected_revision: int, save_id: UUID | str, 
                 # Return the original ack even after newer saves, without rolling the current row back.
                 result = _result(identity, encoded, revision, save_id, updated) | {
                     "importDefaultsFingerprint": current.get("importDefaultsFingerprint")}
-                return (result, False) if _return_state_changed else result
+                return (result, False, _lifecycle_state(connection, identity)) if _return_state_changed else result
             if (0 if current is None else current["revision"]) != expected_revision:
                 raise StoreConflict()
             # A checkpoint may advance the receipt, but cannot rewrite an immutable History step.
@@ -533,8 +545,9 @@ def put_raw_recipe(identity: dict, expected_revision: int, save_id: UUID | str, 
             _write_recipe(connection, identity, current, expected_revision, save_id, encoded, digest,
                           import_defaults_fingerprint)
             result = _read_row(connection, identity)
+            lifecycle_state = _lifecycle_state(connection, identity)
             connection.commit()
-            return (result, True) if _return_state_changed else result
+            return (result, True, lifecycle_state) if _return_state_changed else result
         except Exception:
             connection.rollback()
             raise
