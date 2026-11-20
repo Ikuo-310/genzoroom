@@ -1,5 +1,19 @@
 # GenzoRoom 開発ノート
 
+## RAW関連テスト基盤の修復記録（2026-11-20）
+
+過去の調査記録と現行仕様を区別する。T1では基準時点のRAW関連テストにFrontend 137件、Backend 16件の失敗を確認した。原因は、Curve保存失敗後の終了状態残留、Point Color／Vignette UI Mockの不足、LightCraft契約変更後のBackend fixture、Diagnosticsの廃止項目、History応答上限などに分類した。
+
+- **T2-1 `1dfef97`**：Curve Pointer Up後に同一save ID／同一要求を明示Retry可能にし、Workspace破棄時の重複保存を防止した。失敗したCurveテストが残したMock／モジュール状態も後続テストへ漏れないよう整理した。
+- **T2-2 `15a9fba`**：Point Color Rangeの状態とsetterをUI Mockへ加え、現行UI契約をテストへ反映した。
+- **T2-3 `99220b0`**：Color Mixer動的ID、Vignette Reset、profile別Recipe保存、Preview応答とWhole Full要求の契約にBackendテストを追随させた。Native内部StageCacheの転送・予算検証など、検証対象を失ったテスト2件を削除した。
+- **T3-1 `c3c3c98`**：RAW History一覧のBackend／Frontend応答サイズ上限を撤廃した。保持上限200件と初回全件取得を維持する。
+- **T3-2 `8e67409`**：DiagnosticsをLightCraft v0.20.0の公開契約へ更新した。StageCache、実行経路／fallback推定、メモリ計量、PNG一致比較を除き、Native／Backend／Frontendの計測時間とWorkspace隔離・中止・解放・非永続化の検証を維持した。
+- **T3-2-A `09c34a1`**：RAW Viewer Benchmark応答のNative計測フィールドを`nativeMs`へ統一した。
+- **T4-1**：修復後の一括検証でFrontend 21ファイル1,099件、Backend 38ファイル1,395件が成功し、失敗は0件だった。BackendのSkip 18件は実Native実行ファイルを要する既存liveテスト。Frontendの未処理Promise拒否は0件で、この実行順序による状態残留・順序依存の失敗はなかった。
+
+T1のFrontendは957成功／137失敗／0 Skip、Backendは1,385成功／16失敗／18 Skipだった。T4-1はFrontend 1,099成功／0失敗／0 Skip、Backend 1,395成功／0失敗／18 Skip。追加・削除したテストがあるため総数は異なる。Backendには指定`.venv`のPython 3.14.5を使い、AGENTS.mdの昇格実行手順に従った。工程では現行仕様とGenzoRoom／LightCraftの責務境界を基準にテストを修正・整理しており、単に全テストを通すことを目的としていない。実Native性能測定とWindows Desktop実機動作確認は実施していない。
+
 ## サムネイル基盤 P7 最終総合監査・リリース準備（2026-11-20）
 
 P1〜P6、A1〜A5、P7の実装と監査結果は[サムネイル基盤設計・実装記録](research/THUMBNAIL_INFRASTRUCTURE_DESIGN.md#p7完了記録総合監査限定修正)に集約した。Windows／Docker共通の`ThumbnailImage`、共有Immich read client、ETag再検証、Asset単位のUUIDv4公開版とSSE同期、1 GiB cache、Reset fence、profile別永続領域を現行仕様とする。RAW Recipe／Historyの保存トランザクション結果が生成予約・無効化を駆動し、追加DB読取りに依存しない。公開後の後処理中も公開状態を`running`へ戻さない。

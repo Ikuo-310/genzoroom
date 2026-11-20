@@ -11,6 +11,9 @@ Internal changes are omitted unless they affect users.
 - Windows Desktop Color Mixer target adjustments no longer make the edit History unavailable when the valid `mixerTarget` step is reloaded.
 - Windows Desktop Point Color edits keep Native interaction, Draft Preview and the single History save for a gesture in sync; uncertain saves are retained for recovery instead of being discarded during photo changes.
 - Windows Desktop RAW photo changes recover workspace release or discard failures before opening the next photo, and release editing resources after workspace termination is confirmed.
+- Windows Desktop Curve edits can retry the same History save after Pointer Up, and RAW workspace discard avoids a duplicate save.
+- Windows Desktop retrieves the full RAW History list without a response-size cap while retaining up to 200 entries.
+- Windows Desktop RAW Preview Diagnostics follows LightCraft v0.20.0 and reports supported timings without obsolete StageCache, execution/fallback inference, memory accounting or PNG equality checks. RAW Viewer Benchmark now uses the matching `nativeMs` response field.
 
 ### Added
 
@@ -35,7 +38,6 @@ Internal changes are omitted unless they affect users.
 ### Known limitations
 
 - Windows Desktop remains in development and validation; this migration does not introduce a stable general-purpose Windows installer. LightCraft decides which image originals it can read, and unsupported originals do not fall back to the Docker JPEG engine.
-- Developer RAW Preview Diagnostics still has legacy expectations for execution and StageCache metadata that the current Native preview response does not provide. This affects diagnostic reporting and its related tests, not ordinary Preview rendering.
 
 ## [0.4.0] - 2026-11-20
 

@@ -123,7 +123,7 @@ B1では同じ管理patchのPNG envelopeを17 MiBへ拡張し、GenzoRoomの2048
 
 runtimeはMCPの`render_preview.inputSchema.properties.before.type == boolean`を世代ごとに調べ、Before応答の`kind`、native import fingerprint、geometry、PNG実寸を検証する。schema非対応やBefore基準を確認できないbinaryでは`beforeKey=null`とし比較操作を無効にする。After／RAW編集は従来どおり利用できる。対応schemaだけを持ち、AfterをBeforeとして返すbinaryは画像検証で拒否し、Beforeだけを失敗にする。runtimeのSHA-256診断とbuild receiptで未変更本家binaryと管理buildを識別する。全配布先で既知hashの登録を強制する方式には変更しない。
 
-A2導入時点はnative契約までで、A3でGenzoRoom runtime／HTTP／Frontendの品質・geometry capability／strict metadata／schedulerを接続した。現在はA5-P2のoptional executionとcapacity計量にも対応し、旧metadata互換経路を維持する。領域描画、最終解像度・容量・timeout・cache採用、実RAWのCPU/GPU性能・peak memoryは別の受入であり、synthetic probe成功と混同しない。
+A2導入時点はnative契約までで、A3でGenzoRoom runtime／HTTP／Frontendの品質・geometry capability／strict metadata／schedulerを接続した。旧A5-P2設計のoptional execution・capacity計量・旧metadata互換に関する記述は当時の記録で、現行診断契約ではない。LightCraft v0.20.0の公開応答にない実行経路、fallback、内部cache、メモリ情報は収集・推定せず、旧診断形式との互換も維持しない。領域描画、最終解像度・容量・timeoutの受入と実RAW性能測定は別の確認範囲であり、synthetic probe成功と混同しない。
 
 ## 将来のエンジン更新
 
