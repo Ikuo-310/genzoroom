@@ -2502,3 +2502,11 @@ P1-A〜P2-BでWindows DesktopのPoint Color「範囲を表示 / Show Range」を
 `AnshitsuRawPreview.test.tsx`の失敗比較は、P2-B前`11916df`が56 pass／84 fail、P2-B後`5443777`の回帰修正前が56 pass／85 fail。失敗名と主要エラーを比較すると84件は前後で同じ。追加の1件は新規Show Range test内のnull要素参照で、P2-B追加修正で直した後は57 pass／84 failとなった。調査ではCurveテストが意図的なcommit失敗mockをretryせず残し、fixture／mock状態が後続テストへ残留することを確認した。従って元の84件はP2-B実装前から存在する失敗であり、今回修正対象には含めていない。
 
 Commit `7673ed2`ではShow Range一時停止中に通常のPoint Color Draftまで拒否される条件と、共有`curveTarget`からPoint Color専用Overlay引数が他interactionへ伝わり得る型・経路を修正した。Focused tests、TypeScript、production build、`git diff --check`を再実行して成功。Windows Desktopでのユーザー実動作確認では問題の報告なし。これはユーザーによる実機確認であり、自動テストとは別の結果である。
+
+## シャープニング半径・ディテール・一時可視化（P0〜P2）
+
+LightCraft v0.20.0の固定upstream commit `192ff72923c39e6623f2c7ff67ab3a119deb8071`を維持し、既存managed patchへNative Previewの`sharpen_preview`を追加した。`sharpenPreviewContract: 1`。manifest patch SHA-256は`8ff0bc48ee420f4a9f322c9a3536012002bf7450f02fe50f7da7b9553f926473`であり、実バイナリSHA-256とreceiptはNative管理成果物を参照する。LightCraft内部の現像アルゴリズムは変更していない。
+
+半径`detail.sharpenRadius`は既定1.0、範囲0.5〜3.0、刻み0.1。ディテール`detail.sharpenDetail`は既定25、範囲0〜100、刻み1。Process V3未満では無効。シャープ、半径、ディテール、マスクのAltドラッグ可視化はそれぞれgrayscale、detail、detail、mask。ディテール帯域表示はLightCraft現行仕様により値の変更中も変化しない。一時可視化の解除後は通常Draft／Fullへ戻り、Point Color範囲表示は復帰する。可視化中はRegion表示を抑止する。可視化状態はHistory、Recipe、Exportに保存しない。設定値と通常編集の保存は既存経路を使う。
+
+P0/P0追加調査、P1 Native API公開、P2 UI・Preview統合を実施。修正後Windows Desktopではユーザーが半径・ディテールの通常現像効果とAltドラッグ可視化を確認済み。F1は操作終了時の解除漏れ、F2は対象外スライダーへの影響、F3は同一Preview serialへの重複取消として検出し、`86f315f`および`d603d0b`で修正した。工程ごとのテスト件数は各記録を参照し、合算しない。限定再監査では実装上のFindingは解消。Draft可視化の応答待ち中に確定する一部条件のテスト範囲不足は残るが追加対応不要と判断した。

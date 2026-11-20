@@ -236,3 +236,11 @@ Nativeへ未接続3値を実装するなら、CPU式だけでなくGPU params/sh
 7. **手動確認**: ユーザーのWindows実機で100%／Fit、エッジ／低照度／色ノイズの見え方、Region境界、カテゴリとキーボードfocusを確認。今回ブラウザ・NAS・Firefox検証は行っていない。
 
 今回の成果物は本書1ファイルのみ。実装、Native patch／manifest、README、CHANGELOG、architecture、development-notesは変更していない。既存stashは維持する。
+
+## Sharpening Radius, Detail and overlays (P0–P2)
+
+The current LightCraft integration keeps v0.20.0 upstream commit `192ff72923c39e6623f2c7ff67ab3a119deb8071` and extends the existing managed patch with `sharpen_preview`, contract 1. The patch digest is `8ff0bc48ee420f4a9f322c9a3536012002bf7450f02fe50f7da7b9553f926473`. Consult the managed Native receipt for the binary digest. LightCraft development algorithms were not changed.
+
+Native Radius defaults to 1.0 with range 0.5–3.0 and step 0.1. Native Detail defaults to 25 with range 0–100 and step 1. GenzoRoom disables both below Process V3. Alternate/Alt drag requests grayscale for Sharpening, detail for Radius and Detail, and mask for Masking. Detail-band visualization remains unchanged as its value changes under the current LightCraft behavior. The temporary After/Whole Preview yields to normal Draft/Full on release, pauses Point Color range display and suppresses Region composition. History, Recipe and Export contain persistent settings only.
+
+P0 investigated existing behavior, P1 published the Native contract and verified managed artifacts and binaries, and P2 integrated the controls and temporary UI state. F1 (visualization cleanup), F2 (non-target slider behavior) and F3 (duplicate cancellation) were corrected in `86f315f` and `d603d0b`. Test results remain recorded by phase and are not combined. Users confirmed normal Radius/Detail rendering and Alt visualization in Windows Desktop. The final limited audit found no remaining implementation finding. A test coverage gap remains for confirming a Draft visualization while its response is pending, judged not to require further work.

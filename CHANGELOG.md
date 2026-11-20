@@ -391,3 +391,7 @@ Earlier Phase 5 foundation entries below describe their completion state; produc
 - Prevent global workspace shortcuts from running while the Viewer `⋯` menu is open, restore trigger focus on Escape, and clear stale 3WAY heading focus after real pointer movement to another slider.
 - Treat non-finite optional EXIF integers as missing values so malformed ISO, width, or height metadata does not fail the entire asset detail response.
 - Include all backend application modules in the production image so the backend can start with the Immich connectivity module.
+
+### Added
+
+- Windows Desktop adds RAW Sharpening Radius and Detail controls, disabled below Process V3, with temporary Alt-drag visualizations for Sharpening, Radius, Detail and Masking.
