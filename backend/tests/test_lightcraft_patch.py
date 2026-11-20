@@ -48,6 +48,15 @@ def test_whole_frame_receipt_claims_only_managed_preview_contracts(tmp_path):
     assert not {'beforeContract', 'previewContract'} & receipt.keys()
     assert receipt['wbContract'] == 1
     assert receipt['pointColorRangeContract'] == 1
+    assert receipt['sharpenPreviewContract'] == 1
+
+
+@pytest.mark.parametrize('value', [True, 2, None])
+def test_sharpen_preview_manifest_rejects_invalid_contract(tmp_path, value):
+    path = tmp_path / 'manifest.json'
+    path.write_text(json.dumps({**build.manifest(), 'sharpenPreviewContract': value}), encoding='utf-8')
+    with pytest.raises(ValueError, match='invalid sharpening preview contract'):
+        build.manifest(path)
 
 
 def test_archived_010_manifest_and_patch_remain_reproducible():

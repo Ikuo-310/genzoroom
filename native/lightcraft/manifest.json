@@ -22,21 +22,22 @@
         "crates/pipeline/src/lib.rs",
         "crates/ui-egui/src/render.rs"
       ],
-      "sha256": "5d67916cb9ed3b554e73bf21d3ac69614c4c75956fed1e5bab5f5c74b4efd564",
+      "sha256": "8ff0bc48ee420f4a9f322c9a3536012002bf7450f02fe50f7da7b9553f926473",
       "files": 17,
-      "insertions": 750,
+      "insertions": 773,
       "deletions": 35
     }
   ],
   "commit": "192ff72923c39e6623f2c7ff67ab3a119deb8071",
   "version": "0.20.0",
   "wholeFrameContract": 1,
-  "developmentTargetDir": "target-p3-range",
+  "developmentTargetDir": "target-p1-sharpen",
   "cropEditContract": 1,
   "beforeAfterContract": 1,
   "draftContract": 1,
   "regionContract": 1,
   "geometryDescriptorContract": 2,
   "wbContract": 1,
-  "pointColorRangeContract": 1
+  "pointColorRangeContract": 1,
+  "sharpenPreviewContract": 1
 }

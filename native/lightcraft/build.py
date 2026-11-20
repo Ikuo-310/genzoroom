@@ -57,6 +57,8 @@ def manifest(path=None):
             raise ValueError('invalid WB contract')
         if 'pointColorRangeContract' in value and (type(value['pointColorRangeContract']) is not int or value['pointColorRangeContract'] != 1):
             raise ValueError('invalid Point Color Range contract')
+        if 'sharpenPreviewContract' in value and (type(value['sharpenPreviewContract']) is not int or value['sharpenPreviewContract'] != 1):
+            raise ValueError('invalid sharpening preview contract')
     if 'geometryDescriptorContract' in value and 'wholeFrameContract' not in value:
         if 'cropEditContract' in value and (type(value['cropEditContract']) is not int or value['cropEditContract'] != 1):
             raise ValueError('unsupported crop editing contract')
@@ -258,6 +260,8 @@ def probe_whole_frame(binary, spec):
             probe_region(binary, source, spec['geometryDescriptorContract'])
         if spec.get('pointColorRangeContract') == 1:
             run([sys.executable, str(ROOT / 'point_color_range_probe.py'), str(binary.resolve())])
+        if spec.get('sharpenPreviewContract') == 1:
+            run([sys.executable, str(ROOT / 'sharpen_preview_probe.py'), str(binary.resolve())])
     print('Whole Frame binary schema, settings, PNG and error response verified')
 
 
@@ -651,7 +655,8 @@ def receipt(binary, spec):
                 **({'regionContract': 1, 'geometryDescriptorContract': spec['geometryDescriptorContract']}
                    if spec.get('regionContract') == 1 else {}),
                 **({'wbContract': 1} if spec.get('wbContract') == 1 else {}),
-                **({'pointColorRangeContract': 1} if spec.get('pointColorRangeContract') == 1 else {})}
+                **({'pointColorRangeContract': 1} if spec.get('pointColorRangeContract') == 1 else {}),
+                **({'sharpenPreviewContract': 1} if spec.get('sharpenPreviewContract') == 1 else {})}
     return {"version": spec["version"], "commit": spec["commit"], "patches": spec["patches"],
             "binarySha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "beforeContract": 1, "previewContract": 1, "regionContract": 1,
             "geometryDescriptorContract": spec['geometryDescriptorContract'],

@@ -1216,7 +1216,8 @@ async def create(tmp_path, *, timeouts=QUICK, adaptive=False):
         **({'geometryDescriptorContract': MANAGED['geometryDescriptorContract']}
            if MANAGED.get('regionContract') == 1 else {}),
         **({'wbContract': 1} if MANAGED.get('wbContract') == 1 else {}),
-        **({'pointColorRangeContract': 1} if MANAGED.get('pointColorRangeContract') == 1 else {})}), encoding='utf-8')
+        **({'pointColorRangeContract': 1} if MANAGED.get('pointColorRangeContract') == 1 else {}),
+        **({'sharpenPreviewContract': 1} if MANAGED.get('sharpenPreviewContract') == 1 else {})}), encoding='utf-8')
     children = []
 
     async def spawn(*args, **kwargs):

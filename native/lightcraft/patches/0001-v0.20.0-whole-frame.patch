@@ -216,10 +216,10 @@ index b05dae56ff5fccab298fc6dee10239ddd47ed4b9..2de01852f042f6d57040223c2e9764fd
 +sha2 = { workspace = true }
  log = { workspace = true }
 diff --git a/crates/mcp/src/headless.rs b/crates/mcp/src/headless.rs
-index 11de914173043a86ea701ee0f9d55a89e92f2add..52efb6534ca03d35c7e94601b14ee615265c36c8 100644
+index 11de914173043a86ea701ee0f9d55a89e92f2add..43f9209cccd8b2da09331a69d0f3b1819031ea51 100644
 --- a/crates/mcp/src/headless.rs
 +++ b/crates/mcp/src/headless.rs
-@@ -139,15 +139,190 @@ impl Backend for Headless {
+@@ -139,15 +139,209 @@ impl Backend for Headless {
                  Ok(Value::Array(v))
              }
              "ui.render" => {
@@ -239,6 +239,19 @@ index 11de914173043a86ea701ee0f9d55a89e92f2add..52efb6534ca03d35c7e94601b14ee615
 +                    return Err("invalid before".into());
 +                }
 +                let before = p.get("before").and_then(Value::as_bool).unwrap_or(false);
++                let sharpen_preview = match p.get("sharpen_preview") {
++                    None => None,
++                    Some(Value::String(mode)) => Some(match mode.as_str() {
++                        "grayscale" => (mode.as_str(), lightcraft_engine::pipeline::Overlay::Grayscale),
++                        "detail" => (mode.as_str(), lightcraft_engine::pipeline::Overlay::SharpenDetail),
++                        "mask" => (mode.as_str(), lightcraft_engine::pipeline::Overlay::SharpenMask),
++                        _ => return Err("invalid sharpen_preview".into()),
++                    }),
++                    Some(_) => return Err("invalid sharpen_preview".into()),
++                };
++                if sharpen_preview.is_some() && (before || p.get("crop_edit") == Some(&json!(true)) || p.get("point_color_range_index").is_some()) {
++                    return Err("sharpen_preview_after_only".into());
++                }
 +                let point_color_range_index = match p.get("point_color_range_index") {
 +                    None => None,
 +                    Some(value) => Some(value.as_u64().filter(|index| *index <= 7)
@@ -265,12 +278,16 @@ index 11de914173043a86ea701ee0f9d55a89e92f2add..52efb6534ca03d35c7e94601b14ee615
 +                }
 +                let apply_crop = p.get("crop_edit") != Some(&json!(true));
 +                let mut job = self.session.render_job(id, size, size, before, apply_crop).ok_or("no such photo")?;
++                if let Some((_, overlay)) = sharpen_preview {
++                    job = job.with_overlay(overlay);
++                }
 +                if let Some(index) = point_color_range_index {
 +                    if !job.settings.section_enabled("color")
 +                        || index as usize >= job.settings.point_colors.len()
 +                    {
 +                        return Err("invalid point_color_range_index".into());
-+                    }
+                     }
+-                    None => Ok(json!({"width": img.width, "height": img.height})),
 +                    job = job.with_overlay(lightcraft_engine::pipeline::Overlay::PointColorRange(index));
 +                }
 +                if quality == lightcraft_engine::pipeline::Quality::Draft {
@@ -283,6 +300,9 @@ index 11de914173043a86ea701ee0f9d55a89e92f2add..52efb6534ca03d35c7e94601b14ee615
 +                let mut result = json!({"width": img.width, "height": img.height});
 +                result["kind"] = json!(if before { "before" } else { "after" });
 +                result["quality"] = json!(if quality == lightcraft_engine::pipeline::Quality::Draft { "draft" } else { "full" });
++                if let Some((mode, _)) = sharpen_preview {
++                    result["sharpenPreview"] = json!(mode);
++                }
 +                if let Some(index) = point_color_range_index {
 +                    result["pointColorRangeIndex"] = json!(index);
 +                }
@@ -381,8 +401,7 @@ index 11de914173043a86ea701ee0f9d55a89e92f2add..52efb6534ca03d35c7e94601b14ee615
 +                        || index as usize >= job.settings.point_colors.len()
 +                    {
 +                        return Err("invalid point_color_range_index".into());
-                     }
--                    None => Ok(json!({"width": img.width, "height": img.height})),
++                    }
 +                    job = job.with_overlay(lightcraft_engine::pipeline::Overlay::PointColorRange(index));
 +                }
 +                if draft {
@@ -794,7 +813,7 @@ index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..5dec4aa3eb00e95ac7b80d737f436252
 +    assert_eq!(h.session.execute("develop.get", &json!({"id": id})).unwrap(), before);
 +}
 diff --git a/crates/mcp/src/tools.rs b/crates/mcp/src/tools.rs
-index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..9115f9d0ce374f638701fd2fdd518e83da6f95cc 100644
+index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..e218722388b7556e09b488f9b5d013e0133ddb7b 100644
 --- a/crates/mcp/src/tools.rs
 +++ b/crates/mcp/src/tools.rs
 @@ -78,7 +78,29 @@ fn ids_schema(what: &str) -> Value {
@@ -827,7 +846,7 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..9115f9d0ce374f638701fd2fdd518e83
          tool(
              "command_list",
              "List commands",
-@@ -120,6 +142,12 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
+@@ -120,6 +142,13 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
              json!({
                  "id": {"type": "integer", "description": "Photo id (default: the active photo); selection is unchanged"},
                  "max_side": {"type": "integer", "description": "Long edge in pixels (default 1024, max 4096)"},
@@ -835,12 +854,13 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..9115f9d0ce374f638701fd2fdd518e83
 +                "crop_edit": {"type": "boolean", "description": "Render the uncropped image for crop editing"},
 +                "before": {"type": "boolean", "description": "Render the import baseline"},
 +                "quality": {"type": "string", "enum": ["draft", "full"], "description": "Render quality"},
++                "sharpen_preview": {"type": "string", "enum": ["grayscale", "detail", "mask"], "description": "Temporary sharpening visualization (After Whole only)"},
 +                "point_color_range_index": {"type": "integer", "minimum": 0, "maximum": 7,
 +                    "description": "Visualize the selected Point Color range (After only; requires Color enabled)"},
                  "format": {"type": "string", "enum": ["png", "jpeg"], "description": "Image encoding (default png; jpeg is smaller)"},
              }),
              &[],
-@@ -219,6 +247,10 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
+@@ -219,6 +248,10 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
              json!({
                  "id": {"type": "integer", "description": "Photo id (default: the active photo); selection is unchanged"},
                  "size": {"type": "integer", "description": "Long edge in pixels (default 1024, max 4096)"},
@@ -851,7 +871,7 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..9115f9d0ce374f638701fd2fdd518e83
                  "format": {"type": "string", "enum": ["png", "jpeg"], "description": "Image encoding (default png; jpeg is smaller)"},
                  "path": {"type": "string", "description": "Also save the rendered file here"}
              }),
-@@ -334,6 +366,23 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
+@@ -334,6 +367,23 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
              ),
          ]);
      }
@@ -875,7 +895,7 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..9115f9d0ce374f638701fd2fdd518e83
      v
  }
  
-@@ -378,6 +427,7 @@ fn annotations(name: &str, title: &str) -> Value {
+@@ -378,6 +428,7 @@ fn annotations(name: &str, title: &str) -> Value {
              | "list_commands"
              | "doc_inspect"
              | "render_preview"
@@ -883,7 +903,7 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..9115f9d0ce374f638701fd2fdd518e83
              | "query_photos"
              | "list_controls"
              | "get_develop"
-@@ -557,11 +607,29 @@ fn render_photo(b: &mut dyn Backend, args: &Value) -> ToolResult {
+@@ -557,11 +608,29 @@ fn render_photo(b: &mut dyn Backend, args: &Value) -> ToolResult {
          Err(e) => return ToolResult::error(e),
      };
      let path = tmp.file.to_string_lossy().to_string();
@@ -895,7 +915,7 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..9115f9d0ce374f638701fd2fdd518e83
 +    if let Some(crop_edit) = args.get("crop_edit") {
 +        request["crop_edit"] = crop_edit.clone();
 +    }
-+    for key in ["before", "quality", "point_color_range_index"] {
++    for key in ["before", "quality", "point_color_range_index", "sharpen_preview"] {
 +        if let Some(value) = args.get(key) {
 +            request[key] = value.clone();
 +        }
@@ -914,7 +934,7 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..9115f9d0ce374f638701fd2fdd518e83
      meta["id"] = json!(id);
      image_result(&tmp.file, None, args.get("format").and_then(Value::as_str).unwrap_or("png"), args.get("path").and_then(Value::as_str), meta)
  }
-@@ -609,6 +677,88 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
+@@ -609,6 +678,88 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
          return ToolResult::from(exec(b, &rest.replace('_', "."), args.clone()));
      }
      match name {
@@ -1003,12 +1023,15 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..9115f9d0ce374f638701fd2fdd518e83
          "list_commands" | "command_list" => {
              let filter = s("filter").unwrap_or("").to_lowercase();
              let enabled_only = args.get("enabled_only").and_then(Value::as_bool).unwrap_or(false);
-@@ -664,7 +814,7 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
+@@ -664,7 +815,10 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
          }
          "doc_inspect" => ToolResult::from(doc_inspect(b)),
          "render_preview" => {
 -            let mut a = obj(args, &["id", "format"]);
-+            let mut a = obj(args, &["id", "format", "include_frame", "crop_edit", "before", "quality", "point_color_range_index"]);
++            if args.get("sharpen_preview").is_some_and(|v| !matches!(v.as_str(), Some("grayscale" | "detail" | "mask"))) {
++                return ToolResult::error("invalid sharpen_preview");
++            }
++            let mut a = obj(args, &["id", "format", "include_frame", "crop_edit", "before", "quality", "point_color_range_index", "sharpen_preview"]);
              if let Some(m) = args.get("max_side") {
                  a["size"] = m.clone();
              }
