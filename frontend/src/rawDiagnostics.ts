@@ -2,19 +2,17 @@ import { LIGHTCRAFT_ENGINE } from './lightcraftEngine';
 import { BUILD_INFO } from './buildInfo';
 import { readBounded, type RawGeometry } from './rawApi';
 
-export type RawDiagnosticConfig = { assetId: string; quality: 'draft' | 'full' | 'both'; stageCache: 'off' | 'on' | 'both';
-  backend: 'cpu' | 'gpu'; temperature: 'cold' | 'warm' | 'both'; repeats: number; budgetBytes: number };
-export type RawTrial = { index: number; quality: 'draft' | 'full'; stageCache: 'off' | 'on';
+export type RawDiagnosticConfig = { assetId: string; quality: 'draft' | 'full' | 'both';
+  backend: 'cpu' | 'gpu'; temperature: 'cold' | 'warm' | 'both'; repeats: number };
+export type RawTrial = { index: number; quality: 'draft' | 'full';
   temperature: 'cold' | 'warm'; repeat: number; group: string };
 export type RawTrialMetadata = {
   trial: RawTrial; measuredAt: string;
   contract: { lightcraftVersion: typeof LIGHTCRAFT_ENGINE.version; engineCommit: string; previewContract: 1; binarySha256: string };
   source: { width: number; height: number; format: string; identity: string }; settingsFingerprint: string; frame: RawGeometry;
-  backend: { configured: 'cpu' | 'gpu'; execution: 'cpu' | 'gpu' | 'unconfirmed'; gpuAvailable: boolean; fallbackReported: boolean };
+  backend: { configured: 'cpu' | 'gpu' };
   width: number; height: number; payloadBytes: number;
-  metrics: { execution?: { outcome: 'gpu_success' | 'cpu_not_tried' | 'cpu_fallback'; backend: 'cpu' | 'gpu'; reason: string }; nativeMs: number; validationMs: number; pngSha256: string | null;
-    stageCache: { mode: 'off' | 'on'; applied: boolean; reason: 'none' | 'budget'; cpuBytes: number; gpuBytes: number; retainedBytes: number; budgetBytes: number } };
-  rssBytes: null; vramBytes: null;
+  metrics: { nativeMs: number; validationMs: number; pngSha256: string | null };
 };
 export type RawTrialResult = { trial: RawTrial; result: 'success' | 'failed' | 'cancelled' | 'unsupported';
   metadata: RawTrialMetadata | null; responseWaitMs: number | null; transferMs: number | null; decodeMs: number | null;
@@ -57,12 +55,11 @@ const json = rawDiagnosticJson;
 
 export function rawTrialPlan(config: RawDiagnosticConfig): RawTrial[] {
   const rows: RawTrial[] = [];
-  const caches: ('off' | 'on')[] = config.stageCache === 'both' ? ['off', 'on'] : [config.stageCache];
   const qualities: ('draft' | 'full')[] = config.quality === 'both' ? ['draft', 'full'] : [config.quality];
   const temperatures: ('cold' | 'warm')[] = config.temperature === 'both' ? ['cold', 'warm'] : [config.temperature];
-  for (const stageCache of caches) for (const quality of qualities) for (const temperature of temperatures)
-    for (let repeat = 0; repeat < config.repeats; repeat++) rows.push({ index: rows.length, quality, stageCache, temperature,
-      repeat: repeat + 1, group: `${stageCache}:${quality}:${temperature}:${temperature === 'cold' ? repeat : 0}` });
+  for (const quality of qualities) for (const temperature of temperatures)
+    for (let repeat = 0; repeat < config.repeats; repeat++) rows.push({ index: rows.length, quality, temperature,
+      repeat: repeat + 1, group: `${quality}:${temperature}:${temperature === 'cold' ? repeat : 0}` });
   return rows;
 }
 
@@ -93,9 +90,9 @@ export function leaveRawDiagnostic(runId: string) {
 }
 
 export function parseRawTrial(value: unknown, trial: RawTrial): RawTrialMetadata {
-  if (!exact(value, 'trial,measuredAt,contract,source,settingsFingerprint,frame,backend,width,height,payloadBytes,metrics,rssBytes,vramBytes')
+  if (!exact(value, 'trial,measuredAt,contract,source,settingsFingerprint,frame,backend,width,height,payloadBytes,metrics')
     || JSON.stringify(value.trial) !== JSON.stringify(trial) || typeof value.measuredAt !== 'string' || !Number.isFinite(Date.parse(value.measuredAt))
-    || !hash(value.settingsFingerprint) || value.rssBytes !== null || value.vramBytes !== null) return fail();
+    || !hash(value.settingsFingerprint)) return fail();
   const { contract, source, frame, backend, metrics } = value;
   if (!exact(contract, 'lightcraftVersion,engineCommit,previewContract,binarySha256') || contract.lightcraftVersion !== LIGHTCRAFT_ENGINE.version
     || contract.engineCommit !== LIGHTCRAFT_ENGINE.commit || contract.previewContract !== 1 || !hash(contract.binarySha256)
@@ -104,28 +101,11 @@ export function parseRawTrial(value: unknown, trial: RawTrial): RawTrialMetadata
     || !exact(frame, 'geometryId,nativeWidth,nativeHeight,aspect,fullWidth,fullHeight,window') || !hash(frame.geometryId)
     || !['nativeWidth', 'nativeHeight', 'fullWidth', 'fullHeight'].every(k => count(frame[k]) && (frame[k] as number) > 0 && (frame[k] as number) <= 2 ** 31 - 1)
     || typeof frame.aspect !== 'number' || !Number.isFinite(frame.aspect) || frame.aspect <= 0 || frame.window !== null
-    || !exact(backend, 'configured,execution,gpuAvailable,fallbackReported') || !['cpu', 'gpu'].includes(backend.configured as string)
-    || !['cpu', 'gpu', 'unconfirmed'].includes(backend.execution as string)
-    || typeof backend.gpuAvailable !== 'boolean' || typeof backend.fallbackReported !== 'boolean'
+    || !exact(backend, 'configured') || !['cpu', 'gpu'].includes(backend.configured as string)
     || !count(value.width) || !value.width || !count(value.height) || !value.height || Math.max(value.width, value.height) > 1024
     || value.width !== frame.fullWidth || value.height !== frame.fullHeight || !count(value.payloadBytes) || value.payloadBytes > 5 * 1024 ** 2
-    || !(exact(metrics, 'nativeMs,validationMs,pngSha256,stageCache') || exact(metrics, 'nativeMs,validationMs,pngSha256,stageCache,execution')) || !duration(metrics.nativeMs) || !duration(metrics.validationMs)
+    || !exact(metrics, 'nativeMs,validationMs,pngSha256') || !duration(metrics.nativeMs) || !duration(metrics.validationMs)
     || (trial.quality === 'full' ? !hash(metrics.pngSha256) : metrics.pngSha256 !== null)) return fail();
-  if ('execution' in metrics) {
-    const e = metrics.execution;
-    if (!exact(e, 'outcome,backend,reason') || !(e.outcome === 'gpu_success' && e.backend === 'gpu' && e.reason === 'none'
-      || e.outcome === 'cpu_fallback' && e.backend === 'cpu' && e.reason === 'gpu_failed'
-      || e.outcome === 'cpu_not_tried' && e.backend === 'cpu'
-        && ['cpu_requested', 'shutdown', 'gpu_disabled', 'unsupported', 'gpu_unavailable'].includes(e.reason as string))
-      || backend.execution !== e.backend || backend.fallbackReported !== (e.outcome === 'cpu_fallback')) return fail();
-  } else if (backend.execution === 'gpu' || backend.execution === 'cpu' && backend.configured !== 'cpu') return fail();
-  const cache = metrics.stageCache;
-  if (!exact(cache, 'mode,applied,reason,cpuBytes,gpuBytes,retainedBytes,budgetBytes') || cache.mode !== trial.stageCache
-    || typeof cache.applied !== 'boolean' || !['none', 'budget'].includes(cache.reason as string)
-    || !['cpuBytes', 'gpuBytes', 'retainedBytes', 'budgetBytes'].every(k => count(cache[k]))
-    || (cache.retainedBytes as number) > (cache.budgetBytes as number) || (cache.budgetBytes as number) > 1024 ** 3
-    || cache.mode === 'off' && (cache.applied || cache.retainedBytes !== 0 || cache.budgetBytes !== 0 || cache.reason !== 'none')
-    || cache.mode === 'on' && (cache.budgetBytes === 0 || cache.applied !== (cache.reason === 'none'))) return fail();
   return structuredClone(value) as unknown as RawTrialMetadata;
 }
 
@@ -156,46 +136,30 @@ export function statistics(values: number[]) {
 }
 function comparisonKey(row: RawTrialResult) {
   const m = row.metadata;
-  if (row.result !== 'success' || !m || m.backend.execution === 'unconfirmed' || m.backend.fallbackReported
-    || m.metrics.stageCache.mode === 'on' && !m.metrics.stageCache.applied) return null;
+  if (row.result !== 'success' || !m) return null;
   return JSON.stringify([m.source.identity, m.settingsFingerprint, m.frame, m.contract, m.backend,
     m.width, m.height, row.trial.temperature]);
 }
 export function rawComparisons(rows: RawTrialResult[]) {
-  const ratios: { comparison: 'draftFull' | 'cache'; temperature: string; fixed: string; ratio: number }[] = [];
-  const matches: { temperature: string; repeat: number; result: 'equal' | 'different' | 'unverified' }[] = [];
+  const ratios: { temperature: string; ratio: number }[] = [];
   for (const temperature of ['cold', 'warm']) {
-    const selected = rows.filter(r => r.trial.temperature === temperature && comparisonKey(r));
-    const ratio = (a: RawTrialResult[], b: RawTrialResult[], comparison: 'draftFull' | 'cache', fixed: string) => {
-      const keys = new Set([...a, ...b].map(comparisonKey));
-      if (!a.length || !b.length || keys.size !== 1) return;
-      const fast = statistics(a.map(r => r.metadata!.metrics.nativeMs)).median;
-      const slow = statistics(b.map(r => r.metadata!.metrics.nativeMs)).median;
-      if (fast !== null && slow !== null && fast > 0) ratios.push({ comparison, temperature, fixed, ratio: slow / fast });
-    };
-    for (const cache of ['off', 'on']) ratio(selected.filter(r => r.trial.stageCache === cache && r.trial.quality === 'draft'),
-      selected.filter(r => r.trial.stageCache === cache && r.trial.quality === 'full'), 'draftFull', cache);
-    for (const quality of ['draft', 'full']) ratio(selected.filter(r => r.trial.quality === quality && r.trial.stageCache === 'on'),
-      selected.filter(r => r.trial.quality === quality && r.trial.stageCache === 'off'), 'cache', quality);
-    const full = rows.filter(r => r.trial.temperature === temperature && r.trial.quality === 'full');
-    for (const repeat of new Set(full.map(r => r.trial.repeat))) {
-      const off = full.find(r => r.trial.repeat === repeat && r.trial.stageCache === 'off');
-      const on = full.find(r => r.trial.repeat === repeat && r.trial.stageCache === 'on');
-      const verified = off && on && comparisonKey(off) && comparisonKey(off) === comparisonKey(on);
-      matches.push({ temperature, repeat, result: verified
-        ? off.metadata!.metrics.pngSha256 === on.metadata!.metrics.pngSha256 ? 'equal' : 'different' : 'unverified' });
-    }
+    const selected = rows.filter(row => row.trial.temperature === temperature && comparisonKey(row));
+    if (new Set(selected.map(comparisonKey)).size !== 1) continue;
+    const median = (quality: RawTrial['quality']) => statistics(selected.filter(row => row.trial.quality === quality)
+      .map(row => row.metadata!.metrics.nativeMs)).median;
+    const draft = median('draft'), full = median('full');
+    if (draft !== null && full !== null && draft > 0) ratios.push({ temperature, ratio: full / draft });
   }
-  return { ratios, matches };
+  return ratios;
 }
 
 export function rawStatistics(rows: RawTrialResult[]) {
   const groups = new Map<string, { condition: string; rows: RawTrialResult[] }>();
   for (const row of rows) {
     const m = row.metadata;
-    const condition = `${row.trial.quality}/${row.trial.stageCache}/${row.trial.temperature}/${m?.metrics.stageCache.applied ?? 'unknown'}`;
+    const condition = `${row.trial.quality}/${row.trial.temperature}`;
     const key = JSON.stringify([condition, m?.source.identity, m?.settingsFingerprint, m?.frame, m?.backend,
-      m?.contract, m?.metrics.stageCache.budgetBytes, m?.width, m?.height]);
+      m?.contract, m?.width, m?.height]);
     const group = groups.get(key) ?? { condition, rows: [] };
     group.rows.push(row); groups.set(key, group);
   }
@@ -210,20 +174,18 @@ export function createRawDiagnosticReport(config: RawDiagnosticConfig, rows: Raw
   const plan = rawTrialPlan(config);
   if (new Set(rows.map(r => r.trial.index)).size !== rows.length || rows.some(r => JSON.stringify(r.trial) !== JSON.stringify(plan[r.trial.index])
     || !['success', 'failed', 'cancelled', 'unsupported'].includes(r.result) || r.result === 'success' && !r.metadata
-    || r.metadata && (r.metadata.backend.configured !== config.backend || r.trial.stageCache === 'on'
-      && r.metadata.metrics.stageCache.budgetBytes !== config.budgetBytes)
+    || r.metadata && r.metadata.backend.configured !== config.backend
     || [r.responseWaitMs, r.transferMs, r.decodeMs, r.totalMs].some(v => v !== null && !duration(v)))) fail();
   // Re-parse successful metadata and project every field: arbitrary caller/server extras cannot enter JSON.
-  const trials = rows.map(r => ({ trial: { index: r.trial.index, quality: r.trial.quality, stageCache: r.trial.stageCache,
+  const trials = rows.map(r => ({ trial: { index: r.trial.index, quality: r.trial.quality,
     temperature: r.trial.temperature, repeat: r.trial.repeat, group: r.trial.group }, result: r.result,
     metadata: r.metadata ? parseRawTrial(r.metadata, r.trial) : null,
     responseWaitMs: r.responseWaitMs, transferMs: r.transferMs, decodeMs: r.decodeMs, totalMs: r.totalMs,
     errorCode: r.errorCode && /^(raw|lightcraft)_[a-z_]{1,60}$/.test(r.errorCode) ? r.errorCode : null }));
   return { schemaVersion: 1, reportType: 'raw-preview', generatedAt: now.toISOString(), genzoroom: { ...BUILD_INFO },
-    conditions: { quality: config.quality, stageCache: config.stageCache, backend: config.backend, temperature: config.temperature,
-      repeats: config.repeats, budgetBytes: config.budgetBytes, maxSide: 1024 }, trials,
+    conditions: { quality: config.quality, backend: config.backend, temperature: config.temperature,
+      repeats: config.repeats, maxSide: 1024 }, trials,
     statistics: rawStatistics(trials), comparisons: rawComparisons(trials),
-    limitations: ['nativeIncludesMcpEncodeAndReadback', ...(trials.some(r => r.metadata?.backend.execution === 'unconfirmed') ? ['gpuExecutionUnconfirmed'] : []), 'coldMeansFreshNativeProcessNotOsDiskCache',
-      'warmMeansOneUnmeasuredNativeWarmupNotCacheHitProof', 'rssAndVramNotCollected', 'stageRetentionIsNotProcessMemory',
-      'importDefaultsOnlyNoSavedRecipe', 'totalIncludesGpuStatusQueriesAndFullHash', 'maxSide1024', 'windowsLocalOnly'] };
+    limitations: ['nativeIncludesMcpEncodeAndReadback', 'backendIsConfiguredOnly', 'coldMeansFreshNativeProcessNotOsDiskCache',
+      'warmMeansOneUnmeasuredNativeWarmup', 'importDefaultsOnlyNoSavedRecipe', 'totalIncludesFullHash', 'maxSide1024', 'windowsLocalOnly'] };
 }

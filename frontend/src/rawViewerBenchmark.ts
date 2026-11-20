@@ -7,7 +7,7 @@ export const RAW_VIEWER_OPERATIONS = ['open', 'wholeDraft', 'wholeFull', 'mutati
 export type RawViewerOperation = typeof RAW_VIEWER_OPERATIONS[number];
 export type RawViewerConfig = { assetId: string; scenario: 'viewer'; backend: 'cpu' | 'gpu'; repeats: number };
 export type RawViewerTrial = { index: number; operation: RawViewerOperation; repeat: number; warmup: boolean;
-  quality: 'draft' | 'full'; stageCache: 'off'; temperature: 'cold'; group: string };
+  quality: 'draft' | 'full'; temperature: 'cold'; group: string };
 export type RawRegionPlanTiming = { sourceKind: 'loaded' | 'fit' | 'file' | 'other';
   sourcePreparationMs: number; sourceAcquisitionMs: number; imageSelectionMs: number;
   plannerMs: number; geometryMs: number; sourceRetentionMs: number; otherMs: number };
@@ -15,7 +15,7 @@ export type RawViewerMetadata = {
   operation: RawViewerOperation; repeat: number; warmup: boolean; revision: number; viewGeneration: number;
   quality: 'draft' | 'full'; geometry: RawGeometry; bitmap: { width: number; height: number };
   region: { fullWidth: number; fullHeight: number; window: { x: number; y: number; w: number; h: number }; limited: boolean } | null;
-  wholeRequestedSide: 1024; stageCache: { mode: 'off'; applied: false }; payloadBytes: number;
+  wholeRequestedSide: 1024; payloadBytes: number;
   timing: { backendOperationMs: number; openMs: number | null; nativeMs: number | null; validationMs: number | null;
     regionPlan?: RawRegionPlanTiming };
   engine: { version: string; commit: string; binarySha256: string; previewContract: 1; regionContract: 1;
@@ -36,20 +36,19 @@ export function rawViewerPlan(repeats: number): RawViewerTrial[] {
   if (!Number.isInteger(repeats) || repeats < 1 || repeats > 3) return fail();
   return Array.from({ length: repeats + 1 }, (_, repeat) => RAW_VIEWER_OPERATIONS.map(operation => ({
     index: 0, operation, repeat, warmup: repeat === 0, quality: (['wholeDraft', 'mutationDraft'].includes(operation) ? 'draft' : 'full') as 'draft' | 'full',
-    stageCache: 'off' as const, temperature: 'cold' as const, group: `viewer:${repeat}` }))).flat().map((trial, index) => ({ ...trial, index }));
+    temperature: 'cold' as const, group: `viewer:${repeat}` }))).flat().map((trial, index) => ({ ...trial, index }));
 }
 
 export function parseRawViewerMetadata(v: unknown, trial: RawViewerTrial): RawViewerMetadata {
-  if (!exact(v, 'operation,repeat,warmup,revision,viewGeneration,quality,geometry,bitmap,region,wholeRequestedSide,stageCache,timing,payloadBytes,engine')
+  if (!exact(v, 'operation,repeat,warmup,revision,viewGeneration,quality,geometry,bitmap,region,wholeRequestedSide,timing,payloadBytes,engine')
     || v.operation !== trial.operation || v.repeat !== trial.repeat || v.warmup !== trial.warmup || v.quality !== trial.quality
     || !integer(v.revision) || v.viewGeneration !== trial.index + 1 || v.wholeRequestedSide !== 1024
     || !(trial.operation === 'regionPlan' ? v.payloadBytes === 0 : positive(v.payloadBytes)) || Number(v.payloadBytes) > 17 * 1024 ** 2) return fail();
-  const { geometry: g, bitmap: b, region: r, engine: e, timing: t, stageCache: c } = v;
+  const { geometry: g, bitmap: b, region: r, engine: e, timing: t } = v;
   if (!exact(g, 'geometryId,nativeWidth,nativeHeight,aspect,fullWidth,fullHeight,window') || !hash(g.geometryId)
     || !['nativeWidth', 'nativeHeight', 'fullWidth', 'fullHeight'].every(k => positive(g[k]))
     || typeof g.aspect !== 'number' || !Number.isFinite(g.aspect) || g.aspect <= 0 || g.window !== null
     || !exact(b, 'width,height') || !positive(b.width) || !positive(b.height) || Math.max(b.width, b.height) > 2048
-    || !exact(c, 'mode,applied') || c.mode !== 'off' || c.applied !== false
     || !exact(t, `backendOperationMs,openMs,nativeMs,validationMs${t && typeof t === 'object' && 'regionPlan' in t ? ',regionPlan' : ''}`) || !duration(t.backendOperationMs)
     || !['openMs', 'nativeMs', 'validationMs'].every(k => t[k] === null || duration(t[k]))
     || !exact(e, 'version,commit,binarySha256,previewContract,regionContract,geometryDescriptor,gpuBackend,gpuAdapter')
@@ -130,7 +129,7 @@ export function createRawViewerReport(rows: RawViewerRow[], status: string, back
   return { status: ['idle', 'running', 'complete', 'failed', 'cancelled', 'cleanup_failed'].includes(status) ? status : 'failed',
     failure: failure && RAW_VIEWER_OPERATIONS.includes(failure.operation) && Number.isInteger(failure.repeat) && failure.repeat >= 0 && failure.repeat <= repeats
       ? { operation: failure.operation, repeat: failure.repeat, code: /^(raw|lightcraft)_[a-z_]{1,60}$/.test(failure.code) ? failure.code : 'raw_diagnostic_failed' } : null,
-    conditions: { backend, repeats, warmups: 1, wholeRequestedSide: 1024, regionWindow: { width: 768, height: 576 }, stageCache: 'off' },
+    conditions: { backend, repeats, warmups: 1, wholeRequestedSide: 1024, regionWindow: { width: 768, height: 576 } },
     trials, statistics: rawViewerStatistics(trials), limitations: ['noPerformanceVerdict', 'diagnosticSequenceNotProductionSchedulerTiming',
       'adoptMeansReactLayoutCommitNotScreenPresentation', 'nativeIncludesMcpEncodeAndReadback', 'regionNativeIsEngineReported',
       'regionValidationNotSeparatelyCollected', 'responseWaitIncludesBackendAndTransport', 'openExcludesProcessStartupAndSourceDownload',

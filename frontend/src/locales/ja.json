@@ -978,21 +978,20 @@
   "rawDiagnostics": {
     "title": "RAW Preview測定", "description": "Windows LocalHost専用です。接続先ImmichにあるRAW AssetのUUIDを指定してください。ローカルパスは入力できず、Galleryの選択状態も使用しません。",
     "isolation": "独立した読取専用LightCraftプロセスとimport既定値で測定します。通常のRAW workspaceを先に閉じてください。診断の資源回収が終わるまでRAW編集は開始できません。Recipe・History・Immichは変更しません。",
-    "conditions": "固定する測定条件", "assetId": "Immich RAW Asset UUID", "quality": "品質", "stageCache": "StageCache / 実適用", "backend": "Backend / 実行経路", "temperature": "Cold / Warm",
-    "repeats": "条件ごとの測定回数（1〜5）", "budget": "StageCache予算（MiB、1〜1024）",
-    "coldWarm": "Cold：各試行でnativeプロセスを新規作成してimportします。OSのディスクcacheは消去しません。Warm：同じ品質・cache・サイズで事前に1回描画した後、同じプロセスで反復します。Warmはcache hitの証明ではありません。",
-    "limits": "出力は1024px・5MiBの安全枠を維持します。最大40試行、開始から10分の受付上限、2分のidle leaseがあります。準備処理は測定用render要求と分けます。最終的な解像度policyは実装しません。",
+    "conditions": "固定する測定条件", "assetId": "Immich RAW Asset UUID", "quality": "品質", "backend": "設定したBackend", "temperature": "Cold / Warm",
+    "repeats": "条件ごとの測定回数（1〜5）",
+    "coldWarm": "Coldは試行ごとにNativeプロセスを起動して素材を読み込みます。Warmは同じ品質とサイズで一度事前描画し、同じプロセスで測定を繰り返します。",
+    "limits": "最大20試行で、画像は1024px・5MiBまでです。開始から10分の受付上限と2分のアイドル期限があります。準備処理は測定用の描画要求から分かれています。",
     "start": "測定開始", "stop": "native応答を回収して停止", "retryCleanup": "資源回収を再試行", "export": "RAW専用JSONを出力", "exportFailed": "RAW診断JSONを出力できませんでした。",
-    "error": "RAW診断を完了できませんでした：", "notCollected": "未取得", "unverified": "未検証・一致する測定結果が不足", "fallback": "fallbackを検出",
-    "trials": "個別測定値", "native": "Native", "validation": "PNG検証", "transfer": "転送 / body read", "decode": "Decode", "total": "合計", "image": "PNG", "memory": "Stage保持 / メモリ", "result": "結果",
-    "statistics": "時間統計", "medianMinMax": "中央値 / 最小 / 最大", "draftFull": "Full / Draftのnative時間比", "cache": "OFF / ONのnative時間比",
-    "ratioNotes": "速度比はnative時間の中央値を用います。素材・settings・geometry・binary・Backend・サイズ・Cold/Warmが一致し、ONが実適用された組だけを比較します。経路未確認やfallbackは比較可能と扱いません。",
-    "fullMatch": "Full OFF / ONのPNG SHA-256一致", "timingNotes": "時間の単位はmsです。Nativeは描画・encode・MCP・settings readbackを含み、現像式だけの時間ではありません。転送はブラウザのbody read時間で、純粋なネットワーク遅延ではありません。合計はrender HTTP要求からdecode完了までで、GPU状態照会・settings事前確認・Full hashを含み、準備・import・事前描画を除きます。Stage保持bytesはRSS／VRAMではなく、これらは未取得です。",
-    "gpuNotes": "GPUの利用可能状態だけでは、この描画の実行経路を証明できません。現行native契約にjob単位のGPU／fallback証跡がないため、GPUが利用可能でも経路未確認とします。実RAWの速度・画質・メモリ評価はWindows実測で確認してください。",
-    "values": { "draft": "Draft", "full": "Full", "both": "両方比較", "off": "OFF", "on": "ON", "cpu": "CPU", "gpu": "GPU", "cold": "Cold", "warm": "Warm", "unconfirmed": "実行経路未確認" },
+    "error": "RAW診断を完了できませんでした：", "notCollected": "未取得", "unverified": "未検証・一致する測定結果が不足",
+    "trials": "個別測定値", "native": "Native", "validation": "PNG検証", "transfer": "転送 / body read", "decode": "Decode", "total": "合計", "image": "PNG", "result": "結果",
+    "statistics": "時間統計", "medianMinMax": "中央値 / 最小 / 最大", "draftFull": "Full / Draftのnative時間比",
+    "ratioNotes": "Full / Draftの比率は、素材・設定・ジオメトリ・バイナリ・設定したBackend・出力サイズ・Cold/Warm条件が一致するNative要求時間の中央値から求めます。",
+    "timingNotes": "Native時間には描画、エンコード、MCP通信、設定の読み戻しが含まれます。転送はブラウザでの応答本文の読み取り時間です。合計は描画のHTTP要求からデコード完了までで、設定の事前確認とFull画像のハッシュ計算を含みます。",
+    "gpuNotes": "Backend欄には要求時の設定を表示します。計測時間にはNative要求全体の処理が含まれます。",
+    "values": { "draft": "Draft", "full": "Full", "both": "両方比較", "cpu": "CPU", "gpu": "GPU", "cold": "Cold", "warm": "Warm" },
     "phases": { "idle": "未実行", "preparing": "独立Sessionを準備中…", "running": "測定中…", "stopping": "native処理と資源を回収中…", "complete": "完了", "failed": "失敗", "cancelled": "中断", "cleanup_failed": "資源回収未完了・新規測定を禁止" },
-    "results": { "success": "成功", "failed": "失敗", "cancelled": "中断", "unsupported": "非対応" },
-    "matches": { "equal": "一致", "different": "不一致", "unverified": "未検証" }
+    "results": { "success": "成功", "failed": "失敗", "cancelled": "中断", "unsupported": "非対応" }
   },
   "rawRegionDiagnostics": {
     "title": "RAW Region Preview",
@@ -1383,7 +1382,7 @@
   "rawViewerBenchmark": {
     "title": "RAW Viewerベンチマーク",
     "description": "WebGPU・Real JPEGと並ぶRAW Preview経路の診断です。測定値による合否判定は行いません。",
-    "conditions": "代表RAW 1件、ウォームアップ1シーケンス＋測定3シーケンス。Whole: 1024px、Region: Native 100%・768 × 576の表示領域、Pan 1回、StageCache OFF。",
+    "conditions": "代表RAW 1件、ウォームアップ1シーケンス＋測定3シーケンス。Whole: 1024px、Region: Native 100%・768 × 576の表示領域、Pan 1回。",
     "start": "RAW Viewerベンチマークを実行",
     "runs": "個別実行結果（ミリ秒）",
     "notes": "製品のNative adapterとImageViewerを使う診断シーケンスです。製品schedulerの時間は測定しません。adoptはReactのlayout commitであり画面描画完了ではありません。Region nativeはengine報告値、Whole nativeはMCP readbackを含みます。openはprocess起動・source downloadを除きます。ウォームアップは別documentで実行します。性能閾値や長時間memory追跡はありません。"

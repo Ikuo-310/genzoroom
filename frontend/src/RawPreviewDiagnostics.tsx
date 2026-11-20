@@ -10,8 +10,8 @@ import { createRawDiagnosticReport, fetchRawTrial, leaveRawDiagnostic, prepareRa
 export const rawDiagnosticDependencies = { start: startRawDiagnostic, prepare: prepareRawTrial, render: fetchRawTrial,
   stop: stopRawDiagnostic, closed: rawDiagnosticClosed, leave: leaveRawDiagnostic };
 type Dependencies = typeof rawDiagnosticDependencies;
-const defaults: RawDiagnosticConfig = { assetId: '', quality: 'both', stageCache: 'both', backend: 'cpu',
-  temperature: 'both', repeats: 3, budgetBytes: 512 * 1024 ** 2 };
+const defaults: RawDiagnosticConfig = { assetId: '', quality: 'both', backend: 'cpu',
+  temperature: 'both', repeats: 3 };
 
 async function decode(blob: Blob, width: number, height: number, signal: AbortSignal) {
   const url = URL.createObjectURL(blob), image = new Image();
@@ -95,8 +95,7 @@ export function RawPreviewDiagnostics({ active = true, dependencies = rawDiagnos
           if (mounted.current) setPhase('running');
           const result = await dependencies.render(run.id, trial, run.controller.signal);
           run.controller.signal.throwIfAborted();
-          if (result.metadata.backend.configured !== fixed.backend || trial.stageCache === 'on'
-            && result.metadata.metrics.stageCache.budgetBytes !== fixed.budgetBytes) throw new RawDiagnosticError('raw_invalid_response');
+          if (result.metadata.backend.configured !== fixed.backend) throw new RawDiagnosticError('raw_invalid_response');
           const decodeStarted = performance.now();
           await decode(result.blob, result.metadata.width, result.metadata.height, run.controller.signal);
           const row: RawTrialResult = { trial, result: run.stopped ? 'cancelled' : 'success', metadata: result.metadata,
@@ -135,7 +134,7 @@ export function RawPreviewDiagnostics({ active = true, dependencies = rawDiagnos
   const ms = (n: number | null | undefined) => n == null ? t('rawDiagnostics.notCollected') : `${n.toFixed(2)} ms`;
   const comparisons = rawComparisons(rows), summaries = rawStatistics(rows);
   const update = <K extends keyof RawDiagnosticConfig>(key: K, value: RawDiagnosticConfig[K]) => setConfig(previous => ({ ...previous, [key]: value }));
-  const select = (key: 'quality' | 'stageCache' | 'backend' | 'temperature', values: string[]) => <label>
+  const select = (key: 'quality' | 'backend' | 'temperature', values: string[]) => <label>
     {t(`rawDiagnostics.${key}`)} <select value={config[key]} onChange={event => update(key, event.target.value as never)}>
       {values.map(value => <option key={value} value={value}>{t(`rawDiagnostics.values.${value}`)}</option>)}
     </select></label>;
@@ -146,18 +145,15 @@ export function RawPreviewDiagnostics({ active = true, dependencies = rawDiagnos
       <legend>{t('rawDiagnostics.conditions')}</legend>
       <label>{t('rawDiagnostics.assetId')} <input value={config.assetId} spellCheck={false} maxLength={36}
         placeholder="00000000-0000-0000-0000-000000000000" onChange={event => update('assetId', event.target.value.trim())} /></label>
-      {select('quality', ['draft', 'full', 'both'])}{select('stageCache', ['off', 'on', 'both'])}
+      {select('quality', ['draft', 'full', 'both'])}
       {select('backend', ['cpu', 'gpu'])}{select('temperature', ['cold', 'warm', 'both'])}
       <label>{t('rawDiagnostics.repeats')} <input type="number" min={1} max={5} step={1} value={config.repeats}
         onChange={event => update('repeats', Number(event.target.value))} /></label>
-      <label>{t('rawDiagnostics.budget')} <input type="number" min={1} max={1024} step={1} value={config.budgetBytes / 1024 ** 2}
-        onChange={event => update('budgetBytes', Number(event.target.value) * 1024 ** 2)} /></label>
     </fieldset>
     <p>{t('rawDiagnostics.coldWarm')}</p><p>{t('rawDiagnostics.limits')}</p>
     <div className="developer-actions">
       <button type="button" disabled={busy || !!owner.current || !active || !/^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(config.assetId)
-        || !Number.isInteger(config.repeats) || config.repeats < 1 || config.repeats > 5
-        || !Number.isSafeInteger(config.budgetBytes) || config.budgetBytes < 1 || config.budgetBytes > 1024 ** 3}
+        || !Number.isInteger(config.repeats) || config.repeats < 1 || config.repeats > 5}
         onClick={() => void start()}>{t('rawDiagnostics.start')}</button>
       <button type="button" disabled={!busy || phase === 'stopping'} onClick={stop}>{t('rawDiagnostics.stop')}</button>
       {phase === 'cleanup_failed' && <button type="button" onClick={() => void retryCleanup()}>{t('rawDiagnostics.retryCleanup')}</button>}
@@ -174,18 +170,15 @@ export function RawPreviewDiagnostics({ active = true, dependencies = rawDiagnos
     {exportFailed && <p role="alert">{t('rawDiagnostics.exportFailed')}</p>}
     <div className="raw-diagnostic-table"><table>
       <caption>{t('rawDiagnostics.trials')}</caption>
-      <thead><tr>{['quality', 'stageCache', 'temperature', 'backend', 'native', 'validation', 'transfer', 'decode', 'total', 'image', 'memory', 'result']
+      <thead><tr>{['quality', 'temperature', 'backend', 'native', 'validation', 'transfer', 'decode', 'total', 'image', 'result']
         .map(key => <th key={key}>{t(`rawDiagnostics.${key}`)}</th>)}</tr></thead>
       <tbody>{rows.map(row => <tr key={row.trial.index}>
         <td>{t(`rawDiagnostics.values.${row.trial.quality}`)}</td>
-        <td>{t(`rawDiagnostics.values.${row.trial.stageCache}`)} / {row.metadata ? String(row.metadata.metrics.stageCache.applied) : t('rawDiagnostics.notCollected')}</td>
         <td>{t(`rawDiagnostics.values.${row.trial.temperature}`)} #{row.trial.repeat}</td>
-        <td>{conditions?.backend.toUpperCase()} / {t(`rawDiagnostics.values.${row.metadata?.backend.execution ?? 'unconfirmed'}`)}
-          {row.metadata?.backend.fallbackReported && ` (${t('rawDiagnostics.fallback')})`}</td>
+        <td>{conditions?.backend.toUpperCase()}</td>
         <td>{ms(row.metadata?.metrics.nativeMs)}</td><td>{ms(row.metadata?.metrics.validationMs)}</td><td>{ms(row.transferMs)}</td>
         <td>{ms(row.decodeMs)}</td><td>{ms(row.totalMs)}</td>
         <td>{row.metadata ? `${row.metadata.width} × ${row.metadata.height} / ${row.metadata.payloadBytes} B` : t('rawDiagnostics.notCollected')}</td>
-        <td>{row.metadata ? `${row.metadata.metrics.stageCache.retainedBytes} B` : t('rawDiagnostics.notCollected')}<br />RSS / VRAM: {t('rawDiagnostics.notCollected')}</td>
         <td>{t(`rawDiagnostics.results.${row.result}`)}{row.errorCode && <code>{row.errorCode}</code>}</td>
       </tr>)}</tbody>
     </table></div>
@@ -197,11 +190,8 @@ export function RawPreviewDiagnostics({ active = true, dependencies = rawDiagnos
           {ms(group[key].median)} / {ms(group[key].min)} / {ms(group[key].max)} (n={group[key].count})</td>)}</tr>)}</tbody>
     </table></div>
     <p>{t('rawDiagnostics.ratioNotes')}</p>
-    {!comparisons.ratios.length && <p>{t('rawDiagnostics.unverified')}</p>}
-    {comparisons.ratios.map(r => <p key={`${r.comparison}:${r.temperature}:${r.fixed}`}>{t(`rawDiagnostics.${r.comparison}`)} / {r.temperature} / {r.fixed}: {r.ratio.toFixed(3)}×</p>)}
-    <h3>{t('rawDiagnostics.fullMatch')}</h3>
-    {!comparisons.matches.length && <p>{t('rawDiagnostics.unverified')}</p>}
-    {comparisons.matches.map(m => <p key={`${m.temperature}:${m.repeat}`}>{m.temperature} #{m.repeat}: {t(`rawDiagnostics.matches.${m.result}`)}</p>)}
+    {!comparisons.length && <p>{t('rawDiagnostics.unverified')}</p>}
+    {comparisons.map(r => <p key={r.temperature}>{t('rawDiagnostics.draftFull')} / {r.temperature}: {r.ratio.toFixed(3)}×</p>)}
     <p>{t('rawDiagnostics.timingNotes')}</p><p>{t('rawDiagnostics.gpuNotes')}</p>
     <RawViewerBenchmark active={active && !busy && !owner.current} onReport={onViewerReport} />
   </section>;

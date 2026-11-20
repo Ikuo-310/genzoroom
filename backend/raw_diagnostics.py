@@ -34,26 +34,23 @@ def trial_plan(config):
             return {**config, 'assetId': str(UUID(config['assetId']))}, sequence_plan(config['repeats'])
         except (ValueError, TypeError, AttributeError):
             raise LightCraftError('raw_invalid_request') from None
-    if set(config) != {"assetId", "quality", "stageCache", "backend", "temperature", "repeats", "budgetBytes"}:
+    if set(config) != {"assetId", "quality", "backend", "temperature", "repeats"}:
         raise LightCraftError("raw_invalid_request")
     try:
         asset = str(UUID(config["assetId"]))
     except (ValueError, TypeError, AttributeError):
         raise LightCraftError("raw_invalid_request") from None
-    if config["quality"] not in ("draft", "full", "both") or config["stageCache"] not in ("off", "on", "both") or \
-            config["backend"] not in ("cpu", "gpu") or config["temperature"] not in ("cold", "warm", "both") or \
-            type(config["repeats"]) is not int or not 1 <= config["repeats"] <= MAX_REPEATS or \
-            type(config["budgetBytes"]) is not int or not 1 <= config["budgetBytes"] <= 1024**3:
+    if config["quality"] not in ("draft", "full", "both") or config["backend"] not in ("cpu", "gpu") or \
+            config["temperature"] not in ("cold", "warm", "both") or \
+            type(config["repeats"]) is not int or not 1 <= config["repeats"] <= MAX_REPEATS:
         raise LightCraftError("raw_invalid_request")
     config = {**config, "assetId": asset}
     rows = []
-    for cache in ("off", "on") if config["stageCache"] == "both" else (config["stageCache"],):
-        for quality in ("draft", "full") if config["quality"] == "both" else (config["quality"],):
-            for temperature in ("cold", "warm") if config["temperature"] == "both" else (config["temperature"],):
-                for repeat in range(config["repeats"]):
-                    rows.append({"index": len(rows), "quality": quality, "stageCache": cache,
-                        "temperature": temperature, "repeat": repeat + 1,
-                        "group": f"{cache}:{quality}:{temperature}:{repeat if temperature == 'cold' else 0}"})
+    for quality in ("draft", "full") if config["quality"] == "both" else (config["quality"],):
+        for temperature in ("cold", "warm") if config["temperature"] == "both" else (config["temperature"],):
+            for repeat in range(config["repeats"]):
+                rows.append({"index": len(rows), "quality": quality, "temperature": temperature, "repeat": repeat + 1,
+                    "group": f"{quality}:{temperature}:{repeat if temperature == 'cold' else 0}"})
     return config, rows
 
 
@@ -208,8 +205,7 @@ class RawDiagnosticsApi:
                 run["source"] = await self.cache.download(UUID(run["config"]["assetId"]))
             self._check_deadline()
             self.manager = self.editing.manager.diagnostic_manager("off" if run["config"]["backend"] == "cpu" else "dx12")
-            self.raw = LightCraftRawSession(self.manager, stage_cache=trial["stageCache"],
-                stage_cache_budget_bytes=run["config"]["budgetBytes"] if trial["stageCache"] == "on" else None, diagnostics=True)
+            self.raw = LightCraftRawSession(self.manager, diagnostics=True)
             await self.manager.start()
             async with asyncio.timeout(35):
                 while self.manager.status().state in ("starting", "initializing"):
@@ -260,25 +256,15 @@ class RawDiagnosticsApi:
         trial = run["plan"][run["next"]]
         if run['config'].get('scenario') == 'viewer':
             return await self._render_sequence(trial)
-        gpu_before = await self.manager.get_gpu_info()
-        self._check_deadline()
         frame = await self._frame(trial)
-        gpu_after = await self.manager.get_gpu_info()
         self._check_deadline()
-        cpu = run["config"]["backend"] == "cpu" and not gpu_before.enabled and not gpu_after.enabled
         metadata = {"trial": trial, "measuredAt": datetime.now(timezone.utc).isoformat(),
             "contract": {"lightcraftVersion": self.manager.status().version, "engineCommit": ENGINE_COMMIT,
                 "previewContract": 1, "binarySha256": run["binary"]},
             "source": run["sourceMetadata"], "settingsFingerprint": run["settings"], "frame": frame.frame,
-            "backend": {"configured": run["config"]["backend"], "execution": "cpu" if cpu else "unconfirmed",
-                "gpuAvailable": gpu_after.available, "fallbackReported": bool(gpu_before.last_fallback or gpu_after.last_fallback)},
+            "backend": {"configured": run["config"]["backend"]},
             "width": frame.width, "height": frame.height, "payloadBytes": len(frame.data),
-            "metrics": frame.metrics, "rssBytes": None, "vramBytes": None}
-        execution = frame.metrics.get("execution") if frame.metrics else None
-        if execution:
-            # A process-wide lastFallback can describe an earlier render; prefer this result's evidence.
-            metadata["backend"]["execution"] = execution["backend"]
-            metadata["backend"]["fallbackReported"] = execution["outcome"] == "cpu_fallback"
+            "metrics": frame.metrics}
         encoded = json.dumps(metadata, separators=(",", ":"), allow_nan=False)
         if len(encoded) > 16 * 1024:
             raise LightCraftError("raw_diagnostic_failed")

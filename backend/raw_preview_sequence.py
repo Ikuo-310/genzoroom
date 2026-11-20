@@ -13,7 +13,6 @@ OPERATIONS = ('open', 'wholeDraft', 'wholeFull', 'mutationDraft', 'endFull',
 def sequence_plan(repeats):
     return [{"index": index, "operation": operation, "repeat": repeat, "warmup": repeat == 0,
              "quality": "draft" if operation in ('wholeDraft', 'mutationDraft') else "full",
-             "stageCache": "off",
              "temperature": "cold", "group": f"viewer:{repeat}"}
             for index, (repeat, operation) in enumerate(
                 (r, op) for r in range(repeats + 1) for op in OPERATIONS)]

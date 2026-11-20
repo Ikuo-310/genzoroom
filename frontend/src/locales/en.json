@@ -988,21 +988,20 @@
   "rawDiagnostics": {
     "title": "RAW Preview measurements", "description": "Windows LocalHost only. Enter the UUID of a RAW Asset in the connected Immich library; local paths are not accepted. The Gallery selection is not used.",
     "isolation": "Uses a separate read-only LightCraft process and import defaults. Close the normal RAW workspace first. RAW editing is unavailable until diagnostic cleanup finishes. Recipe, History and Immich are not modified.",
-    "conditions": "Fixed measurement conditions", "assetId": "Immich RAW Asset UUID", "quality": "Quality", "stageCache": "StageCache / applied", "backend": "Backend / execution", "temperature": "Cold / Warm",
-    "repeats": "Samples per condition (1–5)", "budget": "StageCache budget (MiB, 1–1024)",
-    "coldWarm": "Cold: a fresh native process and import for every sample; OS disk caches are not flushed. Warm: one unmeasured render at the same quality/cache/size, then repeated samples in that process. Warm does not prove a cache hit.",
-    "limits": "Output remains within 1024 px / 5 MiB. Up to 40 samples, a 10-minute run admission limit and a 2-minute idle lease. Setup is separate from the measured render request. This does not implement the final resolution policy.",
+    "conditions": "Fixed measurement conditions", "assetId": "Immich RAW Asset UUID", "quality": "Quality", "backend": "Configured backend", "temperature": "Cold / Warm",
+    "repeats": "Samples per condition (1–5)",
+    "coldWarm": "Cold starts a fresh Native process and imports the source for each sample. Warm repeats samples in the same process after one unmeasured render at the same quality and size.",
+    "limits": "Up to 20 samples at 1024 px and 5 MiB per image. Runs have a 10-minute admission limit and a 2-minute idle lease. Preparation is separate from the measured render request.",
     "start": "Start measurements", "stop": "Stop after native reply", "retryCleanup": "Retry cleanup", "export": "Export RAW-only JSON", "exportFailed": "Could not export RAW diagnostics JSON.",
-    "error": "RAW diagnostic operation could not finish:", "notCollected": "Not collected", "unverified": "Unverified / insufficient matching results", "fallback": "Fallback reported",
-    "trials": "Individual samples", "native": "Native", "validation": "Validation", "transfer": "Transfer / body read", "decode": "Decode", "total": "Total", "image": "PNG", "memory": "Stage retention / memory", "result": "Result",
-    "statistics": "Timing statistics", "medianMinMax": "Median / min / max", "draftFull": "Full / Draft native time", "cache": "OFF / ON native time",
-    "ratioNotes": "Ratios use native-time medians only, with matching source/settings/geometry/binary/backend/size and temperature. ON must actually apply. Unconfirmed execution or fallback is not treated as comparable.",
-    "fullMatch": "Full OFF / ON PNG SHA-256", "timingNotes": "Times are milliseconds. Native includes rendering, encoding, MCP and settings readback; it is not pure algorithm time. Transfer is browser body-read time, not isolated network latency. Total spans the render HTTP request through decode, including GPU status queries, settings precheck and Full hashing, excluding prepare/import/warmup. Stage retention is not process RSS or VRAM; those are not collected.",
-    "gpuNotes": "GPU availability is not proof of this render's execution path. The current native contract has no per-job GPU/fallback receipt, so GPU execution remains unconfirmed even when available. Real RAW speed, image quality and memory behavior require Windows measurement.",
-    "values": { "draft": "Draft", "full": "Full", "both": "Compare both", "off": "OFF", "on": "ON", "cpu": "CPU", "gpu": "GPU", "cold": "Cold", "warm": "Warm", "unconfirmed": "Execution unconfirmed" },
+    "error": "RAW diagnostic operation could not finish:", "notCollected": "Not collected", "unverified": "Unverified / insufficient matching results",
+    "trials": "Individual samples", "native": "Native", "validation": "Validation", "transfer": "Transfer / body read", "decode": "Decode", "total": "Total", "image": "PNG", "result": "Result",
+    "statistics": "Timing statistics", "medianMinMax": "Median / min / max", "draftFull": "Full / Draft native time",
+    "ratioNotes": "Full / Draft ratios use median Native request times for matching source, settings, geometry, binary, configured backend, output size and Cold/Warm condition.",
+    "timingNotes": "Native time includes rendering, encoding, MCP and settings readback. Transfer measures the browser body read. Total covers the render HTTP request through decode, including settings precheck and Full hashing.",
+    "gpuNotes": "The backend label shows the requested configuration. Timings cover the full Native request.",
+    "values": { "draft": "Draft", "full": "Full", "both": "Compare both", "cpu": "CPU", "gpu": "GPU", "cold": "Cold", "warm": "Warm" },
     "phases": { "idle": "Not started", "preparing": "Preparing isolated session…", "running": "Measuring…", "stopping": "Collecting native work and releasing resources…", "complete": "Complete", "failed": "Failed", "cancelled": "Stopped", "cleanup_failed": "Cleanup incomplete; a new run is blocked" },
-    "results": { "success": "Success", "failed": "Failed", "cancelled": "Stopped", "unsupported": "Unsupported" },
-    "matches": { "equal": "Equal", "different": "Different", "unverified": "Unverified" }
+    "results": { "success": "Success", "failed": "Failed", "cancelled": "Stopped", "unsupported": "Unsupported" }
   },
   "rawRegionDiagnostics": {
     "title": "RAW Region Preview",
@@ -1393,7 +1392,7 @@
   "rawViewerBenchmark": {
     "title": "RAW Viewer benchmark",
     "description": "Observe the RAW Preview path alongside WebGPU and Real JPEG diagnostics. Timings do not determine correctness.",
-    "conditions": "One RAW; one warm-up sequence plus three measured sequences. Whole: 1024px; Region viewport: 768 × 576 at Native 100%; one Pan; StageCache OFF.",
+    "conditions": "One RAW, one warm-up sequence and three measured sequences. Whole uses 1024 px. Region uses a 768 × 576 viewport at Native 100% with one Pan.",
     "start": "Run RAW Viewer benchmark",
     "runs": "Individual runs (milliseconds)",
     "notes": "Diagnostic sequence using the production native adapter and ImageViewer; it does not time the production scheduler. Adopt is the React layout commit, not screen presentation. Region native time is engine-reported; Whole native time includes MCP readback. Open excludes process startup and source download. Warm-up uses a separate document. No performance thresholds or memory tracking."

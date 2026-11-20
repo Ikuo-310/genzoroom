@@ -164,7 +164,7 @@ export function RawViewerBenchmark({ active, onReport, dependencies = rawViewerD
       native: `${metadata.geometry.nativeWidth} × ${metadata.geometry.nativeHeight}`, wholeRequestedSide: metadata.wholeRequestedSide,
       wholeActual: `${metadata.geometry.fullWidth} × ${metadata.geometry.fullHeight}`,
       region: lastRegion ? `${lastRegion.bitmap.width} × ${lastRegion.bitmap.height}` : '—',
-      regionLimited: lastRegion?.region?.limited ?? '—', stageCache: metadata.stageCache.mode })
+      regionLimited: lastRegion?.region?.limited ?? '—' })
       .map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{String(value ?? '—')}</dd></div>)}</dl>}
     {surface && <div style={{ width: 768, maxWidth: '100%', height: 640, pointerEvents: 'none' }}><ImageViewer src={surface.base?.url ?? surface.url} documentKey={`raw-diagnostic-${surface.metadata.repeat}`} rawFrame={surface.metadata.geometry}
       keyboardBlocked

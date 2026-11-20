@@ -47,7 +47,7 @@ it('locks conditions during a run, measures/decode separately and releases the B
   await setAsset(); await act(async () => button('start').click());
   expect(deps.start).toHaveBeenCalledOnce(); expect(deps.stop).toHaveBeenCalledOnce();
   expect(revoke).toHaveBeenCalledWith('blob:diagnostic');
-  expect(host.textContent).toContain('Success'); expect(host.textContent).toContain('Not collected');
+  expect(host.textContent).toContain('Success');
   expect(host.textContent).toContain('10.00 ms'); expect(button('export').disabled).toBe(false);
 });
 it('Stop does not abort the sent request and rejects its late result for comparisons', async () => {
@@ -97,7 +97,7 @@ it('retains cleanup failure across tab changes and allows an explicit retry', as
 it('rejects a response from a different configured backend', async () => {
   const deps = dependencies();
   vi.mocked(deps.render).mockImplementation(async (_owner, trial) => ({ metadata: {
-    ...trialMetadata(trial), backend: { configured: 'gpu', execution: 'unconfirmed', gpuAvailable: true, fallbackReported: false } },
+    ...trialMetadata(trial), backend: { configured: 'gpu' } },
     blob: new Blob(['image']), responseWaitMs: 10, transferMs: 2, started: performance.now() }));
   await act(async () => root.render(<RawPreviewDiagnostics dependencies={deps} />)); await setAsset();
   await act(async () => button('start').click());

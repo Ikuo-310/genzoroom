@@ -18,44 +18,8 @@ from lightcraft_raw import LightCraftRawSession, RawTimeouts
 
 
 def config(**changes):
-    return {"assetId": str(uuid4()), "quality": "both", "stageCache": "both", "backend": "cpu",
-            "temperature": "both", "repeats": 2, "budgetBytes": 1024**3, **changes}
-
-
-@pytest.mark.parametrize("outcome,backend,reason", [
-    ("gpu_success", "gpu", "none"),
-    ("cpu_not_tried", "cpu", "gpu_unavailable"),
-    ("cpu_fallback", "cpu", "gpu_failed"),
-])
-def test_render_local_execution_reaches_a4_and_structured_logs(local, tmp_path, monkeypatch, outcome, backend, reason):
-    import lightcraft_raw
-    events = []
-    monkeypatch.setattr(lightcraft_raw, "lightcraft_log", lambda event, **context: events.append((event, context)))
-    execution = {"outcome": outcome, "backend": backend, "reason": reason}
-    async def run():
-        diag, editing, _, children, _ = await diagnostic_setup(tmp_path, local, monkeypatch)
-        try:
-            async with client(local) as http:
-                await authenticate(http, local)
-                started = (await http.post("/api/developer/raw-preview/start", json=config(
-                    backend="gpu", quality="full", stageCache="off", temperature="cold", repeats=1))).json()
-                body = {"runId": started["runId"], "index": 0}
-                assert (await http.post("/api/developer/raw-preview/prepare", json=body)).status_code == 200
-                children[-1].execution = execution
-                # A stale process-wide fallback must not override this render's successful result.
-                children[-1].gpu["lastFallback"] = "older failure"
-                response = await http.post("/api/developer/raw-preview/render", json=body)
-                assert response.status_code == 200, response.text
-                meta = json.loads(response.headers["x-raw-diagnostic"])
-                assert meta["metrics"]["execution"] == execution
-                assert meta["backend"]["execution"] == backend
-                assert meta["backend"]["fallbackReported"] == (outcome == "cpu_fallback")
-                assert any(e == "preview.measured" and c.get("execution") == execution for e, c in events)
-                assert any(e == "preview.gpuFallback" and c.get("level") == "warn" for e, c in events) == (outcome == "cpu_fallback")
-        finally:
-            await diag.close()
-            await editing.close()
-    asyncio.run(run())
+    return {"assetId": str(uuid4()), "quality": "both", "backend": "cpu",
+            "temperature": "both", "repeats": 2, **changes}
 
 
 async def diagnostic_setup(tmp_path, local, monkeypatch):
@@ -84,7 +48,7 @@ async def diagnostic_setup(tmp_path, local, monkeypatch):
     return local.raw_diagnostics, editing, manager, children, downloads
 
 
-def test_isolated_quality_cache_cold_warm_and_no_persistence(local, tmp_path, monkeypatch):
+def test_isolated_quality_cold_warm_and_no_persistence(local, tmp_path, monkeypatch):
     async def run():
         diag, editing, manager, children, downloads = await diagnostic_setup(tmp_path, local, monkeypatch)
         normal_generation = manager.status().generation
@@ -94,7 +58,7 @@ def test_isolated_quality_cache_cold_warm_and_no_persistence(local, tmp_path, mo
                 response = await http.post("/api/developer/raw-preview/start", json=config())
                 assert response.status_code == 200, response.text
                 run_id, plan = response.json()["runId"], response.json()["plan"]
-                assert len(plan) == 16
+                assert len(plan) == 8
                 assert (await http.post("/api/raw/workspaces", json={})).json()["code"] == "raw_busy"
                 for trial in plan:
                     body = {"runId": run_id, "index": trial["index"]}
@@ -103,10 +67,13 @@ def test_isolated_quality_cache_cold_warm_and_no_persistence(local, tmp_path, mo
                     response = await http.post("/api/developer/raw-preview/render", json=body)
                     assert response.status_code == 200, response.text
                     metadata = json.loads(response.headers["x-raw-diagnostic"])
-                    assert metadata["trial"] == trial and metadata["backend"]["execution"] == "cpu"
-                    assert metadata["metrics"]["stageCache"]["mode"] == trial["stageCache"]
+                    assert metadata["trial"] == trial and metadata["backend"] == {"configured": "cpu"}
+                    assert set(metadata) == {"trial", "measuredAt", "contract", "source", "settingsFingerprint",
+                        "frame", "backend", "width", "height", "payloadBytes", "metrics"}
+                    assert set(metadata["metrics"]) == {"nativeMs", "validationMs", "pngSha256"}
+                    assert response.headers["content-type"] == "image/png"
+                    assert metadata["payloadBytes"] == len(response.content)
                     assert metadata["metrics"]["nativeMs"] >= 0 and metadata["metrics"]["validationMs"] >= 0
-                    assert metadata["rssBytes"] is None and metadata["vramBytes"] is None
                     assert metadata["metrics"]["pngSha256"] is not None if trial["quality"] == "full" else metadata["metrics"]["pngSha256"] is None
                 await http.post("/api/developer/raw-preview/stop", json={"runId": run_id})
                 await until(lambda: diag.run is None)
@@ -115,8 +82,8 @@ def test_isolated_quality_cache_cold_warm_and_no_persistence(local, tmp_path, mo
                 assert children[0].photos == {} and editing.workspace is None
                 assert editing._history_save is None and editing._recipe_save is None
                 # Each cold sample gets its own process; warm samples share a process after one warmup.
-                assert len(children) == 1 + 4 * 3
-                assert sum(child.render_count for child in children[1:]) == 16 + 4
+                assert len(children) == 1 + 2 * 3
+                assert sum(child.render_count for child in children[1:]) == 8 + 2
                 assert all(child.returncode is not None for child in children[1:])
                 assert (await http.post("/api/raw/workspaces", json={})).status_code == 200
         finally:
@@ -148,7 +115,7 @@ def test_stop_collects_transmitted_render_without_aborting_process(local, tmp_pa
         try:
             async with client(local) as http:
                 await authenticate(http, local)
-                started = (await http.post("/api/developer/raw-preview/start", json=config(quality="full", stageCache="off", temperature="cold", repeats=1))).json()
+                started = (await http.post("/api/developer/raw-preview/start", json=config(quality="full", temperature="cold", repeats=1))).json()
                 body = {"runId": started["runId"], "index": 0}
                 assert (await http.post("/api/developer/raw-preview/prepare", json=body)).status_code == 200
                 child = children[-1]
@@ -170,8 +137,8 @@ def test_stop_collects_transmitted_render_without_aborting_process(local, tmp_pa
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("patch", [{"assetId": "C:/private.dng"}, {"repeats": 6}, {"budgetBytes": 0},
-    {"budgetBytes": 1024**3 + 1}, {"backend": "arbitrary"}, {"quality": "fast"}, {"maxSide": 8192}])
+@pytest.mark.parametrize("patch", [{"assetId": "C:/private.dng"}, {"repeats": 6}, {"stageCache": "off"},
+    {"budgetBytes": 512 * 1024**2}, {"backend": "arbitrary"}, {"quality": "fast"}, {"maxSide": 8192}])
 def test_invalid_diagnostic_conditions_rejected(patch):
     with pytest.raises(Exception, match="raw_invalid_request"):
         module.trial_plan(config(**patch))
@@ -235,14 +202,14 @@ def test_timeout_reaps_only_diagnostic_process_and_never_exports_gpu_text(local,
         try:
             async with client(local) as http:
                 await authenticate(http, local)
-                started = (await http.post("/api/developer/raw-preview/start", json=config(backend="gpu", quality="full", stageCache="off", temperature="cold"))).json()
+                started = (await http.post("/api/developer/raw-preview/start", json=config(backend="gpu", quality="full", temperature="cold"))).json()
                 body = {"runId": started["runId"], "index": 0}
                 await http.post("/api/developer/raw-preview/prepare", json=body)
                 child = children[-1]
                 child.gpu["lastFallback"] = "PRIVATE C:/secret.dng API_KEY"
                 response = await http.post("/api/developer/raw-preview/render", json=body)
                 metadata = json.loads(response.headers["x-raw-diagnostic"])
-                assert metadata["backend"]["execution"] == "unconfirmed" and metadata["backend"]["fallbackReported"]
+                assert metadata["backend"] == {"configured": "gpu"}
                 assert "PRIVATE" not in json.dumps(metadata)
                 body["index"] = 1
                 await http.post("/api/developer/raw-preview/prepare", json=body)
