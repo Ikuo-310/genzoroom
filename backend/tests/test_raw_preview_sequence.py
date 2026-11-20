@@ -47,6 +47,7 @@ def test_viewer_sequence_uses_isolated_native_owner_and_safe_metadata(local, tmp
                     meta = json.loads(response.headers['x-raw-diagnostic'])
                     rows.append(meta)
                     assert meta['operation'] == trial['operation'] and meta['warmup'] == trial['warmup']
+                    assert 'nativeMs' in meta['timing'] and 'nativeRequestMs' not in meta['timing']
                     assert meta['payloadBytes'] == (0 if trial['operation'] == 'regionPlan' else len(response.content))
                     assert meta['engine']['geometryDescriptor'] == 2
                     assert 'stageCache' not in meta

@@ -85,4 +85,4 @@ class RawPreviewSequence:
             'wholeRequestedSide': 1024,
             'timing': {'backendOperationMs': elapsed + (self.open_ms if operation == 'open' else 0),
                        'openMs': self.open_ms if operation == 'open' else None,
-                       'nativeRequestMs': request_ms, 'validationMs': validation_ms}, 'payloadBytes': len(data)}
+                       'nativeMs': request_ms, 'validationMs': validation_ms}, 'payloadBytes': len(data)}

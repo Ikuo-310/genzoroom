@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { createRawViewerReport, fetchRawViewerTrial, parseRawViewerMetadata, rawViewerPlan, rawViewerStatistics } from './rawViewerBenchmark';
+import { LIGHTCRAFT_ENGINE } from './lightcraftEngine';
 import { viewerMetadata } from './test/rawViewerBenchmark';
 afterEach(() => vi.unstubAllGlobals());
 
@@ -33,6 +34,30 @@ it('rejects private extras, invalid boundaries and foreign contracts before expo
   for (const bad of [{ ...metadata, rawPath: 'PRIVATE' }, { ...metadata, geometry: { ...metadata.geometry, AssetId: 'PRIVATE' } },
     { ...metadata, engine: { ...metadata.engine, geometryDescriptor: 1 } }, { ...metadata, viewGeneration: -1 },
     { ...metadata, timing: { ...metadata.timing, nativeMs: NaN } }]) expect(() => parseRawViewerMetadata(bad, trial)).toThrow('raw_invalid_response');
+});
+it('accepts the current Backend Viewer response through the real parser and response reader', async () => {
+  // Captured from test_viewer_sequence_uses_isolated_native_owner_and_safe_metadata.
+  const trial = rawViewerPlan(1)[1];
+  const backendResponse = {
+    operation: 'wholeDraft', repeat: 0, warmup: true, revision: 1, viewGeneration: trial.index + 1,
+    quality: 'draft',
+    geometry: { geometryId: 'a'.repeat(64), nativeWidth: 6000, nativeHeight: 4500, aspect: 4 / 3,
+      fullWidth: 16, fullHeight: 12, window: null },
+    bitmap: { width: 16, height: 12 }, region: null, wholeRequestedSide: 1024, payloadBytes: 91,
+    timing: { backendOperationMs: 3.397200000108569, openMs: null,
+      nativeMs: 1.8867000003410794, validationMs: 0.4401000001053035 },
+    engine: { version: LIGHTCRAFT_ENGINE.version, commit: LIGHTCRAFT_ENGINE.commit,
+      binarySha256: 'b5d54c39e66671c9731b9f471e585d8262cd4f54963f0c93082d8dcf334d4c78',
+      previewContract: 1, regionContract: 1, geometryDescriptor: 2, gpuBackend: 'off', gpuAdapter: null },
+  };
+  const png = new Uint8Array(91); png.set([137, 80, 78, 71, 13, 10, 26, 10]);
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(png, { headers: {
+    'Content-Type': 'image/png', 'X-Raw-Diagnostic': JSON.stringify(backendResponse),
+  } })));
+  const result = await fetchRawViewerTrial('a'.repeat(32), trial, new AbortController().signal);
+  expect(result.metadata).toEqual(backendResponse);
+  expect(result.metadata.timing.nativeMs).toBe(1.8867000003410794);
+  expect(result.blob?.size).toBe(91);
 });
 it('reads Region plan as bounded JSON without inventing image decode or adopt work', async () => {
   const trial = rawViewerPlan(3).find(t => t.operation === 'regionPlan')!, metadata = viewerMetadata(trial);
