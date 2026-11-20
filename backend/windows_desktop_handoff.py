@@ -46,6 +46,7 @@ class DesktopHandoff:
         temporary = None
         try:
             # Only ciphertext reaches disk, including the atomic-publication temporary file.
+            self.path.parent.mkdir(parents=True, exist_ok=True)
             with tempfile.NamedTemporaryFile(dir=self.path.parent, prefix="desktop-session-", suffix=".tmp",
                                              delete=False) as output:
                 temporary = Path(output.name)

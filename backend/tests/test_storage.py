@@ -14,6 +14,8 @@ from export_runtime_store import (
     begin_export_item, create_export_run, get_export_run, recoverable_export_run,
     request_export_stop, transition_export_item,
 )
+from connection_identity import profile_id
+from thumbnail_cache import ThumbnailCache
 from tests.test_export_queue import A, snapshot
 
 
@@ -42,6 +44,56 @@ def test_windows_development_policy_is_independent_of_native_state(monkeypatch):
 def test_docker_development_policy_keeps_jpeg_engine(monkeypatch):
     monkeypatch.setattr(storage, "WINDOWS_STORAGE", False)
     assert main.development_policy() == {"engine": "jpeg"}
+
+
+def test_profile_id_is_deterministic_and_uses_normalized_url_and_user_only():
+    user = str(uuid4())
+    first = profile_id("HTTP://IMMICH.invalid:80/api/", user)
+    assert first == profile_id("http://immich.invalid", user)
+    assert len(first) == 64 and all(character in "0123456789abcdef" for character in first)
+    assert first != profile_id("https://immich.invalid", user)
+    assert first != profile_id("http://immich.invalid", str(uuid4()))
+
+
+def test_connection_profiles_own_database_cache_and_export_queue(tmp_path, monkeypatch):
+    root = tmp_path / "deployment"
+    monkeypatch.setattr(storage, "storage_root_is_mounted", lambda: True)
+    user = str(uuid4())
+    first_profile = storage.configure_profile(root, "http://immich.invalid", user)
+    first_db = storage.DB_PATH
+    first_cache = ThumbnailCache()
+    assert first_db == root / "profiles" / first_profile / "data" / "genzoroom.db"
+    assert first_cache.root == root / "profiles" / first_profile / "cache" / "thumbnails"
+    storage.initialize_storage()
+    edit_store.initialize_database()
+    edit_store.put_edit_state(A, 0, uuid4(), snapshot())
+    edit_store.enqueue_export_assets([A])
+    first_cache.initialize()
+    first_cache.store(A, b"profile one")
+    assert len(edit_store.list_export_queue()) == 1
+
+    second_profile = storage.configure_profile(root, "http://other-immich.invalid", user)
+    assert second_profile != first_profile
+    assert edit_store.DB_PATH == storage.DB_PATH
+    assert storage.DB_PATH != first_db
+    assert ThumbnailCache().root != first_cache.root
+    storage.initialize_storage()
+    edit_store.initialize_database()
+    assert edit_store.get_edit_state(A)["state"] is None
+    assert edit_store.list_export_queue() == []
+    assert ThumbnailCache().read(A) is None
+
+
+def test_unconfigured_profile_never_initializes_persistent_runtime(tmp_path, monkeypatch):
+    root = tmp_path / "deployment"
+    storage.clear_profile(root)
+    monkeypatch.setattr(storage, "storage_root_is_mounted", lambda: True)
+    with pytest.raises(storage.StorageInitializationError, match="storage_identity_unavailable"):
+        storage.initialize_storage()
+    with pytest.raises(edit_store.StoreUnavailable):
+        with edit_store._connection():
+            pass
+    assert not list(root.rglob("genzoroom.db"))
 
 
 @pytest.mark.parametrize("mountinfo,expected", [
@@ -226,24 +278,24 @@ def test_lifespan_rejects_missing_required_columns_before_initialization(
     assert storage.DB_PATH.read_bytes() == before
 
 
-@pytest.mark.parametrize("filename,payload,expected_code", [
-    ("genzoroom.db", b"old database", "storage_root_may_be_data_directory"),
-    ("data/genzoroom.db", b"", "storage_database_empty"),
-    ("data/genzoroom.db", b"not a SQLite database", "storage_database_corrupt"),
+@pytest.mark.parametrize("filename,payload", [
+    ("genzoroom.db", b"old database"),
+    ("data/genzoroom.db", b""),
+    ("data/genzoroom.db", b"not a SQLite database"),
 ])
-def test_lifespan_rejects_wrong_root_or_invalid_existing_db_without_changes(
-        mounted_storage, monkeypatch, filename, payload, expected_code):
+def test_unconfigured_lifespan_ignores_legacy_storage_without_opening_it(
+        mounted_storage, monkeypatch, filename, payload):
+    monkeypatch.setattr(storage, "PROFILE_ID", None)
     monkeypatch.delenv("IMMICH_URL", raising=False)
     monkeypatch.delenv("IMMICH_API_KEY", raising=False)
     path = mounted_storage / filename
     path.parent.mkdir(exist_ok=True)
     path.write_bytes(payload)
     before = path.read_bytes()
-    monkeypatch.setattr(main, "ExportRuntime", lambda **_: pytest.fail("Runtime started before validation"))
-    with pytest.raises(RuntimeError, match=expected_code):
-        start_lifespan()
+    monkeypatch.setattr(main, "ExportRuntime", lambda **_: pytest.fail("Runtime started without an identity"))
+    assert start_lifespan() is None
     assert path.read_bytes() == before
-    assert not storage.DB_PATH.exists() if filename == "genzoroom.db" else storage.DB_PATH.read_bytes() == before
+    assert not list(mounted_storage.glob("**/profiles/*/data/genzoroom.db"))
 
 
 def test_lifespan_rejects_existing_version_zero_sqlite_file(mounted_storage, monkeypatch):

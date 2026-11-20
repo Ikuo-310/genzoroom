@@ -68,7 +68,7 @@ def test_owned_child_normal_and_abnormal_teardown(tmp_path, abnormal):
         line = parent.stdout.readline()
         assert line.startswith("GenzoRoom process smoke: ready "), line + parent.stderr.read() if parent.poll() is not None else line
         pid = int(line.split()[-1])
-        assert (tmp_path / DATA_DIRECTORY / "profiles/unconfigured/data/genzoroom.db").is_file()
+        assert not list((tmp_path / DATA_DIRECTORY).rglob("genzoroom.db"))
         if abnormal:
             parent.kill()
             parent.communicate(timeout=15)
@@ -297,7 +297,7 @@ def test_initial_storage_failure_opens_settings_without_replacing_profile(tmp_pa
             assert database.execute("PRAGMA user_version").fetchone()[0] == (999 if failure == "newer_schema" else 5)
             assert database.execute("SELECT COUNT(*) FROM asset_edit_states").fetchone()[0] == 1
             assert database.execute("SELECT COUNT(*) FROM export_queue").fetchone()[0] == 1
-        assert (store.root / "profiles/unconfigured/data/genzoroom.db").is_file()
+        assert not list(store.root.rglob("genzoroom.db"))
         with reserve_listener(DEFAULT_PORT):
             pass
     finally:
@@ -420,7 +420,7 @@ def test_saved_connection_restart_isolates_database_queue_and_react_state(tmp_pa
             if change == "failure":
                 assert database.execute("PRAGMA user_version").fetchone()[0] == 999
                 assert store.read()["selected"] == second
-                assert (store.root / "profiles/unconfigured/data/genzoroom.db").is_file()
+                assert not (store.root / "profiles/unconfigured/data/genzoroom.db").exists()
             elif change == "key":
                 assert database.execute("SELECT COUNT(*) FROM export_queue").fetchone()[0] == 1
                 row = database.execute("SELECT current_recipe_json, history_json, history_cursor FROM asset_edit_states").fetchone()

@@ -5,17 +5,14 @@ import os
 from pathlib import Path
 import re
 import secrets
-import ssl
 import tempfile
-from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
-
-import httpx
 from starlette.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from windows_credentials import ConnectionSettingsError, CredentialVault
 from backend_logging import backend_logger
+from connection_identity import ConnectionIdentityError, identify as identify_connection, normalize_url as canonical_url, profile_id
 
 
 def connection_log(event, *, method=None, error=None):
@@ -38,55 +35,16 @@ def user_root():
 
 def normalize_url(value):
     try:
-        if not isinstance(value, str) or len(value) > 2048 or any(ord(c) < 33 for c in value.strip()):
-            raise ValueError()
-        url = urlsplit(value.strip())
-        if url.scheme not in ("http", "https") or not url.hostname or url.username is not None \
-                or url.password is not None or url.query or url.fragment or "\\" in value:
-            raise ValueError()
-        host = url.hostname.encode("idna").decode("ascii").lower()
-        if ":" in host:
-            host = "[" + host + "]"
-        port = url.port
-        if port == 0:
-            raise ValueError()
-        authority = host + (f":{port}" if port and port != (80 if url.scheme == "http" else 443) else "")
-        path = url.path.rstrip("/")
-        if path.endswith("/api"):
-            path = path[:-4]
-        if any(segment in (".", "..") for segment in path.split("/")) or "%" in path:
-            raise ValueError()
-        return urlunsplit((url.scheme, authority, path, "", ""))
-    except (ValueError, UnicodeError, AttributeError):
-        raise ConnectionSettingsError("url_invalid") from None
+        return canonical_url(value)
+    except ConnectionIdentityError as error:
+        raise ConnectionSettingsError(error.code) from None
 
 
 async def identify(url, key, *, transport=None):
-    url = normalize_url(url)
-    if not isinstance(key, str) or not key.strip() or len(key.encode("utf-8")) > 2560 \
-            or any(ord(c) < 33 or ord(c) > 126 for c in key):
-        raise ConnectionSettingsError("key_invalid")
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(5, connect=3), follow_redirects=False,
-                                     trust_env=False, transport=transport) as client:
-            response = await client.get(url + "/api/users/me", headers={"x-api-key": key, "Accept": "application/json"})
-        if response.status_code in (401, 403):
-            raise ConnectionSettingsError("authentication_failed" if response.status_code == 401 else "permission_denied")
-        if response.status_code != 200:
-            raise ConnectionSettingsError("unexpected_response")
-        identity = str(UUID(response.json()["id"]))
-        return url, identity
-    except httpx.TimeoutException:
-        raise ConnectionSettingsError("connection_timeout") from None
-    except httpx.RequestError as error:
-        cause = error
-        while cause is not None:
-            if isinstance(cause, ssl.SSLCertVerificationError):
-                raise ConnectionSettingsError("tls_certificate_error") from None
-            cause = cause.__cause__
-        raise ConnectionSettingsError("unreachable") from None
-    except (ValueError, KeyError, TypeError):
-        raise ConnectionSettingsError("identity_unavailable") from None
+        return await identify_connection(url, key, transport=transport)
+    except ConnectionIdentityError as error:
+        raise ConnectionSettingsError(error.code) from None
 
 
 class ConnectionStore:
@@ -162,7 +120,7 @@ class ConnectionStore:
         data["cleanup"].append(identifier)
         self.write(data)
         self.vault.put(identifier, key)
-        profile = old["profile"] if same_identity else secrets.token_hex(32)
+        profile = profile_id(url, user_id)
         data["selected"] = {"url": url, "userId": user_id, "profile": profile, "credential": identifier}
         data["cleanup"].remove(identifier)
         if old:
@@ -252,8 +210,19 @@ class WindowsConnection:
 async def load_windows_connection(*, environment=False, recovery=False, managed=False, store=None):
     store = store if store is not None else ConnectionStore()
     if environment:
-        # Diagnostic environment mode never shares either legacy or saved-profile data.
-        return WindowsConnection(store, source="environment", managed=managed), "environment", None
+        url, key = os.environ.get("IMMICH_URL", ""), os.environ.get("IMMICH_API_KEY", "")
+        os.environ.pop("IMMICH_URL", None)
+        os.environ.pop("IMMICH_API_KEY", None)
+        if url.strip() and key.strip():
+            try:
+                active_url, user_id = await identify(url, key)
+                os.environ["IMMICH_URL"] = active_url
+                os.environ["IMMICH_API_KEY"] = key
+                return WindowsConnection(store, source="environment", managed=managed), profile_id(active_url, user_id), None
+            except ConnectionSettingsError as error:
+                connection_log("startup.recovery", error=str(error))
+                return WindowsConnection(store, source="environment", error=str(error), managed=managed), None, str(error)
+        return WindowsConnection(store, source="environment", error="not_configured", managed=managed), None, "not_configured"
     os.environ.pop("IMMICH_URL", None)
     os.environ.pop("IMMICH_API_KEY", None)
     selected = None
@@ -265,13 +234,13 @@ async def load_windows_connection(*, environment=False, recovery=False, managed=
                 key = store.vault.get(selected["credential"])
                 if key is None:
                     raise ConnectionSettingsError("credential_read_failed")
-                _, identity = await identify(selected["url"], key)
+                active_url, identity = await identify(selected["url"], key)
                 if identity != selected["userId"]:
                     raise ConnectionSettingsError("identity_changed")
-                os.environ["IMMICH_URL"], os.environ["IMMICH_API_KEY"] = selected["url"], key
+                os.environ["IMMICH_URL"], os.environ["IMMICH_API_KEY"] = active_url, key
     except ConnectionSettingsError as failure:
         selected = None
         error = str(failure)
         connection_log("startup.recovery", error=error)
     connection = WindowsConnection(store, source="recovery" if error else "saved", active=selected, error=error, managed=managed)
-    return connection, selected["profile"] if selected else "unconfigured", error
+    return connection, profile_id(selected["url"], selected["userId"]) if selected else None, error

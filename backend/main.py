@@ -20,6 +20,7 @@ from starlette.background import BackgroundTask
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend_logging import LogLevel, backend_logger
+import storage
 from storage import (development_engine, StorageInitializationError, initialize_storage, log_storage_failure,
                      validate_existing_database)
 from edit_state import InvalidEditState, validate_snapshot, has_non_default_recipe
@@ -160,6 +161,16 @@ def thumbnail_diagnostic_event(diagnostic, event: str, **details):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if not storage.profile_configured():
+        # Windows keeps the connection settings UI available without opening a shared fallback DB.
+        app.state.export_runtime = None
+        app.state.tag_repair = None
+        app.state.thumbnail_cache = None
+        app.state.thumbnail_publication_hub = None
+        app.state.thumbnail_scheduler = None
+        app.state.immich_read_client = None
+        yield
+        return
     # Refuse ephemeral/unwritable storage before recovery can create or claim any DB state.
     try:
         await run_in_threadpool(initialize_storage)

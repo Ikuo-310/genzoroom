@@ -41,14 +41,23 @@ docker exec "$container" python -c '
 import shutil, sqlite3, sys
 from pathlib import Path
 from build_info import BUILD_INFO
+import storage
+from edit_store import initialize_database
+from thumbnail_cache import ThumbnailCache
 assert not shutil.which("node") and not shutil.which("npm")
 expected = {"name": "GenzoRoom", "channel": sys.argv[1], "version": sys.argv[2], "commit": sys.argv[3]}
 assert BUILD_INFO == expected
 bundles = list(Path("/usr/share/nginx/html/assets").glob("*.js"))
 assert bundles and all(value in "".join(path.read_text() for path in bundles)
                        for value in (expected["channel"], expected["version"], expected["commit"]))
-assert Path("/genzoroom/data/genzoroom.db").is_file()
-with sqlite3.connect("file:/genzoroom/data/genzoroom.db?mode=rw", uri=True) as connection:
+profile = storage.configure_profile(Path("/genzoroom"), "http://smoke.invalid", "00000000-0000-4000-8000-000000000001")
+storage.initialize_storage()
+initialize_database()
+ThumbnailCache().initialize()
+database = Path("/genzoroom/profiles") / profile / "data/genzoroom.db"
+assert database.is_file()
+assert ThumbnailCache().root == Path("/genzoroom/profiles") / profile / "cache/thumbnails"
+with sqlite3.connect(f"file:{database}?mode=rw", uri=True) as connection:
     assert connection.execute("PRAGMA user_version").fetchone()[0] == 9
     connection.execute("SELECT export_timestamp FROM export_run_items LIMIT 0")
     connection.execute("SELECT develop_settings_json, recipe_revision, last_save_id, import_defaults_fingerprint FROM asset_raw_recipes LIMIT 0")

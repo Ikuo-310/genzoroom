@@ -10,6 +10,7 @@ from uuid import UUID
 from backend_logging import backend_logger
 from edit_state import (InvalidEditState, validate_snapshot, has_non_default_recipe, _recipe,
                         validate_source_identity, STATE_FORMAT_VERSION, RECIPE_VERSION, PROCESSING_VERSION)
+import storage
 from storage import DB_PATH, StorageInitializationError
 
 SCHEMA_VERSION = 9
@@ -255,6 +256,8 @@ def _migrate(connection: sqlite3.Connection) -> None:
 
 @contextmanager
 def _connection():
+    if not storage.profile_configured():
+        raise StoreUnavailable()
     try:
         connection = sqlite3.connect(DB_PATH, timeout=3.0, isolation_level=None)
         try:

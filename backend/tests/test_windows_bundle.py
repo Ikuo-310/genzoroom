@@ -69,7 +69,7 @@ def test_frozen_protocol_ui_and_formal_storage_outside_repository(tmp_path):
         assert html.status_code == 200 and "text/html" in html.headers["content-type"]
         assert client.get("/edit/example", headers={"Accept": "text/html"}).text == html.text
         assert client.get("/api/not-a-route", headers={"Accept": "text/html"}).status_code == 404
-        assert (root / "profiles/unconfigured/data/genzoroom.db").is_file()
+        assert not list(root.rglob("genzoroom.db"))
         assert sentinel.read_text() == "never migrated"
 
 
@@ -143,7 +143,7 @@ def test_normal_distribution_window_closes_owned_backend(tmp_path):
                 break
             sleep(.05)
         assert windows and authenticated
-        assert (tmp_path / "GenzoRoom/profiles/unconfigured/data/genzoroom.db").is_file()
+        assert not list((tmp_path / "GenzoRoom").rglob("genzoroom.db"))
         assert user.PostMessageW(windows[0], 0x0010, 0, 0)  # WM_CLOSE
         assert host.wait(timeout=25) == 0
         assert not (tmp_path / "GenzoRoom/desktop-session.dpapi").exists()

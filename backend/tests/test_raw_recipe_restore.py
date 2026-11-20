@@ -886,17 +886,16 @@ def test_shutdown_during_restore_rejects_late_document(local, tmp_path, monkeypa
     asyncio.run(asyncio.wait_for(run(), 12))
 
 
-def test_windows_import_does_not_bind_database_before_profile_selection(tmp_path):
+def test_storage_profile_selection_updates_imported_persistence_modules(tmp_path):
     code = """import sys
-import windows_local
-assert 'edit_store' not in sys.modules and 'raw_recipe_store' not in sys.modules
-import storage
-storage.configure_windows_storage('unconfigured')
-import raw_recipe_store, edit_store
+from pathlib import Path
+import main, edit_store, storage
+storage.configure_profile_id(Path(sys.argv[1]), 'a' * 64, windows=True)
 assert edit_store.DB_PATH == storage.DB_PATH
-assert 'unconfigured' in str(storage.DB_PATH)
+assert storage.STORAGE_ROOT.name == 'a' * 64 and storage.DB_PATH.name == 'genzoroom.db'
 """
-    result = subprocess.run([sys.executable, "-c", code], env={**os.environ, "LOCALAPPDATA": str(tmp_path)},
+    result = subprocess.run([sys.executable, "-c", code, str(tmp_path / "GenzoRoom")],
+                            env={**os.environ, "LOCALAPPDATA": str(tmp_path)},
                             capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr
 

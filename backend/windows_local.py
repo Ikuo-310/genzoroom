@@ -329,11 +329,18 @@ def main(argv=None):
         from windows_connection import load_windows_connection
         connection, profile, _ = asyncio.run(load_windows_connection(
             environment=args.environment or not args.managed, recovery=args.connection_recovery, managed=args.managed))
-        if profile == "environment":
-            profile = "environment-" + secrets.token_hex(32)
-        from storage import configure_windows_storage
-        configure_windows_storage(profile)
-        # Configure paths before imports bind DB_PATH; Docker continues to import main directly.
+        from storage import clear_profile, configure_profile_id
+        from windows_runtime import data_root
+        try:
+            deployment_root = data_root()
+        except ValueError:
+            from storage import StorageInitializationError
+            raise StorageInitializationError("windows_storage_location_invalid") from None
+        if profile is None:
+            clear_profile(deployment_root, windows=True)
+        else:
+            configure_profile_id(deployment_root, profile, windows=True)
+        # The selected profile is shared by DB, cache, and every Backend runtime.
         from main import app
         host = LocalHost(app, port=args.port, connection=connection)
         config = uvicorn.Config(host, host="127.0.0.1", port=args.port, workers=1,
@@ -352,7 +359,7 @@ def main(argv=None):
     except Exception as error:
         from storage import StorageInitializationError
         known = {"frontend_build_missing", "local_port_unavailable", "local_startup_failed",
-                 "windows_storage_configuration_too_late", "desktop_handoff_failed", "managed_launch_invalid",
+                 "desktop_handoff_failed", "managed_launch_invalid",
                  "backend_build_info_invalid"}
         code = error.code if isinstance(error, StorageInitializationError) else \
             str(error) if isinstance(error, RuntimeError) and str(error) in known else "local_startup_failed"

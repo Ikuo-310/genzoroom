@@ -295,22 +295,19 @@ def test_windows_configuration_happens_before_consumer_imports(tmp_path):
     env = {**os.environ, "LOCALAPPDATA": str(tmp_path), "IMMICH_URL": "", "IMMICH_API_KEY": ""}
     result = subprocess.run([sys.executable, "-c", """
 import storage
-storage.configure_windows_storage()
+storage.configure_profile_id(__import__('pathlib').Path(__import__('os').environ['LOCALAPPDATA']) / 'GenzoRoom' / 'WindowsPoC', 'a' * 64, windows=True)
 import edit_store
 from thumbnail_cache import ThumbnailCache
 assert storage.WINDOWS_STORAGE
 assert storage.DB_PATH == edit_store.DB_PATH
 assert ThumbnailCache().root == storage.STORAGE_ROOT / 'cache' / 'thumbnails'
-assert storage.STORAGE_ROOT.parts[-2:] == ('GenzoRoom', 'WindowsPoC')
+assert storage.DEPLOYMENT_ROOT.parts[-2:] == ('GenzoRoom', 'WindowsPoC')
 storage.initialize_storage()
 edit_store.initialize_database()
 storage.validate_existing_database()
-try:
-    storage.configure_windows_storage()
-except RuntimeError as error:
-    assert str(error) == 'windows_storage_configuration_too_late'
-else:
-    raise AssertionError('late configuration accepted')
+storage.configure_profile_id(storage.DEPLOYMENT_ROOT, 'b' * 64, windows=True)
+assert edit_store.DB_PATH == storage.DB_PATH
+assert ThumbnailCache().root == storage.STORAGE_ROOT / 'cache' / 'thumbnails'
 """], env=env, capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stderr
 
@@ -320,8 +317,9 @@ def test_invalid_windows_storage_never_falls_back(base):
     env = {**os.environ, "LOCALAPPDATA": base}
     result = subprocess.run([sys.executable, "-c", """
 import storage
+from pathlib import Path
 try:
-    storage.configure_windows_storage()
+    storage.configure_profile_id(Path(__import__('os').environ['LOCALAPPDATA']) / 'GenzoRoom', 'a' * 64, windows=True)
 except storage.StorageInitializationError as error:
     assert error.code == 'windows_storage_location_invalid'
 else:
@@ -475,12 +473,12 @@ raise SystemExit(main([sys.argv[2], '--port', sys.argv[1]]))
                 if ready:
                     break
                 sleep(0.05)
+        if not ready and process.poll() is not None:
+            stdout, stderr = process.communicate(timeout=2)
+            pytest.fail(f"LocalHost exited before readiness (code={process.returncode}): {stderr or stdout}")
         assert ready
         root = tmp_path / "GenzoRoom" / "WindowsPoC"
-        profiles = list((root / "profiles").glob("environment-*"))
-        assert len(profiles) == 1
-        assert (profiles[0] / "data" / "genzoroom.db").is_file()
-        assert (profiles[0] / "cache" / "thumbnails").is_dir()
+        assert not list(root.rglob("genzoroom.db"))
         assert not (root / "data").exists()
         if mode == "--desktop":
             from windows_desktop_handoff import protect_for_current_user

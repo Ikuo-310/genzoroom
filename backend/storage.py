@@ -3,18 +3,20 @@
 import os
 import sqlite3
 import stat
-import sys
 import tempfile
 from pathlib import Path
 from urllib.parse import quote
+import re
 
 from backend_logging import backend_logger
 
 
-# Host paths belong to Compose; application paths stay identical in both images.
-STORAGE_ROOT = Path("/genzoroom")
+# Host paths belong to the deployment; each process selects exactly one Immich profile.
+DEPLOYMENT_ROOT = Path("/genzoroom")
+STORAGE_ROOT = DEPLOYMENT_ROOT
 DB_PATH = STORAGE_ROOT / "data" / "genzoroom.db"
 WINDOWS_STORAGE = False
+PROFILE_ID: str | None = None
 
 
 def development_engine() -> str:
@@ -22,28 +24,64 @@ def development_engine() -> str:
     return "lightcraft" if WINDOWS_STORAGE else "jpeg"
 
 
-def configure_windows_storage(profile: str | None = None) -> None:
-    """Select the deployment's isolated user directory before importing persistence consumers."""
-    global STORAGE_ROOT, DB_PATH, WINDOWS_STORAGE
-    if "edit_store" in sys.modules or "main" in sys.modules:
-        # edit_store intentionally binds DB_PATH at import; never split DB/cache ownership.
-        raise RuntimeError("windows_storage_configuration_too_late")
-    from windows_runtime import data_root
+def configure_profile(deployment_root: Path, url: str, user_id: str, *, windows: bool = False) -> str:
+    """Bind one process to a deterministic connection-owned database and cache root."""
+    from connection_identity import ConnectionIdentityError, profile_id
     try:
-        root = data_root().resolve()
-    except ValueError:
+        selected = profile_id(url, user_id)
+    except ConnectionIdentityError:
+        raise StorageInitializationError("storage_identity_unavailable") from None
+    configure_profile_id(deployment_root, selected, windows=windows)
+    return selected
+
+
+def configure_profile_id(deployment_root: Path, selected: str, *, windows: bool = False) -> None:
+    global DEPLOYMENT_ROOT, STORAGE_ROOT, DB_PATH, WINDOWS_STORAGE, PROFILE_ID
+    if not re.fullmatch(r"[0-9a-f]{64}", selected):
+        raise StorageInitializationError("storage_identity_unavailable")
+    try:
+        supplied_root = Path(deployment_root)
+        if windows and (not supplied_root.is_absolute() or supplied_root.drive.startswith("\\\\")):
+            raise ValueError()
+        root = supplied_root.resolve()
+    except (OSError, ValueError):
+        raise StorageInitializationError("windows_storage_location_invalid" if windows else "storage_identity_unavailable") from None
+    DEPLOYMENT_ROOT = root
+    PROFILE_ID = selected
+    STORAGE_ROOT = root / "profiles" / selected
+    DB_PATH = STORAGE_ROOT / "data" / "genzoroom.db"
+    WINDOWS_STORAGE = windows
+    # Persistence modules may be imported before the host finishes validating its connection.
+    import sys
+    edit_store = sys.modules.get("edit_store")
+    if edit_store is not None:
+        edit_store.DB_PATH = DB_PATH
+
+
+def profile_configured() -> bool:
+    return PROFILE_ID is not None
+
+
+def clear_profile(deployment_root: Path, *, windows: bool = False) -> None:
+    """Keep connection setup available without exposing an unscoped persistent database."""
+    global DEPLOYMENT_ROOT, STORAGE_ROOT, DB_PATH, WINDOWS_STORAGE, PROFILE_ID
+    supplied_root = Path(deployment_root)
+    if windows and (not supplied_root.is_absolute() or supplied_root.drive.startswith("\\\\")):
         raise StorageInitializationError("windows_storage_location_invalid")
-    if profile is not None:
-        import re
-        if not re.fullmatch(r"[0-9a-f]{64}|unconfigured|environment-[0-9a-f]{64}", profile):
-            raise StorageInitializationError("windows_storage_location_invalid")
-        root = root / "profiles" / profile
-    STORAGE_ROOT, DB_PATH = root, root / "data" / "genzoroom.db"
-    WINDOWS_STORAGE = True
+    DEPLOYMENT_ROOT = supplied_root.resolve()
+    STORAGE_ROOT = DEPLOYMENT_ROOT
+    DB_PATH = STORAGE_ROOT / "data" / "genzoroom.db"
+    WINDOWS_STORAGE = windows
+    PROFILE_ID = None
+    import sys
+    edit_store = sys.modules.get("edit_store")
+    if edit_store is not None:
+        edit_store.DB_PATH = DB_PATH
 
 
 class StorageInitializationError(RuntimeError):
     MESSAGES = {
+        "storage_identity_unavailable": "Immich connection identity must be verified before opening persistent data",
         "storage_root_not_mounted": "storage root is not mounted; check GENZOROOM_PERSIST_ROOT",
         "windows_storage_location_invalid": "LOCALAPPDATA must identify a local absolute user directory",
         "windows_storage_not_writable": "Windows PoC user storage is not writable",
@@ -66,7 +104,7 @@ class StorageInitializationError(RuntimeError):
 def storage_root_is_mounted() -> bool:
     # ismount() can miss same-filesystem bind mounts; Linux mountinfo lists them explicitly.
     try:
-        return any(line.split()[4] == STORAGE_ROOT.as_posix()
+        return any(line.split()[4] == DEPLOYMENT_ROOT.as_posix()
                    for line in Path("/proc/self/mountinfo").read_text().splitlines())
     except (OSError, IndexError):
         return False
@@ -77,10 +115,10 @@ def initialize_storage() -> None:
         if not WINDOWS_STORAGE and not storage_root_is_mounted():
             raise StorageInitializationError("storage_root_not_mounted")
         try:
-            data = STORAGE_ROOT / "data"
-            if not DB_PATH.exists() and (STORAGE_ROOT / "genzoroom.db").is_file():
-                raise StorageInitializationError("storage_root_may_be_data_directory")
-            data.mkdir(parents=WINDOWS_STORAGE, exist_ok=True)
+            if not profile_configured():
+                raise StorageInitializationError("storage_identity_unavailable")
+            data = DB_PATH.parent
+            data.mkdir(parents=True, exist_ok=True)
             # A disposable file leaves the DB untouched; explicit unlink verifies deletion rights too.
             with tempfile.NamedTemporaryFile(dir=data, delete_on_close=False) as probe:
                 probe.write(b"genzoroom")

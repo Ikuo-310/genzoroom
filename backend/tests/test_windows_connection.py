@@ -12,6 +12,7 @@ import httpx
 import pytest
 
 from windows_connection import ConnectionStore, WindowsConnection, identify, load_windows_connection, normalize_url
+from connection_identity import profile_id
 from windows_credentials import ConnectionSettingsError, CredentialVault
 from tests.test_windows_local import local, client, authenticate
 
@@ -200,7 +201,7 @@ def test_saved_source_overrides_environment_and_checks_user_before_profile_open(
         return url, str(uuid4())
     with patch("windows_connection.identify", other):
         connection, profile, error = asyncio.run(load_windows_connection(store=settings, managed=True))
-    assert profile == "unconfigured" and error == "identity_changed"
+    assert profile is None and error == "identity_changed"
     assert "IMMICH_API_KEY" not in os.environ and "IMMICH_URL" not in os.environ
     assert settings.read()["selected"] == entry
 
@@ -209,12 +210,17 @@ def test_environment_diagnostic_metadata_reports_only_the_active_environment_tar
     saved_key = secrets.token_urlsafe(32)
     settings.save("http://saved.invalid", str(uuid4()), saved_key)
     active_key = secrets.token_urlsafe(32)
+    active_user = str(uuid4())
     monkeypatch.setenv("IMMICH_URL", " HTTP://active.invalid:80/api/ ")
     monkeypatch.setenv("IMMICH_API_KEY", active_key)
-    connection, profile, error = asyncio.run(load_windows_connection(environment=True, store=settings, managed=True))
+    async def identity(url, key):
+        assert key == active_key
+        return normalize_url(url), active_user
+    with patch("windows_connection.identify", identity):
+        connection, profile, error = asyncio.run(load_windows_connection(environment=True, store=settings, managed=True))
 
     metadata = connection.metadata()
-    assert profile == "environment" and error is None
+    assert profile == profile_id("http://active.invalid", active_user) and error is None
     assert metadata == {"url": "http://active.invalid", "keyConfigured": True, "source": "environment",
                         "error": None, "managed": True, "pendingRestart": False, "cleanupPending": False}
     assert saved_key not in json.dumps(metadata) and active_key not in json.dumps(metadata)
@@ -230,7 +236,7 @@ def test_recovery_never_opens_selected_profile_and_retains_retry_settings(settin
     entry = settings.save("http://saved.invalid", str(uuid4()), secrets.token_urlsafe(32))
     monkeypatch.setenv("IMMICH_API_KEY", secrets.token_urlsafe(32))
     connection, profile, error = asyncio.run(load_windows_connection(store=settings, recovery=True, managed=True))
-    assert profile == "unconfigured" and error == "restart_failed"
+    assert profile is None and error == "restart_failed"
     assert connection.metadata()["pendingRestart"]
     assert settings.read()["selected"] == entry and "IMMICH_API_KEY" not in os.environ
 
@@ -250,7 +256,7 @@ def test_missing_saved_credential_opens_unconfigured_recovery(settings, monkeypa
     settings.vault.values.clear()
     monkeypatch.setenv("IMMICH_API_KEY", secrets.token_urlsafe(32))
     _, profile, error = asyncio.run(load_windows_connection(store=settings))
-    assert profile == "unconfigured" and error == "credential_read_failed"
+    assert profile is None and error == "credential_read_failed"
     assert "IMMICH_API_KEY" not in os.environ
 
 

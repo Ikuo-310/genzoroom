@@ -508,3 +508,22 @@ RAW後状態が既知の未補正（`exportEligible=False`）の場合、Reset�
 
 追加監査対応のBackend回帰は275 passed（RAW thumbnail lifecycle／RAW Recipe store／thumbnail API／RAW History API／Windows RAW API）。Frontend全体テストは4,214 passed／138 failed／2 skipped（4,354 tests）。A2追加時baselineの4,214 passed／138 failed／2 skippedと同じ件数で、既知RAW UI失敗が継続した。全体実行時に`AnshitsuRawPreview.test.tsx`の既知RAW UIテストが5.05秒でtimeoutしたが、同テスト単独では1 passed／140 skipped。`RawPointColorControls.test.tsx` 50件と`RawVignetteControls.test.tsx` 3件の既知失敗も継続し、代表原因はmockに`raw.setPointColorRangeIndex`がないこと。今回Frontendコードは変更しておらず、公開状態API／F-04bにも変更はない。TypeScriptチェックとFrontend本番buildは成功。buildには既存の1MB超bundle警告とReact Router `use client` module directive警告がある。`git diff --check`は成功。
 
+## A3-P2：Windows／Docker共通ストレージ分離
+
+永続ストレージを接続先プロファイル単位に統一する。Profile IDはImmich URLを共通の正規化規則（scheme／hostの正規化、末尾path separator除去）で処理し、Immichが返すユーザーUUIDと組み合わせたバージョン付き入力のSHA-256で決定する。API Keyは識別入力に含めないため、同一URL・同一ユーザーでのキー再発行後も保存領域を維持する。URLまたはユーザーUUIDが異なると別Profile IDになる。URL変更は別プロファイルである。同一URL・同一UUIDのままImmichサーバーDBを交換するケースは識別できず、推定しない。
+
+Windows／Dockerとも、配置先ルートの下を次の形で使用する。
+
+```text
+<deployment-root>/profiles/<profileId>/data/genzoroom.db
+<deployment-root>/profiles/<profileId>/cache/thumbnails/
+```
+
+Recipe、History、保存receipt、Export Queue、開発除外情報はDBに、補正済みサムネイルとReset fence markerは同一Profile IDのthumbnail cacheに所属する。Export Runtimeは同じProfile IDのDBを使うBackend lifespanが所有し、別プロファイルのDB／Cacheを同時に開かない。プロファイル切替はRuntime起動前に行う。storageモジュール読込後の選択にも対応するため、永続化モジュールのDB pathを共通切替関数で更新する。
+
+Docker entrypointは環境変数で接続先とAPI Keyが両方与えられた場合、永続Runtime import／初期化の前にImmich `/api/users/me` からユーザーUUIDを確定し、Profile IDを設定する。未設定なら永続データなしで接続設定可能なBackendを起動し、片方のみの設定や接続／識別失敗では永続ストレージを初期化しない。WindowsはCredential Managerの保存情報または既存の診断接続経路から同じ識別を行う。接続未設定・確認失敗時はProfile IDを解除してDB／Cache／Export Runtimeを初期化せず、LocalHostとセッション認証を維持して接続設定画面を利用可能にする。Windowsのランダムprofile生成とDockerの共通ルート直下DB／cache運用は廃止した。
+
+この切替は破壊的変更であり、既存のルート直下DB、Windowsの旧ランダムprofile領域、旧Docker共有cacheは探索・fallback・自動移行しない。旧データは残置され、新しいprofile領域からは見えない。必要な既存データの保全は利用者が別途行う。接続先またはユーザー変更時には新しいprofileを使うため、以前のprofileのRecipe／History／Queue／cacheは混入しない。同一Asset UUIDでもProfile IDが違えばDB／cache pathが分離される。
+
+関連検証はBackend Python 3.14 `.venv`で82 passed（profile決定性、API Key非依存、URL／ユーザー分離、同一Asset IDのprofile間分離、DB／cache／Export Queue、未設定時のRuntime抑止、Docker起動選択、Windows接続選択／import後path切替）。Windows LocalHostの`--no-browser`起動・graceful shutdownは1 passed。`--desktop`の統合起動テストはready待ちで失敗したため未解決として扱い、Desktop handoffを含む実機確認は未実施である。release Smoke Testは起動時のsynthetic profileを用いた新しいDB／cache path assertionへ追随したが、Docker release Smoke Test全体は実行していない。Frontendは未変更のためFrontend test・型チェック・buildは実行していない。
+
