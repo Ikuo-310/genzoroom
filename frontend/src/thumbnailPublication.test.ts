@@ -34,7 +34,8 @@ function deferredStatus({ abortable = true } = {}) {
   vi.stubGlobal('EventSource', Stream);
   const requests: Array<{
     ids: string[]; signal: AbortSignal; fail: () => void;
-    reply: (sequence: number, version: string, id?: string) => void;
+    reply: (sequence: number, version: string | null, id?: string, recipeRevision?: number | null,
+      state?: string) => void;
   }> = [];
   vi.stubGlobal('fetch', (_url: string, init: RequestInit) => new Promise<Response>((resolve, reject) => {
     const ids: string[] = JSON.parse(String(init.body)).assetIds;
@@ -42,9 +43,9 @@ function deferredStatus({ abortable = true } = {}) {
       init.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
     }
     requests.push({ ids, signal: init.signal!, fail: () => resolve(new Response(null, { status: 503 })),
-      reply: (sequence, version, generationId = generation) => resolve(new Response(JSON.stringify({
+      reply: (sequence, version, generationId = generation, recipeRevision = 1, state = 'published') => resolve(new Response(JSON.stringify({
         sequence, generationId, items: Object.fromEntries(ids.map(id => [id, {
-          state: 'published', publicationVersion: version, recipeRevision: 1,
+          state, publicationVersion: version, recipeRevision,
         }])),
       }))) });
   }));
@@ -97,6 +98,19 @@ it('keeps the last good image version for state-only publication events', async 
   expect(getThumbnailPublication('asset-with-last-good-image')).toMatchObject({
     state: 'published', publicationVersion: '41',
   });
+});
+
+it('accepts the old-engine revision sentinel without retrying a valid status snapshot', async () => {
+  const requests = deferredStatus();
+  watch(['old-engine-asset']);
+  await vi.advanceTimersByTimeAsync(25);
+  requests[0].reply(0, null, generation, 0, 'recipe_default');
+  await vi.advanceTimersByTimeAsync(0);
+  expect(getThumbnailPublication('old-engine-asset')).toEqual({
+    recipeRevision: 0, state: 'recipe_default', publicationVersion: null,
+  });
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(requests).toHaveLength(1);
 });
 
 it('retries a failed shared batch at bounded intervals and resynchronizes on reconnect', async () => {

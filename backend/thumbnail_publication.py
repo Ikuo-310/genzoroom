@@ -10,6 +10,7 @@ class ThumbnailPublicationHub:
     def __init__(self, *, queue_size: int = 256):
         self.generation_id = uuid4().hex
         self.sequence = 0
+        self._mutation_sequence = 0
         self._queue_size = queue_size
         self._subscribers: set[asyncio.Queue] = set()
         self._stopping = False
@@ -20,6 +21,13 @@ class ThumbnailPublicationHub:
 
     def position(self) -> tuple[str, int]:
         return self.generation_id, self.sequence
+
+    def consistency_position(self) -> tuple[str, int, int]:
+        return self.generation_id, self.sequence, self._mutation_sequence
+
+    def record_mutation(self):
+        # Recipe revisions can change without changing the image publication stream.
+        self._mutation_sequence += 1
 
     def subscribe(self) -> asyncio.Queue:
         queue = asyncio.Queue(maxsize=self._queue_size)

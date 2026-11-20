@@ -42,9 +42,10 @@ export async function fetchThumbnailPublications(assetIds: readonly string[], si
   for (const assetId of normalizedIds) {
     const value = body.items[assetId];
     if (!isRecord(value) || !(value.recipeRevision === null
-      || Number.isSafeInteger(value.recipeRevision) && (value.recipeRevision as number) >= 1)
+      || Number.isSafeInteger(value.recipeRevision) && (value.recipeRevision as number) >= 0)
       || !isThumbnailPublicationState(value.state)
-      || !(value.publicationVersion === null || typeof value.publicationVersion === 'string' && /^\d{1,24}$/.test(value.publicationVersion))) {
+      || !(value.publicationVersion === null || typeof value.publicationVersion === 'string' && /^\d{1,24}$/.test(value.publicationVersion))
+      || value.recipeRevision === 0 && (value.state !== 'recipe_default' || value.publicationVersion !== null)) {
       throw new Error('thumbnail_publication_invalid_response');
     }
     items[assetId] = { recipeRevision: value.recipeRevision as number | null,

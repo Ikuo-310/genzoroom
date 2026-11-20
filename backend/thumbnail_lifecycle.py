@@ -22,6 +22,7 @@ async def mutate_raw_edits(scheduler, asset_id, operation, *args, **kwargs):
             # Optional cache bookkeeping cannot prevent the authoritative store operation.
             before = None
             known_before = False
+        before_revision = before.get("revision") if isinstance(before, dict) else None
         if known_before and (before is None or before["exportEligible"] is False):
             # A previous reset may have committed just before the process stopped.
             try:
@@ -29,8 +30,13 @@ async def mutate_raw_edits(scheduler, asset_id, operation, *args, **kwargs):
             except OSError as error:
                 raise StoreUnavailable() from error
         result = await run_in_threadpool(operation, *args, **kwargs)
+        mutation_recorded = False
         try:
             after = await run_in_threadpool(get_raw_saved_state, asset_id)
+            after_revision = after.get("revision") if isinstance(after, dict) else None
+            if (not known_before or before_revision != after_revision) and scheduler.publication_hub is not None:
+                scheduler.publication_hub.record_mutation()
+                mutation_recorded = True
             if after is None or after["exportEligible"] is not True:
                 await scheduler.reset(asset_id)
             elif before is None or before["currentRecipe"] != after["currentRecipe"] or \
@@ -38,6 +44,8 @@ async def mutate_raw_edits(scheduler, asset_id, operation, *args, **kwargs):
                 # Ignore receipt-only saves and History changes that keep current settings.
                 scheduler.schedule(asset_id)
         except Exception:
+            if not known_before and not mutation_recorded and scheduler.publication_hub is not None:
+                scheduler.publication_hub.record_mutation()
             # A committed save stays successful even if derived-cache maintenance fails.
             thumbnail_log("saveNotification.failed", level="warn", component="thumbnail_scheduler",
                           assetId=str(asset_id), errorCode="thumbnail_maintenance_failed")

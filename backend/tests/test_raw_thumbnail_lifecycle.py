@@ -14,6 +14,7 @@ import storage
 from immich import ImmichThumbnail
 from thumbnail_cache import ThumbnailCache
 from thumbnail_lifecycle import mutate_raw_edits
+from thumbnail_publication import ThumbnailPublicationHub
 from thumbnail_scheduler import ThumbnailScheduler
 from tests.test_raw_recipe_store import identity, settings
 from tests.test_thumbnail_generator import ASSET, snapshot
@@ -66,6 +67,63 @@ def test_raw_thumbnail_batch_state_matches_the_existing_eligibility_contract(lif
         "recipeRevision": existing["revision"] if existing is not None else None,
         "edited": existing["exportEligible"] if existing is not None else False,
     }
+
+
+def test_raw_history_only_save_advances_consistency_revision_without_publication(lifecycle):
+    cache, scheduler, _, generate = lifecycle
+    key = identity(assetId=str(ASSET))
+    baseline = settings()
+    current = deepcopy(baseline)
+    current["light"]["exposure"] = .7
+    fingerprint = store._digest(store._settings_json(baseline, 1))
+    hub = ThumbnailPublicationHub()
+    scheduler.publication_hub = hub
+    save_id = uuid4()
+    history_save_id = uuid4()
+    options = {"kind": "control", "metadata": {"control": "light.exposure"},
+               "import_defaults_fingerprint": fingerprint}
+
+    async def run():
+        await mutate_raw_edits(scheduler, ASSET, store.put_raw_recipe, key, 0, save_id, current,
+                               import_defaults_fingerprint=fingerprint)
+        assert store.get_raw_saved_state(ASSET)["revision"] == 1
+        assert hub.position()[1] == 1 and hub.consistency_position()[2] == 1
+        cache.store(ASSET, b"previously published")
+        version = cache.version(ASSET)
+        deadline = dict(scheduler._deadlines)
+
+        operation = (key, 1, history_save_id, current)
+        result = await mutate_raw_edits(scheduler, ASSET, store.append_raw_history, *operation, **options)
+        assert result["replayed"] is False
+        assert store.get_raw_saved_state(ASSET)["revision"] == 2
+        assert hub.position()[1] == 1
+        assert hub.consistency_position()[2] == 2
+        assert scheduler._deadlines == deadline
+        assert cache.version(ASSET) == version
+
+        replay = await mutate_raw_edits(scheduler, ASSET, store.append_raw_history, *operation, **options)
+        assert replay["replayed"] is True
+        assert store.get_raw_saved_state(ASSET)["revision"] == 2
+        assert hub.position()[1] == 1
+        assert hub.consistency_position()[2] == 2
+        assert scheduler._deadlines == deadline
+        assert cache.version(ASSET) == version
+
+    asyncio.run(run())
+    generate.assert_not_called()
+
+
+def test_raw_thumbnail_state_uses_zero_only_for_an_incompatible_engine_recipe(lifecycle, monkeypatch):
+    import lightcraft_artifact
+
+    monkeypatch.setattr(lightcraft_artifact, "ENGINE_VERSION", "9.9.9")
+    monkeypatch.setattr(lightcraft_artifact, "ENGINE_COMMIT", "f" * 40)
+    old_identity = identity(assetId=str(ASSET), engineVersion="0.9.1", engineCommit="a" * 40)
+    store.put_raw_recipe(old_identity, 0, uuid4(), settings())
+
+    result = store.get_raw_thumbnail_recipe_states([ASSET])
+
+    assert result[str(ASSET)] == {"recipeRevision": 0, "edited": False}
 
 
 @pytest.mark.parametrize("kind", ["edited", "default", "unknown", "missing"])

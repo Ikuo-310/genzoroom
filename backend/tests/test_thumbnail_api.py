@@ -450,6 +450,39 @@ def test_thumbnail_status_accepts_a_full_thousand_asset_batch(setup):
     asyncio.run(run())
 
 
+def test_thumbnail_status_preserves_mixed_raw_revision_states_in_a_thousand_asset_batch(setup, monkeypatch):
+    cache, _, _, _, _ = setup
+    asset_ids = [uuid4() for _ in range(1000)]
+    states = {str(asset_id): {"recipeRevision": None, "edited": False} for asset_id in asset_ids}
+    states[str(asset_ids[1])] = {"recipeRevision": 0, "edited": False}
+    states[str(asset_ids[2])] = {"recipeRevision": 1, "edited": False}
+    states[str(asset_ids[3])] = {"recipeRevision": 2, "edited": True}
+    cache.store(asset_ids[3], b"current engine publication")
+    monkeypatch.setattr(main, "get_thumbnail_recipe_states", lambda _ids: states)
+
+    async def run():
+        async with client() as api:
+            response = await api.post("/thumbnail-publications/status",
+                json={"assetIds": [str(asset_id) for asset_id in asset_ids]})
+        assert response.status_code == 200
+        items = response.json()["items"]
+        assert len(items) == 1000
+        assert items[str(asset_ids[0])] == {
+            "recipeRevision": None, "state": "recipe_missing", "publicationVersion": None,
+        }
+        assert items[str(asset_ids[1])] == {
+            "recipeRevision": 0, "state": "recipe_default", "publicationVersion": None,
+        }
+        assert items[str(asset_ids[2])] == {
+            "recipeRevision": 1, "state": "recipe_default", "publicationVersion": None,
+        }
+        assert items[str(asset_ids[3])] == {
+            "recipeRevision": 2, "state": "published", "publicationVersion": cache.version(asset_ids[3]),
+        }
+
+    asyncio.run(run())
+
+
 def test_publication_status_retries_a_stale_read_window_after_recipe_save(setup, monkeypatch):
     original = main.get_thumbnail_recipe_states
     entered, release, calls = threading.Event(), threading.Event(), [0]
@@ -481,6 +514,64 @@ def test_publication_status_retries_a_stale_read_window_after_recipe_save(setup,
         release.set()
 
     asyncio.run(run())
+
+
+def test_publication_status_retries_when_history_only_save_advances_revision(setup, monkeypatch):
+    cache, scheduler, _, generate, original = setup
+    first_save_id, history_save_id = uuid4(), uuid4()
+    entered, release, calls = threading.Event(), threading.Event(), [0]
+    original_read = main.get_thumbnail_recipe_states
+
+    def delayed_read(asset_ids):
+        result = original_read(asset_ids)
+        calls[0] += 1
+        if calls[0] == 1:
+            entered.set()
+            release.wait(3)
+        return result
+
+    monkeypatch.setattr(main, "get_thumbnail_recipe_states", delayed_read)
+
+    async def run():
+        async with client() as api:
+            assert (await put(api, snapshot(1), save_id=first_save_id)).status_code == 200
+            cache.store(ASSET, b"last published image")
+            version = cache.version(ASSET)
+            deadline = dict(scheduler._deadlines)
+            public_sequence, mutation_sequence = scheduler.publication_hub.position()[1], \
+                scheduler.publication_hub.consistency_position()[2]
+
+            pending = asyncio.create_task(api.post("/thumbnail-publications/status",
+                json={"assetIds": [str(ASSET)]}))
+            assert await asyncio.to_thread(entered.wait, 3)
+
+            history_only = snapshot(1)
+            history_only["history"] = [{"kind": "exposure", "before": snapshot(1)["currentRecipe"],
+                                         "after": snapshot(1.2)["currentRecipe"]}]
+            history_only["historyCursor"] = 0
+            response = await put(api, history_only, 1, save_id=history_save_id)
+            assert response.status_code == 200 and response.json()["revision"] == 2
+            assert scheduler.publication_hub.position()[1] == public_sequence
+            assert scheduler.publication_hub.consistency_position()[2] == mutation_sequence + 1
+            release.set()
+
+            status = await pending
+            item = status.json()["items"][str(ASSET)]
+            assert item == {"recipeRevision": 2, "state": "reserved", "publicationVersion": version}
+            assert status.json()["sequence"] == public_sequence and calls[0] >= 2
+
+            replay = await put(api, history_only, 1, save_id=history_save_id)
+            assert replay.status_code == 200 and replay.json()["revision"] == 2
+            assert scheduler.publication_hub.position()[1] == public_sequence
+            assert scheduler.publication_hub.consistency_position()[2] == mutation_sequence + 1
+            assert scheduler._deadlines == deadline
+        generate.assert_not_called()
+        original.assert_not_called()
+
+    try:
+        asyncio.run(run())
+    finally:
+        release.set()
 
 
 def test_slow_thumbnail_disk_prepare_does_not_hold_recipe_mutation_fence(setup, monkeypatch):

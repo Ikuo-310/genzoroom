@@ -456,3 +456,35 @@ Frontend公開版同期のfocused testsは5 passed。全体テストは4,207 pas
 
 実機のWebView2・Dockerにおける最大batch応答時間、Backend event loop latency、subscriber/SSE応答の負荷下計測は未実施。Windows/Docker間の実動作、Immich実サービスを含めた負荷時性能と15秒deadlineの妥当性をP7で計測する。今回はA2に限定し、A3およびP7の実装・負荷検証には着手していない。
 
+## 総合監査対応 A2追加：公開状態取得のrevision整合性
+
+### F-04a：公開通知sequenceとDB mutation sequence
+
+公開状態取得はRecipe revisionも返すため、SSEに現れないHistory-only保存も読取り競合として検出する必要がある。公開通知の`sequence`は画像状態変更専用として維持し、`ThumbnailPublicationHub`にプロセス内の内部mutation sequenceを分離して追加した。状態APIはgeneration ID・公開sequence・mutation sequenceを読取り前後で比較する。mutation sequenceはFrontendへ送らず、SSEイベントも発行しない。
+
+JPEGの保存関数はRecipe変更有無と永続状態revision変更有無を別々に返す。新しいsaveIdによるRecipe／History保存ではmutation sequenceだけを進め、Recipe変更時だけ既存schedule／Reset処理で公開sequenceを進める。同一saveIdの再送はDB revisionを変えず、どちらのsequenceも進めない。A2のmutation lock縮小は維持し、DB／cache読取りはlock外、保存commitと内部sequence更新は既存mutation lock内とする。
+
+RAWは既存`mutate_raw_edits`のmutation lock内で、操作前後の保存Recipe revisionを比べる。Recipe保存とHistory commit／cursor移動による新規revisionは内部sequenceを進める。現在Recipeが変わった場合だけ従来の生成scheduleを行い、History-only変更は公開sequence、公開版、生成予約、画像URLを変更しない。同一saveId replayはrevision不変のため内部sequenceも進めない。操作前の任意状態読取りに失敗した場合は、確定済み操作後の再同期を失わないよう内部sequenceを保守的に進めることがあるが、Frontend向け通知や画像再取得は発生しない。
+
+競合テストは状態取得中のJPEG History-only保存とRecipe変更、同一saveId再送を分けて検証する。RAWでもRecipe変更、History-only commit、同一saveId replayを比較し、revision・内部mutation sequence・公開sequence・deadline・公開版がそれぞれの契約どおりであることを確認する。History-only保存による生成呼出しとImmich画像取得がないことも確認する。
+
+### F-04b：RAW recipeRevision契約
+
+公開状態APIの`recipeRevision`契約を次のように固定した。
+
+| 値 | 意味 | 状態／公開版 |
+|---|---|---|
+| `null` | 保存Recipeなし（現行状態を判定できる保存行なし） | `recipe_missing`、公開版なし |
+| `0` | 保存Recipe行はあるが、現行LightCraft engine tupleに一致するRecipeなし | `recipe_default`、公開版なし |
+| 1以上の安全な整数 | 現行engine tupleのRecipe revision | Recipe／cache状態に応じた通常状態 |
+
+Frontendはnullまたは0以上のsafe integerのみを受理する。0は`recipe_default`かつ公開版nullの場合に限定し、負数、小数、文字列、safe integer上限超過、0と矛盾する状態／公開版は引き続き拒否する。旧engine Recipeを現行Recipeとして編集済み扱いせず、既存のRAW export eligibilityと互換性判定は維持する。これにより旧engine Assetを含む正常なbatch全体の拒否と不要Retryを防ぐ。
+
+Backendでは未保存、旧engineのみ、現行engine未補正、現行engine補正済みを含む1,000 Asset batchを検証する。Frontend API parserは同じ4状態を1,000件batchで受理し、invalid revisionと不整合な`0`の組合せを拒否する。publication同期storeの回帰テストでは旧engine sentinelを取り込んでもRetryを発生させない。
+
+### 追加監査対応の検証結果
+
+Backend関連回帰は190 passed（thumbnail API／publication／RAW thumbnail lifecycle／RAW Recipe store）。Frontend公開状態API／同期テストは13 passed。TypeScriptチェックとproduction buildは成功し、`git diff --check`も確認する。Frontend全体は4,214 passed／138 failed／2 skipped（4,354 tests）。A2 baselineの4,207 passed／137 failed／2 skipped（4,346 tests）に対し、新規8テストのうち7件が成功した。既知RAW失敗群は継続しており、`RawPointColorControls.test.tsx` 50件、`RawVignetteControls.test.tsx` 3件に変化はない。
+
+全体実行では`AnshitsuRawPreview.test.tsx`の既知失敗84件に加え、「places all RAW optics controls after NR, uses readback History flags and preserves independent sections」が5.264秒でtimeoutし同ファイルは85 failedとなった。このテストを単独再実行すると成功した。変更対象外のRAW UIテストにおける全体実行時の時間揺れとして切り分け、RAWテスト基盤は変更していない。公開状態API、revision契約、追加8テストの失敗はない。既知RAW UI mockの代表的エラーは`raw.setPointColorRangeIndex is not a function`。buildには既存の大きなbundleとReact Router `use client`警告がある。
+

@@ -599,13 +599,14 @@ async def thumbnail_publication_status(payload: ThumbnailPublicationRequest, req
         # Disk/DB reads stay outside the mutation fence; accept them only if no publication
         # crossed the read window, otherwise retry before taking the short state snapshot.
         for _ in range(3):
-            start_generation, start_sequence = hub.position()
+            start_position = hub.consistency_position()
             recipe_states = await run_in_threadpool(get_thumbnail_recipe_states, payload.assetIds)
             versions = await run_in_threadpool(cache.versions, payload.assetIds)
             async with scheduler.mutation_lock:
-                generation_id, sequence = hub.position()
-                if generation_id != start_generation or sequence != start_sequence:
+                current_position = hub.consistency_position()
+                if current_position != start_position:
                     continue
+                generation_id, sequence, _ = current_position
                 scheduler_states = {str(asset_id): scheduler.generation_state(asset_id)
                                     for asset_id in payload.assetIds}
                 snapshot = compose(recipe_states, versions, generation_id, sequence, scheduler_states)
@@ -706,8 +707,10 @@ async def save_asset_edit_state(asset_id: UUID, request: Request) -> dict:
                     await run_in_threadpool(scheduler.cache.fence_reset, asset_id)
                 except OSError as error:
                     raise _edit_error(503, "thumbnail_scheduler_unavailable") from error
-            result, recipe_changed = await run_in_threadpool(
+            result, recipe_changed, state_changed = await run_in_threadpool(
                 put_edit_state_with_recipe_change, asset_id, revision, save_id, payload)
+            if state_changed and scheduler.publication_hub is not None:
+                scheduler.publication_hub.record_mutation()
             try:
                 if recipe_changed:
                     if has_non_default_recipe(result["state"]):
