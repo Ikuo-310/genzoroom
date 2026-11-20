@@ -4,9 +4,13 @@ from uuid import UUID
 import pytest
 
 import thumbnail_cache as module
-from thumbnail_cache import MAX_CACHE_BYTES, ThumbnailCache
+from thumbnail_cache import CACHE_HEADER_PREFIX, CACHE_HEADER_SIZE, MAX_CACHE_BYTES, ThumbnailCache
 
 A, B, C = (UUID(int=i) for i in (1, 2, 3))
+
+
+def write_entry(path, content: bytes, version: str):
+    path.write_bytes(CACHE_HEADER_PREFIX + version.encode("ascii") + b"\n" + content)
 
 
 def test_atomic_replacement_read_and_delete(tmp_path):
@@ -15,7 +19,7 @@ def test_atomic_replacement_read_and_delete(tmp_path):
     assert cache.read(A) is None
 
 
-def test_publication_version_is_stable_across_restart_and_changes_on_atomic_replacement(tmp_path):
+def test_publication_version_is_stable_across_restart_and_unique_on_replacement(tmp_path):
     cache = ThumbnailCache(tmp_path)
     cache.store(A, b"first")
     first = cache.version(A)
@@ -25,13 +29,19 @@ def test_publication_version_is_stable_across_restart_and_changes_on_atomic_repl
     assert restarted.version(A) == first
     restarted.store(A, b"second")
     second = restarted.version(A)
-    assert second is not None and int(second) > int(first)
+    assert second is not None and len(second) == 32 and second != first
     assert restarted.read_versioned(A) == (b"second", second)
+    os.utime(tmp_path / f"{A}.jpg", (1, 1))
+    restarted.store(A, b"same after clock rollback")
+    rolled_back = restarted.version(A)
+    assert rolled_back not in {first, second}
     assert restarted.delete(A) is True
+    assert not restarted._reset_marker(A).exists()
     assert restarted.version(A) is None
     cache.store(A, b"old")
+    recreated = cache.version(A)
     cache.store(A, b"new")
-    assert cache.read(A) == b"new"
+    assert cache.read(A) == b"new" and cache.version(A) not in {first, second, rolled_back, recreated}
     assert [p.name for p in cache.root.iterdir()] == [f"{A}.jpg"]
     cache.delete(A)
     cache.delete(A)
@@ -76,24 +86,29 @@ def test_limit_is_one_gib_and_evicts_oldest(tmp_path):
 
 
 def test_recent_read_does_not_protect_old_generation_from_eviction(tmp_path, monkeypatch):
-    monkeypatch.setattr(module, "MAX_CACHE_BYTES", 8)
+    entry_size = CACHE_HEADER_SIZE + 4
+    monkeypatch.setattr(module, "MAX_CACHE_BYTES", entry_size * 2)
     cache = ThumbnailCache(tmp_path)
     cache.store(A, b"old1")
     os.utime(tmp_path / f"{A}.jpg", (10, 10))
     cache.store(B, b"old2")
     os.utime(tmp_path / f"{B}.jpg", (20, 20))
+    previous_version = cache.version(A)
     assert cache.read(A) == b"old1"
     cache.store(C, b"new3")
     assert cache.read(A) is None and cache.read(B) == b"old2"
+    cache.store(A, b"regenerated")
+    assert cache.version(A) != previous_version and cache.read(A) == b"regenerated"
 
 
 def test_initialize_removes_orphan_temps_and_prunes(tmp_path, monkeypatch):
     (tmp_path / "thumbnail-orphan.tmp").write_bytes(b"partial")
     (tmp_path / "unrelated.tmp").write_bytes(b"keep")
-    monkeypatch.setattr(module, "MAX_CACHE_BYTES", 5)
+    entry_size = CACHE_HEADER_SIZE + 4
+    monkeypatch.setattr(module, "MAX_CACHE_BYTES", entry_size * 2 - 1)
     for asset_id, timestamp in ((A, 10), (B, 20)):
         path = tmp_path / f"{asset_id}.jpg"
-        path.write_bytes(b"1234")
+        write_entry(path, b"1234", f"{asset_id.int:032x}")
         os.utime(path, (timestamp, timestamp))
     cache = ThumbnailCache(tmp_path)
     cache.initialize()
@@ -123,9 +138,12 @@ def test_logger_failure_is_ignored(tmp_path, monkeypatch):
 
 def test_read_failure_falls_back(tmp_path, monkeypatch):
     from pathlib import Path
-    def fail(self):
-        raise PermissionError()
-    monkeypatch.setattr(Path, "read_bytes", fail)
+    open_file = Path.open
+    def fail(self, *args, **kwargs):
+        if self.name == f"{A}.jpg":
+            raise PermissionError()
+        return open_file(self, *args, **kwargs)
+    monkeypatch.setattr(Path, "open", fail)
     assert ThumbnailCache(tmp_path).read(A) is None
 
 
@@ -148,15 +166,52 @@ def test_failed_reset_delete_fences_old_file_after_restart(tmp_path, monkeypatch
             cache.delete(A)
     restarted = ThumbnailCache(tmp_path)
     assert (tmp_path / f"{A}.jpg").exists()
+    assert restarted._reset_marker(A).exists()
     assert restarted.versions([A]) == {str(A): None}
     assert restarted.read_versioned(A) is None
-    monkeypatch.setattr(module, "time_ns", lambda: int(old))
     restarted.store(A, b"after reset")
     new = restarted.version(A)
     assert new != old
     assert restarted.read_versioned(A) == (b"after reset", new)
+    assert not restarted._reset_marker(A).exists()
     (tmp_path / f"{A}.jpg").unlink()
     assert restarted.versions([A]) == {str(A): None}
+
+
+def test_successful_reset_and_startup_cleanup_remove_unneeded_markers(tmp_path):
+    cache = ThumbnailCache(tmp_path)
+    cache.store(A, b"old")
+    assert cache.fence_reset(A)
+    assert cache._reset_marker(A).exists()
+    assert cache.delete(A)
+    assert not cache._reset_marker(A).exists()
+
+    orphan = cache._reset_marker(B)
+    orphan.write_text("", encoding="ascii")
+    cache.initialize()
+    assert not orphan.exists()
+
+
+def test_eviction_removes_reset_marker_with_deleted_artifact(tmp_path, monkeypatch):
+    entry_size = CACHE_HEADER_SIZE + 4
+    monkeypatch.setattr(module, "MAX_CACHE_BYTES", entry_size)
+    cache = ThumbnailCache(tmp_path)
+    cache.store(A, b"oldA")
+    assert cache.fence_reset(A)
+    assert cache._reset_marker(A).exists()
+    os.utime(tmp_path / f"{A}.jpg", (1, 1))
+    cache.store(B, b"newB")
+    assert not (tmp_path / f"{A}.jpg").exists()
+    assert not cache._reset_marker(A).exists()
+
+
+def test_initialize_discards_raw_jpeg_entries_without_publication_identity(tmp_path):
+    legacy = tmp_path / f"{A}.jpg"
+    legacy.write_bytes(b"old raw jpeg cache")
+    cache = ThumbnailCache(tmp_path)
+    cache.initialize()
+    assert not legacy.exists()
+    assert cache.read_versioned(A) is None
 
 
 def test_partial_prune_reports_each_successful_eviction(tmp_path, monkeypatch):
@@ -167,7 +222,8 @@ def test_partial_prune_reports_each_successful_eviction(tmp_path, monkeypatch):
     cache.store(B, b"bbbb")
     os.utime(tmp_path / f"{A}.jpg", (10, 10))
     os.utime(tmp_path / f"{B}.jpg", (20, 20))
-    monkeypatch.setattr(module, "MAX_CACHE_BYTES", 8)
+    entry_size = CACHE_HEADER_SIZE + 4
+    monkeypatch.setattr(module, "MAX_CACHE_BYTES", entry_size * 2)
     unlink = Path.unlink
 
     def deny_first(path, *args, **kwargs):

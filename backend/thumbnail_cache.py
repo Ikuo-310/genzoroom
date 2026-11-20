@@ -1,18 +1,21 @@
 """Atomic, bounded thumbnail storage, independent of image generation."""
 
 import os
+import re
 from collections import OrderedDict
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from threading import RLock
-from time import time_ns
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from backend_logging import backend_logger
 import storage
 
 THUMBNAIL_CACHE_ROOT = storage.STORAGE_ROOT / "cache" / "thumbnails"
 MAX_CACHE_BYTES = 1_073_741_824
+CACHE_HEADER_PREFIX = b"GENZOROOM-THUMBNAIL-V1 "
+CACHE_HEADER_SIZE = len(CACHE_HEADER_PREFIX) + 32 + 1
+PUBLICATION_VERSION_PATTERN = re.compile(rb"[0-9a-f]{32}")
 
 
 def thumbnail_log(event: str, *, level: str = "debug", component: str = "thumbnail_cache", **context):
@@ -43,12 +46,46 @@ class ThumbnailCache:
         except FileNotFoundError:
             return False
 
+    @staticmethod
+    def _read_publication_version(image) -> str | None:
+        if image.read(len(CACHE_HEADER_PREFIX)) != CACHE_HEADER_PREFIX:
+            return None
+        version = image.read(32)
+        if len(version) != 32 or PUBLICATION_VERSION_PATTERN.fullmatch(version) is None or image.read(1) != b"\n":
+            return None
+        return version.decode("ascii")
+
     def initialize(self):
         with self._lock:
             self.root.mkdir(parents=True, exist_ok=True)
             # Only our temporary-file namespace is disposable after a process interruption.
             for path in self.root.glob("thumbnail-*.tmp"):
                 path.unlink(missing_ok=True)
+            # Cache contents are derived data; old raw-JPEG entries have no durable publication identity.
+            for path in self.root.glob("*.jpg"):
+                try:
+                    UUID(path.stem)
+                    with path.open("rb") as image:
+                        version = self._read_publication_version(image)
+                        has_content = bool(image.read(1))
+                    if version is None or not has_content:
+                        path.unlink(missing_ok=True)
+                except ValueError:
+                    continue
+                except OSError:
+                    thumbnail_log("initialize.entryCleanupFailed", level="warn", errorCode="cache_cleanup_failed")
+            # A fence is needed only while an old JPEG still exists after failed deletion.
+            for marker in self.root.glob("*.reset"):
+                try:
+                    asset_id = UUID(marker.stem)
+                    try:
+                        self._path(asset_id).stat()
+                    except FileNotFoundError:
+                        marker.unlink(missing_ok=True)
+                    except OSError:
+                        continue
+                except (OSError, ValueError):
+                    thumbnail_log("initialize.markerCleanupFailed", level="warn", errorCode="cache_cleanup_failed")
             return self._prune()
 
     def read(self, asset_id: UUID) -> bytes | None:
@@ -56,7 +93,11 @@ class ThumbnailCache:
             try:
                 if self._is_invalidated(asset_id):
                     return None
-                return self._path(asset_id).read_bytes()
+                with self._path(asset_id).open("rb") as image:
+                    if self._read_publication_version(image) is None:
+                        return None
+                    content = image.read()
+                    return content or None
             except FileNotFoundError:
                 return None
             except OSError:
@@ -70,9 +111,12 @@ class ThumbnailCache:
                 if self._is_invalidated(asset_id):
                     return None
                 with path.open("rb") as image:
+                    version = self._read_publication_version(image)
+                    if version is None:
+                        return None
                     content = image.read()
                     self._read_failures.pop(asset_id, None)
-                    return (content, str(os.fstat(image.fileno()).st_mtime_ns)) if content else None
+                    return (content, version) if content else None
             except FileNotFoundError:
                 return None
             except OSError:
@@ -93,9 +137,11 @@ class ThumbnailCache:
                 if self._is_invalidated(asset_id):
                     return None
                 with self._path(asset_id).open("rb") as image:
-                    if not image.read(1):
+                    version = self._read_publication_version(image)
+                    if version is None or not image.read(1):
                         return None
-                    return str(os.fstat(image.fileno()).st_mtime_ns)
+                    self._read_failures.pop(asset_id, None)
+                    return version
             except FileNotFoundError:
                 return None
             except OSError:
@@ -109,14 +155,13 @@ class ThumbnailCache:
     def fence_reset(self, asset_id: UUID):
         with self._lock:
             try:
-                previous_version = self._path(asset_id).stat().st_mtime_ns
+                self._path(asset_id).stat()
             except FileNotFoundError:
                 return False
             if not self._is_invalidated(asset_id):
                 # Fence the old JPEG before attempting physical removal. Keep the fence
                 # while deletion fails, including across process restarts.
                 with self._reset_marker(asset_id).open("x", encoding="ascii") as marker:
-                    marker.write(str(previous_version))
                     marker.flush()
                     os.fsync(marker.fileno())
             return True
@@ -125,6 +170,7 @@ class ThumbnailCache:
         with self._lock:
             existed = self.fence_reset(asset_id)
             self._path(asset_id).unlink(missing_ok=True)
+            self._reset_marker(asset_id).unlink(missing_ok=True)
             self._read_failures.pop(asset_id, None)
             thumbnail_log("deleted", level="info", assetId=str(asset_id))
             return existed
@@ -132,13 +178,14 @@ class ThumbnailCache:
     def prepare_store(self, content: bytes) -> Path:
         temporary = None
         try:
-            if not content or len(content) > MAX_CACHE_BYTES:
+            if not content or len(content) + CACHE_HEADER_SIZE > MAX_CACHE_BYTES:
                 raise ValueError("cache_entry_size_limit")
             with self._lock:
                 self.root.mkdir(parents=True, exist_ok=True)
                 output = NamedTemporaryFile(dir=self.root, prefix="thumbnail-", suffix=".tmp", delete=False)
                 temporary = Path(output.name)
             with output:
+                output.write(CACHE_HEADER_PREFIX + uuid4().hex.encode("ascii") + b"\n")
                 output.write(content)
                 output.flush()
                 os.fsync(output.fileno())
@@ -155,24 +202,12 @@ class ThumbnailCache:
     def publish_prepared(self, asset_id: UUID, temporary: Path, payload_bytes: int) -> str:
         with self._lock:
             try:
-                # Persisted mtime gives each atomic publication a restart-stable URL identity.
-                try:
-                    previous_mtime = self._path(asset_id).stat().st_mtime_ns
-                except FileNotFoundError:
-                    previous_mtime = 0
-                try:
-                    previous_mtime = max(previous_mtime, int(self._reset_marker(asset_id).read_text(encoding="ascii") or "0"))
-                except FileNotFoundError:
-                    pass
-                # Leave room for filesystem timestamp rounding (including Windows FILETIME).
-                published_mtime = max(time_ns(), previous_mtime + 1_000_000)
-                os.utime(temporary, ns=(published_mtime, published_mtime))
-                actual_mtime = temporary.stat().st_mtime_ns
-                if actual_mtime <= previous_mtime:
-                    raise OSError("thumbnail_publication_timestamp_not_advanced")
+                with temporary.open("rb") as image:
+                    version = self._read_publication_version(image)
+                    if version is None or not image.read(1):
+                        raise OSError("thumbnail_publication_identity_invalid")
                 os.replace(temporary, self._path(asset_id))
                 self._reset_marker(asset_id).unlink(missing_ok=True)
-                version = str(actual_mtime)
                 self._read_failures.pop(asset_id, None)
                 thumbnail_log("updated", level="info", assetId=str(asset_id), payloadBytes=payload_bytes)
                 return version
@@ -234,6 +269,10 @@ class ThumbnailCache:
             except OSError:
                 thumbnail_log("prune.deleteFailed", level="warn", assetId=asset_id)
                 continue
+            try:
+                self._reset_marker(UUID(asset_id)).unlink(missing_ok=True)
+            except OSError:
+                thumbnail_log("prune.markerCleanupFailed", level="warn", assetId=asset_id)
             total -= size
             evicted.append(UUID(asset_id))
             thumbnail_log("evicted", level="info", assetId=asset_id, payloadBytes=size,

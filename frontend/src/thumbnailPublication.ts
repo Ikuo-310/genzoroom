@@ -176,7 +176,7 @@ function onPublication(event: MessageEvent<string>) {
   const hasPublicationVersion = Object.prototype.hasOwnProperty.call(message, 'publicationVersion');
   if (typeof message.assetId !== 'string' || !isThumbnailPublicationState(message.state)
     || (hasPublicationVersion && !(message.publicationVersion === null || typeof message.publicationVersion === 'string'
-      && /^\d{1,24}$/.test(message.publicationVersion)))) {
+      && /^[0-9a-f]{32}$/.test(message.publicationVersion)))) {
     scheduleReconciliation(); return;
   }
   if (!listeners.has(message.assetId) || sequence <= (assetSequences.get(message.assetId) ?? -1)) return;

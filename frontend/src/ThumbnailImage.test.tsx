@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { frontendLogger } from './frontendLogging';
 import { isThumbnailRetryTarget, ThumbnailImage } from './ThumbnailImage';
 
+const pub = (value: number) => value.toString(16).padStart(32, '0');
+
 let host: HTMLDivElement;
 let root: Root;
 
@@ -27,9 +29,9 @@ afterEach(() => {
 
 describe('ThumbnailImage diagnostics', () => {
   it('resolves the selected Asset rendition in the shared component', async () => {
-    await act(async () => root.render(<div data-thumbnail-retry-host><button data-thumbnail-action><ThumbnailImage rendition="rendered-thumbnail" publicationVersion="12345" assetId="asset/id"
+    await act(async () => root.render(<div data-thumbnail-retry-host><button data-thumbnail-action><ThumbnailImage rendition="rendered-thumbnail" publicationVersion={pub(12345)} assetId="asset/id"
       surface="gallery" mode="rendered" alt="" /></button></div>));
-    expect(host.querySelector('img')?.getAttribute('src')).toBe('/api/assets/asset%2Fid/rendered-thumbnail?publication=12345');
+    expect(host.querySelector('img')?.getAttribute('src')).toBe(`/api/assets/asset%2Fid/rendered-thumbnail?publication=${pub(12345)}`);
   });
 
   it('correlates image lifecycle and records load failures without exposing image URLs', async () => {
@@ -108,16 +110,16 @@ describe('ThumbnailImage diagnostics', () => {
     const renderImage = (src: string, publicationVersion: string) => <div data-thumbnail-retry-host>
       <button data-thumbnail-action><ThumbnailImage src={src} assetId="asset" surface="gallery" mode="rendered" alt="" publicationVersion={publicationVersion} /></button>
     </div>;
-    await act(async () => root.render(renderImage('/photo/old', '1')));
+    await act(async () => root.render(renderImage('/photo/old', pub(1))));
     const oldImage = host.querySelector('img')!;
-    await act(async () => root.render(renderImage('/photo/new', '1')));
+    await act(async () => root.render(renderImage('/photo/new', pub(1))));
     const newImage = host.querySelector('img')!;
     await act(async () => oldImage.dispatchEvent(new Event('error')));
     expect(newImage.dataset.thumbnailState).toBe('loading');
     expect(newImage.getAttribute('src')).toBe('/photo/new');
 
     await act(async () => newImage.dispatchEvent(new Event('load')));
-    await act(async () => root.render(renderImage('/photo/new', '2')));
+    await act(async () => root.render(renderImage('/photo/new', pub(2))));
     const nextVersion = host.querySelector('img')!;
     expect(nextVersion).not.toBe(newImage);
     expect(nextVersion.dataset.thumbnailState).toBe('loading');
@@ -156,13 +158,13 @@ describe('ThumbnailImage diagnostics', () => {
       get emitEvent() { return this.emit.bind(this); }
     }
     vi.stubGlobal('EventSource', FakeEventSource);
-    let aVersion: string | null = '1';
+    let aVersion: string | null = pub(1);
     let statusSequence = 0;
     const generationId = 'a'.repeat(32);
     const fetch = vi.fn(async (_url: string, init?: RequestInit) => {
       const { assetIds } = JSON.parse(String(init?.body)) as { assetIds: string[] };
       return new Response(JSON.stringify({ generationId, sequence: statusSequence, items: Object.fromEntries(assetIds.map(assetId => [assetId, {
-        recipeRevision: 4, state: 'published', publicationVersion: assetId === 'a' ? aVersion : '10',
+        recipeRevision: 4, state: 'published', publicationVersion: assetId === 'a' ? aVersion : pub(10),
       }])) }));
     });
     vi.stubGlobal('fetch', fetch);
@@ -179,50 +181,50 @@ describe('ThumbnailImage diagnostics', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(30); });
     expect(fetch).toHaveBeenCalledTimes(1);
     const [firstA, secondA, b, normal] = [...host.querySelectorAll('img')];
-    expect(firstA.getAttribute('src')).toBe('/api/assets/a/rendered-thumbnail?publication=1');
-    expect(secondA.getAttribute('src')).toBe('/api/assets/a/rendered-thumbnail?publication=1');
-    expect(b.getAttribute('src')).toBe('/api/assets/b/rendered-thumbnail?publication=10');
+    expect(firstA.getAttribute('src')).toBe(`/api/assets/a/rendered-thumbnail?publication=${pub(1)}`);
+    expect(secondA.getAttribute('src')).toBe(`/api/assets/a/rendered-thumbnail?publication=${pub(1)}`);
+    expect(b.getAttribute('src')).toBe(`/api/assets/b/rendered-thumbnail?publication=${pub(10)}`);
     expect(normal.getAttribute('src')).toBe('/api/assets/normal/thumbnail');
     const bElement = b, normalElement = normal;
     for (const image of [...host.querySelectorAll('img')]) await act(async () => image.dispatchEvent(new Event('load')));
     expect(fetch).toHaveBeenCalledTimes(1);
 
     sources[0].emit('publication', JSON.stringify({ generationId, sequence: 1, assetId: 'a',
-      state: 'published', publicationVersion: '2' }));
+      state: 'published', publicationVersion: pub(2) }));
     await act(async () => {});
     expect([...host.querySelectorAll('img')].slice(0, 2).map(image => image.getAttribute('src'))).toEqual([
-      '/api/assets/a/rendered-thumbnail?publication=2', '/api/assets/a/rendered-thumbnail?publication=2',
+      `/api/assets/a/rendered-thumbnail?publication=${pub(2)}`, `/api/assets/a/rendered-thumbnail?publication=${pub(2)}`,
     ]);
     expect(host.querySelectorAll('img')[2]).toBe(bElement);
     expect(host.querySelectorAll('img')[3]).toBe(normalElement);
-    expect(bElement.getAttribute('src')).toBe('/api/assets/b/rendered-thumbnail?publication=10');
+    expect(bElement.getAttribute('src')).toBe(`/api/assets/b/rendered-thumbnail?publication=${pub(10)}`);
 
-    aVersion = '3';
+    aVersion = pub(3);
     statusSequence = 2;
     sources[0].emit('open');
     await act(async () => { await vi.advanceTimersByTimeAsync(30); });
-    expect(host.querySelectorAll('img')[0].getAttribute('src')).toBe('/api/assets/a/rendered-thumbnail?publication=3');
+    expect(host.querySelectorAll('img')[0].getAttribute('src')).toBe(`/api/assets/a/rendered-thumbnail?publication=${pub(3)}`);
     sources[0].emit('publication', JSON.stringify({ generationId, sequence: 3, assetId: 'b',
-      state: 'published', publicationVersion: '10' }));
+      state: 'published', publicationVersion: pub(10) }));
     statusSequence = 5;
-    aVersion = '4';
+    aVersion = pub(4);
     sources[0].emit('publication', JSON.stringify({ generationId, sequence: 5, assetId: 'a',
-      state: 'published', publicationVersion: '4' }));
+      state: 'published', publicationVersion: pub(4) }));
     await act(async () => { await vi.advanceTimersByTimeAsync(30); });
-    expect(host.querySelectorAll('img')[0].getAttribute('src')).toBe('/api/assets/a/rendered-thumbnail?publication=4');
+    expect(host.querySelectorAll('img')[0].getAttribute('src')).toBe(`/api/assets/a/rendered-thumbnail?publication=${pub(4)}`);
     expect(sources).toHaveLength(1);
     expect(fetch).toHaveBeenCalledTimes(3);
 
     // A status response for A must not consume B's still in-flight SSE event.
     statusSequence = 9;
-    aVersion = '9';
+    aVersion = pub(9);
     await act(async () => host.querySelectorAll('img')[0].dispatchEvent(new Event('error')));
     await act(async () => { await vi.advanceTimersByTimeAsync(30); });
     expect(JSON.parse(String(fetch.mock.lastCall?.[1]?.body)).assetIds).toEqual(['a']);
     sources[0].emit('publication', JSON.stringify({ generationId, sequence: 6, assetId: 'b',
-      state: 'published', publicationVersion: '11' }));
+      state: 'published', publicationVersion: pub(11) }));
     await act(async () => {});
-    expect(host.querySelectorAll('img')[2].getAttribute('src')).toContain('publication=11');
+    expect(host.querySelectorAll('img')[2].getAttribute('src')).toContain(`publication=${pub(11)}`);
 
     statusSequence = 10;
     aVersion = null;

@@ -3,6 +3,7 @@ import json
 import copy
 import hashlib
 import asyncio
+import re
 from contextlib import asynccontextmanager
 from datetime import date
 from time import monotonic
@@ -933,7 +934,7 @@ def _stale_publication_response():
 
 async def corrected_thumbnail_cache_response(asset_id: UUID, request: Request, cache, diagnostic):
     requested_version = request.query_params.get("publication")
-    if requested_version is not None and (not requested_version.isdecimal() or len(requested_version) > 24):
+    if requested_version is not None and re.fullmatch(r"[0-9a-f]{32}", requested_version) is None:
         raise HTTPException(status_code=400, detail={"code": "invalid_thumbnail_publication"})
     try:
         reason = await thumbnail_recipe_reason(asset_id)

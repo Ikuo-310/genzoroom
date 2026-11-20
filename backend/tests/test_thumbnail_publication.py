@@ -17,14 +17,15 @@ def test_hub_emits_ordered_state_and_coalesces_overflow_to_resync():
     subscriber = hub.subscribe()
     hub.publish(A, "queued", None)
     hub.publish(A, "running", None)
-    hub.publish(A, "published", "123")
+    version = "a" * 32
+    hub.publish(A, "published", version)
     assert subscriber.qsize() == 1
     resync = subscriber.get_nowait()
     assert resync == {"generationId": hub.generation_id, "sequence": 3, "type": "resync"}
-    hub.publish(A, "published", "123")
+    hub.publish(A, "published", version)
     event = subscriber.get_nowait()
     assert event == {"generationId": hub.generation_id, "sequence": 4, "assetId": str(A),
-                     "state": "published", "publicationVersion": "123"}
+                     "state": "published", "publicationVersion": version}
     hub.unsubscribe(subscriber)
 
 
@@ -111,7 +112,7 @@ def test_failure_preserves_old_publication_and_capacity_eviction_publishes_missi
                 raise RuntimeError("private failure detail")
             return b"newC"
 
-        monkeypatch.setattr(cache_module, "MAX_CACHE_BYTES", 8)
+        monkeypatch.setattr(cache_module, "MAX_CACHE_BYTES", (cache_module.CACHE_HEADER_SIZE + 4) * 2)
         hub = ThumbnailPublicationHub()
         subscriber = hub.subscribe()
         scheduler = ThumbnailScheduler(cache, generate, publication_hub=hub)

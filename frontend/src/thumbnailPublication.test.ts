@@ -4,6 +4,7 @@ import { closeThumbnailPublicationStream, getThumbnailPublication, resumeThumbna
 
 const generation = 'a'.repeat(32);
 const nextGeneration = 'b'.repeat(32);
+const pub = (value: number) => value.toString(16).padStart(32, '0');
 
 class Stream extends EventTarget {
   static latest: Stream;
@@ -56,28 +57,28 @@ it('orders snapshots per Asset across batches and rejects a response from before
   const requests = deferredStatus();
   watch(Array.from({ length: 1001 }, (_, index) => String(index)));
   const stream = Stream.latest;
-  stream.emit(generation, 1, '1000', '1');
+  stream.emit(generation, 1, '1000', pub(1));
   await vi.advanceTimersByTimeAsync(25);
   expect(requests[0].ids).toHaveLength(1000);
-  requests[0].reply(8, '8');
+  requests[0].reply(8, pub(8));
   await vi.advanceTimersByTimeAsync(0);
   expect(requests[1].ids).toEqual(['1000']);
-  stream.emit(generation, 2, '1000', '2');
-  requests[1].reply(1, '1');
+  stream.emit(generation, 2, '1000', pub(2));
+  requests[1].reply(1, pub(1));
   await vi.advanceTimersByTimeAsync(0);
-  expect(getThumbnailPublication('1000')?.publicationVersion).toBe('2');
+  expect(getThumbnailPublication('1000')?.publicationVersion).toBe(pub(2));
   stream.dispatchEvent(new Event('open'));
   await vi.advanceTimersByTimeAsync(25);
-  stream.emit(nextGeneration, 1, '0', '19');
+  stream.emit(nextGeneration, 1, '0', pub(19));
   expect(requests[2].signal.aborted).toBe(true);
-  requests[2].reply(99, '99');
+  requests[2].reply(99, pub(99));
   await vi.advanceTimersByTimeAsync(25);
-  expect(getThumbnailPublication('0')?.publicationVersion).toBe('19');
+  expect(getThumbnailPublication('0')?.publicationVersion).toBe(pub(19));
   subscriptions.splice(0).forEach(stop => stop());
   expect(getThumbnailPublication('0')).toBeUndefined();
-  stream.emit(nextGeneration, 2, 'never-watched', '20');
+  stream.emit(nextGeneration, 2, 'never-watched', pub(20));
   expect(getThumbnailPublication('never-watched')).toBeUndefined();
-  requests[3].reply(1, '19', nextGeneration);
+  requests[3].reply(1, pub(19), nextGeneration);
   await vi.advanceTimersByTimeAsync(1000);
   expect(stream.close).toHaveBeenCalledOnce();
 });
@@ -89,14 +90,14 @@ it('keeps the last good image version for state-only publication events', async 
   await vi.advanceTimersByTimeAsync(25);
   stream.emit(generation, 1, 'asset-with-last-good-image');
   expect(getThumbnailPublication('asset-with-last-good-image')).toBeUndefined();
-  requests[0].reply(0, '41');
+  requests[0].reply(0, pub(41));
   await vi.advanceTimersByTimeAsync(0);
   await vi.advanceTimersByTimeAsync(25);
   expect(requests).toHaveLength(2);
-  requests[1].reply(1, '41');
+  requests[1].reply(1, pub(41));
   await vi.advanceTimersByTimeAsync(0);
   expect(getThumbnailPublication('asset-with-last-good-image')).toMatchObject({
-    state: 'published', publicationVersion: '41',
+    state: 'published', publicationVersion: pub(41),
   });
 });
 
@@ -128,9 +129,9 @@ it('retries a failed shared batch at bounded intervals and resynchronizes on rec
   expect(requests).toHaveLength(4);
   stream.dispatchEvent(new Event('open'));
   await vi.advanceTimersByTimeAsync(25);
-  requests[4].reply(5, '5');
+  requests[4].reply(5, pub(5));
   await vi.advanceTimersByTimeAsync(0);
-  expect(getThumbnailPublication('a')?.publicationVersion).toBe('5');
+  expect(getThumbnailPublication('a')?.publicationVersion).toBe(pub(5));
 });
 
 it('times out a stalled batch, ignores its delayed reply, and resumes with a bounded retry', async () => {
@@ -140,14 +141,14 @@ it('times out a stalled batch, ignores its delayed reply, and resumes with a bou
   expect(requests).toHaveLength(1);
   await vi.advanceTimersByTimeAsync(15000);
   expect(requests[0].signal.aborted).toBe(true);
-  requests[0].reply(1, 'stale');
+  requests[0].reply(1, pub(40));
   await vi.advanceTimersByTimeAsync(0);
   expect(getThumbnailPublication('stalled-asset')).toBeUndefined();
   await vi.advanceTimersByTimeAsync(525);
   expect(requests).toHaveLength(2);
-  requests[1].reply(2, '42');
+  requests[1].reply(2, pub(42));
   await vi.advanceTimersByTimeAsync(0);
-  expect(getThumbnailPublication('stalled-asset')?.publicationVersion).toBe('42');
+  expect(getThumbnailPublication('stalled-asset')?.publicationVersion).toBe(pub(42));
 });
 
 it('retains current subscribers while stopped and resynchronizes only those still subscribed on resume', async () => {
@@ -159,7 +160,7 @@ it('retains current subscribers while stopped and resynchronizes only those stil
   closeThumbnailPublicationStream();
   expect(stream.close).toHaveBeenCalledOnce();
   expect(requests[0].signal.aborted).toBe(true);
-  stream.emit(generation, 1, 'shutdown-asset', '2');
+  stream.emit(generation, 1, 'shutdown-asset', pub(2));
   const late = subscribeThumbnailPublication('late-asset', () => {});
   late();
   await vi.advanceTimersByTimeAsync(10000);
@@ -168,11 +169,11 @@ it('retains current subscribers while stopped and resynchronizes only those stil
   resumeThumbnailPublicationStream();
   await vi.advanceTimersByTimeAsync(25);
   expect(requests[1].ids).toEqual(['shutdown-asset']);
-  requests[1].reply(1, '2');
+  requests[1].reply(1, pub(2));
   await vi.advanceTimersByTimeAsync(0);
   expect(requests).toHaveLength(2);
   expect(requests[1].ids).not.toContain('late-asset');
-  expect(getThumbnailPublication('shutdown-asset')?.publicationVersion).toBe('2');
+  expect(getThumbnailPublication('shutdown-asset')?.publicationVersion).toBe(pub(2));
   expect(Stream.latest).not.toBe(stream);
   active();
   const resumedStream = Stream.latest;

@@ -392,7 +392,7 @@ def test_publication_status_and_versioned_image_follow_saved_recipe_and_reset(se
             assert unchanged.status_code == 304 and not unchanged.content
             assert unchanged.headers["etag"] == current.headers["etag"]
 
-            stale = await api.get(PATH, params={"publication": "1"})
+            stale = await api.get(PATH, params={"publication": "0" * 32})
             assert stale.status_code == 409 and stale.headers["cache-control"] == "private, no-store"
             assert original.await_count == 0
 
@@ -406,6 +406,17 @@ def test_publication_status_and_versioned_image_follow_saved_recipe_and_reset(se
             assert fallback.headers["cache-control"] == "private, no-store"
         generate.assert_not_called()
         assert scheduler.generation_state(ASSET) == "reset"
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("publication", ["1", "A" * 32, "g" * 32, "a" * 33])
+def test_invalid_publication_identity_is_rejected_without_cacheable_response(setup, publication):
+    async def run():
+        async with client() as api:
+            response = await api.get(PATH, params={"publication": publication})
+        assert response.status_code == 400
+        assert response.headers["cache-control"] == "private, no-store"
+
     asyncio.run(run())
 
 
