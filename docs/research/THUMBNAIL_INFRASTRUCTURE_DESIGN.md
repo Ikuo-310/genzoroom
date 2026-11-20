@@ -527,3 +527,13 @@ Docker entrypointは環境変数で接続先とAPI Keyが両方与えられた�
 
 関連検証はBackend Python 3.14 `.venv`で82 passed（profile決定性、API Key非依存、URL／ユーザー分離、同一Asset IDのprofile間分離、DB／cache／Export Queue、未設定時のRuntime抑止、Docker起動選択、Windows接続選択／import後path切替）。Windows LocalHostの`--no-browser`起動・graceful shutdownは1 passed。`--desktop`の統合起動テストはready待ちで失敗したため未解決として扱い、Desktop handoffを含む実機確認は未実施である。release Smoke Testは起動時のsynthetic profileを用いた新しいDB／cache path assertionへ追随したが、Docker release Smoke Test全体は実行していない。Frontendは未変更のためFrontend test・型チェック・buildは実行していない。
 
+## A3-P3：画像配信のAsset認可境界
+
+公開版なしURLに対する307 redirectの前に、既存の`require_immich_asset()`を呼び、Immich `GET /api/assets/{assetId}`で現在のAssetアクセスを確認する。公開版付きURLのcache hitでも、画像本文やETag／304応答を作る前に同じ確認を維持する。Immersive Previewは通常の補正済み画像と共通の公開cache helperを使うため、redirect・cache hitの認可順序も共通で保護される。Fallback時はImmich thumbnail／preview endpoint自身がアクセスを検証するため、追加のAsset detail要求は発生しない。認可エラーは既存の上流エラー契約で返し、画像経路middlewareが`Cache-Control: private, no-store`を付ける。認可失敗時に画像bytes、publication URL／redirect、ETag／304は返さない。
+
+キャッシュされる画像を返す個々の要求についてAsset認可を再確認する。版なしURLの307と、その後の版付き画像要求は別HTTP要求であり、アクセス権は要求間に失効し得るため、それぞれで確認が必要となる。確認は既存の共有Immich read clientとAsset detail APIを再利用する。画像キャッシュHIT・条件付き要求以外にImmich API呼出しを追加せず、公開状態一括取得・SSEにAsset単位のdetail照会は追加しない。したがって1,000 Assetの状態取得やSSE fanoutのAPI要求数は増えない。版なしredirectに限り、従来なかった1 detail要求を追加する。
+
+認可上の製品境界は画像本文の配信時点である。GenzoRoomは単一利用者連携を前提とし、公開状態一括APIは現在のbatch方式、SSEは共有接続とFrontend側Asset filteringを維持する。Recipe revision、publication version、生成状態などのメタデータについてAsset単位のImmich認可は行わず、SSE購読者ごとの認可も行わない。Windowsでは既存のLocalHost session認証を維持する。Dockerは利用者が管理するネットワーク公開範囲を境界とし、Docker独自認証、RBAC、multi-user／Asset別SSE購読、認可cacheは導入しない。Asset UUIDと状態metadataはこの単一利用者境界内で露出し得る情報として扱い、権限の失効後も画像経路でImmichが拒否することを保証する。接続profile変更時のDB／cache分離はA3-P2のProfile IDが担う。
+
+Backendの`tests/test_thumbnail_api.py`を対象に、認可成功時redirectと版付きHIT、版付きETag再検証の304、rendered thumbnail／Immersive Preview双方の認可失敗、失効時にredirect・本文・304を返さないこと、error no-store、通常画像fallbackを確認する。Frontend契約は変更せず、Frontend検証は行わない。
+

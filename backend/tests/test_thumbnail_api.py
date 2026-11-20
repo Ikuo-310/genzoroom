@@ -348,6 +348,7 @@ def test_get_only_reads_cache_or_original_and_never_generates(setup):
             redirect = await api.get(PATH)
             assert redirect.status_code == 307 and redirect.headers["cache-control"] == "private, no-store"
             assert f"publication={cache.version(ASSET)}" in redirect.headers["location"]
+            assert main.get_asset_detail.await_count == 1
             result = await api.get(PATH, params={"publication": cache.version(ASSET)})
             assert result.content == b"rendered" and result.headers["content-type"] == "image/jpeg"
             assert result.headers["cache-control"] == "private, no-cache"
@@ -359,7 +360,7 @@ def test_get_only_reads_cache_or_original_and_never_generates(setup):
             assert source.headers["cache-control"] == "private, no-cache"
             assert source.headers["etag"].startswith('"')
         assert original.await_count == 2
-        assert main.get_asset_detail.await_count == 2
+        assert main.get_asset_detail.await_count == 3
         generate.assert_not_called()
         assert not scheduler._pending and not scheduler._deadlines
     asyncio.run(run())
@@ -386,6 +387,10 @@ def test_publication_status_and_versioned_image_follow_saved_recipe_and_reset(se
             assert current.status_code == 200 and current.content == b"published"
             assert current.headers["cache-control"] == "private, no-cache"
             assert current.headers["etag"].startswith('"')
+            unchanged = await api.get(PATH, params={"publication": publication["publicationVersion"]},
+                                      headers={"If-None-Match": current.headers["etag"]})
+            assert unchanged.status_code == 304 and not unchanged.content
+            assert unchanged.headers["etag"] == current.headers["etag"]
 
             stale = await api.get(PATH, params={"publication": "1"})
             assert stale.status_code == 409 and stale.headers["cache-control"] == "private, no-store"
@@ -401,6 +406,38 @@ def test_publication_status_and_versioned_image_follow_saved_recipe_and_reset(se
             assert fallback.headers["cache-control"] == "private, no-store"
         generate.assert_not_called()
         assert scheduler.generation_state(ASSET) == "reset"
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("path", [PATH, IMMERSIVE_PATH])
+def test_cached_publication_requires_current_asset_access_before_redirect_or_not_modified(setup, monkeypatch, path):
+    cache, _, _, generate, original = setup
+    cache.store(ASSET, b"private rendered image")
+    denied = ImmichRequestError("authentication_failed", "safe upstream error", status_code=403)
+    current_version = cache.version(ASSET)
+
+    async def run():
+        async with client() as api:
+            assert (await put(api, snapshot(1))).status_code == 200
+            monkeypatch.setattr(main, "get_asset_detail", AsyncMock(side_effect=denied))
+            redirect = await api.get(path)
+            assert redirect.status_code == 502
+            assert redirect.headers["cache-control"] == "private, no-store"
+            assert "location" not in redirect.headers
+            assert b"private rendered image" not in redirect.content
+            assert f"publication={current_version}" not in redirect.text
+
+            revalidated = await api.get(path, params={"publication": current_version},
+                                        headers={"If-None-Match": "*"})
+            assert revalidated.status_code == 502
+            assert revalidated.headers["cache-control"] == "private, no-store"
+            assert "etag" not in revalidated.headers
+            assert b"private rendered image" not in revalidated.content
+
+        assert main.get_asset_detail.await_count == 2
+        original.assert_not_awaited()
+        generate.assert_not_called()
+
     asyncio.run(run())
 
 
@@ -689,7 +726,7 @@ def test_immersive_preview_prefers_only_saved_edited_cache(setup, monkeypatch, s
             assert scheduler._pending == pending_before and scheduler._deadlines == deadlines_before
             if expected == b"cached-jpeg":
                 preview.assert_not_awaited()
-                main.get_asset_detail.assert_awaited_once()
+                assert main.get_asset_detail.await_count == 2
             else: preview.assert_awaited_once()
             generate.assert_not_called()
     asyncio.run(run())

@@ -945,6 +945,11 @@ async def corrected_thumbnail_cache_response(asset_id: UUID, request: Request, c
         raise
     cached = await run_in_threadpool(cache.read_versioned, asset_id) if cache is not None and reason is None else None
     if requested_version is None and cached is not None:
+        try:
+            await require_immich_asset(asset_id, request)
+        except Exception as error:
+            thumbnail_diagnostic_error(diagnostic, error)
+            raise
         query = {"publication": cached[1]}
         diagnostic_id = request.query_params.get("__diag")
         if diagnostic_id and len(diagnostic_id) <= 64 and all(char.isalnum() or char in "-_" for char in diagnostic_id):
