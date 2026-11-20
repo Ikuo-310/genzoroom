@@ -110,10 +110,16 @@ def test_nr_history_retry_reset_off_reopen_and_hidden_state(local, tmp_path, mon
 
 def test_published_control_and_section_contract_matches_frontend_and_history():
     source = (Path(__file__).parents[2] / 'frontend/src/rawApi.ts').read_text(encoding='utf-8')
-    ids = source.split('export const RAW_CONTROL_IDS = [', 1)[1].split('] as const', 1)[0]
+    ids = source.split('export const RAW_CONTROL_IDS = [', 1)[1].split('export type RawControlId', 1)[0]
     setting_ids = source.split('export const RAW_SETTINGS_CONTROL_IDS = [...RAW_CONTROL_IDS,', 1)[1].split('] as const', 1)[0]
     sections = source.split('export const RAW_SECTION_IDS = [', 1)[1].split('] as const', 1)[0]
-    frontend_controls = set(re.findall(r"'([^']+)'", ids))
+    # Expand the two literal arrays used by the Frontend's Mixer ID template.
+    mixer = re.search(r"\.\.\.\(\[([^\]]+)\] as const\)\.flatMap\(color =>\s*\(\[([^\]]+)\] as const\)"
+                      r"\.map\(field => `mixer\.\$\{color\}\.\$\{field\}` as const\)\),", ids)
+    assert mixer is not None
+    colors, fields = (re.findall(r"'([^']+)'", group) for group in mixer.groups())
+    frontend_controls = set(re.findall(r"'([^']+)'", ids[:mixer.start()] + ids[mixer.end():]))
+    frontend_controls.update(f'mixer.{color}.{field}' for color in colors for field in fields)
     frontend_sections = set(re.findall(r"'([^']+)'", sections))
     optics_controls = {f"optics.{name}" for name in (
         "profileDistortion", "profileVignetting", "distortion", "vignetting", "vignettingMidpoint",

@@ -36,7 +36,7 @@ def test_vignette_contracts_match_history_and_frontend():
     source = (Path(__file__).parents[2] / 'frontend/src/rawApi.ts').read_text(encoding='utf-8')
     styles = source.split('export const RAW_VIGNETTE_STYLES = [', 1)[1].split('] as const', 1)[0]
     assert set(re.findall(r"'([^']+)'", styles)) == set(VIGNETTE_STYLES)
-    assert set(RESET_SECTIONS) == store.HISTORY_RESET_SECTIONS == set(SECTIONS) | {'vignette'}
+    assert set(RESET_SECTIONS) == store.HISTORY_RESET_SECTIONS == set(SECTIONS) | {'vignette', 'mixer'}
     assert 'vignette' not in SECTIONS
 
 

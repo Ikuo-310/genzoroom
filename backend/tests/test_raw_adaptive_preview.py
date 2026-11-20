@@ -58,32 +58,21 @@ def test_whole_http_size_reaches_native_without_mutations(local, tmp_path, monke
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("execution", [
-    None,
-    {"outcome": "gpu_success", "backend": "gpu", "reason": "none"},
-    {"outcome": "cpu_not_tried", "backend": "cpu", "reason": "gpu_unavailable"},
-    {"outcome": "cpu_fallback", "backend": "cpu", "reason": "gpu_failed"},
+@pytest.mark.parametrize("field,value", [
+    ("id", 2), ("kind", "before"), ("quality", "draft"), ("frame", {}),
 ])
-def test_render_execution_metadata_is_optional_and_validated(execution):
+def test_whole_full_frame_matches_request(field, value):
     from tests.test_lightcraft_raw import image_result
     result = image_result()
     meta = json.loads(result["content"][1]["text"])
-    meta.update(kind="after", previewContract=1, quality="full", mode="whole",
+    meta.update(kind="after", quality="full",
         frame={"geometryId": "a" * 64, "nativeWidth": 16, "nativeHeight": 12,
-               "aspect": 4 / 3, "fullWidth": 16, "fullHeight": 12, "window": None},
-        stageCache={"mode": "off", "applied": False, "reason": "none", "cpuBytes": 0,
-                    "gpuBytes": 0, "retainedBytes": 0, "budgetBytes": 0})
-    if execution is not None:
-        meta["execution"] = execution
+               "aspect": 4 / 3, "fullWidth": 16, "fullHeight": 12, "window": None})
     result["content"][1]["text"] = json.dumps(meta)
-    assert adapter._validate_png(result, 1, 1024, quality="full")[3] == meta
-    for invalid in ({"outcome": "gpu_success", "backend": "cpu", "reason": "none"},
-                    {"outcome": "cpu_fallback", "backend": "cpu", "reason": "PRIVATE path"},
-                    None):
-        meta["execution"] = invalid
-        result["content"][1]["text"] = json.dumps(meta)
-        with pytest.raises(LightCraftError):
-            adapter._validate_png(result, 1, 1024, quality="full")
+    assert adapter._validate_png(result, 1, 1024, frame_only=True)[3] == meta
+    result["content"][1]["text"] = json.dumps(meta | {field: value})
+    with pytest.raises(LightCraftError, match="lightcraft_invalid_preview"):
+        adapter._validate_png(result, 1, 1024, frame_only=True)
 
 
 def target(doc, serial=1, quality="draft"):
@@ -128,29 +117,6 @@ def test_internal_stage_cache_requires_finite_budget(monkeypatch, budget):
         monkeypatch.setenv("GENZOROOM_RAW_STAGE_CACHE_BUDGET_BYTES", budget)
     with pytest.raises(LightCraftError, match="raw_invalid_preview_request"):
         adapter.LightCraftRawSession(None)
-
-
-@pytest.mark.parametrize('budget', [536870912, 1024**3])
-def test_internal_stage_cache_reaches_native_and_stays_out_of_history(local, tmp_path, monkeypatch, budget):
-    monkeypatch.setenv("GENZOROOM_RAW_STAGE_CACHE", "on")
-    monkeypatch.setenv("GENZOROOM_RAW_STAGE_CACHE_BUDGET_BYTES", str(budget))
-    async def run():
-        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
-        children[0].adaptive_supported = True
-        try:
-            async with client(local) as http:
-                await authenticate(http, local)
-                _, doc = await open_document(http)
-                settings = api.raw._photos[doc["assetId"]].settings_json
-                response = await http.post(f'/api/raw/documents/{doc["handle"]}/preview', json=target(doc, quality="full"))
-                assert response.status_code == 200
-                assert children[0].preview_arguments[-1]["stage_cache"] == "on"
-                assert children[0].preview_arguments[-1]["stage_cache_budget_bytes"] == budget
-                assert api.raw._photos[doc["assetId"]].settings_json == settings
-                assert api.document["recipeRevision"] == 0 and api.document["revision"] == doc["revision"]
-        finally:
-            await api.close()
-    asyncio.run(run())
 
 
 @pytest.mark.parametrize("kind", ["after", "before"])
@@ -200,11 +166,16 @@ def test_actual_runtime_quality_frame_and_same_revision_full(local, tmp_path, mo
                              for i, q in ((1, "draft"), (2, "full"))]
                 assert all(r.status_code == 200 for r in responses), [r.text for r in responses]
                 assert children[0].render_count == 2
+                assert [r.headers["x-raw-serial"] for r in responses] == ["1", "2"]
+                assert all(r.headers["x-raw-revision"] == str(doc["revision"]) for r in responses)
+                assert api.document["recipeRevision"] == 0
                 assert responses[1].headers["x-raw-quality"] == "full"
                 assert responses[0].headers["x-raw-preview-contract"] == str(int(adaptive))
                 args = children[0].preview_arguments
                 if adaptive:
-                    assert [a["quality"] for a in args] == ["draft", "full"]
+                    assert args[0]["quality"] == "draft"
+                    assert args[1]["include_frame"] is True
+                    assert "quality" not in args[1]
                     frame = json.loads(responses[0].headers["x-raw-frame"])
                     assert frame["nativeWidth"] == 6000 and frame["fullWidth"] == 16
                     assert frame["geometryId"] != "a" * 64

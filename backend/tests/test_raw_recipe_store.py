@@ -5,7 +5,6 @@ from contextlib import closing
 from pathlib import Path
 import sqlite3
 from threading import Barrier
-from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
@@ -358,15 +357,24 @@ def test_real_sqlite_full_rolls_back_without_losing_original(db, monkeypatch):
     assert rows(db, "raw_recipe_saves") == before
 
 
-def test_release_smoke_sqlite_assertions_against_current_database(db):
-    edit_store.initialize_database()
+def test_release_smoke_sqlite_assertions_against_current_database(tmp_path, monkeypatch):
     script = (Path(__file__).resolve().parents[2] / "release" / "smoke-test.sh").read_text()
-    # Execute the release script's actual SQLite block without Docker/build-info/network probes.
+    # Redirect the deployment root while retaining the script's profile path and SQLite URI.
     embedded = script.split("python -c '\n", 1)[1].split("\n' ", 1)[0]
-    block = next(node for node in ast.parse(embedded).body if isinstance(node, ast.With))
-    module = ast.Module(body=[block], type_ignores=[])
-    client = SimpleNamespace(connect=lambda *a, **kw: sqlite3.connect(db))
-    exec(compile(module, "release-smoke-sqlite", "exec"), {"sqlite3": client})
+    statements = ast.parse(embedded).body
+    database_assignment = next(node for node in statements if isinstance(node, ast.Assign)
+                               and isinstance(node.targets[0], ast.Name) and node.targets[0].id == "database")
+    block = next(node for node in statements if isinstance(node, ast.With))
+    profile = "a" * 64
+    database = tmp_path / "profiles" / profile / "data" / "genzoroom.db"
+    database.parent.mkdir(parents=True)
+    monkeypatch.setattr(edit_store, "DB_PATH", database)
+    edit_store.initialize_database()
+    module = ast.Module(body=[database_assignment, block], type_ignores=[])
+    exec(compile(module, "release-smoke-sqlite", "exec"), {
+        "Path": {"/genzoroom/profiles": tmp_path / "profiles"}.__getitem__,
+        "profile": profile, "sqlite3": sqlite3,
+    })
 
 
 def test_raw_edit_status_uses_import_baseline_and_current_complete_settings(db):

@@ -24,7 +24,9 @@ def test_c0_keeps_b1_whole_and_never_sends_a_region_to_the_existing_binary(local
                 assert len(child.preview_arguments) == before
                 whole = await http.post(url, json=target(doc, serial=2, quality='full'))
                 assert whole.status_code == 200
-                assert child.preview_arguments[-1]['quality'] == 'full'
+                assert whole.headers['x-raw-quality'] == 'full'
+                assert child.preview_arguments[-1]['include_frame'] is True
+                assert 'quality' not in child.preview_arguments[-1]
                 assert 'region_contract' not in child.preview_arguments[-1]
                 assert api.document['revision'] == doc['revision']
         finally:
