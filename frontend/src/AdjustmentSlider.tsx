@@ -64,6 +64,12 @@ export function AdjustmentSlider(props: Props) {
     latest.current.onTemporaryPreview?.(active);
   }
 
+  function transitionInteraction(next: typeof interaction.current) {
+    // Wheel and panel commits can leave pointer ownership without a pointer-up event.
+    if (interaction.current === 'pointer' && next !== 'pointer') updateTemporaryPreview(false);
+    interaction.current = next;
+  }
+
   function formatNumber(value: number) {
     return value.toFixed(props.precision);
   }
@@ -86,7 +92,7 @@ export function AdjustmentSlider(props: Props) {
   function beginNumberEdit() {
     clearTimeout(timer.current);
     if (interaction.current !== 'number') {
-      interaction.current = 'number';
+      transitionInteraction('number');
       numberStartValue.current = latest.current.value;
       latest.current.onBegin();
       setNumberEditing(true);
@@ -98,7 +104,7 @@ export function AdjustmentSlider(props: Props) {
     const value = readDraft();
     latest.current.onChange(value ?? numberStartValue.current ?? latest.current.value);
     latest.current.onCommit();
-    interaction.current = 'idle';
+    transitionInteraction('idle');
     numberStartValue.current = null;
     setNumberEditing(false);
     updateDraft(null);
@@ -108,7 +114,7 @@ export function AdjustmentSlider(props: Props) {
     if (interaction.current !== 'number') return;
     latest.current.onChange(numberStartValue.current ?? latest.current.value);
     latest.current.onCommit();
-    interaction.current = 'idle';
+    transitionInteraction('idle');
     numberStartValue.current = null;
     setNumberEditing(false);
     updateDraft(null);
@@ -136,27 +142,25 @@ export function AdjustmentSlider(props: Props) {
 
   function commitInteraction() {
     clearTimeout(timer.current);
-    interaction.current = 'idle';
+    transitionInteraction('idle');
     latest.current.onCommit();
   }
   function scheduleCommit(kind: 'keyboard' | 'wheel' = 'keyboard') {
     clearTimeout(timer.current);
-    interaction.current = kind;
+    transitionInteraction(kind);
     if (latest.current.commitPolicy === 'operation-boundary') return;
     timer.current = setTimeout(commitInteraction, ADJUSTMENT_COMMIT_DELAY_MS);
   }
   function finishPointer() {
     if (interaction.current !== 'pointer') return;
-    interaction.current = 'idle';
-    updateTemporaryPreview(false);
+    transitionInteraction('idle');
     latest.current.onCommit();
   }
   function cancelInteraction() {
     clearTimeout(timer.current);
     if (interaction.current === 'number') { cancelNumberEdit(); return; }
     if (interaction.current === 'idle') return;
-    interaction.current = 'idle';
-    updateTemporaryPreview(false);
+    transitionInteraction('idle');
     if (latest.current.onCancel) latest.current.onCancel();
     else latest.current.onCommit();
   }
@@ -207,7 +211,7 @@ export function AdjustmentSlider(props: Props) {
     };
     const pointerEnd = (event:Event) => {
       if(event.type==='pointercancel' && latest.current.onCancel && interaction.current==='pointer'){
-        interaction.current='idle';updateTemporaryPreview(false);latest.current.onCancel();
+        transitionInteraction('idle');latest.current.onCancel();
       }else if(latest.current.cancelEditOnReset && event.target instanceof Element
         && event.target.closest('.adjustment-reset')?.closest('.raw-point-color-adjustments') === element?.closest('.raw-point-color-adjustments')){
         // Reset supersedes this draft; committing it first would race a second History operation.
@@ -224,14 +228,17 @@ export function AdjustmentSlider(props: Props) {
       restoreKeyboardFocusAfterLock.current = false;
       blurAdjustmentRange(element);
     };
+    const tracksTemporaryPreview = !!latest.current.onTemporaryPreview;
     element?.addEventListener('wheel', wheel, { passive: false });
     window.addEventListener('keydown', keydown);
     window.addEventListener('pointerup', pointerEnd);
     window.addEventListener('pointercancel', pointerEnd);
-    window.addEventListener('keydown', modifierChange);
-    window.addEventListener('keyup', modifierChange);
-    window.addEventListener('blur', cancelPointerOnBlur);
-    window.addEventListener('pointerleave', cancelPointerOnBlur);
+    if (tracksTemporaryPreview) {
+      window.addEventListener('keydown', modifierChange);
+      window.addEventListener('keyup', modifierChange);
+      window.addEventListener('blur', cancelPointerOnBlur);
+      window.addEventListener('pointerleave', cancelPointerOnBlur);
+    }
     document.addEventListener('focusin', cancelPendingKeyboardFocus);
     window.addEventListener('blur', cancelPendingKeyboardFocus);
     return () => {
@@ -243,10 +250,12 @@ export function AdjustmentSlider(props: Props) {
       window.removeEventListener('keydown', keydown);
       window.removeEventListener('pointerup', pointerEnd);
       window.removeEventListener('pointercancel', pointerEnd);
-      window.removeEventListener('keydown', modifierChange);
-      window.removeEventListener('keyup', modifierChange);
-      window.removeEventListener('blur', cancelPointerOnBlur);
-      window.removeEventListener('pointerleave', cancelPointerOnBlur);
+      if (tracksTemporaryPreview) {
+        window.removeEventListener('keydown', modifierChange);
+        window.removeEventListener('keyup', modifierChange);
+        window.removeEventListener('blur', cancelPointerOnBlur);
+        window.removeEventListener('pointerleave', cancelPointerOnBlur);
+      }
       document.removeEventListener('focusin', cancelPendingKeyboardFocus);
       window.removeEventListener('blur', cancelPendingKeyboardFocus);
     };
@@ -308,12 +317,12 @@ export function AdjustmentSlider(props: Props) {
         startAdjustmentPointer(range.current);
         clearTimeout(timer.current);
         if (interaction.current === 'number') commitNumberEdit();
-        interaction.current = 'pointer';
+        transitionInteraction('pointer');
         props.onBegin();
         updateTemporaryPreview(isAlternateModifier(event.nativeEvent));
       }}
       onLostPointerCapture={()=>{
-        if(props.onCancel && interaction.current==='pointer'){interaction.current='idle';updateTemporaryPreview(false);props.onCancel();}
+        if(props.onCancel && interaction.current==='pointer'){transitionInteraction('idle');props.onCancel();}
         else finishPointer();
       }}
       onChange={(event) => {

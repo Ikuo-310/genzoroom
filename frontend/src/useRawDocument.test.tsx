@@ -970,10 +970,14 @@ describe('RAW document lifetime', () => {
     act(() => current!.beginControls('detail.sharpenRadius'));
     const overlay = deferred<api.RawFrame>();
     vi.mocked(api.rawPreview).mockReturnValueOnce(overlay.promise);
+    vi.mocked(api.cancelRawPreview).mockClear();
     act(() => current!.setSharpenPreview('detail')); await flush();
+    const overlaySerial = vi.mocked(api.rawPreview).mock.calls.at(-1)![1];
     expect(vi.mocked(api.rawPreview).mock.calls.at(-1)?.[4]).toMatchObject({ quality: 'draft', sharpenPreview: 'detail' });
     expect(vi.mocked(api.rawPreview).mock.calls.at(-1)?.[4]).not.toHaveProperty('pointColorRangeIndex');
+    vi.mocked(api.cancelRawPreview).mockClear();
     act(() => current!.setSharpenPreview(null));
+    expect(vi.mocked(api.cancelRawPreview).mock.calls.filter(call => call[2] === overlaySerial)).toHaveLength(1);
     expect(current!.url).toBeUndefined();
     await act(async () => overlay.resolve({ ...pointFrame, blob: new Blob(['late-overlay']) })); await flush();
     expect(vi.mocked(api.rawPreview).mock.calls.at(-1)?.[4]).toMatchObject({ pointColorRangeIndex: 0 });

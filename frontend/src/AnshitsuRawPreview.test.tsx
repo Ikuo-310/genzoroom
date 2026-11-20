@@ -365,17 +365,55 @@ it('maps Alternate pointer previews for Sharpening controls and restores the ord
     const slider = host.querySelector<HTMLInputElement>(`[data-adjustment-id="${id}"]`)!;
     const down = new Event('pointerdown', { bubbles: true, cancelable: true });
     Object.assign(down, { button: 0, pointerId: 1, altKey: true });
-    act(() => slider.dispatchEvent(down)); await flush();
-    expect(vi.mocked(rawApi.rawPreview).mock.calls.some(call => call[4]?.sharpenPreview === mode)).toBe(true);
+    slider.value = String(Number(slider.value) + Number(slider.step));
+    const start = vi.mocked(rawApi.rawPreview).mock.calls.length;
+    act(() => { slider.dispatchEvent(down); slider.dispatchEvent(new Event('input', { bubbles: true })); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 65)); }); await flush();
+    expect(vi.mocked(rawApi.rawPreview).mock.calls.slice(start).at(-1)?.[4]?.sharpenPreview).toBe(mode);
+    const altRelease = vi.mocked(rawApi.rawPreview).mock.calls.length;
     act(() => window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt', altKey: false })));
-    await flush();
-    expect(vi.mocked(rawApi.rawPreview).mock.calls.some(call => call[4] !== undefined && call[4].sharpenPreview === undefined)).toBe(true);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 65)); }); await flush();
+    expect(vi.mocked(rawApi.rawPreview).mock.calls.slice(altRelease).at(-1)?.[4]).not.toHaveProperty('sharpenPreview');
+    const altPress = vi.mocked(rawApi.rawPreview).mock.calls.length;
     const altDown = new KeyboardEvent('keydown', { key: 'Alt', altKey: true });
-    act(() => window.dispatchEvent(altDown)); await flush();
-    expect(vi.mocked(rawApi.rawPreview).mock.calls.some(call => call[4]?.sharpenPreview === mode)).toBe(true);
-    act(() => window.dispatchEvent(new Event('pointercancel'))); await flush();
-    expect(vi.mocked(rawApi.rawPreview).mock.calls.at(-1)?.[4]?.sharpenPreview).toBeUndefined();
+    act(() => window.dispatchEvent(altDown)); await act(async () => { await new Promise(resolve => setTimeout(resolve, 65)); }); await flush();
+    expect(vi.mocked(rawApi.rawPreview).mock.calls.slice(altPress).at(-1)?.[4]?.sharpenPreview).toBe(mode);
+    const cancel = vi.mocked(rawApi.rawPreview).mock.calls.length;
+    act(() => window.dispatchEvent(new Event('pointercancel'))); await act(async () => { await new Promise(resolve => setTimeout(resolve, 65)); }); await flush();
+    expect(vi.mocked(rawApi.rawPreview).mock.calls.slice(cancel).at(-1)?.[4]).not.toHaveProperty('sharpenPreview');
   }
+});
+
+it('ends sharpen visualization on wheel, panel commit, and window blur', async () => {
+  vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), process: 3 }));
+  await mount();
+  const slider = host.querySelector<HTMLInputElement>('[data-adjustment-id="detail.sharpenRadius"]')!;
+  const pointerDown = () => {
+    const event = new Event('pointerdown', { bubbles: true, cancelable: true });
+    Object.assign(event, { button: 0, pointerId: 2, altKey: true });
+    slider.value = String(Number(slider.value) + Number(slider.step));
+    act(() => { slider.dispatchEvent(event); slider.dispatchEvent(new Event('input', { bubbles: true })); });
+  };
+  pointerDown(); await act(async () => { await new Promise(resolve => setTimeout(resolve, 65)); }); await flush();
+  const wheelStart = vi.mocked(rawApi.rawPreview).mock.calls.length;
+  const wheel = new Event('wheel', { bubbles: true, cancelable: true });
+  Object.assign(wheel, { deltaY: -1, shiftKey: true });
+  act(() => slider.dispatchEvent(wheel));
+  act(() => commitAdjustmentEdits(host.querySelector('.raw-adjustment-controls')!));
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 65)); }); await flush();
+  const wheelPreview = vi.mocked(rawApi.rawPreview).mock.calls.slice(wheelStart).at(-1)?.[4];
+  expect(wheelPreview).toBeDefined();
+  expect(wheelPreview).not.toHaveProperty('sharpenPreview');
+
+  pointerDown(); await act(async () => { await new Promise(resolve => setTimeout(resolve, 65)); }); await flush();
+  const panelCommitStart = vi.mocked(rawApi.rawPreview).mock.calls.length;
+  act(() => commitAdjustmentEdits(host.querySelector('.raw-adjustment-controls')!)); await act(async () => { await new Promise(resolve => setTimeout(resolve, 65)); }); await flush();
+  expect(vi.mocked(rawApi.rawPreview).mock.calls.slice(panelCommitStart).at(-1)?.[4]).not.toHaveProperty('sharpenPreview');
+
+  pointerDown(); await act(async () => { await new Promise(resolve => setTimeout(resolve, 65)); }); await flush();
+  const blurStart = vi.mocked(rawApi.rawPreview).mock.calls.length;
+  act(() => window.dispatchEvent(new Event('blur'))); await act(async () => { await new Promise(resolve => setTimeout(resolve, 65)); }); await flush();
+  expect(vi.mocked(rawApi.rawPreview).mock.calls.slice(blurStart).at(-1)?.[4]).not.toHaveProperty('sharpenPreview');
 });
 it('places all RAW optics controls after NR, uses readback History flags and preserves independent sections', async () => {
   vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => doc.assetId !== base.id ? rawSettings(doc) : ({ ...rawSettings(doc),

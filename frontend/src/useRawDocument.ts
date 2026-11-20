@@ -1481,7 +1481,6 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     sharpenPreviewRef.current = mode;
     sharpenPreviewRestoringRef.current = mode === null;
     rangePausedRef.current = mode !== null || beforeRequested || !!visible?.cropMode || pickModeOwnsViewer();
-    suspendDisplayRef.current();
     wholeSurfaces.current.after = undefined;
     overlayRef.current?.clear();
     if (visible?.url) setState(previous => previous ? { ...previous, url: undefined, width: undefined, height: undefined } : previous);
