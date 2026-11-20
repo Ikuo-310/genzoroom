@@ -207,6 +207,42 @@ def test_recipe_save_result_tracks_commit_when_followup_state_read_fails(lifecyc
     generate.assert_not_called()
 
 
+def test_history_recipe_change_uses_committed_state_when_followup_read_fails(lifecycle, monkeypatch):
+    _, scheduler, _, generate = lifecycle
+    hub = ThumbnailPublicationHub()
+    scheduler.publication_hub = hub
+    baseline = settings()
+    initial = deepcopy(baseline)
+    initial["light"]["exposure"] = .7
+    fingerprint = store._digest(store._settings_json(baseline, 1))
+    key = identity(assetId=str(ASSET))
+    asyncio.run(mutate_raw_edits(scheduler, ASSET, store.put_raw_recipe, key, 0, uuid4(), initial,
+                                 import_defaults_fingerprint=fingerprint))
+    before_revision = store.get_raw_saved_state(ASSET)["revision"]
+    current = deepcopy(initial)
+    current["light"]["exposure"] = 1.2
+    options = {"kind": "control", "metadata": {"control": "light.exposure"},
+               "import_defaults_fingerprint": fingerprint}
+    saved_state = store.get_raw_saved_state
+    calls = [0]
+
+    def fail_followup_read(asset_id):
+        calls[0] += 1
+        if calls[0] == 2:
+            raise store.StoreUnavailable()
+        return saved_state(asset_id)
+
+    monkeypatch.setattr(store, "get_raw_saved_state", fail_followup_read)
+    result = asyncio.run(mutate_raw_edits(scheduler, ASSET, store.append_raw_history, key,
+        before_revision, uuid4(), current, **options))
+    assert result["replayed"] is False
+    assert calls[0] == 1
+    assert scheduler._deadlines == {ASSET: 60}
+    assert hub.consistency_position()[2] == 2
+    assert hub.position()[1] == 2
+    generate.assert_not_called()
+
+
 def test_raw_save_mutation_invalidates_a_concurrent_publication_status_snapshot(lifecycle, monkeypatch):
     _, scheduler, _, generate = lifecycle
     hub = ThumbnailPublicationHub()

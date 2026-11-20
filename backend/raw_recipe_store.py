@@ -478,7 +478,7 @@ def lookup_raw_recipe(identity: dict) -> dict:
             raise
 
 
-def delete_raw_edits(asset_id: str) -> dict:
+def delete_raw_edits(asset_id: str, *, _return_lifecycle_state: bool = False) -> dict:
     """Atomically remove this Asset's persisted RAW Recipe and History rows."""
     asset_id = _uuid(asset_id)
     with _connection() as connection:
@@ -495,8 +495,10 @@ def delete_raw_edits(asset_id: str) -> dict:
             for save_id in recipe_receipts | history_receipts:
                 connection.execute("DELETE FROM raw_recipe_saves WHERE save_id=?", (save_id,))
             connection.commit()
-            return {"recipes": recipes, "histories": histories, "steps": steps,
-                    "historyReceipts": history_saves}
+            result = {"recipes": recipes, "histories": histories, "steps": steps,
+                      "historyReceipts": history_saves}
+            return (result, any((recipes, histories, steps, history_saves)), None) \
+                if _return_lifecycle_state else result
         except Exception:
             connection.rollback()
             raise
@@ -833,28 +835,28 @@ def get_raw_history(identity: dict, *, initial_settings: dict | None = None) -> 
 
 
 def initialize_raw_history(identity, expected_revision, save_id, settings, *, request_fingerprint=None,
-                           import_defaults_fingerprint=None):
+                           import_defaults_fingerprint=None, _return_lifecycle_state=False):
     """Persist a baseline checkpoint, not an invented editing operation."""
     return _save_history(identity, expected_revision, save_id, settings, {"type": "initialize"}, None,
-                         request_fingerprint, import_defaults_fingerprint)
+                         request_fingerprint, import_defaults_fingerprint, _return_lifecycle_state)
 
 
 def append_raw_history(identity, expected_revision, save_id, settings, *, kind, metadata=None,
                        step_id=None, baseline_settings=None, request_fingerprint=None,
-                       import_defaults_fingerprint=None):
+                       import_defaults_fingerprint=None, _return_lifecycle_state=False):
     """Append one confirmed operation; supply the initial readback for an unsaved RAW."""
     operation = {"type": "append", "kind": kind, "metadata": {} if metadata is None else metadata,
                  "stepId": _history_uuid(save_id if step_id is None else step_id)}
     return _save_history(identity, expected_revision, save_id, settings, operation, baseline_settings,
-                         request_fingerprint, import_defaults_fingerprint)
+                         request_fingerprint, import_defaults_fingerprint, _return_lifecycle_state)
 
 
 def move_raw_history_cursor(identity, expected_revision, save_id, settings, *, target_step_id, request_fingerprint=None,
-                            import_defaults_fingerprint=None):
+                            import_defaults_fingerprint=None, _return_lifecycle_state=False):
     """Confirm Undo/Redo/jump readback against a stable step UUID; None selects baseline."""
     return _save_history(identity, expected_revision, save_id, settings,
                          {"type": "move", "targetStepId": target_step_id}, None, request_fingerprint,
-                         import_defaults_fingerprint)
+                         import_defaults_fingerprint, _return_lifecycle_state)
 
 
 def _history_summary(current, history):
@@ -897,7 +899,7 @@ def get_raw_history_save(identity, save_id, *, request_fingerprint):
 
 
 def _save_history(identity, expected_revision, save_id, settings, operation, baseline_settings, request_fingerprint,
-                  import_defaults_fingerprint=None):
+                  import_defaults_fingerprint=None, return_lifecycle_state=False):
     identity = normalize_identity(identity)
     if type(expected_revision) is not int or not 0 <= expected_revision < MAX_REVISION:
         raise InvalidRawHistory()
@@ -923,9 +925,11 @@ def _save_history(identity, expected_revision, save_id, settings, operation, bas
                     raise StoreConflict("save_id_reused")
                 if history is None or current["revision"] < receipt[1]["revision"]:
                     raise StoreUnavailable()
+                lifecycle_state = _lifecycle_state(connection, identity) if return_lifecycle_state else None
                 connection.commit()
                 # The immutable ack is historical; current metadata is explicitly separate.
-                return {"ack": receipt[1], "current": _history_summary(current, history), "replayed": True}
+                result = {"ack": receipt[1], "current": _history_summary(current, history), "replayed": True}
+                return (result, False, lifecycle_state) if return_lifecycle_state else result
             if connection.execute("SELECT 1 FROM raw_recipe_saves WHERE save_id=?", (save_id,)).fetchone():
                 raise StoreConflict("save_id_reused")
             if (0 if current is None else current["revision"]) != expected_revision:
@@ -1009,8 +1013,10 @@ def _save_history(identity, expected_revision, save_id, settings, operation, bas
                          _json(step["settings"]), step["createdAt"], step["saveId"]))
             result = _read_row(connection, identity)
             verified = _read_history(connection, identity, result)
+            lifecycle_state = _lifecycle_state(connection, identity) if return_lifecycle_state else None
             connection.commit()
-            return {"ack": ack, "current": _history_summary(result, verified), "replayed": False}
+            response = {"ack": ack, "current": _history_summary(result, verified), "replayed": False}
+            return (response, True, lifecycle_state) if return_lifecycle_state else response
         except Exception:
             connection.rollback()
             raise

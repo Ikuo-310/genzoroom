@@ -1,4 +1,5 @@
 import asyncio
+import threading
 from uuid import UUID
 
 import pytest
@@ -148,6 +149,35 @@ def test_failure_keeps_cache_and_worker_continues_without_retry(tmp_path):
         assert cache.read(A) == b"old" and cache.read(C) is None
         assert calls == [A, C, B] and not scheduler._pending
         await scheduler.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("schedule_again,expected", [(False, "published"), (True, "queued")])
+def test_publication_state_does_not_revert_during_post_publish_prune(tmp_path, schedule_again, expected):
+    async def run():
+        entered, release = threading.Event(), threading.Event()
+        cache = ThumbnailCache(tmp_path)
+        original_prune = cache.prune
+
+        def delayed_prune():
+            entered.set()
+            assert release.wait(3)
+            return original_prune()
+
+        cache.prune = delayed_prune
+        scheduler = ThumbnailScheduler(cache, lambda _: asyncio.sleep(0, result=b"jpeg"))
+        await scheduler.start()
+        try:
+            scheduler.schedule(A, immediate=True)
+            assert await asyncio.to_thread(entered.wait, 3)
+            assert scheduler.generation_state(A) == "published"
+            if schedule_again:
+                scheduler.schedule(A, immediate=True)
+                assert scheduler.generation_state(A) == expected
+        finally:
+            release.set()
+            await scheduler.close()
+
     asyncio.run(run())
 
 
