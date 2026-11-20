@@ -1251,7 +1251,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       // A late slider unmount cannot target a successor. Its old owner still finishes its
       // gesture on this same queue before cleanup, including transmitted native mutations.
       const pointColorDeparture = !!saver?.pointColorInteracting;
-      const finalSave = discarded || discardOperation || pointColorDeparture || recoveryInProgress ? undefined : saver?.mixerInteracting ? saver.cancelMixerInteraction()
+      const finalSave = discarded || discardTermination || discardOperation || pointColorDeparture || recoveryInProgress ? undefined : saver?.mixerInteracting ? saver.cancelMixerInteraction()
         : saver?.cropping ? saver.cancelGeometry() : saver?.save();
       if (saverRef.current === saver) saverRef.current = null;
       if (editorRef.current === editor) editorRef.current = null;
@@ -1587,8 +1587,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     notifyRef.current();
     await saver.preparePointColorForDeparture(retry);
     await saver.waitHistory(retry);
-    // An open curve gesture is not a savable snapshot; fail instead of looping on its dirty owner.
-    if (saver.curveInteracting) throw new RawApiError('raw_save_unconfirmed');
+    // Only explicit Retry may drain a finished curve's immutable History request.
+    if (saver.curveInteracting && !(retry && saver.canRetryCurveSave)) throw new RawApiError('raw_save_unconfirmed');
     if (retry && (editor.error || saver.error === 'raw_revision_conflict')) {
       editor.retry(true);
       // Retry first resynchronizes on this queue; settle must not inspect its old error.

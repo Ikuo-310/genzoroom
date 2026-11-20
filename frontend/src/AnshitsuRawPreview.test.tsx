@@ -1115,6 +1115,21 @@ it('routes channel, graph, and category curve resets plus point context deletion
   expect(reset.disabled).toBe(false);
 });
 
+async function retryCurveSaveAndRelease() {
+  const requests = commitHistory.mock.calls.length;
+  const failed = commitHistory.mock.calls.at(-1)![0];
+  const retryLabel = i18n.t('workspace.rawPreview.retrySave');
+  expect(rawApi.releaseRawWorkspace).not.toHaveBeenCalled();
+  await clickText(retryLabel);
+  expect(commitHistory).toHaveBeenCalledTimes(requests + 1);
+  expect(commitHistory.mock.calls.at(-1)![0]).toEqual(failed);
+  expect(host.textContent).not.toContain(retryLabel);
+  expect(exposure().disabled).toBe(false);
+  await act(async () => root.render(null));
+  await flush();
+  expect(rawApi.releaseRawWorkspace).toHaveBeenCalledExactlyOnceWith('workspace');
+}
+
 it('locks out duplicate curve edits while an operation is pending and discards the local draft on failure', async () => {
   vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), curve: {
     master: [], red: [], green: [], blue: [],
@@ -1138,10 +1153,11 @@ it('locks out duplicate curve edits while an operation is pending and discards t
   expect(graph.classList.contains('is-dragging')).toBe(false);
   expect(commitHistory).toHaveBeenCalledOnce();
 
-  await act(async () => { rejectOperation(new Error('history transport failed')); await Promise.resolve(); });
+  await act(async () => { rejectOperation(new rawApi.RawSaveError('raw_connection_failed', 'unknown')); });
   await flush();
   expect(host.querySelectorAll('[data-testid="raw-curve-point"]')).toHaveLength(2);
   expect(commitHistory).toHaveBeenCalledOnce();
+  await retryCurveSaveAndRelease();
 });
 
 it('sends one immutable curve History operation only after a changed drag reaches Pointer Up', async () => {
@@ -1202,7 +1218,7 @@ it('sends one immutable curve History operation only after a changed drag reache
   expect(commitHistory.mock.calls.filter(([request]) => request.action === 'operate')).toHaveLength(1);
   expect(Number(host.querySelectorAll<SVGCircleElement>('[data-testid="raw-curve-point"]')[1].getAttribute('cx'))).toBe(170);
 
-  commitHistory.mockRejectedValueOnce(new Error('curve history transport failed'));
+  commitHistory.mockRejectedValueOnce(new rawApi.RawSaveError('raw_connection_failed', 'unknown'));
   const retryPoint = host.querySelectorAll<SVGCircleElement>('[data-testid="raw-curve-point"]')[1];
   Object.defineProperty(retryPoint, 'setPointerCapture', { configurable: true, value: vi.fn() });
   dispatchPointer(retryPoint, 'pointerdown', 75, 170, 70);
@@ -1211,6 +1227,7 @@ it('sends one immutable curve History operation only after a changed drag reache
   await flush();
   expect(commitHistory.mock.calls.filter(([request]) => request.action === 'operate')).toHaveLength(2);
   expect(Number(host.querySelectorAll<SVGCircleElement>('[data-testid="raw-curve-point"]')[1].getAttribute('cx'))).toBe(170);
+  await retryCurveSaveAndRelease();
 });
 
 it('finishes a curve drag before switching RAW documents and refreshes RGB from the new document', async () => {
@@ -1571,10 +1588,11 @@ it('keeps the RAW loading status until the preview is ready', async () => {
 
 it('keeps the RAW edit failure status over the last ready preview', async () => {
   await mount();
-  vi.mocked(rawApi.setRawControls).mockRejectedValue(new rawApi.RawApiError('raw_connection_failed'));
+  vi.mocked(rawApi.setRawControls).mockRejectedValueOnce(new rawApi.RawApiError('raw_connection_failed'));
   await editRaw();
   expect(host.querySelector('.raw-preview-note')?.textContent).toContain('Development settings or Preview could not be confirmed');
   expect(host.querySelector('.viewer-panel img')?.getAttribute('src')).toBe('blob:lightcraft');
+  await clickText(i18n.t('workspace.rawPreview.retrySave'));
 });
 
 it('blocks RAW to JPEG on a lost save response and retries the exact saveId before navigation', async () => {
@@ -1641,6 +1659,7 @@ it('does not reserve or exclude the active RAW when prepareSave fails', async ()
   act(() => host.querySelector<HTMLButtonElement>('[aria-label="Exclude a.DNG from Filmstrip"]')!.click()); await flush();
   expect(host.querySelector('.filmstrip-item[aria-current="true"]')?.getAttribute('aria-label')).toBe('a.DNG');
   expect(thumbnailPosts()).toHaveLength(0);
+  await clickText(i18n.t('workspace.rawPreview.retrySave'));
 });
 
 it('reserves an active RAW after prepareSave and before exclusion navigation', async () => {
@@ -1731,6 +1750,13 @@ it('offers save retry before renewal while retaining a RAW edit after its bounda
   expect(retry.disabled).toBe(false);
   expect(host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')!.disabled).toBe(true);
   expect(rawApi.releaseRawWorkspace).not.toHaveBeenCalled();
+  const saved = rawHistoryResult(commitHistory.mock.calls[0][0]);
+  const reopened = { ...saved, generation: saved.generation + 1, mutationAttempts: 0 };
+  vi.mocked(rawApi.openRawDocument).mockResolvedValueOnce(reopened);
+  vi.mocked(rawApi.readRawSettings).mockResolvedValueOnce(reopened);
+  await act(async () => retry.click());
+  await flush();
+  expect(rawApi.openRawDocument).toHaveBeenCalledTimes(2);
 });
 
 it('does not render normal save-state text while a RAW save is pending or after it succeeds', async () => {
@@ -2192,7 +2218,7 @@ it('toggles Picker, cancels with Escape/other edits/Asset change, and submits on
   const base = host.querySelector<HTMLImageElement>('.raw-whole-base')!;
   Object.defineProperty(base, 'naturalWidth', { value: 16 }); Object.defineProperty(base, 'naturalHeight', { value: 12 });
   act(() => base.dispatchEvent(new Event('load')));
-  commitHistory.mockImplementation(async request => rawHistoryResult({ ...request,
+  commitHistory.mockImplementationOnce(async request => rawHistoryResult({ ...request,
     doc: { ...request.doc, revision: request.doc.revision + 1, settingsFingerprint: 'e'.repeat(64),
       wb: { available: true, mode: 'custom', scale: 'kelvin' }, values: { ...request.doc.values, 'wb.temp': 5300, 'wb.tint': 12 } } },
     { history: { initialized: true, cursor: 1, length: 1, selectedStepId: request.saveId } }));
@@ -2489,6 +2515,7 @@ it('RAW save failure prevents Q enqueue', async () => {
   act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'q', bubbles: true })));
   await flush();
   expect(queueApi.enqueueExportAssets).not.toHaveBeenCalled();
+  await clickText(i18n.t('workspace.rawPreview.retrySave'));
 });
 
 it('queues an inactive saved RAW from Filmstrip without switching or saving the active document', async () => {
@@ -2659,9 +2686,11 @@ it('commits keyboard Straighten before Undo and displays the restored Native ang
 });
 
 it('requires explicit RAW discard confirmation before Gallery return and never autosaves after detachment',async()=>{
- commitHistory.mockRejectedValue(new rawApi.RawSaveError('raw_session_edit_limit','unknown'));
+ // The edit budget rejects the Native control update before a History save can be sent.
+ vi.mocked(rawApi.setRawControls).mockRejectedValue(new rawApi.RawApiError('raw_session_edit_limit', 502));
  await mount();await editRaw();await clickText(i18n.t('workspace.backToPhotos'));await flush();
  expect(host.querySelector('[role=alertdialog]')?.textContent).toContain('raw_session_edit_limit');
+ expect(commitHistory).not.toHaveBeenCalled();
  await clickText(i18n.t('workspace.rawFailure.discardGallery'));expect(rawApi.discardRawWorkspace).not.toHaveBeenCalled();
  await clickText(i18n.t('workspace.rawFailure.cancelDiscard'));expect(rawApi.discardRawWorkspace).not.toHaveBeenCalled();
  await clickText(i18n.t('workspace.rawFailure.discardGallery'));const count=vi.mocked(rawApi.saveRawHistory).mock.calls.length;

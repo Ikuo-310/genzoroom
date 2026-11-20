@@ -59,6 +59,11 @@ export class RawRecipeSave {
   get cropOperation() { return this.cropGesture?.type; }
   get cropping() { return !!this.cropGesture; }
   get curveInteracting() { return !!this.curveGesture; }
+  get canRetryCurveSave() {
+    const gesture = this.curveGesture, request = this.retryRequest;
+    return !!gesture?.ending && !gesture.cancelPromise && !!gesture.id && !!request && 'action' in request
+      && request.action === 'operate' && request.operation?.kind === 'curve' && request.curveInteractionId === gesture.id;
+  }
   get mixerInteracting() { return !!this.mixerGesture; }
   get pointColorInteracting() { return !!this.pointColorGesture; }
   get pointColorFinishPending() { return this.pointColorGesture?.endOwner === 'finish'; }
