@@ -572,32 +572,57 @@ async def thumbnail_publication_status(payload: ThumbnailPublicationRequest, req
     hub = getattr(request.app.state, "thumbnail_publication_hub", None)
     if scheduler is None or cache is None or hub is None:
         raise _edit_error(503, "thumbnail_scheduler_unavailable")
+
+    def compose(recipe_states, versions, generation_id, sequence, scheduler_states):
+        items = {}
+        for asset_id in payload.assetIds:
+            key = str(asset_id)
+            recipe = recipe_states[key]
+            edited = recipe["edited"]
+            recipe_revision = recipe["recipeRevision"]
+            state = scheduler_states[key]
+            version = versions.get(key) if edited is True else None
+            if edited is None:
+                visible_state = "recipe_unknown"
+            elif edited is not True:
+                visible_state = "recipe_missing" if recipe_revision is None else "recipe_default"
+            elif version is None:
+                visible_state = "cache_missing" if state in (None, "published", "cache_missing") else state
+            else:
+                visible_state = state or "published"
+            items[key] = {"recipeRevision": recipe_revision,
+                          "state": visible_state, "publicationVersion": version}
+        return {"generationId": generation_id, "sequence": sequence, "items": items}
+
     try:
-        async with scheduler.mutation_lock:
+        snapshot = None
+        # Disk/DB reads stay outside the mutation fence; accept them only if no publication
+        # crossed the read window, otherwise retry before taking the short state snapshot.
+        for _ in range(3):
+            start_generation, start_sequence = hub.position()
             recipe_states = await run_in_threadpool(get_thumbnail_recipe_states, payload.assetIds)
             versions = await run_in_threadpool(cache.versions, payload.assetIds)
-            items = {}
-            for asset_id in payload.assetIds:
-                key = str(asset_id)
-                recipe = recipe_states[key]
-                edited = recipe["edited"]
-                recipe_revision = recipe["recipeRevision"]
-                state = scheduler.generation_state(asset_id)
-                version = versions.get(key) if edited is True else None
-                if edited is None:
-                    visible_state = "recipe_unknown"
-                elif edited is not True:
-                    visible_state = "recipe_missing" if recipe_revision is None else "recipe_default"
-                elif version is None:
-                    visible_state = "cache_missing" if state in (None, "published", "cache_missing") else state
-                else:
-                    visible_state = state or "published"
-                items[key] = {"recipeRevision": recipe_revision,
-                              "state": visible_state, "publicationVersion": version}
-            generation_id, sequence = hub.position()
+            async with scheduler.mutation_lock:
+                generation_id, sequence = hub.position()
+                if generation_id != start_generation or sequence != start_sequence:
+                    continue
+                scheduler_states = {str(asset_id): scheduler.generation_state(asset_id)
+                                    for asset_id in payload.assetIds}
+                snapshot = compose(recipe_states, versions, generation_id, sequence, scheduler_states)
+                break
+        if snapshot is None:
+            # Under sustained publication churn, take one serialized snapshot rather than
+            # returning a mixed Recipe/cache revision or starving the synchronization request.
+            async with scheduler.mutation_lock:
+                recipe_states = await run_in_threadpool(get_thumbnail_recipe_states, payload.assetIds)
+                versions = await run_in_threadpool(cache.versions, payload.assetIds)
+                generation_id, sequence = hub.position()
+                scheduler_states = {str(asset_id): scheduler.generation_state(asset_id)
+                                    for asset_id in payload.assetIds}
+                snapshot = compose(recipe_states, versions, generation_id, sequence, scheduler_states)
     except StoreUnavailable as error:
         raise _store_error(error) from error
-    return JSONResponse({"generationId": generation_id, "sequence": sequence, "items": items},
+    return JSONResponse(snapshot,
                         headers={"Cache-Control": "private, no-store"})
 
 

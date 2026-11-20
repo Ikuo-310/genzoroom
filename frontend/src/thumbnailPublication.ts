@@ -20,6 +20,7 @@ let activeChunk: string[] = [];
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let idleTimer: ReturnType<typeof setTimeout> | null = null;
 let shuttingDown = false;
+const RECONCILIATION_TIMEOUT_MS = 15_000;
 
 function resetSynchronization() {
   streamGeneration += 1;
@@ -94,8 +95,30 @@ async function reconcile(assetIds: string[]) {
       if (!chunk.length) continue;
       activeChunk = chunk;
       const owners = chunk.map(id => listeners.get(id));
+      const batchController = new AbortController();
+      let timedOut = false;
+      const abortForStreamChange = () => batchController.abort();
+      if (request.signal.aborted) batchController.abort();
+      else request.signal.addEventListener('abort', abortForStreamChange, { once: true });
+      let abortRequest: (() => void) | null = null;
+      let deadlineTimer: ReturnType<typeof setTimeout> | null = null;
+      const deadline = new Promise<never>((_, reject) => {
+        deadlineTimer = setTimeout(() => {
+          timedOut = true;
+          batchController.abort();
+          reject(new Error('thumbnail_publication_request_timeout'));
+        }, RECONCILIATION_TIMEOUT_MS);
+      });
+      const cancelled = new Promise<never>((_, reject) => {
+        abortRequest = () => reject(new DOMException('Aborted', 'AbortError'));
+        if (request.signal.aborted) abortRequest();
+        else request.signal.addEventListener('abort', abortRequest, { once: true });
+      });
       try {
-        const result = await fetchThumbnailPublications(chunk, request.signal);
+        // Some fetch implementations do not settle promptly after abort; the race enforces the deadline.
+        const result = await Promise.race([
+          fetchThumbnailPublications(chunk, batchController.signal), deadline, cancelled,
+        ]);
         if (expectedStreamGeneration !== streamGeneration || request.signal.aborted) return;
         if (backendGenerationId !== null && backendGenerationId !== result.generationId) {
           queueRetry(chunk);
@@ -115,8 +138,12 @@ async function reconcile(assetIds: string[]) {
         }
       } catch (error) {
         if (request.signal.aborted) return;
-        logSyncFailure(error);
+        logSyncFailure(timedOut ? new Error('thumbnail_publication_request_timeout') : error);
         queueRetry(chunk);
+      } finally {
+        if (deadlineTimer !== null) clearTimeout(deadlineTimer);
+        if (abortRequest) request.signal.removeEventListener('abort', abortRequest);
+        request.signal.removeEventListener('abort', abortForStreamChange);
       }
     }
   } finally {
@@ -146,18 +173,25 @@ function onPublication(event: MessageEvent<string>) {
   lastSequence = sequence;
   if (missedEvents) scheduleReconciliation();
   if (message.type === 'resync') { scheduleReconciliation(); return; }
+  const hasPublicationVersion = Object.prototype.hasOwnProperty.call(message, 'publicationVersion');
   if (typeof message.assetId !== 'string' || !isThumbnailPublicationState(message.state)
-    || !(message.publicationVersion === null || typeof message.publicationVersion === 'string'
-      && /^\d{1,24}$/.test(message.publicationVersion))) {
+    || (hasPublicationVersion && !(message.publicationVersion === null || typeof message.publicationVersion === 'string'
+      && /^\d{1,24}$/.test(message.publicationVersion)))) {
     scheduleReconciliation(); return;
   }
   if (!listeners.has(message.assetId) || sequence <= (assetSequences.get(message.assetId) ?? -1)) return;
   assetSequences.set(message.assetId, sequence);
   const previous = snapshots.get(message.assetId);
+  if (!hasPublicationVersion && previous === undefined) {
+    // State-only events cannot establish which image URL is safe until a snapshot arrives.
+    scheduleReconciliation([message.assetId]);
+    return;
+  }
   publishSnapshot(message.assetId, {
     recipeRevision: previous?.recipeRevision ?? null,
     state: message.state,
-    publicationVersion: message.publicationVersion,
+    publicationVersion: hasPublicationVersion ? message.publicationVersion as string | null
+      : previous?.publicationVersion ?? null,
   });
 }
 

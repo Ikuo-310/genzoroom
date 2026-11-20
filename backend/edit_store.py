@@ -8,7 +8,8 @@ from time import monotonic
 from uuid import UUID
 
 from backend_logging import backend_logger
-from edit_state import InvalidEditState, validate_snapshot, has_non_default_recipe
+from edit_state import (InvalidEditState, validate_snapshot, has_non_default_recipe, _recipe,
+                        validate_source_identity, STATE_FORMAT_VERSION, RECIPE_VERSION, PROCESSING_VERSION)
 from storage import DB_PATH, StorageInitializationError
 
 SCHEMA_VERSION = 9
@@ -357,16 +358,22 @@ def get_thumbnail_recipe_states(asset_ids: list[UUID]) -> dict[str, dict]:
     with _connection() as connection:
         rows = connection.execute(
             f"""SELECT asset_id, state_format_version, recipe_version, processing_version,
-            current_recipe_json, history_json, history_cursor, source_identity_json, revision
+            current_recipe_json, source_identity_json, revision
             FROM asset_edit_states WHERE asset_id IN ({placeholders})""", tuple(result)
         )
         for row in rows:
-            asset_id = UUID(row["asset_id"])
-            snapshot = _snapshot(row, asset_id)
-            result[str(asset_id)] = {
-                "recipeRevision": row["revision"],
-                "edited": has_non_default_recipe(snapshot),
-            }
+            try:
+                asset_id = UUID(row["asset_id"])
+                if row["state_format_version"] not in (1, STATE_FORMAT_VERSION) \
+                    or row["recipe_version"] not in (17, RECIPE_VERSION) \
+                    or row["processing_version"] != PROCESSING_VERSION:
+                    raise InvalidEditState("invalid_thumbnail_recipe")
+                recipe = _recipe(json.loads(row["current_recipe_json"]), row["recipe_version"])
+                validate_source_identity(json.loads(row["source_identity_json"]), asset_id)
+                result[str(asset_id)] = {"recipeRevision": row["revision"],
+                                         "edited": has_non_default_recipe({"currentRecipe": recipe})}
+            except (ValueError, TypeError, KeyError, IndexError, RecursionError, InvalidEditState):
+                raise StoreUnavailable() from None
     return result
 
 

@@ -1,4 +1,6 @@
 import asyncio
+import copy
+import threading
 from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -400,6 +402,124 @@ def test_publication_status_and_versioned_image_follow_saved_recipe_and_reset(se
         generate.assert_not_called()
         assert scheduler.generation_state(ASSET) == "reset"
     asyncio.run(run())
+
+
+def test_thumbnail_recipe_status_projects_current_recipe_without_reading_history(setup, monkeypatch):
+    state = snapshot(0)
+    history = []
+    previous = copy.deepcopy(state["currentRecipe"])
+    for index in range(1, 31):
+        following = copy.deepcopy(previous)
+        following["adjustments"]["exposure"] = index / 10
+        history.append({"kind": "exposure", "before": previous, "after": following})
+        previous = following
+    state["history"] = history
+    state["historyCursor"] = 0
+    assert edit_store.put_edit_state(ASSET, 0, uuid4(), state)["revision"] == 1
+
+    def unexpected_history_restore(*_args):
+        pytest.fail("thumbnail status must not restore History")
+
+    monkeypatch.setattr(edit_store, "_snapshot", unexpected_history_restore)
+    queries = []
+    connect = edit_store.sqlite3.connect
+
+    def traced_connect(*args, **kwargs):
+        connection = connect(*args, **kwargs)
+        connection.set_trace_callback(queries.append)
+        return connection
+
+    monkeypatch.setattr(edit_store.sqlite3, "connect", traced_connect)
+    assert edit_store.get_thumbnail_recipe_states([ASSET]) == {
+        str(ASSET): {"recipeRevision": 1, "edited": False},
+    }
+    selects = [query.lower() for query in queries if query.lstrip().lower().startswith("select")]
+    assert selects and all("history_json" not in query for query in selects)
+
+
+def test_thumbnail_status_accepts_a_full_thousand_asset_batch(setup):
+    asset_ids = [str(uuid4()) for _ in range(1000)]
+
+    async def run():
+        async with client() as api:
+            response = await api.post("/thumbnail-publications/status", json={"assetIds": asset_ids})
+        assert response.status_code == 200
+        assert len(response.json()["items"]) == 1000
+        assert all(item["state"] == "recipe_missing" for item in response.json()["items"].values())
+
+    asyncio.run(run())
+
+
+def test_publication_status_retries_a_stale_read_window_after_recipe_save(setup, monkeypatch):
+    original = main.get_thumbnail_recipe_states
+    entered, release, calls = threading.Event(), threading.Event(), [0]
+
+    def delayed_read(asset_ids):
+        result = original(asset_ids)
+        calls[0] += 1
+        if calls[0] == 1:
+            entered.set()
+            release.wait(3)
+        return result
+
+    monkeypatch.setattr(main, "get_thumbnail_recipe_states", delayed_read)
+
+    async def run():
+        async with client() as api:
+            assert (await put(api, snapshot(1))).status_code == 200
+            pending = asyncio.create_task(api.post("/thumbnail-publications/status",
+                json={"assetIds": [str(ASSET)]}))
+            assert await asyncio.to_thread(entered.wait, 3)
+            assert (await put(api, snapshot(2), 1)).status_code == 200
+            release.set()
+            response = await pending
+            assert response.status_code == 200
+            item = response.json()["items"][str(ASSET)]
+            assert item["recipeRevision"] == 2 and item["state"] == "reserved"
+            assert response.json()["sequence"] == main.app.state.thumbnail_publication_hub.position()[1]
+            assert calls[0] >= 2
+        release.set()
+
+    asyncio.run(run())
+
+
+def test_slow_thumbnail_disk_prepare_does_not_hold_recipe_mutation_fence(setup, monkeypatch):
+    cache, scheduler, _, _, _ = setup
+    entered, release = threading.Event(), threading.Event()
+    prepare = cache.prepare_store
+
+    def delayed_prepare(content):
+        entered.set()
+        release.wait(3)
+        return prepare(content)
+
+    monkeypatch.setattr(cache, "prepare_store", delayed_prepare)
+    hub = main.app.state.thumbnail_publication_hub
+    subscriber = hub.subscribe()
+
+    async def run():
+        await scheduler.start()
+        async with client() as api:
+            assert (await put(api, snapshot(1))).status_code == 200
+            assert (await api.post(PATH)).status_code == 202
+            assert await asyncio.to_thread(entered.wait, 3)
+            assert (await api.get("/health")).json() == {"status": "ok"}
+            assert (await put(api, snapshot(2), 1)).status_code == 200
+            release.set()
+            await until(lambda: scheduler._active is None)
+            assert cache.read(ASSET) is None
+            events = []
+            while not subscriber.empty():
+                events.append(subscriber.get_nowait())
+            assert [event["state"] for event in events][-1] == "reserved"
+            assert all(event["state"] != "published" for event in events)
+        await scheduler.close()
+
+    try:
+        asyncio.run(run())
+    finally:
+        release.set()
+        hub.unsubscribe(subscriber)
 
 
 @pytest.mark.parametrize("edited,reason,status", [(None, "recipe_missing", 200),

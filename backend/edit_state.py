@@ -104,6 +104,24 @@ def _changed_fields(before: dict, after: dict) -> tuple[set[str], set[str]]:
     return values, flags
 
 
+def validate_source_identity(source: object, asset_id: UUID | None = None) -> dict:
+    if not isinstance(source, dict) or not {"provider", "assetId", "inputKind"} <= source.keys() \
+        or source.keys() - {"provider", "assetId", "inputKind", "checksum", "checksumKind"} \
+        or source["provider"] != "immich" or source["inputKind"] != "immich-preview" \
+        or type(source["assetId"]) is not str or not source["assetId"].strip() \
+        or ("checksum" in source) != ("checksumKind" in source) \
+        or ("checksum" in source and (type(source["checksum"]) is not str or type(source["checksumKind"]) is not str)):
+        raise InvalidEditState("invalid_source_identity")
+    if asset_id is not None:
+        try:
+            matches = UUID(source["assetId"]) == asset_id
+        except ValueError:
+            matches = False
+        if not matches:
+            raise InvalidEditState("invalid_source_identity")
+    return source
+
+
 def _entry(value: object, state_format_version: int, recipe_version: int) -> dict:
     paste = isinstance(value, dict) and value.get("kind") == "paste"
     keys = ("kind", "before", "after", "metadata") if paste else ("kind", "before", "after")
@@ -162,21 +180,7 @@ def validate_snapshot(value: object, asset_id: UUID | None = None) -> dict:
     if type(state["processingVersion"]) is not str or state["processingVersion"] != PROCESSING_VERSION:
         raise InvalidEditState("unsupported_processing_version")
     current = _recipe(state["currentRecipe"], state["recipeVersion"])
-    source = state["sourceIdentity"]
-    if not isinstance(source, dict) or not {"provider", "assetId", "inputKind"} <= source.keys() \
-        or source.keys() - {"provider", "assetId", "inputKind", "checksum", "checksumKind"} \
-        or source["provider"] != "immich" or source["inputKind"] != "immich-preview" \
-        or type(source["assetId"]) is not str or not source["assetId"].strip() \
-        or ("checksum" in source) != ("checksumKind" in source) \
-        or ("checksum" in source and (type(source["checksum"]) is not str or type(source["checksumKind"]) is not str)):
-        raise InvalidEditState("invalid_source_identity")
-    if asset_id is not None:
-        try:
-            matches = UUID(source["assetId"]) == asset_id
-        except ValueError:
-            matches = False
-        if not matches:
-            raise InvalidEditState("invalid_source_identity")
+    validate_source_identity(state["sourceIdentity"], asset_id)
     history = state["history"]
     if not isinstance(history, list):
         raise InvalidEditState("invalid_history")

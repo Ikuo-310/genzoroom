@@ -214,6 +214,35 @@ def get_raw_recipe(identity: dict) -> dict:
 RAW_EXPORT_PROCESSING_VERSION = "raw-lightcraft-v1"
 
 
+def _raw_thumbnail_eligibility(*, settings, fingerprint, schema, baseline):
+    from raw_controls import (with_legacy_grading_defaults, with_legacy_optics_defaults,
+                              with_legacy_profile_defaults)
+    if fingerprint is not None:
+        eligible = _digest(_settings_json(settings, schema)) != fingerprint
+        if eligible:
+            # Legacy fingerprints may omit serde-default sections added in later versions.
+            defaults = {"grading": with_legacy_grading_defaults({})["grading"],
+                        "optics": with_legacy_optics_defaults({})["optics"],
+                        "profile": with_legacy_profile_defaults({})["profile"]}
+            normalized = with_legacy_profile_defaults(
+                with_legacy_optics_defaults(with_legacy_grading_defaults(settings)))
+            candidates = [normalized]
+            omittable = [section for section, default in defaults.items() if normalized.get(section) == default]
+            for mask in range(1, 1 << len(omittable)):
+                legacy = dict(normalized)
+                for index, section in enumerate(omittable):
+                    if mask & (1 << index):
+                        legacy.pop(section, None)
+                candidates.append(legacy)
+            eligible = all(_digest(_settings_json(candidate, schema)) != fingerprint for candidate in candidates)
+        return eligible
+    if baseline is None:
+        return None
+    current = with_legacy_profile_defaults(with_legacy_optics_defaults(with_legacy_grading_defaults(settings)))
+    original = with_legacy_profile_defaults(with_legacy_optics_defaults(with_legacy_grading_defaults(baseline)))
+    return _json(current) != _json(original)
+
+
 def select_raw_export_state(connection, asset_id):
     """Expose only the current engine tuple to Export, thumbnails and edit badges."""
     from lightcraft_artifact import ENGINE_VERSION, ENGINE_COMMIT
@@ -293,15 +322,95 @@ def get_raw_edit_statuses(asset_ids: list[UUID]) -> dict[str, bool | None]:
 def get_raw_thumbnail_recipe_states(asset_ids: list[UUID]) -> dict[str, dict]:
     if not asset_ids:
         return {}
+    from lightcraft_artifact import ENGINE_VERSION, ENGINE_COMMIT
+
+    result = {str(asset_id): {"recipeRevision": None, "edited": False} for asset_id in asset_ids}
+    if not ENGINE_VERSION or not ENGINE_COMMIT:
+        return result
+    placeholders = ",".join("?" for _ in asset_ids)
+    engine = ("lightcraft", ENGINE_VERSION, ENGINE_COMMIT, 1)
     with _connection() as connection:
         connection.execute("BEGIN")
-        result = {}
+        any_rows = {row[0] for row in connection.execute(
+            f"SELECT DISTINCT asset_id FROM asset_raw_recipes WHERE asset_id IN ({placeholders})",
+            tuple(str(asset_id) for asset_id in asset_ids))}
+        rows = connection.execute(f"""SELECT asset_id, source_content_hash, engine_name, engine_version,
+            engine_commit, settings_schema_version, develop_settings_json, recipe_revision, last_save_id,
+            updated_at, import_defaults_fingerprint FROM asset_raw_recipes
+            WHERE asset_id IN ({placeholders}) AND engine_name=? AND engine_version=?
+            AND engine_commit=? AND settings_schema_version=?
+            ORDER BY updated_at DESC, recipe_revision DESC""",
+            (*[str(asset_id) for asset_id in asset_ids], *engine)).fetchall()
+        selected = {}
+        for row in rows:
+            selected.setdefault(row["asset_id"], row)
         for asset_id in asset_ids:
-            state = select_raw_export_state(connection, asset_id)
-            result[str(asset_id)] = {
-                "recipeRevision": state["revision"] if state is not None else None,
-                "edited": state["exportEligible"] if state is not None else False,
-            }
+            key = str(asset_id)
+            if key in any_rows and key not in selected:
+                result[key] = {"recipeRevision": 0, "edited": False}
+
+        decoded = {}
+        save_ids = []
+        for key, row in selected.items():
+            try:
+                identity = normalize_identity(dict(zip(IDENTITY_FIELDS,
+                    (row[column] for column in IDENTITY_COLUMNS))))
+                if tuple(identity.values()) != tuple(row[column] for column in IDENTITY_COLUMNS):
+                    raise InvalidRawRecipe()
+                encoded = _settings_json(json.loads(row["develop_settings_json"]), identity["settingsSchemaVersion"])
+                revision, updated = _metadata(row)
+                fingerprint = _import_defaults_fingerprint(row["import_defaults_fingerprint"])
+                save_id = _uuid(row["last_save_id"])
+                if save_id != row["last_save_id"]:
+                    raise InvalidRawRecipe()
+                decoded[key] = (identity, encoded, revision, updated, fingerprint, save_id)
+                save_ids.append(save_id)
+            except (ValueError, TypeError, KeyError, IndexError, RecursionError, UnicodeError):
+                raise StoreUnavailable() from None
+
+        receipts = {}
+        for offset in range(0, len(save_ids), 900):
+            batch = save_ids[offset:offset + 900]
+            if not batch:
+                continue
+            receipt_marks = ",".join("?" for _ in batch)
+            receipts.update((row["save_id"], row) for row in connection.execute(
+                f"SELECT save_id, request_hash, recipe_revision, updated_at FROM raw_recipe_saves "
+                f"WHERE save_id IN ({receipt_marks})", tuple(batch)))
+
+        needs_baseline = {key for key, item in decoded.items() if item[4] is None}
+        history_by_identity = {}
+        if needs_baseline:
+            baseline_ids = sorted(needs_baseline)
+            baseline_marks = ",".join("?" for _ in baseline_ids)
+            baseline_rows = connection.execute(f"""SELECT asset_id, source_content_hash, engine_name,
+                engine_version, engine_commit, settings_schema_version, baseline_settings_json
+                FROM asset_raw_histories WHERE asset_id IN ({baseline_marks}) AND engine_name=?
+                AND engine_version=? AND engine_commit=? AND settings_schema_version=?""",
+                (*baseline_ids, *engine)).fetchall()
+            for row in baseline_rows:
+                identity_key = tuple(row[column] for column in IDENTITY_COLUMNS)
+                try:
+                    baseline = _stored_settings(row["baseline_settings_json"], row["settings_schema_version"])
+                    history_by_identity[identity_key] = baseline
+                except (ValueError, TypeError, KeyError, IndexError, RecursionError, UnicodeError):
+                    raise StoreUnavailable() from None
+
+        for key, (identity, encoded, revision, updated, fingerprint, save_id) in decoded.items():
+            receipt = receipts.get(save_id)
+            try:
+                if receipt is None or _metadata(receipt) != (revision, updated) or \
+                    receipt["request_hash"] != _request_hash(identity, encoded, revision - 1):
+                    raise StoreUnavailable()
+            except (ValueError, TypeError, KeyError, IndexError):
+                raise StoreUnavailable() from None
+            baseline = history_by_identity.get(tuple(identity.values())) if fingerprint is None else None
+            try:
+                edited = _raw_thumbnail_eligibility(settings=json.loads(encoded), fingerprint=fingerprint,
+                    schema=identity["settingsSchemaVersion"], baseline=baseline)
+            except (ValueError, TypeError, KeyError, IndexError, RecursionError, UnicodeError):
+                raise StoreUnavailable() from None
+            result[key] = {"recipeRevision": revision, "edited": edited}
         connection.commit()
         return result
 

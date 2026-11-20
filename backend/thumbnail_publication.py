@@ -3,6 +3,8 @@
 import asyncio
 from uuid import uuid4
 
+KEEP_PUBLICATION_VERSION = object()
+
 
 class ThumbnailPublicationHub:
     def __init__(self, *, queue_size: int = 256):
@@ -43,13 +45,14 @@ class ThumbnailPublicationHub:
                     break
             queue.put_nowait(None)
 
-    def publish(self, asset_id, state: str, publication_version: str | None):
+    def publish(self, asset_id, state: str, publication_version=KEEP_PUBLICATION_VERSION):
         if self._stopping:
             return
         self.sequence += 1
         event = {"generationId": self.generation_id, "sequence": self.sequence,
-                 "assetId": str(asset_id), "state": state,
-                 "publicationVersion": publication_version}
+                 "assetId": str(asset_id), "state": state}
+        if publication_version is not KEEP_PUBLICATION_VERSION:
+            event["publicationVersion"] = publication_version
         for queue in tuple(self._subscribers):
             if queue.full():
                 while not queue.empty():

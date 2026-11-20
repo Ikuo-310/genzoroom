@@ -66,6 +66,37 @@ def test_scheduler_keeps_previous_publication_while_regenerating_then_publishes_
     asyncio.run(run())
 
 
+def test_scheduler_publishes_captured_version_without_restat_notifications(tmp_path, monkeypatch):
+    async def run():
+        cache = ThumbnailCache(tmp_path)
+
+        def unexpected_version_lookup(_asset_id):
+            raise AssertionError("scheduler notifications must not perform a cache version lookup")
+
+        monkeypatch.setattr(cache, "version", unexpected_version_lookup)
+        hub = ThumbnailPublicationHub()
+        subscriber = hub.subscribe()
+        scheduler = ThumbnailScheduler(cache, lambda _asset_id: asyncio.sleep(0, result=b"rendered"),
+                                       publication_hub=hub)
+        await scheduler.start()
+        try:
+            scheduler.schedule(A, immediate=True)
+            async def published():
+                while scheduler.generation_state(A) != "published":
+                    await asyncio.sleep(0.001)
+            await asyncio.wait_for(published(), 2)
+            events = []
+            while not subscriber.empty():
+                events.append(subscriber.get_nowait())
+            assert [event["state"] for event in events] == ["queued", "running", "published"]
+            assert "publicationVersion" not in events[0] and "publicationVersion" not in events[1]
+            assert events[2]["publicationVersion"] == cache.read_versioned(A)[1]
+        finally:
+            await scheduler.close()
+            hub.unsubscribe(subscriber)
+    asyncio.run(run())
+
+
 def test_failure_preserves_old_publication_and_capacity_eviction_publishes_missing(tmp_path, monkeypatch):
     async def run():
         cache = ThumbnailCache(tmp_path)
@@ -95,7 +126,7 @@ def test_failure_preserves_old_publication_and_capacity_eviction_publishes_missi
             while not subscriber.empty():
                 failure_events.append(subscriber.get_nowait())
             assert failure_events[-1]["state"] == "failed"
-            assert failure_events[-1]["publicationVersion"] == old_version
+            assert "publicationVersion" not in failure_events[-1]
             assert cache.read_versioned(A) == (b"oldA", old_version)
 
             scheduler.schedule(C, immediate=True)

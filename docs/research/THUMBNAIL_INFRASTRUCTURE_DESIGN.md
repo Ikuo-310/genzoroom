@@ -424,3 +424,35 @@ F-02では、UvicornがASGI lifespan shutdownへ進む前に、既存HTTP task�
 
 Windows LocalServerとUvicornの実socket停止統合は自動テスト済み。Docker daemonが利用できない環境のため、nginx経由でSSEを保持した実コンテナ停止とSupervisorからBackend lifespan到達までの結合確認は未実施であり、実機確認が必要。Container起動構成テストではrelease imageが`run_server.py`を使うこと、nginx設定とSupervisor経路が保たれていることを確認する。
 
+## 総合監査対応 A2：公開状態取得・通知I/O・状態同期期限
+
+### F-04：一括公開状態取得
+
+JPEGの公開状態取得は、`asset_edit_states`からAsset ID、version、processing version、現在のRecipe、source identity、revisionだけを読む。History JSONのSELECT、デコード、snapshot全体の復元は行わない。補正有無は従来どおり現在Recipeの`has_non_default_recipe`で判定し、形式・source identity検証は維持する。Historyのみが非defaultで現在RecipeがdefaultのAssetは、従来と同じく未補正として扱う。
+
+RAWはAssetごとのHistory復元を止めた。要求Assetの現行LightCraft engine tupleをまとめて読み、保存receiptは最大900件単位、fingerprintがない旧Recipeに必要なbaseline settingsのみをまとめて取得する。レシート・Recipe identity・schema・baselineの検証と既存のfingerprint／baseline eligibility判定契約を維持する。Export等のHistory利用経路は従来の復元を維持する。DB schema・永続状態は追加していない。
+
+公開状態APIは最大1,000 AssetずつDB／キャッシュを読み、mutation lock外で取得する。読み取り前後のHub generation／sequenceを比較し、recipe save・Reset・公開・evictionの通知が交差したbatchは最大3回読み直す。連続更新が続く場合のみ、飢餓を避けるため短いmutation lock内で一貫した最終snapshotを取得する。単純にlockを外した混在snapshotは返さない。1,000件超のFrontend要求は既存のbatch分割で処理する。
+
+ローカル比較（Windows、同じPython 3.14環境、1,000 JPEG Asset、各Assetに15件のHistoryをDBへ直接seed、3回実行）では、History JSON列は合計24,374,000 bytesだった。修正前の保持済みbaseline計測は中央値2,402.94ms／Python peak traced allocation 417,050 bytes、修正後は137.30ms／中央値peak 300,894 bytes（各run 295,966～309,686 bytes）。修正後SELECTで処理した対象文字列列の推定合計は926,000 bytesで、History列の復元を除いた。所要時間は約17.5倍、tracemalloc peakは約28%減った。SQLiteの実ディスクpage I/O量を計測した値ではなく、Docker／実機の待ち時間比較でもない。mutation lock外の時間はDB取得時間全体に相当し、同時保存の待ちを同期的に発生させない。競合中は再試行・最終fallbackの時間が加わる。
+
+### F-05：通知経路からの同期ディスクI/O除去
+
+生成bytesの一時ファイル作成・書込・flush・fsyncはthreadpoolで行い、cache RLockをpayload書込中に保持しない。mutation lock内ではReset fence確認後にthreadpool上のcache RLockで原子的置換し、置換したtempのmtimeから公開版をその場で確定する。確定版をschedulerから公開イベントへ直接渡し、通知のための`cache.version()`再読込をしない。生成予約・開始・失敗など公開版を変更しない通知は版フィールドを省略し、Reset／evictionは明示的nullを通知する。容量整理はmutation lock外のthreadpoolで実行し、eviction通知時に現行stateを短いlock内で再確認する。Reset済みAssetは無効状態を維持し、生成・予約・実行中の状態は公開成果物のevictionで誤って置き換えない。
+
+これにより、画像生成payload書込・fsync・容量走査・削除をmutation lock内で待つ時間を除いた。公開置換と公開イベントの順序、およびcache RLock／mutation lock／publication fenceの役割は維持した。意図的に遅らせたtemp書込の間にHealth応答とRecipe保存が進み、古い生成結果が保存後に公開されないテストを追加した。成功通知のversionが置換成果物と一致し、schedulerの状態通知からversion用ディスク照会が呼ばれないことも検証する。容量整理で旧公開ファイルが消えた場合、以前のgeneration stateが`failed`であっても実際の配信可否を優先し`cache_missing`を通知する。
+
+### F-09：状態同期batchの処理期限
+
+Frontendの共有状態照会1 batchに15秒のdeadlineを設定した。HTTP fetchとdeadline／購読解除・Backend世代変更AbortをPromise競争させるため、AbortSignalに応答しないfetch wrapperでも後続batchと他Assetの同期が永久に止まらない。timeoutは従来の500ms／1秒／2秒、最大3回の共有Retryへ接続する。意図的AbortはRetryに数えず、timeout時に遅れて届く旧応答はstream generation／Asset sequence確認で適用しない。deadline timerとAbort listenerは全終了経路で解除する。
+
+15秒はWindows LocalHostとDocker内nginx／Uvicornのlocalhost経路で、最大1,000 AssetのDB・cache状態取得にcold start余裕を持たせつつ、無応答を長時間保持しないための初期上限である。両環境のcold cache・負荷時p95/p99処理時間はまだ実測していないため、製品上の閾値としては保守的な設計値であり、P7の負荷計測後に必要なら見直す。Retry間隔・回数、同時batch数1、コンポーネント単位pollingなしは変更しない。
+
+### A2検証結果・残存事項
+
+Backendの公開状態API／scheduler／cache／RAW lifecycle／Recipe store関連は206 tests passed。新規ケースはHistory列非取得、RAW History復元回避と従来eligibility同値、1,000件一括状態取得、状態照会とRecipe保存のsequence競合、slow cache prepare中のHealth／保存受付、版再照会なしの通知、およびeviction状態である。Windowsのasyncio socketpair初期化が通常sandbox内で停止したため、AGENTS指定のPython 3.14 `.venv`で同じBackend回帰コマンドを許可されたprivileged実行で完了した。
+
+Frontend公開版同期のfocused testsは5 passed。全体テストは4,207 passed／137 failed／2 skipped（4,346 tests）で、A1 baselineの4,205 passed／137 failed／2 skipped（4,344 tests）から、新規2テストは成功し、失敗件数・既知失敗名は不変だった。失敗は`AnshitsuRawPreview.test.tsx` 84件、`RawPointColorControls.test.tsx` 50件、`RawVignetteControls.test.tsx` 3件の既知RAW群で、エラーはRAW UI mockに`setPointColorRangeIndex`がないことによるもの。A2のサムネイル関連新規失敗はない。TypeScriptとFrontend production buildは成功。buildには既存の大きいbundle／React Router `use client`警告がある。
+
+実機のWebView2・Dockerにおける最大batch応答時間、Backend event loop latency、subscriber/SSE応答の負荷下計測は未実施。Windows/Docker間の実動作、Immich実サービスを含めた負荷時性能と15秒deadlineの妥当性をP7で計測する。今回はA2に限定し、A3およびP7の実装・負荷検証には着手していない。
+

@@ -9,9 +9,10 @@ class Stream extends EventTarget {
   static latest: Stream;
   close = vi.fn();
   constructor() { super(); Stream.latest = this; }
-  emit(generationId: string, sequence: number, assetId: string, publicationVersion: string) {
+  emit(generationId: string, sequence: number, assetId: string, publicationVersion?: string) {
     this.dispatchEvent(new MessageEvent('publication', {
-      data: JSON.stringify({ generationId, sequence, assetId, state: 'published', publicationVersion }),
+      data: JSON.stringify({ generationId, sequence, assetId, state: 'running',
+        ...(publicationVersion === undefined ? {} : { publicationVersion }) }),
     }));
   }
 }
@@ -28,7 +29,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-function deferredStatus() {
+function deferredStatus({ abortable = true } = {}) {
   vi.useFakeTimers();
   vi.stubGlobal('EventSource', Stream);
   const requests: Array<{
@@ -37,7 +38,9 @@ function deferredStatus() {
   }> = [];
   vi.stubGlobal('fetch', (_url: string, init: RequestInit) => new Promise<Response>((resolve, reject) => {
     const ids: string[] = JSON.parse(String(init.body)).assetIds;
-    init.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+    if (abortable) {
+      init.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+    }
     requests.push({ ids, signal: init.signal!, fail: () => resolve(new Response(null, { status: 503 })),
       reply: (sequence, version, generationId = generation) => resolve(new Response(JSON.stringify({
         sequence, generationId, items: Object.fromEntries(ids.map(id => [id, {
@@ -78,6 +81,24 @@ it('orders snapshots per Asset across batches and rejects a response from before
   expect(stream.close).toHaveBeenCalledOnce();
 });
 
+it('keeps the last good image version for state-only publication events', async () => {
+  const requests = deferredStatus();
+  watch(['asset-with-last-good-image']);
+  const stream = Stream.latest;
+  await vi.advanceTimersByTimeAsync(25);
+  stream.emit(generation, 1, 'asset-with-last-good-image');
+  expect(getThumbnailPublication('asset-with-last-good-image')).toBeUndefined();
+  requests[0].reply(0, '41');
+  await vi.advanceTimersByTimeAsync(0);
+  await vi.advanceTimersByTimeAsync(25);
+  expect(requests).toHaveLength(2);
+  requests[1].reply(1, '41');
+  await vi.advanceTimersByTimeAsync(0);
+  expect(getThumbnailPublication('asset-with-last-good-image')).toMatchObject({
+    state: 'published', publicationVersion: '41',
+  });
+});
+
 it('retries a failed shared batch at bounded intervals and resynchronizes on reconnect', async () => {
   const requests = deferredStatus();
   watch(['a', 'b']);
@@ -96,6 +117,23 @@ it('retries a failed shared batch at bounded intervals and resynchronizes on rec
   requests[4].reply(5, '5');
   await vi.advanceTimersByTimeAsync(0);
   expect(getThumbnailPublication('a')?.publicationVersion).toBe('5');
+});
+
+it('times out a stalled batch, ignores its delayed reply, and resumes with a bounded retry', async () => {
+  const requests = deferredStatus({ abortable: false });
+  watch(['stalled-asset']);
+  await vi.advanceTimersByTimeAsync(25);
+  expect(requests).toHaveLength(1);
+  await vi.advanceTimersByTimeAsync(15000);
+  expect(requests[0].signal.aborted).toBe(true);
+  requests[0].reply(1, 'stale');
+  await vi.advanceTimersByTimeAsync(0);
+  expect(getThumbnailPublication('stalled-asset')).toBeUndefined();
+  await vi.advanceTimersByTimeAsync(525);
+  expect(requests).toHaveLength(2);
+  requests[1].reply(2, '42');
+  await vi.advanceTimersByTimeAsync(0);
+  expect(getThumbnailPublication('stalled-asset')?.publicationVersion).toBe('42');
 });
 
 it('retains current subscribers while stopped and resynchronizes only those still subscribed on resume', async () => {

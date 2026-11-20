@@ -8,9 +8,9 @@ from starlette.concurrency import run_in_threadpool
 
 from thumbnail_cache import thumbnail_log
 from thumbnail_generator import ThumbnailGenerationError
+from thumbnail_publication import KEEP_PUBLICATION_VERSION
 
 DEBOUNCE_SECONDS = 60
-_USE_CACHE_VERSION = object()
 
 
 class ThumbnailScheduler:
@@ -87,10 +87,9 @@ class ThumbnailScheduler:
             return "reserved"
         return self._states.get(asset_id)
 
-    def _publish(self, asset_id, state, publication_version=_USE_CACHE_VERSION):
+    def _publish(self, asset_id, state, publication_version=KEEP_PUBLICATION_VERSION):
         if self.publication_hub is not None:
-            version = self.cache.version(asset_id) if publication_version is _USE_CACHE_VERSION else publication_version
-            self.publication_hub.publish(asset_id, state, version)
+            self.publication_hub.publish(asset_id, state, publication_version)
 
     def _promote_due(self):
         now = self._clock()
@@ -119,19 +118,39 @@ class ThumbnailScheduler:
             self._publish(asset_id, "running")
             try:
                 content = await self._generate(asset_id)
-                async with self.mutation_lock:
-                    if not self._invalidated:
-                        evicted = await run_in_threadpool(self.cache.store, asset_id, content)
-                        for evicted_id in evicted or ():
-                            self._remember_terminal(evicted_id, "cache_missing")
-                            self._publish(evicted_id, "cache_missing")
-                        self._remember_terminal(asset_id, "published")
-                        thumbnail_log("completed", component="thumbnail_scheduler", assetId=str(asset_id),
-                                      payloadBytes=len(content), durationMs=round((self._clock() - started) * 1000))
-                        self._publish(asset_id, "published")
-                    else:
-                        thumbnail_log("discarded", component="thumbnail_scheduler", assetId=str(asset_id),
-                                      errorCode="generation_invalidated")
+                prepared = await run_in_threadpool(self.cache.prepare_store, content)
+                try:
+                    published = False
+                    async with self.mutation_lock:
+                        if self._invalidated:
+                            thumbnail_log("discarded", component="thumbnail_scheduler", assetId=str(asset_id),
+                                          errorCode="generation_invalidated")
+                        else:
+                            publication_version = await run_in_threadpool(
+                                self.cache.publish_prepared, asset_id, prepared, len(content))
+                            self._remember_terminal(asset_id, "published")
+                            published = True
+                            thumbnail_log("completed", component="thumbnail_scheduler", assetId=str(asset_id),
+                                          payloadBytes=len(content), durationMs=round((self._clock() - started) * 1000))
+                            self._publish(asset_id, "published", publication_version)
+                    if published:
+                        try:
+                            evicted = await run_in_threadpool(self.cache.prune)
+                        except OSError:
+                            evicted = []
+                            thumbnail_log("prune.failed", level="warn", errorCode="cache_prune_failed")
+                        if evicted:
+                            async with self.mutation_lock:
+                                for evicted_id in evicted:
+                                    current_state = self.generation_state(evicted_id)
+                                    if current_state == "reset":
+                                        continue
+                                    if current_state in {None, "failed", "published", "cache_missing"}:
+                                        self._remember_terminal(evicted_id, "cache_missing")
+                                        current_state = "cache_missing"
+                                    self._publish(evicted_id, current_state, None)
+                finally:
+                    await run_in_threadpool(self.cache.discard_prepared, prepared)
             except Exception as error:
                 code = error.code if isinstance(error, ThumbnailGenerationError) else "thumbnail_generation_failed"
                 if not self._invalidated:

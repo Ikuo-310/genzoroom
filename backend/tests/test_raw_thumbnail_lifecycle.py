@@ -52,6 +52,23 @@ def save(kind="edited", *, asset=ASSET, revision=0, exposure=.7, save_id=None):
 
 
 @pytest.mark.parametrize("kind", ["edited", "default", "unknown", "missing"])
+def test_raw_thumbnail_batch_state_matches_the_existing_eligibility_contract(lifecycle, kind, monkeypatch):
+    if kind != "missing":
+        save(kind)
+    existing = store.get_raw_saved_state(ASSET)
+
+    def unexpected_history_restore(*_args):
+        pytest.fail("thumbnail status must not restore RAW History")
+
+    monkeypatch.setattr(store, "_read_history", unexpected_history_restore)
+    result = store.get_raw_thumbnail_recipe_states([ASSET])
+    assert result[str(ASSET)] == {
+        "recipeRevision": existing["revision"] if existing is not None else None,
+        "edited": existing["exportEligible"] if existing is not None else False,
+    }
+
+
+@pytest.mark.parametrize("kind", ["edited", "default", "unknown", "missing"])
 @pytest.mark.parametrize("endpoint", ["rendered-thumbnail", "immersive-preview"])
 @pytest.mark.parametrize("cached", [False, True])
 def test_raw_get_eligibility_and_legacy_jpeg_never_overrides(lifecycle, kind, endpoint, cached):

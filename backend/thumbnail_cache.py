@@ -129,18 +129,32 @@ class ThumbnailCache:
             thumbnail_log("deleted", level="info", assetId=str(asset_id))
             return existed
 
-    def store(self, asset_id: UUID, content: bytes):
+    def prepare_store(self, content: bytes) -> Path:
         temporary = None
+        try:
+            if not content or len(content) > MAX_CACHE_BYTES:
+                raise ValueError("cache_entry_size_limit")
+            with self._lock:
+                self.root.mkdir(parents=True, exist_ok=True)
+                output = NamedTemporaryFile(dir=self.root, prefix="thumbnail-", suffix=".tmp", delete=False)
+                temporary = Path(output.name)
+            with output:
+                output.write(content)
+                output.flush()
+                os.fsync(output.fileno())
+            return temporary
+        except (OSError, ValueError):
+            if temporary is not None:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    thumbnail_log("temporaryCleanup.failed", level="warn", errorCode="cache_cleanup_failed")
+            thumbnail_log("write.failed", level="warn", errorCode="cache_write_failed")
+            raise
+
+    def publish_prepared(self, asset_id: UUID, temporary: Path, payload_bytes: int) -> str:
         with self._lock:
             try:
-                if not content or len(content) > MAX_CACHE_BYTES:
-                    raise ValueError("cache_entry_size_limit")
-                self.root.mkdir(parents=True, exist_ok=True)
-                with NamedTemporaryFile(dir=self.root, prefix="thumbnail-", suffix=".tmp", delete=False) as output:
-                    temporary = Path(output.name)
-                    output.write(content)
-                    output.flush()
-                    os.fsync(output.fileno())
                 # Persisted mtime gives each atomic publication a restart-stable URL identity.
                 try:
                     previous_mtime = self._path(asset_id).stat().st_mtime_ns
@@ -153,25 +167,47 @@ class ThumbnailCache:
                 # Leave room for filesystem timestamp rounding (including Windows FILETIME).
                 published_mtime = max(time_ns(), previous_mtime + 1_000_000)
                 os.utime(temporary, ns=(published_mtime, published_mtime))
-                if temporary.stat().st_mtime_ns <= previous_mtime:
+                actual_mtime = temporary.stat().st_mtime_ns
+                if actual_mtime <= previous_mtime:
                     raise OSError("thumbnail_publication_timestamp_not_advanced")
                 os.replace(temporary, self._path(asset_id))
                 self._reset_marker(asset_id).unlink(missing_ok=True)
-                thumbnail_log("updated", level="info", assetId=str(asset_id), payloadBytes=len(content))
+                version = str(actual_mtime)
+                self._read_failures.pop(asset_id, None)
+                thumbnail_log("updated", level="info", assetId=str(asset_id), payloadBytes=payload_bytes)
+                return version
+            except (OSError, ValueError):
+                thumbnail_log("write.failed", level="warn", assetId=str(asset_id), errorCode="cache_write_failed")
+                raise
+
+    def discard_prepared(self, temporary: Path):
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            thumbnail_log("temporaryCleanup.failed", level="warn", errorCode="cache_cleanup_failed")
+
+    def prune(self):
+        with self._lock:
+            return self._prune()
+
+    def store(self, asset_id: UUID, content: bytes):
+        temporary = self.prepare_store(content)
+        try:
+            with self._lock:
+                self.publish_prepared(asset_id, temporary, len(content))
                 try:
                     return self._prune()
                 except OSError:
                     # Publication already succeeded; report cleanup separately from write failure.
                     thumbnail_log("prune.failed", level="warn", errorCode="cache_prune_failed")
-            except (OSError, ValueError):
-                thumbnail_log("write.failed", level="warn", assetId=str(asset_id), errorCode="cache_write_failed")
-                raise
-            finally:
-                if temporary is not None:
-                    try:
-                        temporary.unlink(missing_ok=True)
-                    except OSError:
-                        thumbnail_log("temporaryCleanup.failed", level="warn", errorCode="cache_cleanup_failed")
+        finally:
+            self.discard_prepared(temporary)
+
+    def store_with_version(self, asset_id: UUID, content: bytes) -> tuple[list[UUID], str | None]:
+        # Keep the new file stable until its identity is captured for the publication event.
+        with self._lock:
+            evicted = self.store(asset_id, content)
+            return evicted or [], self.version(asset_id)
 
     def _prune(self):
         entries = []
