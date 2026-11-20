@@ -32,6 +32,7 @@ function createRaw(colors: ReturnType<typeof point>[] = []) {
     operationError: undefined as string | undefined,
     pointColorPickActive: false, pointColorPickAvailable: colors.length < 8 && settings.sections.color,
     togglePointColorPick: vi.fn(), cancelPointColorPick: vi.fn(),
+    pointColorRangeIndex: null as number | null, setPointColorRangeIndex: vi.fn<(index: number | null) => void>(),
     pointColorInteracting: false, pointColorInputEnabled: false, beginPointColorInteraction: vi.fn(() => true), updatePointColorInteraction: vi.fn(),
     finishPointColorInteraction: vi.fn(), cancelPointColorInteraction: vi.fn(),
     operate: vi.fn(), beginControls: vi.fn(), changeControls: vi.fn(), flushControls: vi.fn(), desired: {} };
@@ -108,6 +109,15 @@ it('shows each ordered entry including duplicates and keeps selection local to t
   const savedUi = window.localStorage.getItem(RAW_DEVELOPMENT_PANEL_UI_KEY);
   act(() => buttons[2].click());
   expect(swatches().map(button => button.getAttribute('aria-pressed'))).toEqual(['false', 'false', 'true']);
+  const showRange = () => host.querySelector<HTMLInputElement>('.raw-point-color-range input')!;
+  expect(showRange().checked).toBe(false);
+  expect(raw.setPointColorRangeIndex).not.toHaveBeenCalled();
+  act(() => showRange().click());
+  expect(raw.setPointColorRangeIndex).toHaveBeenLastCalledWith(2);
+  raw.pointColorRangeIndex = 2; draw(raw);
+  expect(showRange().checked).toBe(true);
+  act(() => showRange().click());
+  expect(raw.setPointColorRangeIndex).toHaveBeenLastCalledWith(null);
   expect(window.localStorage.getItem(RAW_DEVELOPMENT_PANEL_UI_KEY)).toBe(savedUi);
   expect(raw.operate).not.toHaveBeenCalled();
   expect(raw.beginControls).not.toHaveBeenCalled();

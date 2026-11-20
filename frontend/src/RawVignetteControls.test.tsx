@@ -14,6 +14,7 @@ afterEach(() => { act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(
 it('persists independent RAW panel folds and selections across remount and asset changes without edit operations', async () => {
   const asset = (id: string) => ({ workspaceId: 'workspace', assetId: id, handle: 'handle', documentToken: 'token', generation: 1, revision: 1 });
   const raw = { assetId: 'asset-a', status: 'ready', settings: rawSettings(asset('asset-a')), history: {}, operate: vi.fn(),
+    pointColorRangeIndex: null, setPointColorRangeIndex: vi.fn(),
     beginControls: vi.fn(), changeControls: vi.fn(), flushControls: vi.fn(), desired: {} };
   function draw() { act(() => root.render(<RawAdjustmentControls raw={raw as never} />)); }
   const category = (name: string) => host.querySelector<HTMLButtonElement>(`.raw-adjustment-category.is-${name} > .adjustment-category-header .adjustment-category-title`)!;
@@ -70,7 +71,9 @@ it.each(['ja', 'en'])('uses desired amount for dependents and preserves values/m
   const settings = rawSettings({ workspaceId: 'workspace', assetId: 'asset', handle: 'handle', documentToken: 'token', generation: 1, revision: 1 });
   Object.assign(settings.values, { 'vignette.midpoint': 23, 'vignette.feather': 87, 'vignette.roundness': -34, 'vignette.highlights': 89 });
   const operate = vi.fn();
-  const raw = { assetId: 'asset', status: 'ready', settings, history: {}, operate, beginControls: vi.fn(), changeControls: vi.fn(), flushControls: vi.fn(), desired: {} };
+  const raw = { assetId: 'asset', status: 'ready', settings, history: {}, operate,
+    pointColorRangeIndex: null, setPointColorRangeIndex: vi.fn(),
+    beginControls: vi.fn(), changeControls: vi.fn(), flushControls: vi.fn(), desired: {} };
   function draw() { act(() => root.render(<RawAdjustmentControls raw={raw as never} />)); }
   const ranges = () => [...host.querySelectorAll<HTMLInputElement>('[data-adjustment-id^="vignette."]')];
   draw();
