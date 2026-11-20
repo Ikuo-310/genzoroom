@@ -47,7 +47,8 @@ DEFAULT = {"version": 1, "process": 2, "wb": {"mode": "custom", "temp": 6500., "
                      "red": [], "green": [], "blue": [], "refine_saturation": 100.}}
 QUICK = RawTimeouts(admission=.5, command=1, import_raw=2, preview=1, validation=1, ready=1)
 NATIVE_DETAIL_CONTROLS = {
-    'sharpenAmount': ('sharpen_amount', 0), 'sharpenMasking': ('sharpen_masking', 0),
+    'sharpenAmount': ('sharpen_amount', 0), 'sharpenRadius': ('sharpen_radius', 1),
+    'sharpenDetail': ('sharpen_detail', 25), 'sharpenMasking': ('sharpen_masking', 0),
     'nrLuminance': ('nr_luminance', 0), 'nrDetail': ('nr_detail', 50), 'nrColor': ('nr_color', 0),
     'nrColorDetail': ('nr_color_detail', 50), 'nrColorSmoothness': ('nr_color_smoothness', 50),
 }
@@ -847,6 +848,7 @@ class RawProcess(FakeProcess):
         self.before_supported = False
         self.before_wrong_kind = False
         self.adaptive_supported = False
+        self.sharpen_preview_supported = False
         self.frame_supported = False
         self.simple_crop_supported = False
         self.frame_fault = None
@@ -877,6 +879,11 @@ class RawProcess(FakeProcess):
 
     def respond(self, message):
         if message["method"] == "tools/list":
+            if self.sharpen_preview_supported:
+                return reply(self.stdout, message, {"tools": [{"name": "render_preview", "inputSchema": {"properties": {
+                    "before": {"type": "boolean"}, "quality": {"type": "string", "enum": ["draft", "full"]},
+                    "include_frame": {"type": "boolean"},
+                    "sharpen_preview": {"type": "string", "enum": ["grayscale", "detail", "mask"]}}}}]})
             if self.simple_crop_supported:
                 return reply(self.stdout, message, {"tools": [{"name": "render_preview", "inputSchema": {
                     "properties": {"include_frame": {"type": "boolean"}, "crop_edit": {"type": "boolean"}}}}]})
@@ -917,6 +924,8 @@ class RawProcess(FakeProcess):
                         metadata = json.loads(result["content"][1]["text"])
                         metadata.update(kind="before" if args.get("before") else "after",
                                         quality=args.get("quality", "full"))
+                        if "sharpen_preview" in args:
+                            metadata["sharpenPreview"] = args["sharpen_preview"]
                         result["content"][1]["text"] = json.dumps(metadata)
                         if args.get("before"):
                             settings = self.photos[args["id"]]["settings"]

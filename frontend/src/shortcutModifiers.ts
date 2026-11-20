@@ -10,3 +10,7 @@ export function isPrimaryModifier(
 ): boolean {
   return platform === 'mac' ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
 }
+
+export function isAlternateModifier(event: Pick<KeyboardEvent, 'altKey'> | Pick<MouseEvent, 'altKey'>): boolean {
+  return event.altKey;
+}

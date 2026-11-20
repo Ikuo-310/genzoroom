@@ -585,7 +585,8 @@ HISTORY_CONTROLS = frozenset(("wb.temp", "wb.tint", "color.vibrance", "color.sat
                             "effects.texture", "effects.clarity", "effects.dehaze",
                             "vignette.amount", "vignette.midpoint", "vignette.feather", "vignette.roundness", "vignette.highlights",
                             "light.exposure", "light.contrast", "light.highlights", "light.whites",
-                            "light.shadows", "light.blacks", "detail.sharpenAmount", "detail.sharpenMasking",
+                            "light.shadows", "light.blacks", "detail.sharpenAmount", "detail.sharpenRadius",
+                            "detail.sharpenDetail", "detail.sharpenMasking",
                             "detail.nrLuminance", "detail.nrDetail", "detail.nrColor", "detail.nrColorDetail",
                             "detail.nrColorSmoothness"))
 HISTORY_CONTROLS |= frozenset(f"grading.{band}.{field}" for band in ("shadows", "midtones", "highlights") for field in ("hue", "sat", "lum")) | {"grading.blending", "grading.balance"}

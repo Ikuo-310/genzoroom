@@ -60,13 +60,17 @@ const bindings: { category: RawCategoryId; controls: RawControlId[]; ids: Slider
     'vignette.amount', 'vignette.midpoint', 'vignette.feather', 'vignette.roundness', 'vignette.highlights'],
     ids: ['effects.texture', 'effects.clarity', 'effects.dehaze',
       'vignette.amount', 'vignette.midpoint', 'vignette.feather', 'vignette.roundness', 'vignette.highlights'] },
-  { category: 'detail', controls: ['detail.sharpenAmount', 'detail.sharpenMasking', 'detail.nrLuminance', 'detail.nrDetail',
+  { category: 'detail', controls: ['detail.sharpenAmount', 'detail.sharpenRadius', 'detail.sharpenDetail', 'detail.sharpenMasking', 'detail.nrLuminance', 'detail.nrDetail',
     'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'],
-    ids: ['detail.sharpenAmount', 'detail.sharpenMasking', 'detail.nrLuminance', 'detail.nrDetail',
+    ids: ['detail.sharpenAmount', 'detail.sharpenRadius', 'detail.sharpenDetail', 'detail.sharpenMasking', 'detail.nrLuminance', 'detail.nrDetail',
       'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'] },
 ];
 const detailHeadings: Partial<Record<RawControlId, string>> = {
   'detail.sharpenAmount': 'sharpening', 'detail.nrLuminance': 'noiseReduction', 'detail.nrColor': 'colorNoiseReduction',
+};
+const sharpenPreviewModes: Partial<Record<RawControlId, 'grayscale' | 'detail' | 'mask'>> = {
+  'detail.sharpenAmount': 'grayscale', 'detail.sharpenRadius': 'detail',
+  'detail.sharpenDetail': 'detail', 'detail.sharpenMasking': 'mask',
 };
 const vignetteLabels: Partial<Record<RawControlId, string>> = {
   'vignette.amount': 'vignetteAmount', 'vignette.midpoint': 'vignetteMidpoint', 'vignette.feather': 'vignetteFeather',
@@ -335,6 +339,7 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
         const enabled = category === 'curves' ? true : settings.sections[sections[category]];
         const dependent = control.startsWith('vignette.') && control !== 'vignette.amount'
           && (raw.desired?.['vignette.amount'] ?? settings.values['vignette.amount']) === 0;
+        const processDependent = (control === 'detail.sharpenRadius' || control === 'detail.sharpenDetail') && settings.process < 3;
         const labelKey = category === 'detail' || category === 'effects' ? `rawPreview.${vignetteLabels[control] ?? control.split('.')[1]}` : id;
         return <Fragment key={`${raw.assetId}:${control}`}>
           {control === 'vignette.amount' && <>
@@ -357,8 +362,10 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
           defaultValue={relativeWbControl ? 0 : spec.default}
           resetLabel={t(control.startsWith('wb.') ? 'workspace.rawPreview.wbResetAsShot' : `workspace.${labelKey}Reset`)} valueLabel={t(`workspace.${labelKey}Value`)}
           valueText={`${value.toFixed(relativeWbControl ? 0 : spec.precision)}${control.endsWith('.hue') ? '°' : control === 'wb.temp' && !relativeWb ? ' K' : control === 'light.exposure' ? ' EV' : ''}`}
-          disabled={locked || !enabled || dependent || control.startsWith('wb.') && !settings.wb.available}
-          resetDisabled={actionsLocked || dependent || control.startsWith('wb.') && !settings.wb.available}
+          onTemporaryPreview={sharpenPreviewModes[control]
+            ? active => raw.setSharpenPreview(active ? sharpenPreviewModes[control]! : null) : undefined}
+          disabled={locked || !enabled || dependent || processDependent || control.startsWith('wb.') && !settings.wb.available}
+          resetDisabled={actionsLocked || dependent || processDependent || control.startsWith('wb.') && !settings.wb.available}
           onChange={value => raw.changeControls({ [control]: control === 'wb.temp' ? nativeTemperature(value, settings.wb.scale) : value })}
           onCommit={() => raw.flushControls(control)} /></Fragment>;
       })}</div>

@@ -80,6 +80,42 @@ def target(doc, serial=1, quality="draft"):
                                        "viewGeneration": 1, "geometryId": None}
 
 
+@pytest.mark.parametrize("mode", ["grayscale", "detail", "mask"])
+@pytest.mark.parametrize("quality", ["draft", "full"])
+def test_sharpen_overlay_preview_echoes_mode_without_settings_mutation(local, tmp_path, monkeypatch, mode, quality):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        child = children[0]
+        child.sharpen_preview_supported = True
+        child.adaptive_supported = True
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                _, doc = await open_document(http)
+                identity = {key: doc[key] for key in ("workspaceId", "generation", "documentToken")}
+                before = (await http.post(f'/api/raw/documents/{doc["handle"]}/settings', json=identity)).json()
+                endpoint = f'/api/raw/documents/{doc["handle"]}/preview'
+                response = await http.post(endpoint, json=target(doc, 1, quality) | {"sharpenPreview": mode})
+                assert response.status_code == 200, response.text
+                assert response.headers["x-raw-kind"] == "after"
+                assert response.headers["x-raw-sharpen-preview"] == mode
+                assert child.preview_arguments[-1]["sharpen_preview"] == mode
+                normal = await http.post(endpoint, json=target(doc, 2, quality))
+                assert normal.status_code == 200 and "x-raw-sharpen-preview" not in normal.headers
+                for invalid in (None, "bad", 1):
+                    rejected = await http.post(endpoint, json=target(doc, 4, quality) | {"sharpenPreview": invalid})
+                    assert rejected.status_code == 400
+                assert (await http.post(endpoint, json=target(doc, 5, quality) | {"sharpenPreview": mode,
+                    "pointColorRangeIndex": 0})).status_code == 400
+                assert (await http.post(endpoint, json=target(doc, 6, quality) | {"sharpenPreview": mode,
+                    "mode": "crop-edit"})).status_code == 400
+                after = (await http.post(f'/api/raw/documents/{doc["handle"]}/settings', json=identity)).json()
+                assert before["values"] == after["values"] and before["revision"] == after["revision"]
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("native,code,status", [
     ("preview_invalid_quality", "raw_invalid_preview_request", 400),
     ("preview_invalid_contract", "raw_invalid_preview_request", 400),

@@ -164,6 +164,18 @@ it('sends the optional Whole Point Color range index and requires its exact echo
   await expect(rawPreview(doc, 3, new AbortController().signal, 'after', { ...target, pointColorRangeIndex: 8 })).rejects.toThrow();
   await expect(rawPreview({ ...doc, beforeKey: 'b'.repeat(64) }, 3, new AbortController().signal, 'before', target)).rejects.toThrow();
 });
+it.each(['grayscale', 'detail', 'mask'] as const)('sends and verifies the sharpen %s overlay contract', async sharpenPreview => {
+  const target = { ...adaptiveTarget, sharpenPreview };
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => response({ ...adaptiveHeaders(), 'X-Raw-Sharpen-Preview': sharpenPreview }));
+  vi.stubGlobal('fetch', fetch);
+  await rawPreview(doc, 3, new AbortController().signal, 'after', target);
+  expect(JSON.parse((fetch.mock.calls[0][1] as RequestInit).body as string)).toMatchObject({ sharpenPreview });
+  vi.stubGlobal('fetch', vi.fn(async () => response(adaptiveHeaders())));
+  await expect(rawPreview(doc, 3, new AbortController().signal, 'after', target)).rejects.toThrow();
+  await expect(rawPreview(doc, 3, new AbortController().signal, 'before', target)).rejects.toThrow();
+  await expect(rawPreview(doc, 3, new AbortController().signal, 'after', { ...target, mode: 'crop-edit' })).rejects.toThrow();
+  await expect(rawPreview(doc, 3, new AbortController().signal, 'after', { ...target, pointColorRangeIndex: 0 })).rejects.toThrow();
+});
 it('routes temporary curve updates through the existing adaptive Draft Preview contract', async () => {
   const settings = rawSettings(doc), interactionId = 'd'.repeat(32);
   const fetch = vi.fn<typeof globalThis.fetch>()

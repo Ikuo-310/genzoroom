@@ -124,13 +124,16 @@ def test_published_control_and_section_contract_matches_frontend_and_history():
     assert frontend_sections == store.HISTORY_SECTIONS
     assert frontend_sections == set(SECTIONS)
     assert CONTROL_PATHS['detail.sharpenAmount'] == ('detail', 'sharpen_amount')
+    assert CONTROL_PATHS['detail.sharpenRadius'] == ('detail', 'sharpen_radius')
+    assert CONTROL_PATHS['detail.sharpenDetail'] == ('detail', 'sharpen_detail')
     assert CONTROL_PATHS['detail.sharpenMasking'] == ('detail', 'sharpen_masking')
 
 
 @pytest.mark.parametrize('values', [
     {'detail.sharpenAmount': -1}, {'detail.sharpenAmount': 151}, {'detail.sharpenMasking': 101},
     {'detail.sharpenMasking': True}, {'detail.sharpenAmount': float('nan')},
-    {'detail.sharpen_amount': 1}, {'detail.sharpenRadius': 1}, {'enhance.denoise': 1},
+    {'detail.sharpenRadius': .4}, {'detail.sharpenRadius': 3.1}, {'detail.sharpenDetail': -1},
+    {'detail.sharpenDetail': 101}, {'detail.sharpen_amount': 1}, {'enhance.denoise': 1},
 ])
 def test_detail_rejects_invalid_or_unpublished_controls(values):
     with pytest.raises(LightCraftError, match='raw_invalid_controls'):
@@ -156,11 +159,14 @@ def test_detail_native_operations_history_reopen_and_unpublished_values(local, t
                 seeded_step = doc['history']['selectedStepId']
                 assert seeded_step is not None
                 assert store.get_raw_history(api._history_identity)['history']['steps'][-1]['settings'] == seeded
-                doc = await patch(http, doc, {'detail.sharpenAmount': 120, 'detail.sharpenMasking': 75})
-                doc = await operation(http, doc, 'commit', body(doc) | {'kind': 'control', 'metadata': {'control': 'detail.sharpenAmount'}})
-                assert ('develop.set', {'values': {'detail.sharpenAmount': 120, 'detail.sharpenMasking': 75}}) in child.commands
+                doc = await patch(http, doc, {'detail.sharpenAmount': 120, 'detail.sharpenRadius': 2.3,
+                    'detail.sharpenDetail': 71, 'detail.sharpenMasking': 75})
+                doc = await operation(http, doc, 'commit', body(doc) | {'kind': 'control', 'metadata': {'control': 'detail.sharpenRadius'}})
+                assert ('develop.set', {'values': {'detail.sharpenAmount': 120, 'detail.sharpenRadius': 2.3,
+                    'detail.sharpenDetail': 71, 'detail.sharpenMasking': 75}}) in child.commands
                 saved = copy.deepcopy(child.photos[child.active]['settings'])
-                assert saved['detail'] == seeded['detail'] | {'sharpen_amount': 120, 'sharpen_masking': 75}
+                assert saved['detail'] == seeded['detail'] | {'sharpen_amount': 120, 'sharpen_radius': 2.3,
+                    'sharpen_detail': 71, 'sharpen_masking': 75}
                 assert saved['enhance'] == seeded['enhance']
                 doc = await edit(http, doc, 'sectionToggle', {'section': 'detail', 'enabled': False})
                 assert not doc['sections']['detail'] and child.photos[child.active]['settings'] == saved | {'disabled_sections': ['detail']}
@@ -170,6 +176,7 @@ def test_detail_native_operations_history_reopen_and_unpublished_values(local, t
                 doc = await edit(http, same, 'sectionReset', {'section': 'detail'})
                 reset = copy.deepcopy(child.photos[child.active]['settings'])
                 assert reset['detail'] == DETAIL_RESET_DEFAULTS
+                assert doc['values']['detail.sharpenRadius'] == 1 and doc['values']['detail.sharpenDetail'] == 25
                 assert reset['enhance'] == {'denoise': 0, 'raw_details': True, 'super_resolution': True}
                 assert reset['disabled_sections'] == ['detail'] and not doc['sections']['detail']
                 assert {k: v for k, v in reset.items() if k not in ('detail', 'enhance', 'disabled_sections')} == {
@@ -180,7 +187,8 @@ def test_detail_native_operations_history_reopen_and_unpublished_values(local, t
                 assert child.photos[child.active]['settings'] == reset
                 doc = await edit(http, doc, 'sectionToggle', {'section': 'detail', 'enabled': True})
                 doc = await edit(http, doc, 'allReset', {})
-                assert doc['values']['detail.sharpenAmount'] == 40 and doc['values']['detail.sharpenMasking'] == 0
+                assert doc['values']['detail.sharpenAmount'] == 40 and doc['values']['detail.sharpenRadius'] == 1
+                assert doc['values']['detail.sharpenDetail'] == 25 and doc['values']['detail.sharpenMasking'] == 0
                 doc = await operation(http, doc, 'undo')
                 await http.delete(f'/api/raw/workspaces/{doc["workspaceId"]}')
                 _, response = await open_asset(http, doc['assetId'])

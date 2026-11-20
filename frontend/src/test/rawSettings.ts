@@ -24,12 +24,13 @@ export function rawSettings(doc: RawDocument): RawSettings {
       profileAvailable: null, profileSource: 'unknown', profileName: null, profileApplied: false },
     wbAutoAvailable: true, wb: { available: true, mode: 'asShot', scale: 'kelvin' }, sections: { light: true, color: true, grading: true, effects: true, detail: true, optics: true },
     values: Object.fromEntries(RAW_SETTINGS_CONTROL_IDS.map(id => [id, id === 'wb.temp' ? 6500 : id === 'detail.sharpenAmount' ? 40
+      : id === 'detail.sharpenRadius' ? 1 : id === 'detail.sharpenDetail' ? 25
       : id === 'detail.nrColor' ? 25 : controlDefaults[id] ?? 0])) as RawValues,
     controls: RAW_SETTINGS_CONTROL_IDS.map(id => {
       const optics = opticsSpecs[id];
-      return { id, min: optics?.[0] ?? (id.startsWith('grading.') && !id.endsWith('.lum') && id !== 'grading.balance' ? 0 : id.startsWith('detail.') || ['vignette.midpoint', 'vignette.feather', 'vignette.highlights'].includes(id) ? 0 : id === 'wb.temp' ? 2000 : id === 'light.exposure' ? -5 : id === 'wb.tint' ? -150 : -100),
-        max: optics?.[1] ?? (id.endsWith('.hue') && !id.startsWith('mixer.') ? 360 : id === 'detail.sharpenAmount' ? 150 : id === 'wb.temp' ? 50000 : id === 'light.exposure' ? 5 : id === 'wb.tint' ? 150 : 100),
-        step: id === 'wb.temp' ? 50 : id === 'light.exposure' ? .01 : 1, default: optics?.[2] ?? (id === 'wb.temp' ? 6500 : controlDefaults[id] ?? 0),
-        precision: id === 'light.exposure' ? 2 : 0 };
+      return { id, min: optics?.[0] ?? (id === 'detail.sharpenRadius' ? .5 : id.startsWith('grading.') && !id.endsWith('.lum') && id !== 'grading.balance' ? 0 : id.startsWith('detail.') || ['vignette.midpoint', 'vignette.feather', 'vignette.highlights'].includes(id) ? 0 : id === 'wb.temp' ? 2000 : id === 'light.exposure' ? -5 : id === 'wb.tint' ? -150 : -100),
+        max: optics?.[1] ?? (id === 'detail.sharpenRadius' ? 3 : id.endsWith('.hue') && !id.startsWith('mixer.') ? 360 : id === 'detail.sharpenAmount' ? 150 : id === 'wb.temp' ? 50000 : id === 'light.exposure' ? 5 : id === 'wb.tint' ? 150 : 100),
+        step: id === 'detail.sharpenRadius' ? .1 : id === 'wb.temp' ? 50 : id === 'light.exposure' ? .01 : 1, default: optics?.[2] ?? (id === 'detail.sharpenRadius' ? 1 : id === 'detail.sharpenDetail' ? 25 : id === 'wb.temp' ? 6500 : controlDefaults[id] ?? 0),
+        precision: id === 'detail.sharpenRadius' ? 1 : id === 'light.exposure' ? 2 : 0 };
     }) };
 }

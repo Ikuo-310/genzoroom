@@ -962,6 +962,27 @@ describe('RAW document lifetime', () => {
     act(() => current!.cancelCurveInteraction()); await flush();
   });
 
+  it('drops a late sharpen overlay and restores the paused Point Color preview', async () => {
+    vi.mocked(api.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), point_colors: [pointColor] }));
+    vi.mocked(api.rawPreview).mockResolvedValue(pointFrame);
+    await render('a'); await flush();
+    act(() => current!.setPointColorRangeIndex(0)); await flush();
+    act(() => current!.beginControls('detail.sharpenRadius'));
+    const overlay = deferred<api.RawFrame>();
+    vi.mocked(api.rawPreview).mockReturnValueOnce(overlay.promise);
+    act(() => current!.setSharpenPreview('detail')); await flush();
+    expect(vi.mocked(api.rawPreview).mock.calls.at(-1)?.[4]).toMatchObject({ quality: 'draft', sharpenPreview: 'detail' });
+    expect(vi.mocked(api.rawPreview).mock.calls.at(-1)?.[4]).not.toHaveProperty('pointColorRangeIndex');
+    act(() => current!.setSharpenPreview(null));
+    expect(current!.url).toBeUndefined();
+    await act(async () => overlay.resolve({ ...pointFrame, blob: new Blob(['late-overlay']) })); await flush();
+    expect(vi.mocked(api.rawPreview).mock.calls.at(-1)?.[4]).toMatchObject({ pointColorRangeIndex: 0 });
+    expect(vi.mocked(api.rawPreview).mock.calls.at(-1)?.[4]).not.toHaveProperty('sharpenPreview');
+    expect(current!.url).toMatch(/^blob:raw-/);
+    expect(vi.mocked(api.saveRawHistory).mock.calls.filter(([request]) => request.action !== 'initialize')).toHaveLength(0);
+    act(() => current!.flushControls()); await flush();
+  });
+
   it('adopts a plain Point Color Draft while Show Range is paused for Before', async () => {
     await beginPointColor();
     const previous = current!.url;

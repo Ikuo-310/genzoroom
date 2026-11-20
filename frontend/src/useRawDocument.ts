@@ -75,8 +75,11 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   // Keep this display-only intent document-scoped so it never enters Native settings or edit persistence.
   const [pointColorRange, setPointColorRange] = useState<{ assetId: string; index: number } | null>(null);
   const pointColorRangeRef = useRef<{ assetId: string; index: number } | null>(null);
+  const sharpenPreviewRef = useRef<'grayscale' | 'detail' | 'mask' | null>(null);
+  // Keep Region surfaces out until an ordinary Whole Preview has replaced the overlay bitmap.
+  const sharpenPreviewRestoringRef = useRef(false);
   if (pointColorRangeRef.current?.assetId !== assetId) pointColorRangeRef.current = null;
-  useEffect(() => { setPointColorRange(null); }, [assetId]);
+  useEffect(() => { setPointColorRange(null); sharpenPreviewRef.current = null; sharpenPreviewRestoringRef.current = false; }, [assetId]);
   const rangePausedRef = useRef(beforeRequested);
   const effectivePointColorRange = () => !rangePausedRef.current && pointColorRangeRef.current?.assetId === assetId
     ? pointColorRangeRef.current.index : undefined;
@@ -162,7 +165,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     let viewAggregationAt = 0;
     let displayGeneration = 0, viewGeneration = 0, displayRunning = false;
     let displayPending: { doc: RawDocument; valid: () => boolean; generation: number; quality: 'draft' | 'full'; geometryId: string | null;
-      side: number; mode: 'whole' | 'crop-edit'; pointColorRangeIndex?: number } | undefined;
+      side: number; mode: 'whole' | 'crop-edit'; pointColorRangeIndex?: number; sharpenPreview?: 'grayscale' | 'detail' | 'mask' } | undefined;
     let transmitted: { doc: RawDocument; serial: number } | undefined;
     let displayTargetKey: string | undefined;
     let revisionResyncs = 0;
@@ -173,7 +176,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     let auto: RawRegionAuto | undefined;
     let autoQueued = false;
     const evaluateAuto = () => {
-      if (autoQueued || !current() || cropMode) return;
+      if (autoQueued || !current() || cropMode || sharpenPreviewRef.current !== null || sharpenPreviewRestoringRef.current) return;
       autoQueued = true;
       queueMicrotask(() => { autoQueued = false; if (current()) auto?.evaluate(); });
     };
@@ -218,7 +221,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       changed: () => { if (current()) { overlayRef.current?.refresh(); regionChanged(n => n + 1); evaluateAuto(); publishDiagnosticState(); } },
       owner: () => !cropMode && editor && publishedFrame && regionOwner ? {
         doc: editor.confirmed, ...regionOwner, geometry: publishedFrame.frame,
-        blocked: !current() || frozen.current || editor.mutating || editor.unsettled && !editor.interacting || !!saver?.locked,
+        blocked: !current() || sharpenPreviewRef.current !== null || sharpenPreviewRestoringRef.current || frozen.current
+          || editor.mutating || editor.unsettled && !editor.interacting || !!saver?.locked,
         wholeBusy: displayRunning || !!displayPending,
       } : undefined,
       send: async (owner, item, signal) => item.mode === 'region'
@@ -396,7 +400,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     };
     suspendDisplayRef.current = invalidateDisplay;
     const renderPreview = async (doc: RawDocument, quality: 'draft' | 'full', geometryId: string | null, maxSide: number,
-      valid = current, mode: 'whole' | 'crop-edit' = 'whole', pointColorRangeIndex?: number) => {
+      valid = current, mode: 'whole' | 'crop-edit' = 'whole', pointColorRangeIndex?: number,
+      sharpenPreview?: 'grayscale' | 'detail' | 'mask') => {
       if (!valid()) return;
       let candidate: string | undefined;
       const metrics = editor?.metrics, ackAt = metrics?.ackAt;
@@ -409,7 +414,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         transmitted = { doc, serial: requestSerial };
         const frame = await rawPreview(doc, requestSerial, controller.signal, 'after', {
           quality, mode, maxSide, geometryId, viewGeneration,
-          ...(pointColorRangeIndex === undefined ? {} : { pointColorRangeIndex }) });
+          ...(pointColorRangeIndex === undefined ? {} : { pointColorRangeIndex }),
+          ...(sharpenPreview === undefined ? {} : { sharpenPreview }) });
         if (!valid()) return;
         candidate = await decodeFrame(frame, controller.signal, urls);
         if (!valid()) return;
@@ -435,6 +441,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
           // B1's Before bitmap is content-keyed: rebind only its receipt revision after the same baseline/geometry is confirmed.
           wholeSurfaces.current.before = { ...baseline, doc: { ...doc } };
         }
+        if (sharpenPreview === undefined) sharpenPreviewRestoringRef.current = false;
         overlay.refresh();
         publishDiagnosticState();
         const snapshot:CropSnapshot|undefined = mode==='crop-edit' && frame.frame && frame.cropDisplay
@@ -475,7 +482,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       if (!valid()) return;
       displayRunning = true;
       // This slot owns failures and URL cleanup; mutation/save queues never join image work.
-      void renderPreview(intent.doc, intent.quality, intent.geometryId, intent.side, valid, intent.mode, intent.pointColorRangeIndex).catch(cause => {
+      void renderPreview(intent.doc, intent.quality, intent.geometryId, intent.side, valid, intent.mode,
+        intent.pointColorRangeIndex, intent.sharpenPreview).catch(cause => {
         if (!valid()) return;
         if (cause instanceof RawSuperseded) {
           if (cause.reason === 'revision') resyncPreview(valid);
@@ -485,7 +493,9 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         log(code);
         displayTargetKey = undefined;
         setState(previous => previous && ({ ...previous, displayError: code }));
-      }).finally(() => { transmitted = undefined; displayRunning = false; pumpDisplay(); region.refresh(); evaluateAuto(); publishDiagnosticState(); });
+      }).finally(() => { transmitted = undefined; displayRunning = false; pumpDisplay();
+        if (sharpenPreviewRef.current === null && !sharpenPreviewRestoringRef.current) { region.refresh(); evaluateAuto(); }
+        publishDiagnosticState(); });
     };
     const resyncPreview = (valid = current) => {
       if (!valid()) return;
@@ -514,10 +524,11 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       // A gesture keeps its selected size; the final Full re-evaluates the latest view.
       if (!editor?.interacting && !latestView?.interacting && latestView) side = rawWholeSide(latestView, side) ?? side;
       const quality = editor?.interacting || latestView?.interacting ? 'draft' : 'full';
-      const requestedRange = effectivePointColorRange();
-      const rangeIndex = !cropMode && editor?.confirmed.sections.color
+      const sharpenPreview = sharpenPreviewRef.current ?? undefined;
+      const requestedRange = sharpenPreview ? undefined : effectivePointColorRange();
+      const rangeIndex = !sharpenPreview && !cropMode && editor?.confirmed.sections.color
         && requestedRange !== undefined && !!editor.confirmed.point_colors[requestedRange] ? requestedRange : undefined;
-      const key = `${cropMode}:${doc.documentToken}:${doc.revision}:${quality}:${side}:${viewGeneration}:${rangeIndex ?? 'plain'}`;
+      const key = `${cropMode}:${doc.documentToken}:${doc.revision}:${quality}:${side}:${viewGeneration}:${rangeIndex ?? 'plain'}:${sharpenPreview ?? 'normal'}`;
       if (key === displayTargetKey) return;
       // New ACKs replace the pending slot, not a running ACK image merely because
       // desired changed. Native revision and ownership checks still gate adoption.
@@ -531,10 +542,10 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         && editor?.confirmed.generation === doc.generation && editor.confirmed.documentToken === doc.documentToken
         && editor.confirmed.revision === doc.revision;
       displayPending = { doc, valid: acknowledged, generation: displayGeneration, quality, geometryId, side,
-        mode: cropMode ? 'crop-edit' : 'whole', ...(rangeIndex === undefined ? {} : { pointColorRangeIndex: rangeIndex }) };
+        mode: cropMode ? 'crop-edit' : 'whole', ...(rangeIndex === undefined ? {} : { pointColorRangeIndex: rangeIndex }),
+        ...(sharpenPreview === undefined ? {} : { sharpenPreview }) };
       pumpDisplay();
-      region.refresh();
-      overlay.refresh();
+      if (!sharpenPreview && !sharpenPreviewRestoringRef.current) { region.refresh(); overlay.refresh(); }
     };
     const applyView = () => {
       viewTimer = undefined;
@@ -1463,7 +1474,22 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   const pickModeOwnsViewer = () => pickModeActive || pendingPickOwner.current === pickTag
     || pendingPickOwner.current === pointColorPickTag;
   // Temporary comparison, crop and sampling modes pause the overlay while preserving its checked state.
-  rangePausedRef.current = beforeRequested || !!visible?.cropMode || pickModeOwnsViewer();
+  rangePausedRef.current = beforeRequested || !!visible?.cropMode || pickModeOwnsViewer() || sharpenPreviewRef.current !== null;
+  const setSharpenPreview = (mode: 'grayscale' | 'detail' | 'mask' | null) => {
+    if (mode !== null && (beforeRequested || visible?.cropMode)) return;
+    if (sharpenPreviewRef.current === mode) return;
+    sharpenPreviewRef.current = mode;
+    sharpenPreviewRestoringRef.current = mode === null;
+    rangePausedRef.current = mode !== null || beforeRequested || !!visible?.cropMode || pickModeOwnsViewer();
+    suspendDisplayRef.current();
+    wholeSurfaces.current.after = undefined;
+    overlayRef.current?.clear();
+    if (visible?.url) setState(previous => previous ? { ...previous, url: undefined, width: undefined, height: undefined } : previous);
+    viewRef.current();
+  };
+  useEffect(() => {
+    if (sharpenPreviewRef.current !== null && (beforeRequested || visible?.cropMode)) setSharpenPreview(null);
+  }, [beforeRequested, visible?.cropMode]);
   useEffect(() => {
     if (pointColorRangeRef.current?.assetId === assetId && callbackEditor()) viewRef.current();
   }, [assetId, beforeRequested, visible?.cropMode, pickOwner]);
@@ -1658,6 +1684,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     });
   };
   return visible && { ...visible, pointColorRangeIndex: pointColorRange?.assetId === assetId ? pointColorRange.index : null,
+    setSharpenPreview,
     setPointColorRangeIndex,
     crop: { operation: cropSaver?.cropOperation, overlay,setOverlay, straightenTool, setStraightenTool:(value:boolean)=>setStraightenTool(value),
       operate: (operation: RawGeometryOperation, action?: import('./rawApi').RawGeometryAction) => {
@@ -1770,7 +1797,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         .catch(cause => log(cause instanceof RawApiError ? cause.code : 'raw_connection_failed', 'history.failed'));
     },
     regionDelivery: regionRef.current,
-    regionDisplay: visible.cropMode ? undefined : overlayRef.current?.display,
+    regionDisplay: visible.cropMode || sharpenPreviewRef.current !== null || sharpenPreviewRestoringRef.current
+      ? undefined : overlayRef.current?.display,
     regionOutline,
     connectRegion: () => connectRegionRef.current(),
     viewChanged: (view?: RawView) => {

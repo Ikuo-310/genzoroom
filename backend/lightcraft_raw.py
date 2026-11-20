@@ -99,6 +99,7 @@ class PreviewFrame:
     interaction_id: str | None = None
     interaction_sequence: int | None = None
     point_color_range_index: int | None = None
+    sharpen_preview: str | None = None
 
     @property
     def crop_display(self):
@@ -325,6 +326,7 @@ class PreviewTicket:
         self.interaction_id = None
         self.interaction_sequence = None
         self.point_color_range_index = None
+        self.sharpen_preview = None
         self.reason = "replaced"
         self._future = asyncio.get_running_loop().create_future()
         self._future.add_done_callback(lambda f: None if f.cancelled() else f.exception())
@@ -524,7 +526,7 @@ def _source_info(value):
         raise LightCraftError("raw_source_unavailable") from None
 
 
-def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=None, geometry=None, quality=None, frame_only=False, point_color_range_index=None):
+def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=None, geometry=None, quality=None, frame_only=False, point_color_range_index=None, sharpen_preview=None):
     try:
         content = result["content"]
         if len(content) != 2 or any(not isinstance(c, dict) for c in content):
@@ -543,6 +545,8 @@ def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=N
         allowed = {"id", "width", "height"}
         if point_color_range_index is not None:
             allowed.add('pointColorRangeIndex')
+        if sharpen_preview is not None:
+            allowed.add('sharpenPreview')
         if kind == "before":
             allowed |= {"kind", "beforeFingerprint", "geometry"}
         if isinstance(metadata, dict) and "kind" in metadata:
@@ -558,6 +562,8 @@ def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=N
             raise ValueError()
         if point_color_range_index is not None and (type(metadata['pointColorRangeIndex']) is not int
                 or metadata['pointColorRangeIndex'] != point_color_range_index):
+            raise ValueError()
+        if sharpen_preview is not None and metadata.get('sharpenPreview') != sharpen_preview:
             raise ValueError()
         if metadata.get("kind", "after") != kind:
             raise ValueError()
@@ -2837,8 +2843,11 @@ class LightCraftRawSession:
 
     def request_preview(self, handle, expected_revision, max_side=DEFAULT_PREVIEW_SIDE, *, kind="after",
                         quality=None, serial=0, view_generation=0, geometry_id=None, mode="whole",
-                        interaction_id=None, interaction_sequence=None, point_color_range_index=None):
+                        interaction_id=None, interaction_sequence=None, point_color_range_index=None, sharpen_preview=None):
         photo = self._photo(handle, active=True)
+        if sharpen_preview is not None and (sharpen_preview not in ('grayscale', 'detail', 'mask')
+                or kind != 'after' or mode != 'whole' or point_color_range_index is not None):
+            raise LightCraftError('raw_invalid_preview_request')
         if point_color_range_index is not None and (type(point_color_range_index) is not int
                 or not 0 <= point_color_range_index <= 7 or kind != 'after' or mode != 'whole'):
             raise LightCraftError('raw_invalid_preview_request')
@@ -2912,6 +2921,7 @@ class LightCraftRawSession:
             quality = "full"
         ticket.mode = mode
         ticket.point_color_range_index = point_color_range_index
+        ticket.sharpen_preview = sharpen_preview
         ticket.quality, ticket.adaptive = quality or "full", quality is not None
         ticket.serial, ticket.view_generation, ticket.geometry_id = serial, view_generation, geometry_id
         if self._worker is None or self._worker.done():
@@ -3092,6 +3102,8 @@ class LightCraftRawSession:
                             args = {"include_frame": True}
                         if ticket.point_color_range_index is not None:
                             args['point_color_range_index'] = ticket.point_color_range_index
+                        if ticket.sharpen_preview is not None:
+                            args['sharpen_preview'] = ticket.sharpen_preview
                         native_started = monotonic()
                         try:
                             if ticket.region_operation is not None:
@@ -3138,7 +3150,7 @@ class LightCraftRawSession:
                             _validation_job=(_validate_png, (result, photo.photo_id, ticket.max_side, ticket.kind,
                                 photo.before_fingerprint, geometry,
                                 ticket.quality if ticket.adaptive and not frame_only else None,
-                                frame_only, ticket.point_color_range_index)))
+                                frame_only, ticket.point_color_range_index, ticket.sharpen_preview)))
                     validation_ms = (monotonic() - validation_started) * 1000
                     del result
                     data, w, h = image[:3]
@@ -3171,7 +3183,8 @@ class LightCraftRawSession:
                                                  if self._diagnostics and metadata else None,
                                              interaction_id=ticket.interaction_id,
                                              interaction_sequence=ticket.interaction_sequence,
-                                             point_color_range_index=ticket.point_color_range_index)
+                                             point_color_range_index=ticket.point_color_range_index,
+                                             sharpen_preview=ticket.sharpen_preview)
                         if ticket.kind == "before":
                             self._before_cache = frame
                         ticket._finish(frame)

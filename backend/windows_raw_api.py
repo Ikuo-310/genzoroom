@@ -777,7 +777,7 @@ class RawPreviewApi:
             kind = body.get("kind", "after")
             adaptive = "quality" in body
             extra = {"quality", "mode", "maxSide", "viewGeneration", "geometryId"} if adaptive else set()
-            if set(body) - {"kind", "pointColorRangeIndex"} - extra != {"workspaceId", "generation", "documentToken", "revision", "serial"} \
+            if set(body) - {"kind", "pointColorRangeIndex", "sharpenPreview"} - extra != {"workspaceId", "generation", "documentToken", "revision", "serial"} \
                     or kind not in ("before", "after") \
                     or any(type(body.get(key)) is not int for key in ("generation", "revision")) \
                     or any(body.get(key) != doc[key] for key in ("generation", "documentToken", "revision")) \
@@ -791,10 +791,17 @@ class RawPreviewApi:
                     or not 0 <= body['pointColorRangeIndex'] <= 7 or kind != 'after'
                     or body.get('mode', 'whole') != 'whole'):
                 raise LightCraftError('raw_invalid_preview_request')
+            if 'sharpenPreview' in body and (body['sharpenPreview'] not in ('grayscale', 'detail', 'mask')
+                    or kind != 'after' or body.get('mode', 'whole') != 'whole' or 'pointColorRangeIndex' in body):
+                raise LightCraftError('raw_invalid_preview_request')
             handle = self._raw_handle
             options = {"kind": kind} if kind == "before" else {}
             if 'pointColorRangeIndex' in body:
                 options['point_color_range_index'] = body['pointColorRangeIndex']
+            if 'sharpenPreview' in body:
+                if not await self.manager._raw_sharpen_preview_supported(doc['generation']):
+                    raise LightCraftError('raw_preview_unsupported')
+                options['sharpen_preview'] = body['sharpenPreview']
             if adaptive:
                 supported = await self.manager._raw_preview_supported(doc["generation"])
                 if body.get("mode") == "crop-edit":
@@ -1072,6 +1079,8 @@ class RawPreviewApi:
             raise LightCraftError('lightcraft_invalid_preview')
         if frame.point_color_range_index != body.get('pointColorRangeIndex'):
             raise LightCraftError('lightcraft_invalid_preview')
+        if getattr(frame, 'sharpen_preview', None) != body.get('sharpenPreview'):
+            raise LightCraftError('lightcraft_invalid_preview')
         headers = {"X-Raw-Generation": str(frame.handle.generation), "X-Raw-Token": frame.handle.document_token,
                    "X-Raw-Revision": str(body["revision"]), "X-Raw-Epoch": str(frame.selection_epoch),
                    "X-Raw-Sequence": str(frame.sequence), "X-Raw-Serial": str(body["serial"]),
@@ -1080,6 +1089,8 @@ class RawPreviewApi:
         headers["X-Raw-Kind"] = frame.kind
         if frame.point_color_range_index is not None:
             headers['X-Raw-Point-Color-Range-Index'] = str(frame.point_color_range_index)
+        if body.get('sharpenPreview') is not None:
+            headers['X-Raw-Sharpen-Preview'] = body['sharpenPreview']
         if "quality" in body:
             headers.update({"X-Raw-Quality": frame.quality, "X-Raw-Mode": "whole",
                             "X-Raw-Preview-Contract": "1" if frame.frame is not None else "0",

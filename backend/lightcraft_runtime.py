@@ -63,6 +63,7 @@ class _Session:
     crop_edit: bool | None = None
     region_preview: bool | None = None
     point_color_range: bool | None = None
+    sharpen_preview: bool | None = None
     white_balance: bool | None = None
 
 
@@ -696,6 +697,20 @@ class LightCraftManager:
                 for tool in items) for name in ('render_preview', 'render_region_preview'))
         return session.point_color_range
 
+    async def _raw_sharpen_preview_supported(self, generation):
+        session = self._raw_session(generation)
+        if session.sharpen_preview is None:
+            result = await session.client.request('tools/list', timeout=self._timeouts.request)
+            self._check_raw_session(session)
+            items = result.get('tools', []) if isinstance(result, dict) else []
+            session.sharpen_preview = any(isinstance(tool, dict) and tool.get('name') == 'render_preview'
+                and isinstance(tool.get('inputSchema'), dict)
+                and isinstance(tool['inputSchema'].get('properties'), dict)
+                and isinstance(tool['inputSchema']['properties'].get('sharpen_preview'), dict)
+                and tool['inputSchema']['properties']['sharpen_preview'].get('enum') == ['grayscale', 'detail', 'mask']
+                for tool in items if isinstance(items, list))
+        return session.sharpen_preview
+
     async def _raw_region(self, generation, photo_id, operation, target, *, timeout):
         from raw_region import validate_target
         validate_target(target, operation)
@@ -725,7 +740,7 @@ class LightCraftManager:
 
     async def _raw_preview(self, generation, photo_id, max_side, *, timeout, before=False,
                            quality=None, stage_cache="off", stage_cache_budget_bytes=None, crop_edit=None, include_frame=False,
-                           simple_crop=False, point_color_range_index=None):
+                           simple_crop=False, point_color_range_index=None, sharpen_preview=None):
         session = self._raw_session(generation)
         if before and not await self._raw_before_supported(generation):
             raise LightCraftError("raw_before_unsupported")
@@ -734,6 +749,11 @@ class LightCraftManager:
             if not await self._raw_point_color_range_supported(generation):
                 raise LightCraftError('raw_preview_unsupported')
             options['point_color_range_index'] = point_color_range_index
+        if sharpen_preview is not None:
+            if sharpen_preview not in ('grayscale', 'detail', 'mask') or before or crop_edit is not None \
+                    or point_color_range_index is not None or not await self._raw_sharpen_preview_supported(generation):
+                raise LightCraftError('raw_preview_unsupported')
+            options['sharpen_preview'] = sharpen_preview
         if include_frame:
             if crop_edit is not None or not await self._raw_frame_supported(generation):
                 raise LightCraftError("raw_preview_unsupported")

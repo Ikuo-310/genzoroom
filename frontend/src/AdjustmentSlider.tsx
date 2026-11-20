@@ -10,6 +10,7 @@ import {
 } from './adjustmentFocus';
 import { useTranslation } from 'react-i18next';
 import type { AdjustmentMenuPosition } from './AdjustmentContextMenu';
+import { isAlternateModifier } from './shortcutModifiers';
 
 export type AdjustmentSliderMenuTarget = AdjustmentMenuPosition & { adjustmentId: AdjustmentId };
 export type OpenAdjustmentSliderMenu = (target: AdjustmentSliderMenuTarget) => void;
@@ -32,6 +33,7 @@ type Props = {
   trackGradient?: string;
   className?: string;
   onCancel?: () => void; onBegin: () => void; onChange: (value: number) => void; onCommit: () => void; onReset: () => void;
+  onTemporaryPreview?: (active: boolean) => void;
 };
 
 export const ADJUSTMENT_COMMIT_DELAY_MS = 500;
@@ -54,6 +56,13 @@ export function AdjustmentSlider(props: Props) {
   const draftValue = useRef<string | null>(null);
   const [numberEditing, setNumberEditing] = useState(false);
   const [draft, setDraft] = useState<string | null>(null);
+  const temporaryPreview = useRef(false);
+
+  function updateTemporaryPreview(active: boolean) {
+    if (temporaryPreview.current === active) return;
+    temporaryPreview.current = active;
+    latest.current.onTemporaryPreview?.(active);
+  }
 
   function formatNumber(value: number) {
     return value.toFixed(props.precision);
@@ -139,6 +148,7 @@ export function AdjustmentSlider(props: Props) {
   function finishPointer() {
     if (interaction.current !== 'pointer') return;
     interaction.current = 'idle';
+    updateTemporaryPreview(false);
     latest.current.onCommit();
   }
   function cancelInteraction() {
@@ -146,6 +156,7 @@ export function AdjustmentSlider(props: Props) {
     if (interaction.current === 'number') { cancelNumberEdit(); return; }
     if (interaction.current === 'idle') return;
     interaction.current = 'idle';
+    updateTemporaryPreview(false);
     if (latest.current.onCancel) latest.current.onCancel();
     else latest.current.onCommit();
   }
@@ -196,13 +207,18 @@ export function AdjustmentSlider(props: Props) {
     };
     const pointerEnd = (event:Event) => {
       if(event.type==='pointercancel' && latest.current.onCancel && interaction.current==='pointer'){
-        interaction.current='idle';latest.current.onCancel();
+        interaction.current='idle';updateTemporaryPreview(false);latest.current.onCancel();
       }else if(latest.current.cancelEditOnReset && event.target instanceof Element
         && event.target.closest('.adjustment-reset')?.closest('.raw-point-color-adjustments') === element?.closest('.raw-point-color-adjustments')){
         // Reset supersedes this draft; committing it first would race a second History operation.
         cancelInteraction();
       }else finishPointer();
     };
+    // Pointer capture can outlive focus changes, so track Alt independently until this drag ends.
+    const modifierChange = (event: KeyboardEvent) => {
+      if (interaction.current === 'pointer') updateTemporaryPreview(isAlternateModifier(event));
+    };
+    const cancelPointerOnBlur = () => { if (interaction.current === 'pointer') cancelInteraction(); };
     const cancelPendingKeyboardFocus = (event: Event) => {
       if (!restoreKeyboardFocusAfterLock.current || event.target === element) return;
       restoreKeyboardFocusAfterLock.current = false;
@@ -212,16 +228,25 @@ export function AdjustmentSlider(props: Props) {
     window.addEventListener('keydown', keydown);
     window.addEventListener('pointerup', pointerEnd);
     window.addEventListener('pointercancel', pointerEnd);
+    window.addEventListener('keydown', modifierChange);
+    window.addEventListener('keyup', modifierChange);
+    window.addEventListener('blur', cancelPointerOnBlur);
+    window.addEventListener('pointerleave', cancelPointerOnBlur);
     document.addEventListener('focusin', cancelPendingKeyboardFocus);
     window.addEventListener('blur', cancelPendingKeyboardFocus);
     return () => {
       unregisterAdjustment(element);
       clearTimeout(timer.current);
       if(latest.current.onCancel)latest.current.onCancel();else latest.current.onCommit();
+      updateTemporaryPreview(false);
       element?.removeEventListener('wheel', wheel);
       window.removeEventListener('keydown', keydown);
       window.removeEventListener('pointerup', pointerEnd);
       window.removeEventListener('pointercancel', pointerEnd);
+      window.removeEventListener('keydown', modifierChange);
+      window.removeEventListener('keyup', modifierChange);
+      window.removeEventListener('blur', cancelPointerOnBlur);
+      window.removeEventListener('pointerleave', cancelPointerOnBlur);
       document.removeEventListener('focusin', cancelPendingKeyboardFocus);
       window.removeEventListener('blur', cancelPendingKeyboardFocus);
     };
@@ -285,9 +310,10 @@ export function AdjustmentSlider(props: Props) {
         if (interaction.current === 'number') commitNumberEdit();
         interaction.current = 'pointer';
         props.onBegin();
+        updateTemporaryPreview(isAlternateModifier(event.nativeEvent));
       }}
       onLostPointerCapture={()=>{
-        if(props.onCancel && interaction.current==='pointer'){interaction.current='idle';props.onCancel();}
+        if(props.onCancel && interaction.current==='pointer'){interaction.current='idle';updateTemporaryPreview(false);props.onCancel();}
         else finishPointer();
       }}
       onChange={(event) => {

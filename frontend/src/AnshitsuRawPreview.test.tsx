@@ -316,14 +316,14 @@ it('pauses Show Range for Before and resumes the selected index without editing 
 it('binds engine control specs to shared sliders and commits RAW values without JPEG rendering', async () => {
   await mount();
   const sliders = [...host.querySelectorAll<HTMLInputElement>('.adjustment-range')];
-  expect(sliders).toHaveLength(28);
+  expect(sliders).toHaveLength(30);
   expect(host.querySelector('[data-adjustment-id="optics.profileDistortion"]')).toBeNull();
   expect(sliders.map(slider => slider.dataset.adjustmentId)).toEqual([
     'exposure', 'contrast', 'highlights', 'whites', 'shadows', 'blacks',
     'temperature', 'tint', 'vibrance', 'saturation',
     'effects.texture', 'effects.clarity', 'effects.dehaze',
     'vignette.amount', 'vignette.midpoint', 'vignette.feather', 'vignette.roundness', 'vignette.highlights',
-    'detail.sharpenAmount', 'detail.sharpenMasking',
+    'detail.sharpenAmount', 'detail.sharpenRadius', 'detail.sharpenDetail', 'detail.sharpenMasking',
     'detail.nrLuminance', 'detail.nrDetail', 'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness',
     'optics.distortion', 'optics.vignetting', 'optics.vignettingMidpoint',
   ]);
@@ -335,10 +335,14 @@ it('binds engine control specs to shared sliders and commits RAW values without 
   expect(sliders[6].style.getPropertyValue('--adjustment-track-gradient')).toContain('#d86943');
   expect(sliders[7].style.getPropertyValue('--adjustment-track-gradient')).toContain('#4f9b62');
   expect(sliders[7].style.getPropertyValue('--adjustment-track-gradient')).toContain('#b05aa0');
+  expect(sliders[19].min).toBe('0.5'); expect(sliders[19].max).toBe('3'); expect(sliders[19].step).toBe('0.1');
+  expect(sliders[19].value).toBe('1');
+  expect(sliders[19].closest('.adjustment-control')?.querySelector<HTMLInputElement>('input[type="number"]')?.value).toBe('1.0');
+  expect(sliders[19].disabled).toBe(true); expect(sliders[20].value).toBe('25'); expect(sliders[20].disabled).toBe(true);
   const actions = [...host.querySelectorAll<HTMLButtonElement>('.adjustment-power, .adjustment-reset, .adjustment-category-actions button, .develop-panel .workspace-section-action')];
-  expect(actions).toHaveLength(40);
+  expect(actions).toHaveLength(42);
   expect(host.querySelectorAll('.adjustment-power')).toHaveLength(0);
-  expect(actions.filter(button => button.disabled)).toHaveLength(5);
+  expect(actions.filter(button => button.disabled)).toHaveLength(7);
   const number = sliders[0].closest('.adjustment-control')!.querySelector<HTMLInputElement>('input[type="number"]')!;
   act(() => {
     number.focus();
@@ -349,6 +353,29 @@ it('binds engine control specs to shared sliders and commits RAW values without 
   expect(rawApi.setRawControls).toHaveBeenCalledWith(expect.objectContaining({ revision: 1 }), { 'light.exposure': 1.25 });
   expect(rawApi.rawPreview).toHaveBeenCalledTimes(2); expect(adjusted).not.toHaveBeenCalled();
   expect(number.value).toBe('1.25'); expect(host.textContent).not.toContain('Development recipes are autosaved');
+});
+
+it('maps Alternate pointer previews for Sharpening controls and restores the ordinary Draft while dragging', async () => {
+  vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), process: 3 }));
+  await mount();
+  expect(host.querySelector<HTMLInputElement>('[data-adjustment-id="detail.sharpenRadius"]')?.disabled).toBe(false);
+  expect(host.querySelector<HTMLInputElement>('[data-adjustment-id="detail.sharpenDetail"]')?.disabled).toBe(false);
+  for (const [id, mode] of [['detail.sharpenAmount', 'grayscale'], ['detail.sharpenRadius', 'detail'],
+    ['detail.sharpenDetail', 'detail'], ['detail.sharpenMasking', 'mask']] as const) {
+    const slider = host.querySelector<HTMLInputElement>(`[data-adjustment-id="${id}"]`)!;
+    const down = new Event('pointerdown', { bubbles: true, cancelable: true });
+    Object.assign(down, { button: 0, pointerId: 1, altKey: true });
+    act(() => slider.dispatchEvent(down)); await flush();
+    expect(vi.mocked(rawApi.rawPreview).mock.calls.some(call => call[4]?.sharpenPreview === mode)).toBe(true);
+    act(() => window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt', altKey: false })));
+    await flush();
+    expect(vi.mocked(rawApi.rawPreview).mock.calls.some(call => call[4] !== undefined && call[4].sharpenPreview === undefined)).toBe(true);
+    const altDown = new KeyboardEvent('keydown', { key: 'Alt', altKey: true });
+    act(() => window.dispatchEvent(altDown)); await flush();
+    expect(vi.mocked(rawApi.rawPreview).mock.calls.some(call => call[4]?.sharpenPreview === mode)).toBe(true);
+    act(() => window.dispatchEvent(new Event('pointercancel'))); await flush();
+    expect(vi.mocked(rawApi.rawPreview).mock.calls.at(-1)?.[4]?.sharpenPreview).toBeUndefined();
+  }
 });
 it('places all RAW optics controls after NR, uses readback History flags and preserves independent sections', async () => {
   vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => doc.assetId !== base.id ? rawSettings(doc) : ({ ...rawSettings(doc),
@@ -600,7 +627,7 @@ it('reuses Detail category collapse, action navigation, toggle and Reset', async
   expect(document.activeElement).toBe(toggle);
   historyKey('ArrowRight', { ctrlKey: false, shiftKey: true }, toggle); expect(document.activeElement).toBe(reset);
   act(() => title.click()); expect(category.querySelector('.adjustment-range')).toBeNull();
-  act(() => title.click()); expect(category.querySelectorAll('.raw-detail-controls .adjustment-range')).toHaveLength(7);
+  act(() => title.click()); expect(category.querySelectorAll('.raw-detail-controls .adjustment-range')).toHaveLength(9);
   act(() => toggle.click()); await flush();
   expect(toggle.getAttribute('aria-pressed')).toBe('false');
   expect(category.querySelector<HTMLInputElement>('.adjustment-range')!.value).toBe('40');
@@ -1343,7 +1370,7 @@ it('disables only WB when Kelvin capability is unknown', async () => {
   await mount();
   const sliders = [...host.querySelectorAll<HTMLInputElement>('.adjustment-range')];
   expect(sliders.slice(6, 8).every(slider => slider.disabled)).toBe(true);
-  expect(sliders.filter(slider => slider.disabled).map(slider => slider.dataset.adjustmentId)).toEqual(['temperature', 'tint', 'vignette.midpoint', 'vignette.feather', 'vignette.roundness', 'vignette.highlights', 'optics.vignettingMidpoint']);
+  expect(sliders.filter(slider => slider.disabled).map(slider => slider.dataset.adjustmentId)).toEqual(['temperature', 'tint', 'vignette.midpoint', 'vignette.feather', 'vignette.roundness', 'vignette.highlights', 'detail.sharpenRadius', 'detail.sharpenDetail', 'optics.vignettingMidpoint']);
 });
 
 it('shows a five-digit temperature with an overlaid K suffix while WB Reset updates both fields', async () => {
@@ -1364,7 +1391,7 @@ it('shows a five-digit temperature with an overlaid K suffix while WB Reset upda
   expect(input.parentElement?.classList.contains('adjustment-number-wrap')).toBe(true);
   expect(input.parentElement?.querySelector('.adjustment-number-suffix')).not.toBeNull();
   const rows = [...host.querySelectorAll<HTMLElement>('.raw-adjustment-controls .adjustment-control')];
-  expect(rows).toHaveLength(28);
+  expect(rows).toHaveLength(30);
   expect(rows.every(row => row.querySelector('.adjustment-number-wrap input[type="number"]')
     && row.querySelectorAll('.adjustment-value-controls .adjustment-reset').length === 1)).toBe(true);
   const reset = temp.querySelector<HTMLButtonElement>('.adjustment-reset')!;

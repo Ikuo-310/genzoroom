@@ -29,6 +29,8 @@ CONTROLS = {
     "vignette.roundness": (-100, 100, 1, 0, 0),
     "vignette.highlights": (0, 100, 1, 0, 0),
     "detail.sharpenAmount": (0, 150, 1, 0, 0),
+    "detail.sharpenRadius": (0.5, 3, 0.1, 1, 1),
+    "detail.sharpenDetail": (0, 100, 1, 25, 0),
     "detail.sharpenMasking": (0, 100, 1, 0, 0),
     "detail.nrLuminance": (0, 100, 1, 0, 0),
     "detail.nrDetail": (0, 100, 1, 50, 0),
@@ -74,6 +76,8 @@ MAX_POINT_COLORS = 8
 # Native command IDs are not JSON field names; every readback and History delta uses this mapping.
 CONTROL_PATHS = {control: tuple(control.split(".")) for control in CONTROLS} | {
     "detail.sharpenAmount": ("detail", "sharpen_amount"),
+    "detail.sharpenRadius": ("detail", "sharpen_radius"),
+    "detail.sharpenDetail": ("detail", "sharpen_detail"),
     "detail.sharpenMasking": ("detail", "sharpen_masking"),
     "detail.nrLuminance": ("detail", "nr_luminance"),
     "detail.nrDetail": ("detail", "nr_detail"),

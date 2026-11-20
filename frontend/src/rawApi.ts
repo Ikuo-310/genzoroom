@@ -15,7 +15,7 @@ export type RawDocument = {
 export type RawGeometry = { geometryId: string; nativeWidth: number; nativeHeight: number; aspect: number;
   fullWidth: number; fullHeight: number; window: null };
 export type RawDisplayTarget = { quality: 'draft' | 'full'; mode: 'whole' | 'crop-edit'; maxSide: number; viewGeneration: number; geometryId: string | null;
-  pointColorRangeIndex?: number };
+  pointColorRangeIndex?: number; sharpenPreview?: 'grayscale' | 'detail' | 'mask' };
 export type RawCropDisplay = { canonicalGeometry: { crop: RawCrop; orientation: string }; bitmapSpace: 'oriented-warped-unstraightened-flipped'; settingsFingerprint: string };
 export type RawFrame = { blob: Blob; width: number; height: number; epoch: number; sequence: number; kind?: 'before' | 'after'; key?: string;
   quality?: 'draft' | 'full'; frame?: RawGeometry; cropDisplay?: RawCropDisplay; interactionId?: string; interactionSequence?: number;
@@ -35,7 +35,7 @@ export const RAW_CONTROL_IDS = ['light.exposure', 'light.contrast', 'light.highl
     (['hue', 'sat', 'lum'] as const).map(field => `mixer.${color}.${field}` as const)),
   'effects.texture', 'effects.clarity', 'effects.dehaze',
   'vignette.amount', 'vignette.midpoint', 'vignette.feather', 'vignette.roundness', 'vignette.highlights',
-  'detail.sharpenAmount', 'detail.sharpenMasking',
+  'detail.sharpenAmount', 'detail.sharpenRadius', 'detail.sharpenDetail', 'detail.sharpenMasking',
   'detail.nrLuminance', 'detail.nrDetail', 'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'] as const;
 export type RawControlId = typeof RAW_CONTROL_IDS[number];
 export const RAW_SETTINGS_CONTROL_IDS = [...RAW_CONTROL_IDS,
@@ -759,6 +759,8 @@ export async function rawPreview(doc: RawDocument, serial: number, signal: Abort
   targetedInteraction?: { id: string; target: { x: number; y: number }; steps: number[] } | { id: string; sequence: number },
   mixerInteraction?: { id: string; sequence: number }, pointColorInteraction?: { id: string; sequence: number }): Promise<RawFrame> {
   if (target && (!Number.isInteger(target.maxSide) || target.maxSide < 16 || target.maxSide > RAW_PREVIEW_MAX_SIDE
+    || target.sharpenPreview !== undefined && (!['grayscale', 'detail', 'mask'].includes(target.sharpenPreview)
+      || target.mode !== 'whole' || kind !== 'after' || target.pointColorRangeIndex !== undefined)
     || target.pointColorRangeIndex !== undefined && (!Number.isSafeInteger(target.pointColorRangeIndex)
       || target.pointColorRangeIndex < 0 || target.pointColorRangeIndex > 7 || target.mode !== 'whole' || kind !== 'after')))
     throw new RawApiError('raw_invalid_preview_request');
@@ -781,7 +783,8 @@ export async function rawPreview(doc: RawDocument, serial: number, signal: Abort
         : previewSequence ? { interactionSequence: previewSequence } : { points: interaction!.points }),
       serial, maxSide: target?.maxSide ?? RAW_PREVIEW_MAX_SIDE, viewGeneration: target?.viewGeneration ?? 0,
       geometryId: target?.geometryId ?? null,
-      ...(target?.pointColorRangeIndex === undefined ? {} : { pointColorRangeIndex: target.pointColorRangeIndex }) }
+      ...(target?.pointColorRangeIndex === undefined ? {} : { pointColorRangeIndex: target.pointColorRangeIndex }),
+      ...(target?.sharpenPreview === undefined ? {} : { sharpenPreview: target.sharpenPreview }) }
       : { revision: doc.revision, serial, ...target, ...(kind === 'before' ? { kind } : {}) }) }),
     signal: AbortSignal.any([signal, AbortSignal.timeout(90_000)]) });
   try {
@@ -830,6 +833,8 @@ export async function rawPreview(doc: RawDocument, serial: number, signal: Abort
     if (target?.pointColorRangeIndex === undefined
       ? rangeText !== null
       : rangeText !== String(target.pointColorRangeIndex)) throw new RawApiError('raw_invalid_response');
+    const sharpenText = response.headers.get('x-raw-sharpen-preview');
+    if (sharpenText !== (target?.sharpenPreview ?? null)) throw new RawApiError('raw_invalid_response');
     const numeric = (name: string) => {
       const text = response.headers.get(`x-raw-${name}`);
       if (!text || !/^\d{1,16}$/.test(text) || !integer(Number(text))) throw new RawApiError('raw_invalid_response');
