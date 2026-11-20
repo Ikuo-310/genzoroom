@@ -399,16 +399,21 @@ it('ends sharpen visualization on wheel, panel commit, and window blur', async (
   const wheel = new Event('wheel', { bubbles: true, cancelable: true });
   Object.assign(wheel, { deltaY: -1, shiftKey: true });
   act(() => slider.dispatchEvent(wheel));
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 220)); }); await flush();
+  const wheelDraft = vi.mocked(rawApi.rawPreview).mock.calls.slice(wheelStart).at(-1)?.[4];
+  expect(wheelDraft).toBeDefined();
+  expect(wheelDraft).toMatchObject({ quality: 'draft' });
+  expect(wheelDraft).not.toHaveProperty('sharpenPreview');
+  const panelCommitStart = vi.mocked(rawApi.rawPreview).mock.calls.length;
   act(() => commitAdjustmentEdits(host.querySelector('.raw-adjustment-controls')!));
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 65)); }); await flush();
-  const wheelPreview = vi.mocked(rawApi.rawPreview).mock.calls.slice(wheelStart).at(-1)?.[4];
-  expect(wheelPreview).toBeDefined();
-  expect(wheelPreview).not.toHaveProperty('sharpenPreview');
+  expect(vi.mocked(rawApi.rawPreview).mock.calls.slice(panelCommitStart).at(-1)?.[4]).toMatchObject({ quality: 'full' });
+  expect(vi.mocked(rawApi.rawPreview).mock.calls.slice(panelCommitStart).at(-1)?.[4]).not.toHaveProperty('sharpenPreview');
 
   pointerDown(); await act(async () => { await new Promise(resolve => setTimeout(resolve, 65)); }); await flush();
-  const panelCommitStart = vi.mocked(rawApi.rawPreview).mock.calls.length;
+  const blurCommitStart = vi.mocked(rawApi.rawPreview).mock.calls.length;
   act(() => commitAdjustmentEdits(host.querySelector('.raw-adjustment-controls')!)); await act(async () => { await new Promise(resolve => setTimeout(resolve, 65)); }); await flush();
-  expect(vi.mocked(rawApi.rawPreview).mock.calls.slice(panelCommitStart).at(-1)?.[4]).not.toHaveProperty('sharpenPreview');
+  expect(vi.mocked(rawApi.rawPreview).mock.calls.slice(blurCommitStart).at(-1)?.[4]).not.toHaveProperty('sharpenPreview');
 
   pointerDown(); await act(async () => { await new Promise(resolve => setTimeout(resolve, 65)); }); await flush();
   const blurStart = vi.mocked(rawApi.rawPreview).mock.calls.length;

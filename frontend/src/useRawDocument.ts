@@ -166,7 +166,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     let displayGeneration = 0, viewGeneration = 0, displayRunning = false;
     let displayPending: { doc: RawDocument; valid: () => boolean; generation: number; quality: 'draft' | 'full'; geometryId: string | null;
       side: number; mode: 'whole' | 'crop-edit'; pointColorRangeIndex?: number; sharpenPreview?: 'grayscale' | 'detail' | 'mask' } | undefined;
-    let transmitted: { doc: RawDocument; serial: number } | undefined;
+    let transmitted: { doc: RawDocument; serial: number; cancelled: boolean } | undefined;
     let displayTargetKey: string | undefined;
     let revisionResyncs = 0;
     let displayedRevision = -1;
@@ -396,7 +396,10 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       displayTargetKey = undefined;
       displayPending = undefined;
       if (current()) invalidateBeforeRef.current();
-      if (transmitted) void cancelRawPreview(transmitted.doc, 'after', transmitted.serial).catch(() => {});
+      if (transmitted && !transmitted.cancelled) {
+        transmitted.cancelled = true;
+        void cancelRawPreview(transmitted.doc, 'after', transmitted.serial).catch(() => {});
+      }
     };
     suspendDisplayRef.current = invalidateDisplay;
     const renderPreview = async (doc: RawDocument, quality: 'draft' | 'full', geometryId: string | null, maxSide: number,
@@ -411,7 +414,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       try {
         if (frameSerial >= 2 ** 31 - 2) { void restart().catch(() => {}); return; }
         const requestSerial = ++frameSerial;
-        transmitted = { doc, serial: requestSerial };
+        transmitted = { doc, serial: requestSerial, cancelled: false };
         const frame = await rawPreview(doc, requestSerial, controller.signal, 'after', {
           quality, mode, maxSide, geometryId, viewGeneration,
           ...(pointColorRangeIndex === undefined ? {} : { pointColorRangeIndex }),
