@@ -112,6 +112,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   const identity = useRef(assetId);
   const editorRef = useRef<RawControls | null>(null);
   const saverRef = useRef<RawRecipeSave | null>(null);
+  // The Workspace outlives an Asset effect; each operation still checks the ID it captured.
+  const workspaceOwnerRef = useRef<{ workspaceId?: string; effectSerial?: number }>({});
   const frozen = useRef(false);
   const restartRef = useRef<(retry?: boolean) => Promise<void>>(async () => {});
   const discardRef=useRef<()=>Promise<void>>(async()=>{});
@@ -151,7 +153,26 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   useEffect(() => {
     if (!assetId) { setState(null); return; }
     const currentSerial = ++serial.current;
-    let active = true, retired=false, available = false, workspace: string | undefined, url: string | undefined;
+    let active = true, retired=false, available = false, url: string | undefined;
+    const workspaceOwner = workspaceOwnerRef.current;
+    const workspace = {
+      get current(): string | undefined {
+        return workspaceOwner.effectSerial === currentSerial ? workspaceOwner.workspaceId : undefined;
+      },
+      set current(workspaceId: string | undefined) {
+        if (workspaceId === undefined) {
+          if (workspaceOwner.effectSerial === currentSerial) {
+            workspaceOwner.workspaceId = undefined;
+            workspaceOwner.effectSerial = undefined;
+          }
+          return;
+        }
+        if (workspaceOwner.workspaceId && workspaceOwner.effectSerial !== currentSerial)
+          throw new RawApiError('raw_workspace_conflict');
+        workspaceOwner.workspaceId = workspaceId;
+        workspaceOwner.effectSerial = currentSerial;
+      },
+    };
     let recoveryInProgress = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let editor: RawControls | undefined;
@@ -630,7 +651,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       saver = new RawRecipeSave(settings, { schedule: enqueue, changed: notify, controls: installed,
         curveSettled: settleCurvePresentation,
         curveRecovery: async () => {
-          const oldWorkspace = workspace;
+          const oldWorkspace = workspace.current;
           const oldSaver = saver, oldEditor = editor;
           const discardOwner = pointColorTermination;
           // The explicit discard owner decides whether this failed Cancel has safe discard proof.
@@ -644,7 +665,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
               && oldEditor!.confirmed.revision === identity.revision;
             await owned(async () => {
               if (!oldWorkspace) return;
-              if (!recoveryCurrent() || workspace !== oldWorkspace) {
+              if (!recoveryCurrent() || workspace.current !== oldWorkspace) {
                 await retainUncertainRecoveryWorkspace(oldWorkspace, oldSaver, new RawApiError('raw_save_unconfirmed'));
                 return;
               }
@@ -664,13 +685,13 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
                 }
                 throw cause;
               }
-              if (workspace !== oldWorkspace) throw new RawApiError('raw_stale_handle');
-              workspace = undefined;
+              if (workspace.current !== oldWorkspace) throw new RawApiError('raw_stale_handle');
+              workspace.current = undefined;
               oldSaver?.dispose(); oldEditor?.dispose();
               if (!recoveryCurrent()) return;
               const createdWorkspace = await createRawWorkspace();
-              workspace = createdWorkspace;
-              if (!recoveryCurrent() || workspace !== createdWorkspace) {
+              adoptWorkspace(createdWorkspace);
+              if (!recoveryCurrent() || workspace.current !== createdWorkspace) {
                 await terminateStaleRecoveryWorkspace(createdWorkspace);
                 return;
               }
@@ -680,7 +701,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
                 if (!recoveryCurrent()) { await terminateStaleRecoveryWorkspace(createdWorkspace); return; }
                 throw cause;
               }
-              if (!recoveryCurrent() || workspace !== createdWorkspace) { await terminateStaleRecoveryWorkspace(createdWorkspace); return; }
+              if (!recoveryCurrent() || workspace.current !== createdWorkspace) { await terminateStaleRecoveryWorkspace(createdWorkspace); return; }
               let settings: RawSettings;
               try { settings = await readRawSettings(reopened); }
               catch (cause) {
@@ -849,12 +870,17 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       enqueue(async () => { try { await action(); resolve(); } catch (error) { reject(error); } });
     });
     const release = async () => {
-      if (!workspace) return;
-      try { await releaseRawWorkspace(workspace); }
+      const ownedWorkspace = workspace.current;
+      if (!ownedWorkspace) return;
+      try { await releaseRawWorkspace(ownedWorkspace); }
       catch (cause) {
         if (!(cause instanceof RawApiError) || cause.code !== 'raw_workspace_conflict' || !await rawWorkspaceEmpty()) throw cause;
       }
-      workspace = undefined;
+      if (workspace.current !== ownedWorkspace) throw new RawApiError('raw_stale_handle');
+      workspace.current = undefined;
+    };
+    const adoptWorkspace = (workspaceId: string) => {
+      workspace.current = workspaceId;
     };
     const terminateStaleRecoveryWorkspace = async (workspaceId: string) => {
       let owner = pointColorTermination;
@@ -867,9 +893,9 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       let queuedHere = true;
       owner ??= new RawWorkspaceTermination(workspaceId, 'recovery', undefined, async () => {}, async () => {
         const releaseOwned = async () => {
-          if (workspace !== workspaceId) throw new RawApiError('raw_stale_handle');
+          if (workspace.current !== workspaceId) throw new RawApiError('raw_stale_handle');
           await releaseWorkspaceConfirmed(workspaceId);
-          workspace = undefined;
+          workspace.current = undefined;
         };
         if (queuedHere) await releaseOwned();
         else await owned(releaseOwned);
@@ -878,7 +904,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       try {
         await owner.run();
         if (pointColorTermination === owner) pointColorTermination = undefined;
-        workspace = undefined;
+        workspace.current = undefined;
       } catch (cause) {
         queuedHere = false;
         throw cause;
@@ -910,9 +936,9 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       const owner = new RawWorkspaceTermination(workspaceId, 'recovery', oldSaver, async () => {}, async () => {
         if (firstAttempt) { firstAttempt = false; throw cause; }
         await owned(async () => {
-          if (workspace !== workspaceId) throw new RawApiError('raw_stale_handle');
+          if (workspace.current !== workspaceId) throw new RawApiError('raw_stale_handle');
           if (await rawWorkspaceEmpty(workspaceId)) {
-            workspace = undefined;
+            workspace.current = undefined;
             oldSaver?.dispose(); oldEditor?.dispose();
             return;
           }
@@ -920,13 +946,13 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
           try { await discardRawWorkspace({ workspaceId }); }
           catch (retryCause) {
             if (await rawWorkspaceEmpty(workspaceId)) {
-              workspace = undefined;
+              workspace.current = undefined;
               oldSaver?.dispose(); oldEditor?.dispose();
               return;
             }
             throw retryCause;
           }
-          workspace = undefined;
+          workspace.current = undefined;
           oldSaver?.dispose(); oldEditor?.dispose();
         });
       });
@@ -970,11 +996,12 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
           await release();
           if (!current()) throw new RawApiError('raw_document_closed');
           stage = 'open';
-          workspace = await createRawWorkspace();
-          // A failed open may already have released its workspace; retry still verifies that fact.
+          const createdWorkspace = await createRawWorkspace();
+          adoptWorkspace(createdWorkspace);
+          // A failed open may already have released its Workspace; retry still verifies that fact.
           stage = 'release';
           if (!current()) throw new RawApiError('raw_document_closed');
-          const doc = await openRawDocument(workspace, assetId);
+          const doc = await openRawDocument(createdWorkspace, assetId);
           if (!current()) throw new RawApiError('raw_document_closed');
           const settings = await readRawSettings(doc);
           if (!current()) throw new RawApiError('raw_document_closed');
@@ -1019,7 +1046,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         await resetRawEditsApi(assetId, editor?.confirmed);
         resetCleared = true;
         resetStage = 'reopen';
-        workspace = undefined;
+        const previousWorkspace = workspace.current;
+        if (previousWorkspace) workspace.current = undefined;
         revoke();
         const oldEditor = editor, oldSaver = saver;
         oldEditor?.dispose(); oldSaver?.dispose();
@@ -1027,14 +1055,15 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         if (editorRef.current === oldEditor) editorRef.current = null;
         if (saverRef.current === oldSaver) saverRef.current = null;
         setState({ assetId, status: 'loading', resetting: true });
-        workspace = await createRawWorkspace();
-        const doc = await openRawDocument(workspace, assetId);
+        const createdWorkspace = await createRawWorkspace();
+        adoptWorkspace(createdWorkspace);
+        const doc = await openRawDocument(createdWorkspace, assetId);
         const settings = await readRawSettings(doc);
         if (!current()) { await release(); return; }
         frozen.current = false;
         install(settings);
       }).catch(async cause => {
-        if (resetCleared && workspace) {
+        if (resetCleared && workspace.current) {
           try { await release(); } catch { /* Keep the reset error visible; Backend retains cleanup ownership. */ }
         }
         const code = resetStage === 'reopen' ? 'raw_edit_reset_reopen_failed'
@@ -1074,9 +1103,10 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         if (!await rawCapability(controller.signal)) throw new RawApiError('raw_unavailable');
         available = true;
         if (!current()) return;
-        workspace = await createRawWorkspace();
+        const createdWorkspace = await createRawWorkspace();
+        adoptWorkspace(createdWorkspace);
         if (!current()) return;
-        const doc = await openRawDocument(workspace, assetId);
+        const doc = await openRawDocument(createdWorkspace, assetId);
         if (!current()) return;
         const settings = await readRawSettings(doc);
         if (!current()) return;
@@ -1091,10 +1121,14 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         timer = setTimeout(() => void heartbeat(), 30_000);
       } catch (error) { fail(error); }
       finally {
-        if (!current() && workspace && !retired) {
-          // An installed termination owner must be the only caller to release this imported workspace.
-          if (pointColorTermination?.workspaceId !== workspace) {
-            try { await releaseRawWorkspace(workspace); workspace = undefined; } catch { log('raw_release_failed'); }
+        if (!current() && workspace.current && !retired) {
+          // An installed termination owner must be the only caller to release this imported Workspace.
+          if (pointColorTermination?.workspaceId !== workspace.current) {
+            const staleWorkspace = workspace.current;
+            try {
+              await releaseRawWorkspace(staleWorkspace);
+              if (workspace.current === staleWorkspace) workspace.current = undefined;
+            } catch { log('raw_release_failed'); }
           }
         }
       }
@@ -1110,7 +1144,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     let discardIdentity: { workspaceId: string; handle: string; generation: number; documentToken: string; revision: number } | undefined;
     const ownsDiscardProof = () => {
       const doc = discardProof?.saver.confirmed;
-      return !!discardDecision?.allowed && !!discardProof && discardProof.workspaceId === workspace
+      return !!discardDecision?.allowed && !!discardProof && discardProof.workspaceId === workspace.current
         && discardProof.saver.ownsPointColorDraftDiscard(discardDecision)
         && doc?.workspaceId === discardProof.workspaceId && doc.handle === discardProof.handle
         && doc.generation === discardProof.generation && doc.documentToken === discardProof.documentToken
@@ -1118,12 +1152,12 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     };
     const discardDocumentMatches = () => {
       const doc = discardEditor?.confirmed;
-      return !!discardIdentity && workspace === discardIdentity.workspaceId && doc?.workspaceId === discardIdentity.workspaceId
+      return !!discardIdentity && workspace.current === discardIdentity.workspaceId && doc?.workspaceId === discardIdentity.workspaceId
         && doc.handle === discardIdentity.handle && doc.generation === discardIdentity.generation
         && doc.documentToken === discardIdentity.documentToken && doc.revision === discardIdentity.revision;
     };
     const completeExplicitDiscard = (owner: RawWorkspaceTermination) => {
-      discarded=true;workspace=undefined;cropVisualRef.current=null;revoke();
+      discarded=true;workspace.current=undefined;cropVisualRef.current=null;revoke();
       discardSaver?.dispose();discardEditor?.dispose();
       if (pointColorTermination === owner) pointColorTermination = undefined;
       if (identity.current === assetId && serial.current === currentSerial) {
@@ -1146,9 +1180,9 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         if (!discardSaveSafeAtStart) return Promise.reject(new RawApiError('raw_save_unconfirmed'));
         return runExplicitDiscard(discardTermination);
       }
-      if(!active || identity.current!==assetId || serial.current!==currentSerial || !workspace)return Promise.reject(new RawApiError('raw_document_closed'));
+      if(!active || identity.current!==assetId || serial.current!==currentSerial || !workspace.current)return Promise.reject(new RawApiError('raw_document_closed'));
       if (pointColorTermination) return Promise.reject(new RawApiError('raw_busy'));
-      const ownedWorkspace=workspace;
+      const ownedWorkspace=workspace.current;
       const ownedSaver=saver, ownedEditor=editor;
       discardSaver=ownedSaver; discardEditor=ownedEditor;
       const doc=ownedEditor?.confirmed;
@@ -1168,7 +1202,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       retired=true;frozen.current=true;
       setState(previous=>previous && {...previous,locked:true});
       let discardSent = false;
-      const identityStillOwned = () => workspace === ownedWorkspace && discardDocumentMatches()
+      const identityStillOwned = () => workspace.current === ownedWorkspace && discardDocumentMatches()
         && (!discardProof || ownsDiscardProof());
       const settle = async () => {
         if (discardDecision) {
@@ -1198,13 +1232,13 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         await ownedSaver?.preparePointColorForDeparture();
       };
       const terminateOwned = async () => {
-        if (workspace !== ownedWorkspace || !identityStillOwned()) throw new RawApiError('raw_stale_handle');
+        if (workspace.current !== ownedWorkspace || !identityStillOwned()) throw new RawApiError('raw_stale_handle');
         if (discardDecision?.allowed && (!ownsDiscardProof() || !ownedSaver?.ownsPointColorDraftDiscard(discardDecision)))
           throw new RawApiError('raw_save_unconfirmed');
         if (ownedSaver && !ownedSaver.canDiscardWorkspace(discardDecision)) throw new RawApiError('raw_save_unconfirmed');
         if (releaseAfterFinish) {
           await releaseWorkspaceConfirmed(ownedWorkspace);
-          workspace = undefined;
+          workspace.current = undefined;
           return;
         }
         abortRawWorkspaceRequests(ownedWorkspace);
@@ -1213,7 +1247,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
           throw failure;
         };
         if (discardSent) {
-          if (await rawWorkspaceEmpty(ownedWorkspace)) { workspace=undefined; return; }
+          if (await rawWorkspaceEmpty(ownedWorkspace)) { workspace.current=undefined; return; }
           // A retry requires the original P1 proof; without it only an empty Backend can release ownership.
           if (!ownsDiscardProof()) throw new RawApiError('raw_save_unconfirmed');
         }
@@ -1233,7 +1267,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
             throw retryCause;
           }
         }
-        workspace=undefined;
+        workspace.current=undefined;
       };
       // Point Color Cancel settles outside ownership; its discard joins the queue, while other tools keep the Backend drain path.
       const terminate = async () => pointColorGuard ? owned(terminateOwned) : terminateOwned();
@@ -1279,15 +1313,15 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
           return false; // Never release an unconfirmed native document after an unexpected unmount.
         }
         editor?.dispose(); saver?.dispose();
-        if (workspace) {
+        if (workspace.current) {
           try { await release(); } catch { log('raw_release_failed'); return false; }
         }
         return true;
       };
       if (discardTermination) {
-        // The explicit discard owner already holds Cancel and workspace termination across unmount.
+        // The explicit discard owner already holds Cancel and Workspace termination across unmount.
       } else if (pointColorDeparture) {
-        const ownedWorkspace = workspace;
+        const ownedWorkspace = workspace.current;
         if (!ownedWorkspace) return;
         const termination = new RawWorkspaceTermination(ownedWorkspace, 'release', saver,
           async () => {
@@ -1297,10 +1331,10 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
           },
           async () => {
             await owned(async () => {
-              if (workspace !== ownedWorkspace) throw new RawApiError('raw_stale_handle');
+              if (workspace.current !== ownedWorkspace) throw new RawApiError('raw_stale_handle');
               // The endpoint revalidates this ID before releasing, so a conflicting owner stays untouched.
               await releaseWorkspaceConfirmed(ownedWorkspace);
-              workspace = undefined;
+              workspace.current = undefined;
               editor?.dispose(); saver?.dispose();
             });
           });
@@ -1311,11 +1345,11 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
           log('raw_save_unconfirmed', 'recipe.saveFailed');
         });
       } else if (discardOperation) {
-        // A non-Point-Color discard already owns this workspace and continues after the hook leaves.
+        // A non-Point-Color discard already owns this Workspace and continues after the hook leaves.
       } else if (recoveryInProgress) {
-        // Recovery owns the workspace until it can transfer the known outcome to a termination owner.
-      } else if (workspace) {
-        const ownedWorkspace = workspace;
+        // Recovery owns the Workspace until it can transfer the known outcome to a termination owner.
+      } else if (workspace.current) {
+        const ownedWorkspace = workspace.current;
         let initialSettle = finalSave;
         const termination = new RawWorkspaceTermination(ownedWorkspace, 'release', saver, async () => {
           const pending = initialSettle;
@@ -1328,9 +1362,9 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
           if (saver?.dirty || saver?.error || editor?.unsettled) throw new RawApiError('raw_save_unconfirmed');
         }, async () => {
           await owned(async () => {
-            if (workspace !== ownedWorkspace) throw new RawApiError('raw_stale_handle');
+            if (workspace.current !== ownedWorkspace) throw new RawApiError('raw_stale_handle');
             await releaseWorkspaceConfirmed(ownedWorkspace);
-            workspace = undefined;
+            workspace.current = undefined;
             editor?.dispose(); saver?.dispose();
           });
         });

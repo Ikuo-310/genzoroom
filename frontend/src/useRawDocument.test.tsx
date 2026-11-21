@@ -906,6 +906,21 @@ describe('RAW native Before cache', () => {
     expect(vi.mocked(api.rawPreview).mock.calls.filter(call => call[3] === 'before')).toHaveLength(2);
   });
 
+  it('keeps Workspace ownership with the active Asset effect through switch and unmount', async () => {
+    let created = 0;
+    vi.mocked(api.createRawWorkspace).mockImplementation(async () => `owner-${++created}`);
+    await render('a'); await flush();
+    await render('b'); await flush();
+
+    expect(api.releaseRawWorkspace).toHaveBeenCalledWith('owner-1');
+    expect(api.openRawDocument).toHaveBeenLastCalledWith('owner-2', 'b');
+    expect(current?.document?.workspaceId).toBe('owner-2');
+
+    await act(async () => root.unmount()); await flush();
+    expect(vi.mocked(api.releaseRawWorkspace).mock.calls.map(([workspaceId]) => workspaceId))
+      .toEqual(['owner-1', 'owner-2']);
+  });
+
   it('keeps After editing usable when Before fails or decoded dimensions do not match', async () => {
     enableBefore(); await render('a'); await flush();
     const after = current?.url;
