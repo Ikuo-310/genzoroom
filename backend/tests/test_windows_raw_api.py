@@ -54,6 +54,66 @@ def close_headers(doc):
             "X-Raw-Token": doc["documentToken"], "X-Raw-Revision": str(doc["revision"])}
 
 
+def test_document_close_keeps_workspace_and_replays_only_latest_receipt(local, tmp_path, monkeypatch):
+    async def run():
+        api, manager, children, root = await setup(tmp_path, local, monkeypatch)
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                workspace, first = await open_document(http)
+                async def acquire(asset_id):
+                    return Original(data=str(asset_id).encode()), "dng"
+                api.cache._acquire = acquire
+                first_url = f'/api/raw/documents/{first["handle"]}'
+                assert (await http.delete(first_url, headers=close_headers(first))).status_code == 204
+                assert api.workspace == workspace and api.document is None
+                assert manager.status().generation == first["generation"]
+                assert (await http.delete(first_url, headers=close_headers(first))).status_code == 204
+                response = await http.post("/api/raw/documents", json={"workspaceId": workspace, "assetId": str(uuid4())})
+                assert response.status_code == 200, response.text
+                second = response.json()
+                assert second["generation"] == first["generation"] and api.workspace == workspace
+                assert (await http.delete(first_url, headers=close_headers(first))).status_code == 204
+                assert api.document["handle"] == second["handle"]
+                bad = await http.delete(first_url, headers=close_headers(first) | {"X-Raw-Revision": "999"})
+                assert bad.status_code == 409 and api.document["handle"] == second["handle"]
+                assert (await http.delete(f'/api/raw/documents/{second["handle"]}', headers=close_headers(second))).status_code == 204
+                assert (await http.delete(first_url, headers=close_headers(first))).status_code == 409
+                assert (await http.delete(f"/api/raw/workspaces/{workspace}")).status_code == 204
+                assert not list(root.iterdir()) and children[0].returncode is not None
+        finally:
+            await api.close()
+    asyncio.run(asyncio.wait_for(run(), 15))
+
+
+@pytest.mark.parametrize("ending", ["discard", "shutdown", "open_failure"])
+def test_closed_document_workspace_cleanup(local, tmp_path, monkeypatch, ending):
+    async def run():
+        api, _, children, root = await setup(tmp_path, local, monkeypatch)
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                workspace, doc = await open_document(http)
+                assert (await http.delete(f'/api/raw/documents/{doc["handle"]}', headers=close_headers(doc))).status_code == 204
+                assert api._document_close_receipt is not None
+                if ending == "discard":
+                    result = await http.post(f"/api/raw/workspaces/{workspace}/discard", json={"scope": "workspace"})
+                    assert result.status_code == 204
+                elif ending == "open_failure":
+                    async def fail(_):
+                        raise LightCraftError("raw_download_failed")
+                    monkeypatch.setattr(api.cache, "download", fail)
+                    result = await http.post("/api/raw/documents", json={"workspaceId": workspace, "assetId": str(uuid4())})
+                    assert result.status_code != 200
+                else:
+                    await api.close()
+                assert api.workspace is None and api._document_close_receipt is None
+                assert children[0].returncode is not None and not list(root.iterdir())
+        finally:
+            await api.close()
+    asyncio.run(asyncio.wait_for(run(), 15))
+
+
 def test_document_close_drains_preview_before_release(local, tmp_path, monkeypatch):
     async def run():
         api, manager, children, root = await setup(tmp_path, local, monkeypatch)
@@ -75,7 +135,9 @@ def test_document_close_drains_preview_before_release(local, tmp_path, monkeypat
                 child.gate.set()
                 assert (await preview).status_code == 204
                 assert (await closing).status_code == 204
-                assert api.workspace is None and manager.status().generation > doc["generation"]
+                assert api.workspace == workspace and manager.status().generation == doc["generation"]
+                assert list(root.iterdir())
+                assert (await http.delete(f"/api/raw/workspaces/{workspace}")).status_code == 204
                 assert not list(root.iterdir())
         finally:
             if child.gate:
@@ -91,7 +153,7 @@ def test_document_close_waits_for_response_send_lease(local, tmp_path, monkeypat
         try:
             async with client(local) as http:
                 await authenticate(http, local)
-                _, doc = await open_document(http)
+                workspace, doc = await open_document(http)
                 lease = object()
                 api._image_leases.add(lease)
                 response = api._hold_image_response(module._ImageResponse(b"image"), lease)
@@ -107,7 +169,9 @@ def test_document_close_waits_for_response_send_lease(local, tmp_path, monkeypat
                 gate.set()
                 await transfer
                 assert (await closing).status_code == 204
-                assert not api._image_leases and not list(root.iterdir())
+                assert not api._image_leases and list(root.iterdir())
+                assert (await http.delete(f"/api/raw/workspaces/{workspace}")).status_code == 204
+                assert not list(root.iterdir())
         finally:
             gate.set()
             await api.close()
@@ -162,8 +226,9 @@ def test_document_close_blocks_new_work_and_joins_same_owner(local, tmp_path, mo
                 resume.set()
                 assert (await first).status_code == 204
                 assert (await second).status_code == 204
-                assert api.document is None and api.workspace is None
-                assert manager.status().generation > generation and not list(root.iterdir())
+                assert api.document is None and api.workspace == workspace
+                assert manager.status().generation == generation and list(root.iterdir())
+                assert (await http.delete(f"/api/raw/workspaces/{workspace}")).status_code == 204
         finally:
             resume.set()
             await api.close()
@@ -185,6 +250,7 @@ def test_document_close_refuses_unsaved_changes_and_keeps_owner(local, tmp_path,
                 response = await http.delete(f'/api/raw/documents/{doc["handle"]}', headers=close_headers(doc))
                 assert response.status_code == 409 and response.json()["code"] == "raw_history_commit_required"
                 assert api.workspace == workspace and api.document["handle"] == doc["handle"]
+                assert api._document_close_receipt is None
                 assert (await http.delete(f"/api/raw/workspaces/{workspace}")).status_code == 204
         finally:
             await api.close()

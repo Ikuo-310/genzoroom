@@ -85,6 +85,7 @@ class RawPreviewApi:
         self._document_close_task = None
         self._document_close_identity = None
         self._document_close_draining = False
+        self._document_close_receipt = None
         self._touched = monotonic()
         self._workspace_state = "empty"
         self._native_released = False
@@ -544,6 +545,8 @@ class RawPreviewApi:
             raise LightCraftError("raw_invalid_request")
         identity = (workspace, handle, int(generation), token, int(revision))
         self._owner(workspace)
+        if identity == self._document_close_receipt:
+            return Response(status_code=204, headers={"Cache-Control": "no-store"})
         if self._document_close_task is not None:
             if identity != self._document_close_identity:
                 raise LightCraftError("raw_busy")
@@ -593,7 +596,8 @@ class RawPreviewApi:
                     raise LightCraftError("raw_stale_handle")
                 if doc["revision"] != identity[4]:
                     raise LightCraftError("raw_revision_conflict")
-                await self._release(checkpoint_history=False)
+                self._clear_document()
+                self._document_close_receipt = identity
                 return Response(status_code=204, headers={"Cache-Control": "no-store"})
         finally:
             self._document_close_draining = False
@@ -638,6 +642,7 @@ class RawPreviewApi:
                     await self.raw.close()
                     if self.cache: await self.cache.close()
                     self.cache = self.workspace = self.document = None
+                    self._document_close_receipt = None
                     self._workspace_state = 'empty'
                     from lightcraft_raw import LightCraftRawSession
                     self.raw = LightCraftRawSession(self.manager)
@@ -663,6 +668,7 @@ class RawPreviewApi:
                 if body or self.workspace is not None:
                     raise LightCraftError("raw_workspace_conflict")
                 self._discard_task = self._discard_request = None
+                self._document_close_receipt = None
                 self.workspace = secrets.token_hex(16)
                 self._reset_asset_id = self._reset_owner = None
                 self.cache = RawSourceCache()
@@ -2018,12 +2024,10 @@ class RawPreviewApi:
                        generation=handle.generation, revision=snapshot.revision)
         return snapshot, "restored", recipe_revision, False
 
-    async def _release(self, *, checkpoint_history=True):
-        if self.workspace is None:
-            return
-        if checkpoint_history:
-            await self._history_checkpoint()
+    def _clear_document(self):
         self.document = None
+        self._raw_handle = None
+        self._preview_latest.clear()
         self._region_geometry.clear()
         self._wb_frames.clear()
         self._recipe_save = None
@@ -2031,6 +2035,15 @@ class RawPreviewApi:
         self._recipe_recovery_baseline = None
         self._geometry_gesture = None
         self._history_initialized = self._history_enabled = False
+        self._wb_available = False
+
+    async def _release(self, *, checkpoint_history=True):
+        if self.workspace is None:
+            return
+        if checkpoint_history:
+            await self._history_checkpoint()
+        self._clear_document()
+        self._document_close_receipt = None
         self._workspace_state = "releasing"
         try:
             # A cleanup retry must not restart the Engine or admit new source references.
@@ -2178,6 +2191,7 @@ class RawPreviewApi:
             raise
         self.cache = None
         self.workspace = self.document = None
+        self._document_close_receipt = None
         self._region_geometry.clear()
         self._wb_frames.clear()
         self._recipe_save = None

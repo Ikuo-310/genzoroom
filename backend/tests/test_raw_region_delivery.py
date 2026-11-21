@@ -55,7 +55,9 @@ def test_document_close_drains_region_and_rejects_late_response(local, tmp_path,
                 child.gate.set()
                 assert (await region).status_code == 204
                 assert (await closing).status_code == 204
-                assert api.workspace is None and not list(root.iterdir())
+                assert api.workspace == doc["workspaceId"] and list(root.iterdir())
+                assert (await http.delete(f'/api/raw/workspaces/{doc["workspaceId"]}')).status_code == 204
+                assert not list(root.iterdir())
         finally:
             if child.gate:
                 child.gate.set()
