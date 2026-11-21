@@ -1029,9 +1029,12 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
           stage = 'open';
           const createdWorkspace = await createRawWorkspace();
           adoptWorkspace(createdWorkspace);
+          if (!current()) {
+            await terminateStaleRecoveryWorkspace(createdWorkspace);
+            throw new RawApiError('raw_document_closed');
+          }
           // A failed open may already have released its Workspace; retry still verifies that fact.
           stage = 'release';
-          if (!current()) throw new RawApiError('raw_document_closed');
           const doc = await openRawDocument(createdWorkspace, assetId);
           if (!current()) throw new RawApiError('raw_document_closed');
           const settings = await readRawSettings(doc);
@@ -1234,6 +1237,10 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       return discardOperation;
     };
     discardRef.current=()=>{
+      if (restarting && restartOperation) return restartOperation.then(async () => {
+        await saver?.save();
+        return discardRef.current();
+      });
       if(discardOperation)return discardOperation;
       if (discardTermination) {
         discardSaveSafeAtStart = discardSaver?.canDiscardWorkspace(discardDecision) ?? true;
@@ -1359,7 +1366,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       // A late slider unmount cannot target a successor. Its old owner still finishes its
       // gesture on this same queue before cleanup, including transmitted native mutations.
       const pointColorDeparture = !!saver?.pointColorInteracting;
-      const finalSave = discarded || discardTermination || discardOperation || pointColorDeparture || recoveryInProgress ? undefined : saver?.mixerInteracting ? saver.cancelMixerInteraction()
+      const finalSave = discarded || discardTermination || discardOperation || pointColorDeparture || recoveryInProgress || restarting ? undefined : saver?.mixerInteracting ? saver.cancelMixerInteraction()
         : saver?.cropping ? saver.cancelGeometry() : saver?.save();
       if (saverRef.current === saver) saverRef.current = null;
       if (editorRef.current === editor) editorRef.current = null;
@@ -1379,7 +1386,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         return true;
       };
       const assetTransition = !pagehideRequested && darkroomActiveRef.current && identity.current !== assetId
-        && !!workspace.current && !!editor && !!saver && !discarded && !discardTermination && !discardOperation && !recoveryInProgress;
+        && !!workspace.current && !!editor && !!saver && !discarded && !discardTermination && !discardOperation
+        && !recoveryInProgress && !restarting;
       if (assetTransition) {
         const ownedWorkspace = workspace.current!;
         let closeDocument: RawDocument | undefined;
@@ -1455,6 +1463,30 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         });
       } else if (discardOperation) {
         // A non-Point-Color discard already owns this Workspace and continues after the hook leaves.
+      } else if (restarting && workspace.current) {
+        const ownedWorkspace = workspace.current;
+        const restart = restartOperation;
+        let owner: RawWorkspaceTermination;
+        owner = new RawWorkspaceTermination(ownedWorkspace, 'recovery', saver, async () => {
+          try { await restart; } catch { /* Reconcile the Workspace only after regeneration stops using it. */ }
+          if (stage === 'save' && (saver?.dirty || saver?.error || editor?.unsettled))
+            throw new RawApiError('raw_save_unconfirmed');
+        }, async () => {
+          if (workspaceOwner.workspaceId !== ownedWorkspace) {
+            if (await rawWorkspaceEmpty(ownedWorkspace)) return;
+            throw new RawApiError('raw_stale_handle');
+          }
+          await releaseWorkspaceConfirmed(ownedWorkspace);
+          if (workspaceOwner.workspaceId === ownedWorkspace) {
+            workspaceOwner.workspaceId = undefined;
+            workspaceOwner.effectSerial = undefined;
+            workspaceOwner.documentState = undefined;
+          }
+        }, async () => {
+          if (pointColorTermination === owner) pointColorTermination = undefined;
+        });
+        pointColorTermination = owner;
+        void owner.run().catch(cause => log(cause instanceof RawApiError ? cause.code : 'raw_connection_failed', 'raw.releaseFailed'));
       } else if (pointColorTermination?.kind === 'recovery' && pointColorTermination.workspaceId === workspace.current) {
         const owner = pointColorTermination;
         void owner.run().catch(cause => log(cause instanceof RawApiError ? cause.code : 'raw_connection_failed', 'raw.releaseFailed'));

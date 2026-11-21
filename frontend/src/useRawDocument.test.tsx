@@ -1813,6 +1813,32 @@ describe('RAW History document integration', () => {
     expect(current?.historySteps).toHaveLength(2); expect(api.readRawHistory).toHaveBeenCalledTimes(2);
     expect(vi.mocked(api.saveRawHistory).mock.calls.map(([r]) => r.action)).toEqual(['initialize', 'undo', 'initialize']);
   });
+  it('renews the shared session budget when edits across Assets reach 200', async () => {
+    const model = backend(198); let generation = 1;
+    vi.mocked(api.createRawWorkspace).mockImplementation(async () => `budget-workspace-${generation}`);
+    vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => ({ workspaceId, assetId,
+      generation, handle: `budget-${assetId}-${generation}`, documentToken: `token-${assetId}-${generation}`, revision: 1 }));
+    vi.mocked(api.releaseRawWorkspace).mockImplementation(async () => { generation++; });
+    await render('a'); await flush();
+    act(() => current!.undo()); await flush();
+    expect(current?.settings?.mutationAttempts).toBe(199);
+
+    await render('b'); await flush();
+    expect(current?.document?.workspaceId).toBe('budget-workspace-1');
+    expect(current?.settings?.mutationAttempts).toBe(199);
+    act(() => current!.redo()); await flush();
+
+    expect(api.closeRawDocument).toHaveBeenCalledOnce();
+    expect(api.releaseRawWorkspace).toHaveBeenCalledOnce();
+    expect(current?.document).toMatchObject({ assetId: 'b', workspaceId: 'budget-workspace-2', generation: 2 });
+    expect(current?.settings?.mutationAttempts).toBe(1);
+    expect(current?.history?.cursor).toBe(2);
+    expect(current?.settings?.recipeFingerprint).toBe(current?.settings?.settingsFingerprint);
+    expect(current?.settings?.recipeRevision).toBeGreaterThan(0);
+    expect(model.cursor()).toBe(2);
+    const finalEdit = vi.mocked(api.saveRawHistory).mock.calls.findIndex(([request]) => request.action === 'redo');
+    expect(vi.mocked(api.saveRawHistory).mock.invocationCallOrder[finalEdit]).toBeLessThan(vi.mocked(api.releaseRawWorkspace).mock.invocationCallOrder[0]);
+  });
   it('never publishes a late History move or its Preview into the successor document', async () => {
     const model = backend(); await render('a'); await flush(); const old = current!;
     const pending = deferred<api.RawHistoryResult>(); vi.mocked(api.saveRawHistory).mockReturnValueOnce(pending.promise);
@@ -2037,6 +2063,78 @@ describe('bounded RAW session renewal', () => {
     act(() => current!.retryRegeneration()); await drain();
     expect(vi.mocked(api.releaseRawWorkspace).mock.calls.slice(0, 2)).toEqual([['workspace-1'], ['workspace-1']]);
     expect(current?.document?.generation).toBe(2); expect(current?.locked).toBe(false);
+  });
+  it.each(['create', 'open', 'settings'] as const)(
+    'keeps one regeneration owner and requires Retry after replacement %s fails', async stage => {
+      vi.useFakeTimers(); renewal(); await threshold();
+      if (stage === 'create') vi.mocked(api.createRawWorkspace).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'));
+      if (stage === 'open') vi.mocked(api.openRawDocument).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'));
+      if (stage === 'settings') vi.mocked(api.readRawSettings).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'));
+
+      act(() => current!.flushControls()); await drain();
+      expect(current?.status).toBe('error'); expect(current?.regenerationError).toBe('raw_connection_failed');
+      expect(api.createRawWorkspace).toHaveBeenCalledTimes(2);
+      expect(api.openRawDocument).toHaveBeenCalledTimes(stage === 'create' ? 1 : 2);
+
+      act(() => current!.retryRegeneration()); await drain();
+      expect(current?.status).toBe('ready'); expect(current?.regenerationError).toBeUndefined();
+      expect(current?.document?.generation).toBe(stage === 'create' ? 2 : 3);
+      expect(current?.settings?.mutationAttempts).toBe(1);
+      expect(api.createRawWorkspace).toHaveBeenCalledTimes(3);
+      expect(api.openRawDocument).toHaveBeenCalledTimes(stage === 'create' ? 2 : 3);
+      expect(api.releaseRawWorkspace).toHaveBeenCalledTimes(stage === 'create' ? 1 : 2);
+    });
+  it.each(['unmount', 'pagehide', 'Asset change'] as const)(
+    'releases a Workspace created after %s during regeneration instead of leaking its owner', async departure => {
+    vi.useFakeTimers(); renewal(); await threshold();
+    const createGate = deferred<string>();
+    vi.mocked(api.createRawWorkspace).mockImplementationOnce(() => createGate.promise);
+    act(() => current!.flushControls()); await drain();
+    expect(api.releaseRawWorkspace).toHaveBeenCalledOnce();
+    expect(api.createRawWorkspace).toHaveBeenCalledTimes(2);
+
+    if (departure === 'unmount') await render(null);
+    else if (departure === 'pagehide') await act(async () => { window.dispatchEvent(new Event('pagehide')); });
+    else await render('b');
+    createGate.resolve('workspace-2'); await drain();
+    expect(api.releaseRawWorkspace).toHaveBeenLastCalledWith('workspace-2');
+    if (departure === 'Asset change') {
+      expect(api.openRawDocument).toHaveBeenCalledTimes(2);
+      expect(current?.document).toMatchObject({ assetId: 'b', workspaceId: 'workspace-3' });
+    } else expect(api.openRawDocument).toHaveBeenCalledOnce();
+  });
+  it('releases rather than Closes when Asset changes during replacement Open, then opens the successor', async () => {
+    vi.useFakeTimers(); renewal(); await threshold();
+    const openGate = deferred<api.RawDocument>();
+    vi.mocked(api.openRawDocument).mockImplementationOnce(() => openGate.promise);
+    act(() => current!.flushControls()); await drain();
+    expect(api.openRawDocument).toHaveBeenCalledTimes(2);
+    await render('b');
+    openGate.resolve({ workspaceId: 'workspace-2', assetId: 'a', handle: 'replacement-a', generation: 2,
+      documentToken: 'replacement-token', revision: 1 });
+    await drain();
+    expect(api.closeRawDocument).not.toHaveBeenCalled();
+    expect(api.releaseRawWorkspace).toHaveBeenCalledTimes(2);
+    expect(current?.document?.assetId).toBe('b');
+    expect(current?.document?.workspaceId).toBe('workspace-3');
+  });
+  it('waits for regeneration to settle before applying explicit Discard to its current Workspace', async () => {
+    vi.useFakeTimers(); renewal(); await threshold();
+    const openGate = deferred<api.RawDocument>();
+    vi.mocked(api.openRawDocument).mockImplementationOnce(() => openGate.promise);
+    vi.mocked(api.discardRawWorkspace).mockResolvedValue();
+    act(() => current!.flushControls()); await drain();
+    let discard!: Promise<void>;
+    act(() => { discard = current!.discardChanges(); });
+    await drain();
+    expect(api.discardRawWorkspace).not.toHaveBeenCalled();
+
+    openGate.resolve({ workspaceId: 'workspace-2', assetId: 'a', handle: 'replacement-a', generation: 2,
+      documentToken: 'replacement-token', revision: 1 });
+    await act(async () => { await discard; }); await drain();
+    expect(api.discardRawWorkspace).toHaveBeenCalledWith({ workspaceId: 'workspace-2' });
+    expect(api.closeRawDocument).not.toHaveBeenCalled();
+    expect(current?.code).toBe('raw_document_closed');
   });
   it('does not accept default settings after a failed restore and keeps the saved recipe for retry', async () => {
     vi.useFakeTimers(); const model = renewal(); await threshold();
