@@ -82,6 +82,8 @@ class RawPreviewApi:
         self._discard_task = None
         self._discard_request = None
         self._discarding = False
+        self._document_close_task = None
+        self._document_close_identity = None
         self._touched = monotonic()
         self._workspace_state = "empty"
         self._native_released = False
@@ -241,7 +243,14 @@ class RawPreviewApi:
             lightcraft_log('region.owner.started', level='debug')
         try:
             body = await self._body(request) if request.method in {"POST", "PUT"} else {}
+            if request.method == "DELETE" and "handle" in request.path_params:
+                return await self._close_document(request)
             if request.method == 'POST' and request.url.path.endswith('/discard'):
+                if self._document_close_task is not None:
+                    try:
+                        await asyncio.shield(self._document_close_task)
+                    except LightCraftError:
+                        pass
                 return await self._discard(request, body)
             if request.method == "POST" and request.url.path.endswith("/edit-status"):
                 if set(body) != {"assetIds"} or not isinstance(body["assetIds"], list) or len(body["assetIds"]) > 100:
@@ -258,6 +267,8 @@ class RawPreviewApi:
                 except (InvalidRawRecipe, StoreUnavailable):
                     raise LightCraftError("raw_recipe_unavailable") from None
                 return JSONResponse({"edited": edited}, headers={"Cache-Control": "no-store"})
+            if self._document_close_task is not None:
+                raise LightCraftError("raw_busy")
             if request.url.path.endswith("/preview/cancel"):
                 return self._cancel_preview(request, body)
             if request.url.path.endswith("/region/cancel"):
@@ -517,6 +528,65 @@ class RawPreviewApi:
         if self.raw.status().state in ({"lost", "stopped", "closing"} if resync else {"lost", "desynchronized", "stopped", "closing"}):
             raise LightCraftError("raw_unavailable")
         return doc
+
+    async def _close_document(self, request):
+        workspace = request.headers.get("x-raw-workspace")
+        generation = request.headers.get("x-raw-generation")
+        token = request.headers.get("x-raw-token")
+        revision = request.headers.get("x-raw-revision")
+        handle = request.path_params["handle"]
+        if (not workspace or not re.fullmatch(r"[a-f0-9]{32}", handle)
+                or not token or not re.fullmatch(r"[a-f0-9]{32}", token)
+                or not generation or not re.fullmatch(r"[0-9]{1,16}", generation)
+                or not revision or not re.fullmatch(r"[0-9]{1,16}", revision)
+                or int(generation) >= 2**53 or int(revision) >= 2**53):
+            raise LightCraftError("raw_invalid_request")
+        identity = (workspace, handle, int(generation), token, int(revision))
+        self._owner(workspace)
+        if self._document_close_task is not None:
+            if identity != self._document_close_identity:
+                raise LightCraftError("raw_busy")
+            return await asyncio.shield(self._document_close_task)
+        if self._closing or self._history_draining or self._discarding:
+            raise LightCraftError("raw_busy")
+        doc = self._document(handle)
+        if doc["generation"] != identity[2] or doc["documentToken"] != token:
+            raise LightCraftError("raw_stale_handle")
+        if doc["revision"] != identity[4]:
+            raise LightCraftError("raw_revision_conflict")
+        # Freeze admission before yielding so accepted owners can settle on the same lock.
+        self._document_close_identity = identity
+        self._document_close_task = asyncio.create_task(
+            self._close_document_owned(identity, doc, tuple(self._tasks)), name="raw-document-close")
+        return await asyncio.shield(self._document_close_task)
+
+    async def _close_document_owned(self, identity, doc, pending):
+        try:
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+            async with self._lock:
+                self._owner(identity[0])
+                if self._document(identity[1]) is not doc or doc["generation"] != identity[2] or doc["documentToken"] != identity[3]:
+                    raise LightCraftError("raw_stale_handle")
+                if doc["revision"] != identity[4]:
+                    raise LightCraftError("raw_revision_conflict")
+                self.raw._ensure_curve_interaction_owner()
+                self._history_unsettled()
+                if self.raw.status().state != "synced":
+                    raise LightCraftError("raw_history_commit_required")
+                if self._recipe_save and not self._recipe_save.get("settled", False):
+                    raise LightCraftError("raw_recipe_save_pending")
+                if not self._history_initialized and doc["settingsFingerprint"] != (
+                        doc["importDefaultsFingerprint"] if doc.get("recipeRecoveryPending")
+                        else doc["recipeFingerprint"]):
+                    raise LightCraftError("raw_history_commit_required")
+                await self._history_checkpoint()
+                # P1-2A retains the existing release; P1-2B will replace this boundary.
+                await self._release(checkpoint_history=False)
+                return Response(status_code=204, headers={"Cache-Control": "no-store"})
+        finally:
+            self._document_close_task = self._document_close_identity = None
+            self._touched = monotonic()
 
     async def _discard(self, request, body):
         identity = (request.path_params['workspace'], body)
@@ -2033,7 +2103,7 @@ class RawPreviewApi:
             while self.workspace is not None:
                 await asyncio.sleep(LEASE_POLL_SECONDS)
                 async with self._lock:
-                    if monotonic() - self._touched >= LEASE_SECONDS:
+                    if self._document_close_task is None and monotonic() - self._touched >= LEASE_SECONDS:
                         await self._release()
         except asyncio.CancelledError:
             pass
@@ -2047,6 +2117,11 @@ class RawPreviewApi:
             raise asyncio.CancelledError()
 
     async def _close(self):
+        if self._document_close_task is not None:
+            try:
+                await asyncio.shield(self._document_close_task)
+            except LightCraftError:
+                pass
         if self._discard_task is not None:
             await asyncio.shield(self._discard_task)
         owner = self.raw

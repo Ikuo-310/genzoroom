@@ -49,6 +49,122 @@ async def open_document(http):
     return workspace, response.json()
 
 
+def close_headers(doc):
+    return {"X-Raw-Workspace": doc["workspaceId"], "X-Raw-Generation": str(doc["generation"]),
+            "X-Raw-Token": doc["documentToken"], "X-Raw-Revision": str(doc["revision"])}
+
+
+@pytest.mark.parametrize("header,value,code,status", [
+    ("X-Raw-Workspace", "wrong", "raw_workspace_conflict", 409),
+    ("X-Raw-Generation", "999", "raw_stale_handle", 409),
+    ("X-Raw-Token", "a" * 32, "raw_stale_handle", 409),
+    ("X-Raw-Revision", "999", "raw_revision_conflict", 409),
+    ("X-Raw-Revision", "-1", "raw_invalid_request", 400),
+])
+def test_document_close_rejects_invalid_owner(local, tmp_path, monkeypatch, header, value, code, status):
+    async def run():
+        api, _, _, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                _, doc = await open_document(http)
+                response = await http.delete(f'/api/raw/documents/{doc["handle"]}',
+                                             headers=close_headers(doc) | {header: value})
+                assert response.status_code == status and response.json()["code"] == code
+                assert api.document["handle"] == doc["handle"]
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
+def test_document_close_blocks_new_work_and_joins_same_owner(local, tmp_path, monkeypatch):
+    async def run():
+        api, manager, _, root = await setup(tmp_path, local, monkeypatch)
+        entered, resume = asyncio.Event(), asyncio.Event()
+        checkpoint = api._history_checkpoint
+        async def delayed():
+            entered.set()
+            await resume.wait()
+            await checkpoint()
+        monkeypatch.setattr(api, "_history_checkpoint", delayed)
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                workspace, doc = await open_document(http)
+                generation = manager.status().generation
+                url = f'/api/raw/documents/{doc["handle"]}'
+                first = asyncio.create_task(http.delete(url, headers=close_headers(doc)))
+                await entered.wait()
+                second = asyncio.create_task(http.delete(url, headers=close_headers(doc)))
+                await asyncio.sleep(0)
+                blocked = await http.post("/api/raw/documents", json={"workspaceId": workspace, "assetId": str(uuid4())})
+                assert blocked.status_code == 409 and blocked.json()["code"] == "raw_busy"
+                resume.set()
+                assert (await first).status_code == 204
+                assert (await second).status_code == 204
+                assert api.document is None and api.workspace is None
+                assert manager.status().generation > generation and not list(root.iterdir())
+        finally:
+            resume.set()
+            await api.close()
+    asyncio.run(asyncio.wait_for(run(), 15))
+
+
+def test_document_close_refuses_unsaved_changes_and_keeps_owner(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, _, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                workspace, doc = await open_document(http)
+                changed = await http.post(f'/api/raw/documents/{doc["handle"]}/controls',
+                    json={k: doc[k] for k in ("workspaceId", "generation", "documentToken")} |
+                         {"expectedRevision": doc["revision"], "values": {"light.exposure": 1.}})
+                assert changed.status_code == 200
+                doc = changed.json()
+                response = await http.delete(f'/api/raw/documents/{doc["handle"]}', headers=close_headers(doc))
+                assert response.status_code == 409 and response.json()["code"] == "raw_history_commit_required"
+                assert api.workspace == workspace and api.document["handle"] == doc["handle"]
+                assert (await http.delete(f"/api/raw/workspaces/{workspace}")).status_code == 204
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
+def test_document_close_waits_for_accepted_mutation_and_rechecks_revision(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, _, _ = await setup(tmp_path, local, monkeypatch)
+        entered, resume = asyncio.Event(), asyncio.Event()
+        original = api.raw.set_controls
+        async def delayed(*args):
+            entered.set()
+            await resume.wait()
+            return await original(*args)
+        monkeypatch.setattr(api.raw, "set_controls", delayed)
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                workspace, doc = await open_document(http)
+                url = f'/api/raw/documents/{doc["handle"]}'
+                mutation = asyncio.create_task(http.post(url + "/controls",
+                    json={k: doc[k] for k in ("workspaceId", "generation", "documentToken")} |
+                         {"expectedRevision": doc["revision"], "values": {"light.exposure": 1.}}))
+                await entered.wait()
+                closing = asyncio.create_task(http.delete(url, headers=close_headers(doc)))
+                await until(lambda: api._document_close_task is not None)
+                assert not closing.done()
+                assert (await http.delete(f"/api/raw/workspaces/{workspace}")).json()["code"] == "raw_busy"
+                resume.set()
+                assert (await mutation).status_code == 200
+                result = await closing
+                assert result.status_code == 409 and result.json()["code"] == "raw_revision_conflict"
+                assert api.document["handle"] == doc["handle"] and api.workspace == workspace
+        finally:
+            resume.set()
+            await api.close()
+    asyncio.run(asyncio.wait_for(run(), 15))
+
+
 def test_raw_edit_status_route_uses_raw_store_without_open_workspace(local, tmp_path, monkeypatch):
     async def run():
         api, _, _, _ = await setup(tmp_path, local, monkeypatch)
