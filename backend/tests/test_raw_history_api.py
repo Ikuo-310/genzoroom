@@ -15,7 +15,8 @@ import main
 import raw_recipe_store as store
 from lightcraft_mcp import LightCraftError
 from tests.test_windows_local import local, client, authenticate
-from tests.test_windows_raw_api import setup, open_document
+from tests.test_windows_raw_api import setup, open_document, close_headers
+from tests.test_raw_source import Original
 from tests.test_raw_recipe_api import change, save_body, headers
 from tests.test_raw_recipe_restore import open_asset
 from tests.test_raw_recipe_restore import hold_merge, seed
@@ -38,6 +39,93 @@ def body(doc, revision=None, save_id=None):
 
 def commit_body(doc, revision=None, save_id=None):
     return body(doc, revision, save_id) | {"kind": "control", "metadata": {"control": "light.exposure"}}
+
+
+def test_document_switch_reuses_resident_and_restores_history_cursor(local, tmp_path, monkeypatch):
+    async def run():
+        api, manager, children, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                workspace, doc = await open_document(http)
+                asset_a, generation = doc["assetId"], doc["generation"]
+                async def acquire(asset_id):
+                    return Original(data=str(asset_id).encode()), "dng"
+                api.cache._acquire = acquire
+                doc = await operation(http, doc, "initialize")
+                doc = await change(http, doc, 1.)
+                doc = await operation(http, doc, "commit", commit_body(doc))
+                doc = await change(http, doc, 2.)
+                doc = await operation(http, doc, "commit", commit_body(doc))
+                doc = await operation(http, doc, "undo")
+                assert doc["history"]["cursor"] == 1 and doc["values"]["light.exposure"] == 1.
+                doc = await change(http, doc, 3.)
+                close_url = f'/api/raw/documents/{doc["handle"]}'
+                rejected = await http.delete(close_url, headers=close_headers(doc))
+                assert rejected.status_code == 409 and api.document["handle"] == doc["handle"]
+                doc = await recover(http, api, doc)
+                assert doc["values"]["light.exposure"] == 1.
+                assert (await http.delete(close_url, headers=close_headers(doc))).status_code == 204
+                asset_b = str(uuid4())
+                opened = await http.post("/api/raw/documents", json={"workspaceId": workspace, "assetId": asset_b})
+                assert opened.status_code == 200, opened.text
+                other = opened.json()
+                assert other["generation"] == generation and other["workspaceId"] == workspace
+                assert (await http.delete(f'/api/raw/documents/{other["handle"]}', headers=close_headers(other))).status_code == 204
+                opened = await http.post("/api/raw/documents", json={"workspaceId": workspace, "assetId": asset_a})
+                assert opened.status_code == 200, opened.text
+                reopened = opened.json()
+                assert reopened["generation"] == generation == manager.status().generation
+                assert reopened["workspaceId"] == workspace and reopened["recipeStatus"] == "restored"
+                assert sum(name == "library.import" for name, _ in children[0].commands) == 2
+                history = await http.get(url(reopened), headers=headers(reopened))
+                assert history.status_code == 200 and history.json()["history"]["cursor"] == 1
+                assert history.json()["history"]["length"] == 2
+                assert (await api.raw.get_settings(api._raw_handle)).settings["light"]["exposure"] == 1.
+                assert (await http.delete(f'/api/raw/workspaces/{workspace}')).status_code == 204
+        finally:
+            await api.close()
+    asyncio.run(asyncio.wait_for(run(), 20))
+
+
+def test_resident_capacity_and_hard_budget_recover_by_workspace_release(local, tmp_path, monkeypatch):
+    async def run():
+        api, manager, children, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                workspace, first = await open_document(http)
+                async def acquire(asset_id):
+                    return Original(data=str(asset_id).encode()), "dng"
+                api.cache._acquire = acquire
+                generation = first["generation"]
+                assert (await http.delete(f'/api/raw/documents/{first["handle"]}', headers=close_headers(first))).status_code == 204
+                opened = await http.post("/api/raw/documents", json={"workspaceId": workspace, "assetId": str(uuid4())})
+                assert opened.status_code == 200
+                second = opened.json()
+                assert api.raw.status().resident_count == 2
+                assert (await http.delete(f'/api/raw/documents/{second["handle"]}', headers=close_headers(second))).status_code == 204
+                third_asset = str(uuid4())
+                denied = await http.post("/api/raw/documents", json={"workspaceId": workspace, "assetId": third_asset})
+                assert denied.status_code != 200 and denied.json()["code"] == "raw_session_capacity"
+                assert api.workspace is None and children[0].returncode is not None
+                workspace, opened = await open_asset(http, third_asset)
+                assert opened.status_code == 200
+                doc = opened.json()
+                assert doc["generation"] > generation and api.raw.status().resident_count == 1
+                api.raw._edits = 256
+                denied = await http.post(f'/api/raw/documents/{doc["handle"]}/controls',
+                    json=identity(doc) | {"expectedRevision": doc["revision"], "values": {"light.exposure": 1.}})
+                assert denied.json()["code"] == "raw_session_edit_limit"
+                assert (await http.delete(f'/api/raw/workspaces/{workspace}')).status_code == 204
+                workspace, reopened = await open_asset(http, third_asset)
+                assert reopened.status_code == 200
+                assert reopened.json()["generation"] > doc["generation"]
+                assert reopened.json()["mutationAttempts"] < 200
+                assert (await http.delete(f'/api/raw/workspaces/{workspace}')).status_code == 204
+        finally:
+            await api.close()
+    asyncio.run(asyncio.wait_for(run(), 20))
 
 
 async def operation(http, doc, action, request=None):
