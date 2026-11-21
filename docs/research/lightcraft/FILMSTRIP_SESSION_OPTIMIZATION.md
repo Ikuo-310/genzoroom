@@ -228,3 +228,35 @@ LightCraftは現像・描画・Export、写真カタログ、Resident入替とCP
 | ファイルと長時間動作 | 原本と既存sidecarの内容・存在が同じで、新規sidecarも発生しない。少数枠を越えて繰り返し巡回し、Nativeの参照・ログ蓄積を確認する。必要に応じてCPU／GPUメモリを観測し、allocatorに残る容量と写真への有効な参照を区別する。 |
 
 未解決なのは、破棄できるNative Undo／Redo・pending logの範囲、残存jobと各種補助参照の判定、長時間巡回時の資源の傾向、選択中写真の扱い、製品用のNative入場契約、原本コピーのディスク寿命である。P2-2で個別退役の成功・拒否・結果不明を判別でき、保持する写真が無傷であることを確認してから、Nativeの容量制御とBackend接続の具体化へ進む。
+
+
+### P2-2A 既存API対照試験の実測結果
+
+実施日 2026-11-21。固定upstream `192ff72923c39e6623f2c7ff67ab3a119deb8071` を元にmanifest記載patchを適用して作成済みの `lightcraft-cli.exe`（`.tmp/lightcraft-sharpen-p1/target-p1-sharpen/release/lightcraft-cli.exe`）を使用した。PoC用Native変更・正式patch・manifestは加えていない。JSONLはPowerShell `ConvertTo-Json -Compress` で各リクエストを直列化し、Native CLIの `run --script <jsonl> --keep-going` に渡した。生成した各行は `ConvertFrom-Json` でも検査した。Sessionは `--library` を指定しない一時Headlessであり、`library.info` の `persistent:false` で永続ライブラリを使っていないことを確認した。
+
+テスト用コピーは合成DNG A（24,938 bytes）、既存JPEG B（406,494 bytes）、別JPEG C（444,722 bytes）。元ファイルは読み取りのみ。実行前に各コピーのSHA-256は元fixtureと一致し、A/B/Cの隣接XMPは存在しなかった。
+
+#### 成功した実行
+
+| Session | 操作とNative応答 | 確認結果 |
+| --- | --- | --- |
+| 削除・再Import | A Import `imported:[1]`、B Import `[2]`、B選択 `selected:1`、`photo.deletePermanently(ids:[1])` は `deleted:1`。続く `photo.inspect(id:1)` は `no such photo 1` で失敗した。C Importは `[3]`、A再Importは `[4]`。 | Aの旧ID 1は削除後のinspectで拒否され、同じ一時SessionでCとAをImportできた。再Import AはID 4を取得した。これは恒久削除と新規Importの挙動であり、Nativeメモリ退役の証明ではない。 |
+| 削除直後のUndo／Redo | 別SessionでA/BをID 1/2としてImportし、Bを選択、Aを恒久削除後 `edit.undo` は `undone:"Delete Permanently"`。inspect ID 1が成功し `deleted:false`、exposure 0、History空を返した。次の `edit.redo` は `redone:"Delete Permanently"`、inspect ID 1は `no such photo 1`。さらにUndoするとID 1が再びinspectできた。 | 削除のUndo操作が旧PhotoIdと写真状態を復元し、Redoで同じIDを再削除することを実測した。編集値はデフォルト値のままで、非デフォルト編集状態の復元はこの実行では検証していない。 |
+
+#### 公開APIから確認できた範囲と未観測の内部状態
+
+`library.info` は一時Sessionで `persistent:false`、写真数2を返した。Headlessコマンド実行で観測できるundo／redoの応答は上記のとおり。今回のCLI公開コマンドからpending log、メモリ内journal、Beforeマップの内容を直接列挙する方法は確認できず、数値や内容を実測結果として記載しない。永続ライブラリは開いていないためディスクjournalへの追記もこの試験対象外である。
+
+ソース上は `Session::commit` が削除の逆操作をUndoへ保持し、順方向の `RemovePhoto` をpending logに積む。 `run_command` はコマンドID／引数をSessionのjournalへ記録し、永続ライブラリが開いている場合は `persist()` を呼ぶ。 `apply_through(RemovePhoto)` はmedia cacheをforgetする一方、独立した `Session.before` 参照の除去はこの経路にない。これは固定ソースの確認であり、当該コンテナの内容を実測したものではない。
+
+#### 原本とsidecar
+
+実行後のコピーのSHA-256とサイズは以下のとおり。コピー元と一致した。全fixtureで隣接XMPは引き続き存在せず、試験用ディレクトリ内に別sidecarも生成されなかった。
+
+| Fixture | bytes | SHA-256 | 隣接XMP |
+| --- | ---: | --- | --- |
+| A.dng | 24,938 | `00FDAF88EFAED361056369C0612311A4B9F94C2BB6A3102CEF53EBF655A40942` | なし |
+| B.jpg | 406,494 | `58AD0FE7C10ED3E7C54F07A3664449D04E54E87CEC7F268068934C1D0421CF6F` | なし |
+| C.jpg | 444,722 | `428F38C740E98BF5A4D9D7A8CAAC93916B4469E82F62AEB73571DD584A13FDEA` | なし |
+
+以上により、P2-2Aの削除・再Import、独立Undo／Redo、原本・sidecar比較は実行した。未検証は非デフォルト編集状態を含むUndo、Beforeの実行時値、pending log／journalの実行時内部内容、Nativeの内部PhotoId参照とCPU／GPU資源解放である。pending log等の観測には公開APIがなく、内部状態を露出する診断機能は追加していない。恒久削除はUndoで旧IDを復活させるため、安全なResident退役としては不適合というP2-1の判断を維持する。
