@@ -295,4 +295,35 @@ HeadlessのMCP transportに `headless.retirePhoto` とPoC tool `headless_retire_
 
 Engine処理は `&mut Session` 上で同期実行される。PoCはHeadlessの同期コマンド経路を対象とし、別threadが保持するRenderJob、activity/job内のPhotoId参照を列挙する公開APIは追加していない。interactionの拒否は実装とソースで確認したが、fixtureを使ったinteraction中の実行試験は未実施。Redo、pending log、journalの内容と対象Photo IDの非参照はNative focused testのSession内部状態で確認し、BeforeのB保持もfocused testで確認した。OSのworking set、GPU allocator、長時間反復時のメモリ回収は測定していない。選択中の写真はPoC契約上拒否する。Undo／RedoとlogをSession全体で破棄するため、この処理は一時Headless Sessionにのみ使える。
 
-正式managed patch化を判断する前に、interaction中の拒否、繰り返し退役・再Import、残存job参照のないことをNative側で保証する境界を確認する必要がある。特に履歴全消去がEngineの一時Headless利用で許容されるか、かつ他のPhotoId参照がないことを追加Native testで確定してから、managed patch対象と公開API契約を検討する。P2-2BのPoC patchは製品へ適用しない。
+P2-3ではHeadless内の解放通知・候補選択と、同一Sessionでの反復退役／再Importをfocused testおよび実CLIで確認した。正式managed patch化の前にはinteraction中の拒否をfixtureで実測し、非同期Native jobとの安全境界、長期資源傾向、履歴全消去が一時Headlessで許容可能であることを追加確認する。P2-2B／P2-3のPoC patchは製品へ適用しない。
+
+
+## P2-3 LightCraft Native側のResident自律入替PoC
+
+### Native Undo／Redo・pending logの記録
+
+固定upstreamとP2-2B実装を確認した範囲では、Headless SessionだけでUndo／Redoまたはpending logの記録を最初から無効化する公開Session設定は見つからなかった。Engineの `Session::commit` と各種operation適用がこれらを更新するため、記録停止にはEngineの広い操作経路を変える必要があり、Session整合性への影響をこのPoCで正当化できない。P2-3は記録方法を変更せず、P2-2Bの退役成功時に一時Session全体のUndo／Redo・pending log・command journalを破棄する方式を維持する。退役した写真の参照を残さず、通常Libraryや通常Undo契約に影響させないことを優先した。
+
+### 入場・候補選択・退役契約
+
+PoCはLightCraft v0.20.0 upstream `192ff72923c39e6623f2c7ff67ab3a119deb8071` にmanifest所定の正式managed patch `0001-v0.20.0-whole-frame.patch` を適用し、その後P2-2B [個別退役PoC patch](../../../native/lightcraft/poc/p2-2b-headless-photo-retirement.patch)、続けて [Resident入替PoC patch](../../../native/lightcraft/poc/p2-3-headless-resident-replacement.patch) を `git apply --unidiff-zero` で適用する。P2-3 patch SHA-256は `EF37C11FD497BB9DD77235BCCFF83904B225ED455C1A2BCEEAEDCB883FC62C09`。P2-3 patchはP2-2B後の差分で、変更対象は `crates/mcp/src/headless.rs`、`crates/mcp/src/tools.rs`、`crates/mcp/src/tests.rs`。正式manifest、正式managed patch、製品用Native binaryには含めない。
+
+Headless MCPにPoC専用の `headless.release_photo(id)` と `headless.import_with_eviction(paths)` を追加した。前者は一時Session内にある非選択写真について、interactionがないことを確認して利用終了の通知を記録する。通知は退役そのものではなく、後続Importで候補にできるという意味である。保存確定・Document Close後にだけ通知する責任は呼出側に残る。後者は単一の写真をImportするHeadless専用経路で、Native側が管理するアクセス順から最も古い解放通知済みかつ非選択の写真を選び、既存のP2-2B退役処理を呼び出してから通常の `library.import` を実行する。候補IDや順序をGenzoRoomから渡さず、選択中写真、interaction中、永続Library、解放通知のない写真は退役させない。PoC上のResident数2は巡回を短く再現するための試験設定で、製品上限やLightCraftのメモリ予算値を決定するものではない。
+
+成功応答は `{status:"ok", importedIds, retiredIds, error:null}`。候補不足やImport前の拒否は `status:"rejected"` で両ID配列は空。退役後にImportが失敗した場合、または上限を満たす前に候補が尽きた場合は `status:"partial_failure"` と確定済み `retiredIds`、空の `importedIds`、Nativeの失敗情報を返す。退役入口がエラーを返し変更結果が確定できない場合は `status:"unknown"` とし、既に確定した `retiredIds` と結果不明の `unknownId` を返す。呼出側は同Sessionを続けて使わず破棄する必要がある。この契約は成功した退役と新規Importの失敗を区別するが、応答自体がtransport上で失われた場合は、同じSession内の状態確認またはSession破棄が必要であり、要求の盲目的な再送を成功扱いしない。
+
+LightCraft側Headlessがselection／importを監視し、最近使ったIDの順序と明示解放済みIDを保持する。個別のCPU／GPU管理、Native cacheの無効化、メモリ計測、独立したGenzoRoom LRUは追加していない。実退役時のCatalog整理と `media.forget` はP2-2Bの既存Engine処理を使う。Native通常APIの `library.import` や一般削除の意味は変更していない。
+
+### 検証結果
+
+固定upstream + 正式managed patch + P2-2B + P2-3の独立Native worktreeで `cargo test -p lightcraft-mcp --no-default-features headless_ -- --nocapture` を実行し、focused unit 6件と関連MCP integration 1件が成功した。Residentテストは合成PNGを使い、同一SessionでA/BをImport、A→B→Aを選択、解放通知済みの古い候補だけを退役してC/D/E相当を順次Import、退役IDを再利用せず、空き候補がないときはCatalog数を維持して拒否することを確認する。永続Libraryでは解放・入替の両APIを拒否する。Native CLIは同じPoC checkoutから `cargo build -p lightcraft-cli --no-default-features` でビルドした。
+
+既存の合成DNG A、JPEG B、JPEG Cの試験コピーを使った実CLI MCP stdio試験も成功した。A/BはID 1/2でImportし、A→B→A再選択後、Aのexposure 0.4とBefore renderが保たれたまま、Bを退役してCをID 3でImportした。その後、別の解放通知を使ってAを退役しBをID 4で再Import、Cを退役しAをID 5で再Importした。旧ID 1はinspectで拒否され、A再ImportのID 5とは異なる。Aを退役した後のUndo／Redoでも旧ID 1は復活しなかった。Bは最初の巡回で退役対象だったため、ID 4での再Importは新しい写真としてImport既定値となる。GenzoRoomが保存済みRecipeを再適用する接続は今回の対象外である。候補がないときは `rejected`、解放通知したBの退役後に無効なJPEGをImportしたときは `partial_failure`、退役済みID `4` が応答に含まれることを確認した。
+
+試験コピーのA.dng／B.jpg／C.jpgは実行前後でサイズとSHA-256が一致し、隣接XMP sidecarは存在せず、新規sidecarも生成されなかった。Undo／Redo・pending log・journalの整理はP2-2BのNative focused testでSession内部状態を検査済みであり、P2-3のCLI試験では旧IDが戻らないことを確認した。今回のCLI経路はHeadless内で同期実行されるため並行Native jobの退役競合を再現しておらず、CPU／GPU実メモリの即時解放や長時間巡回の資源傾向も測定していない。interaction中の拒否はP2-2B実装に基づき、P2-3専用のfixture実測ではない。
+
+### 成立範囲・GenzoRoom接続と次の確認
+
+LightCraft Headless内で「利用終了の通知→LightCraft自身による候補選択→既存退役→通常Import」の同期経路が成立し、退役対象を呼出側が選ばずに同一Sessionで複数回の入替を続けられた。GenzoRoom接続に必要となる最小契約は、保存確定・Document Close後のPhoto解放通知、`import_with_eviction`の結果中の新PhotoId／退役PhotoIdの受領、`partial_failure`／`unknown`時のWorkspace破棄判断である。Recipe／History永続化やSession再生成をNative側へ移すものではない。
+
+これはNative API／Headlessの成立性をみるPoCで、製品のメモリ容量に対する最適Resident数、候補選択の長時間性能、async Native jobとの排他、transport応答喪失からの状態回復、正式MCP APIとしての互換性は未確定である。P2-3では製品用Capacity設定、GenzoRoom Backend接続、manifest／正式managed patch更新を行わない。正式採用時はP2-2BとP2-3を合わせてmanaged patch化し、UPDATE_GUIDEに従って固定upstreamへの順次適用、Native build、実binaryの契約確認、GenzoRoom adapter統合を別工程で行う。
