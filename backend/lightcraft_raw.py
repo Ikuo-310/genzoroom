@@ -33,7 +33,6 @@ MAX_BASE64_CHARS = 4 * ((MAX_IMAGE_BYTES + 2) // 3)
 MAX_METADATA_BYTES = 16 * 1024
 MAX_PATCH_BYTES = 64 * 1024
 MAX_SETTINGS_BYTES = 256 * 1024
-MAX_RAW_FILES = 2
 MAX_EDITS = 256
 MAX_PREVIEW_SIDE = 2048
 # Legacy bootstrap and document Before identity must not change with the advertised ceiling.
@@ -718,7 +717,6 @@ class LightCraftRawSession:
         self._lifecycle = asyncio.Lock()
         self._stop = asyncio.Event()
         self._photos = {}
-        self._resident = set()
         self._active = None
         self._desired_token = None
         self._generation = None
@@ -799,7 +797,8 @@ class LightCraftRawSession:
         state = ("stopped" if self._closed else "closing" if self._stop.is_set() else
                  "lost" if self._lost else "desynchronized" if self._desynchronized else
                  self._phase or (photo.sync if photo else "empty"))
-        return RawStatus(state, self._generation, self._epoch, len(self._resident), self._edits,
+        return RawStatus(state, self._generation, self._epoch,
+                         sum(photo.photo_id is not None for photo in self._photos.values()), self._edits,
                          self._running is not None, self._pending is not None or self._before_pending is not None)
 
     def _available(self, *, allow_desync=False):
@@ -818,6 +817,8 @@ class LightCraftRawSession:
         if artifact is None or artifact['version'] != ENGINE_VERSION or artifact['upstreamCommit'] != ENGINE_COMMIT:
             # A version string cannot authorize stamping a saved Recipe with a source commit.
             raise LightCraftError('raw_unverified_artifact')
+        if artifact.get("headlessResidentContract") != 1:
+            raise LightCraftError("raw_unverified_artifact")
         if self._desynchronized and not allow_desync:
             raise LightCraftError("raw_session_desynchronized")
         if self._generation is None:
@@ -1026,35 +1027,81 @@ class LightCraftRawSession:
             lightcraft_log("raw.lensProfileInfo.unavailable", level="warn", generation=self._generation,
                            errorCode=error.code)
 
-    async def _import(self, key, path, fingerprint, previous, deadline):
+    def _apply_retired_ids(self, ids):
+        for photo_id in ids:
+            photo = next((item for item in self._photos.values() if item.photo_id == photo_id), None)
+            if photo is None:
+                self._desynchronized = True
+                raise LightCraftError("raw_invalid_resident_response")
+            photo.photo_id = None
+            if photo.handle.source_key == self._active:
+                self._active = self._desired_token = None
+
+    async def release_photo(self, handle):
+        self._ensure_curve_interaction_owner()
+        photo = self._photo(handle, active=True)
+
+        async def action(deadline):
+            current = self._photo(handle, active=True)
+            result = await self.manager._raw_headless(
+                self._generation, "headless_release_photo", {"id": current.photo_id},
+                timeout=min(self._timeouts.command, self._remaining(deadline)))
+            if result != {"released": current.photo_id}:
+                self._desynchronized = True
+                raise LightCraftError("raw_invalid_resident_response")
+            return result
+
+        return await self._submit(action, self._timeouts.command)
+
+    async def _import(self, key, path, fingerprint, previous, deadline, *, restore_previous=True):
         if not self._budget_set:
             budget = await self._command("app.memoryBudget", {"mb": 1024}, deadline)
             if not isinstance(budget, dict) or type(budget.get("budget")) is not int or budget["budget"] != 1024**3:
                 raise LightCraftError("raw_memory_budget_mismatch")
             self._budget_set = True
         try:
-            result = await self._command("library.import", {"paths": [path], "mode": "add"}, deadline)
+            result = await self.manager._raw_headless(
+                self._generation, "headless_import_with_eviction", {"paths": [path]},
+                timeout=min(self._timeouts.import_raw, self._remaining(deadline)))
         except BaseException:
             self._desynchronized = True
             raise
-        if not isinstance(result, dict) or not isinstance(result.get("imported"), list) or \
-                not isinstance(result.get("failed"), list) or not isinstance(result.get("duplicates"), list):
+        status = result.get("status")
+        imported = result.get("importedIds")
+        retired = result.get("retiredIds")
+        if status not in {"ok", "rejected", "partial_failure", "unknown"} or \
+                not isinstance(imported, list) or not isinstance(retired, list) or \
+                result.get("errorCode") not in (None, "duplicate_source") or \
+                any(type(value) is not int or value <= 0 or value > 0xffffffffffffffff for value in imported + retired) or \
+                len(set(imported)) != len(imported) or len(set(retired)) != len(retired) or \
+                set(imported).intersection(retired) or \
+                result.get("errorCode") is not None and status not in {"rejected", "partial_failure"}:
             self._desynchronized = True
             raise LightCraftError("raw_invalid_import_response")
-        ids = result["imported"]
-        if result["failed"] or result.get("restored") or len(ids) > 1 or ids and result["duplicates"]:
-            self._desynchronized = bool(ids) or bool(result.get("restored"))
+        try:
+            self._apply_retired_ids(retired)
+        except LightCraftError:
+            raise
+        if status == "unknown":
+            self._desynchronized = True
+            raise LightCraftError("raw_native_result_unknown")
+        if status == "partial_failure":
+            self._desynchronized = True
             raise LightCraftError("raw_import_failed")
-        if not ids and len(result["duplicates"]) == 1:
-            duplicate = result["duplicates"][0]
-            ids = [duplicate.get("existing")] if isinstance(duplicate, dict) else []
-        if len(ids) != 1 or type(ids[0]) is not int or not 0 < ids[0] <= 0xffffffffffffffff:
+        if status == "rejected":
+            if imported or retired:
+                self._desynchronized = True
+                raise LightCraftError("raw_invalid_import_response")
+            if result.get("errorCode") == "duplicate_source":
+                raise LightCraftError("raw_duplicate_source")
+            raise LightCraftError("raw_import_failed")
+        if len(imported) != 1:
             self._desynchronized = True
             raise LightCraftError("raw_invalid_import_response")
-        photo_id = ids[0]
-        if photo_id in self._resident:
+        photo_id = imported[0]
+        if any(item.photo_id == photo_id for item in self._photos.values()):
+            self._desynchronized = True
             raise LightCraftError("raw_duplicate_source")
-        self._resident.add(photo_id)
         try:
             info = await self._command("photo.inspect", {"id": photo_id}, deadline)
             if not isinstance(info, dict) or type(info.get("id")) is not int or info["id"] != photo_id or \
@@ -1106,7 +1153,7 @@ class LightCraftRawSession:
                                and json.loads(settings).get("wb", {}).get("scale") == "kelvin")
             if photo.wb_kelvin:
                 photo.as_shot_wb = tuple(white)
-            if previous is not None:
+            if previous is not None and restore_previous:
                 settings = await self._restore(photo, previous.settings_json, deadline)
             self._commit(photo, settings)
             self._photos[key] = photo
@@ -1127,8 +1174,6 @@ class LightCraftRawSession:
         previous = self._photos.get(source_key)
         if previous is not None and (path != previous.path or fingerprint != previous.fingerprint):
             raise LightCraftError("raw_source_changed")
-        if previous is None and len(self._photos) >= MAX_RAW_FILES:
-            raise LightCraftError("raw_session_capacity")
 
         self._invalidate(selection=True)
         epoch = self._epoch
@@ -1143,8 +1188,6 @@ class LightCraftRawSession:
             previous = self._photos.get(source_key)
             if previous is not None and (path != previous.path or fingerprint != previous.fingerprint):
                 raise LightCraftError("raw_source_changed")
-            if previous is None and len(self._photos) >= MAX_RAW_FILES:
-                raise LightCraftError("raw_session_capacity")
             if previous is not None and previous.photo_id is not None:
                 photo = previous
                 await self._command("library.select", {"ids": [photo.photo_id], "active": photo.photo_id, "mode": "replace"}, deadline)
@@ -1155,9 +1198,8 @@ class LightCraftRawSession:
                     self._invalidate()
                     self._commit(photo, settings)
             else:
-                if len(self._resident) >= MAX_RAW_FILES:
-                    raise LightCraftError("raw_session_capacity")
-                photo = await self._import(source_key, path, fingerprint, previous, deadline)
+                photo = await self._import(source_key, path, fingerprint, previous, deadline,
+                                           restore_previous=previous is None or previous.photo_id is not None)
             self._active = source_key
             if epoch == self._epoch:
                 self._desired_token = photo.handle.document_token
@@ -3398,13 +3440,12 @@ class LightCraftRawSession:
                         await asyncio.sleep(.01)
                 self._generation = generation
                 self._lost = self._desynchronized = self._budget_set = False
-                self._resident.clear()
                 self._edits = 0
                 self._active = self._desired_token = None
                 for photo in self._photos.values():
                     photo.photo_id = None
                 if not restore_active:
-                    # This explicit operation is also the PoC's bounded way to release snapshots.
+                    # Workspace release remains the owner of cached source snapshots.
                     self._photos.clear()
                 if restore_active and active is not None:
                     previous = self._photos[active]
@@ -3452,6 +3493,5 @@ class LightCraftRawSession:
                 joined = asyncio.create_task(self._join_operations(), name="lightcraft-raw-join")
                 await _await_task_resilient(joined)
                 self._photos.clear()
-                self._resident.clear()
                 self._active = self._desired_token = None
             self._closed = True

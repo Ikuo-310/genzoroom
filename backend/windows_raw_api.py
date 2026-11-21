@@ -596,6 +596,7 @@ class RawPreviewApi:
                     raise LightCraftError("raw_stale_handle")
                 if doc["revision"] != identity[4]:
                     raise LightCraftError("raw_revision_conflict")
+                await self.raw.release_photo(self._raw_handle)
                 self._clear_document()
                 self._document_close_receipt = identity
                 return Response(status_code=204, headers={"Cache-Control": "no-store"})

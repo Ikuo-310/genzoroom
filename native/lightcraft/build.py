@@ -59,6 +59,8 @@ def manifest(path=None):
             raise ValueError('invalid Point Color Range contract')
         if 'sharpenPreviewContract' in value and (type(value['sharpenPreviewContract']) is not int or value['sharpenPreviewContract'] != 1):
             raise ValueError('invalid sharpening preview contract')
+        if 'headlessResidentContract' in value and (type(value['headlessResidentContract']) is not int or value['headlessResidentContract'] != 1):
+            raise ValueError('invalid headless resident contract')
     if 'geometryDescriptorContract' in value and 'wholeFrameContract' not in value:
         if 'cropEditContract' in value and (type(value['cropEditContract']) is not int or value['cropEditContract'] != 1):
             raise ValueError('unsupported crop editing contract')
@@ -262,7 +264,57 @@ def probe_whole_frame(binary, spec):
             run([sys.executable, str(ROOT / 'point_color_range_probe.py'), str(binary.resolve())])
         if spec.get('sharpenPreviewContract') == 1:
             run([sys.executable, str(ROOT / 'sharpen_preview_probe.py'), str(binary.resolve())])
+        if spec.get('headlessResidentContract') == 1:
+            probe_headless_resident(binary, spec)
     print('Whole Frame binary schema, settings, PNG and error response verified')
+
+
+def probe_headless_resident(binary, spec):
+    """Verify the installed Headless admission/release tools and response envelope."""
+    with tempfile.TemporaryDirectory(prefix='genzoroom-resident-') as folder:
+        paths = []
+        for name, color in [('a', (32, 64, 96)), ('b', (96, 64, 32))]:
+            path = Path(folder) / f'{name}.png'
+            def chunk(kind, data):
+                return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data))
+            path.write_bytes(b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 8, 8, 8, 2, 0, 0, 0))
+                            + chunk(b'IDAT', zlib.compress((b'\0' + bytes(color) * 8) * 8)) + chunk(b'IEND', b''))
+            paths.append(path)
+        def tool(index, name, arguments):
+            return {'jsonrpc': '2.0', 'id': index, 'method': 'tools/call', 'params': {'name': name, 'arguments': arguments}}
+        messages = [
+            {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'protocolVersion': '2025-06-18',
+             'capabilities': {}, 'clientInfo': {'name': 'genzoroom-resident-probe', 'version': '1'}}},
+            {'jsonrpc': '2.0', 'method': 'notifications/initialized'},
+            {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/list'},
+            tool(3, 'command_run', {'id': 'library.import', 'params': {'paths': [str(paths[0])], 'mode': 'add'}}),
+            tool(4, 'headless_release_photo', {'id': 1}),
+            tool(5, 'headless_import_with_eviction', {'paths': [str(paths[1])]}),
+            tool(6, 'command_run', {'id': 'library.select', 'params': {'ids': [2], 'active': 2, 'mode': 'replace'}}),
+            tool(7, 'headless_retire_photo', {'id': 1}),
+        ]
+        process = subprocess.run([str(binary), 'mcp', '--headless', '--compact'],
+            input=''.join(json.dumps(item) + '\n' for item in messages).encode(), stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, timeout=120, check=True, env={**os.environ, 'TEMP': folder, 'TMP': folder},
+            creationflags=0x08000000 if os.name == 'nt' else 0)
+        replies = {item['id']: item for line in process.stdout.splitlines() if (item := json.loads(line)).get('id') is not None}
+        tools = replies[2]['result']['tools']
+        retire = next((item for item in tools if item.get('name') == 'headless_retire_photo'), None)
+        release = next((item for item in tools if item.get('name') == 'headless_release_photo'), None)
+        importing = next((item for item in tools if item.get('name') == 'headless_import_with_eviction'), None)
+        if retire is None or retire.get('inputSchema', {}).get('required') != ['id'] \
+                or release is None or release.get('inputSchema', {}).get('required') != ['id'] \
+                or importing is None or importing.get('inputSchema', {}).get('required') != ['paths']:
+            raise ValueError('binary Headless Resident schema mismatch')
+        if any(replies[index]['result'].get('isError') is not False for index in (3, 4, 5, 6, 7)):
+            raise ValueError('binary Headless Resident operation failed')
+        release_result = replies[4]['result'].get('structuredContent')
+        imported = replies[5]['result'].get('structuredContent')
+        retired = replies[7]['result'].get('structuredContent')
+        if release_result != {'released': 1} or imported != {
+                'status': 'ok', 'importedIds': [2], 'retiredIds': [], 'error': None, 'errorCode': None} \
+                or retired != {'retired': 1}:
+            raise ValueError(f'binary Headless Resident response mismatch: {imported}')
 
 
 def probe_region(binary, source, descriptor_contract):
@@ -656,7 +708,8 @@ def receipt(binary, spec):
                    if spec.get('regionContract') == 1 else {}),
                 **({'wbContract': 1} if spec.get('wbContract') == 1 else {}),
                 **({'pointColorRangeContract': 1} if spec.get('pointColorRangeContract') == 1 else {}),
-                **({'sharpenPreviewContract': 1} if spec.get('sharpenPreviewContract') == 1 else {})}
+                **({'sharpenPreviewContract': 1} if spec.get('sharpenPreviewContract') == 1 else {}),
+                **({'headlessResidentContract': 1} if spec.get('headlessResidentContract') == 1 else {})}
     return {"version": spec["version"], "commit": spec["commit"], "patches": spec["patches"],
             "binarySha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "beforeContract": 1, "previewContract": 1, "regionContract": 1,
             "geometryDescriptorContract": spec['geometryDescriptorContract'],

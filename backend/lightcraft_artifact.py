@@ -33,6 +33,8 @@ def managed_manifest():
             raise ValueError('invalid managed LightCraft manifest')
         if 'sharpenPreviewContract' in value and (type(value['sharpenPreviewContract']) is not int or value['sharpenPreviewContract'] != 1):
             raise ValueError('invalid managed LightCraft manifest')
+        if 'headlessResidentContract' in value and (type(value['headlessResidentContract']) is not int or value['headlessResidentContract'] != 1):
+            raise ValueError('invalid managed LightCraft manifest')
         return value
     if type(value.get('geometryDescriptorContract')) is not int or value['geometryDescriptorContract'] != 2 \
             or value.get('contracts') != {'before': 1, 'preview': 1, 'region': 1, 'wb': 1} \
@@ -100,10 +102,12 @@ def verified_artifact(executable, digest, version):
                            if MANAGED.get('regionContract') == 1 else {}),
                         **({'wbContract': 1} if MANAGED.get('wbContract') == 1 else {}),
                         **({'pointColorRangeContract': 1} if MANAGED.get('pointColorRangeContract') == 1 else {}),
-                        **({'sharpenPreviewContract': 1} if MANAGED.get('sharpenPreviewContract') == 1 else {})}
+                        **({'sharpenPreviewContract': 1} if MANAGED.get('sharpenPreviewContract') == 1 else {}),
+                        **({'headlessResidentContract': 1} if MANAGED.get('headlessResidentContract') == 1 else {})}
             if not isinstance(value, dict) or type(value.get('wholeFrameContract')) is not int \
                 or any(type(value.get(key)) is not int for key in ('cropEditContract', 'beforeAfterContract', 'draftContract',
-                    'regionContract', 'geometryDescriptorContract', 'wbContract', 'pointColorRangeContract', 'sharpenPreviewContract') if key in expected) or value != expected \
+                    'regionContract', 'geometryDescriptorContract', 'wbContract', 'pointColorRangeContract', 'sharpenPreviewContract',
+                    'headlessResidentContract') if key in expected) or value != expected \
                     or version != expected['version'] or not re.fullmatch(r'[a-f0-9]{64}', digest):
                 return None
             return {'version': version, 'upstreamCommit': expected['commit'], 'managedPatch': True,
@@ -114,7 +118,8 @@ def verified_artifact(executable, digest, version):
                        if 'regionContract' in expected else {}),
                     **({'wbContract': 1} if 'wbContract' in expected else {}),
                     **({'pointColorRangeContract': 1} if 'pointColorRangeContract' in expected else {}),
-                    **({'sharpenPreviewContract': 1} if 'sharpenPreviewContract' in expected else {})}
+                    **({'sharpenPreviewContract': 1} if 'sharpenPreviewContract' in expected else {}),
+                    **({'headlessResidentContract': 1} if 'headlessResidentContract' in expected else {})}
         expected = {**{key: MANAGED[key] for key in ('version', 'commit', 'patches', 'geometryDescriptorContract')},
                     'binarySha256': digest, 'beforeContract': 1, 'previewContract': 1, 'regionContract': 1,
                     **({'cropEditContract': 1} if MANAGED.get('cropEditContract') == 1 else {}),

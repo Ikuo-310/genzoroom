@@ -63,9 +63,11 @@ def test_document_switch_reuses_resident_and_restores_history_cursor(local, tmp_
                 close_url = f'/api/raw/documents/{doc["handle"]}'
                 rejected = await http.delete(close_url, headers=close_headers(doc))
                 assert rejected.status_code == 409 and api.document["handle"] == doc["handle"]
+                assert not any(command == "headless.releasePhoto" for command, _ in children[0].commands)
                 doc = await recover(http, api, doc)
                 assert doc["values"]["light.exposure"] == 1.
                 assert (await http.delete(close_url, headers=close_headers(doc))).status_code == 204
+                assert children[0].commands[-1][0] == "headless.releasePhoto"
                 asset_b = str(uuid4())
                 opened = await http.post("/api/raw/documents", json={"workspaceId": workspace, "assetId": asset_b})
                 assert opened.status_code == 200, opened.text
@@ -88,7 +90,7 @@ def test_document_switch_reuses_resident_and_restores_history_cursor(local, tmp_
     asyncio.run(asyncio.wait_for(run(), 20))
 
 
-def test_resident_capacity_and_hard_budget_recover_by_workspace_release(local, tmp_path, monkeypatch):
+def test_native_residency_continues_and_hard_budget_recovers_by_workspace_release(local, tmp_path, monkeypatch):
     async def run():
         api, manager, children, _ = await setup(tmp_path, local, monkeypatch)
         try:
@@ -105,14 +107,15 @@ def test_resident_capacity_and_hard_budget_recover_by_workspace_release(local, t
                 second = opened.json()
                 assert api.raw.status().resident_count == 2
                 assert (await http.delete(f'/api/raw/documents/{second["handle"]}', headers=close_headers(second))).status_code == 204
-                third_asset = str(uuid4())
-                denied = await http.post("/api/raw/documents", json={"workspaceId": workspace, "assetId": third_asset})
-                assert denied.status_code != 200 and denied.json()["code"] == "raw_session_capacity"
-                assert api.workspace is None and children[0].returncode is not None
-                workspace, opened = await open_asset(http, third_asset)
-                assert opened.status_code == 200
-                doc = opened.json()
-                assert doc["generation"] > generation and api.raw.status().resident_count == 1
+                for index in range(3):
+                    third_asset = str(uuid4())
+                    opened = await http.post("/api/raw/documents", json={"workspaceId": workspace, "assetId": third_asset})
+                    assert opened.status_code == 200, opened.text
+                    doc = opened.json()
+                    assert doc["generation"] == generation and doc["workspaceId"] == workspace
+                    if index < 2:
+                        await http.delete(f'/api/raw/documents/{doc["handle"]}', headers=close_headers(doc))
+                assert api.raw.status().resident_count == 5 and children[0].returncode is None
                 assert doc["regenerationThreshold"] == 200 and doc["mutationLimit"] == 256
                 for attempt in range(200 - doc["mutationAttempts"]):
                     doc = await change(http, doc, (attempt % 30) / 10)
@@ -122,8 +125,13 @@ def test_resident_capacity_and_hard_budget_recover_by_workspace_release(local, t
                 saved = await http.put(f'/api/raw/documents/{doc["handle"]}/recipe', json=save_body(doc))
                 assert saved.status_code == 200
                 assert (await http.delete(f'/api/raw/workspaces/{workspace}')).status_code == 204
-                workspace, reopened = await open_asset(http, third_asset)
-                assert reopened.status_code == 200
+                workspace_response = await http.post("/api/raw/workspaces", json={})
+                assert workspace_response.status_code == 200
+                workspace = workspace_response.json()["workspaceId"]
+                api.cache._acquire = acquire
+                reopened = await http.post("/api/raw/documents", json={"workspaceId": workspace,
+                                                                          "assetId": third_asset})
+                assert reopened.status_code == 200, reopened.text
                 next_doc = reopened.json()
                 assert next_doc["generation"] > doc["generation"]
                 assert next_doc["mutationAttempts"] == 1 and next_doc["regenerationThreshold"] == 200
@@ -134,10 +142,70 @@ def test_resident_capacity_and_hard_budget_recover_by_workspace_release(local, t
                     json=identity(doc) | {"expectedRevision": doc["revision"], "values": {"light.exposure": 1.}})
                 assert denied.json()["code"] == "raw_session_edit_limit"
                 assert (await http.delete(f'/api/raw/workspaces/{workspace}')).status_code == 204
-                workspace, reopened = await open_asset(http, third_asset)
-                assert reopened.status_code == 200
+                workspace_response = await http.post("/api/raw/workspaces", json={})
+                assert workspace_response.status_code == 200
+                workspace = workspace_response.json()["workspaceId"]
+                api.cache._acquire = acquire
+                reopened = await http.post("/api/raw/documents", json={"workspaceId": workspace,
+                                                                          "assetId": third_asset})
+                assert reopened.status_code == 200, reopened.text
                 assert reopened.json()["generation"] > doc["generation"]
                 assert reopened.json()["mutationAttempts"] < 200
+                assert (await http.delete(f'/api/raw/workspaces/{workspace}')).status_code == 204
+        finally:
+            await api.close()
+    asyncio.run(asyncio.wait_for(run(), 20))
+
+
+def test_native_eviction_reimports_asset_from_committed_recipe_and_history(local, tmp_path, monkeypatch):
+    async def run():
+        api, manager, children, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                workspace, doc = await open_document(http)
+                asset_a = doc["assetId"]
+                async def acquire(asset_id):
+                    return Original(data=str(asset_id).encode()), "dng"
+                api.cache._acquire = acquire
+                doc = await operation(http, doc, "initialize")
+                doc = await change(http, doc, 1.)
+                doc = await operation(http, doc, "commit", commit_body(doc))
+                doc = await change(http, doc, 2.)
+                doc = await operation(http, doc, "commit", commit_body(doc))
+                doc = await operation(http, doc, "undo")
+                assert doc["history"]["cursor"] == 1
+                saved_history = doc["history"]
+                old_a_id = api.raw._photos[asset_a].photo_id
+                assert (await http.delete(f'/api/raw/documents/{doc["handle"]}', headers=close_headers(doc))).status_code == 204
+                assert children[0].commands[-1] == ("headless.releasePhoto", {"id": old_a_id})
+
+                children[0].eviction_on_import = True
+                asset_b = str(uuid4())
+                opened = await http.post("/api/raw/documents", json={"workspaceId": workspace, "assetId": asset_b})
+                assert opened.status_code == 200, opened.text
+                doc_b = opened.json()
+                assert doc_b["generation"] == doc["generation"] == manager.status().generation
+                assert api.raw._photos[asset_a].photo_id is None
+                assert (await http.delete(f'/api/raw/documents/{doc_b["handle"]}', headers=close_headers(doc_b))).status_code == 204
+
+                reopened = await http.post("/api/raw/documents", json={"workspaceId": workspace, "assetId": asset_a})
+                assert reopened.status_code == 200, reopened.text
+                doc_a = reopened.json()
+                assert doc_a["generation"] == doc["generation"] and doc_a["workspaceId"] == workspace
+                assert doc_a["recipeStatus"] == "restored" and doc_a["recipeRevision"] == 4
+                assert api.raw._photos[asset_a].photo_id != old_a_id
+                history = await http.get(url(doc_a), headers=headers(doc_a))
+                assert history.status_code == 200
+                assert history.json()["history"]["cursor"] == 1
+                assert history.json()["history"]["cursor"] == saved_history["cursor"]
+                assert history.json()["history"]["length"] == saved_history["length"]
+                assert (await api.raw.get_settings(api._raw_handle)).settings["light"]["exposure"] == 1.
+                imports = [result for name, result in children[0].resident_results
+                           if name == "headless_import_with_eviction"]
+                assert imports[-2]["retiredIds"] == [old_a_id]
+                assert imports[-1]["retiredIds"] == [2]
+                assert children[0].returncode is None
                 assert (await http.delete(f'/api/raw/workspaces/{workspace}')).status_code == 204
         finally:
             await api.close()

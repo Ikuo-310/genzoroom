@@ -94,6 +94,45 @@ index 5403ad6eb21555be07ce72fbdf4b2aa9f733e2eb..45bb9fe5ae1cb122cee88638c26392c7
              edit(s, "develop.wbPick", "White Balance", |d| {
                  lightcraft_pipeline::local::normalize_wb(d, &info);
                  d.wb.mode = WbMode::Custom;
+diff --git a/crates/engine/src/lib.rs b/crates/engine/src/lib.rs
+index 53077f95c62e4332b61e58b5eb794bcd66de2948..0cd4d8cbfd7cdd852c80cd508eb2292419947e7a 100644
+--- a/crates/engine/src/lib.rs
++++ b/crates/engine/src/lib.rs
+@@ -947,6 +947,34 @@ impl Session {
+         self.selection.active.filter(|id| self.catalog.photo(*id).is_some())
+     }
+ 
++    /// Permanently forget one inactive photo in a disposable, non-persistent session.
++    pub fn retire_headless_photo(&mut self, id: PhotoId) -> Result<()> {
++        if self.library.is_some() {
++            return Err(EngineError::Other("photo retirement requires a transient session".into()));
++        }
++        if self.catalog.photo(id).is_none() {
++            return Err(EngineError::Other(format!("no such photo {}", id.0)));
++        }
++        if self.active() == Some(id) || self.selection.ids.contains(&id) {
++            return Err(EngineError::Other("cannot retire a selected photo".into()));
++        }
++        if self.interaction.is_some() {
++            return Err(EngineError::Other("cannot retire during an interaction".into()));
++        }
++        let op = self.catalog.delete_photos_permanently_ops(&[id]);
++        self.apply_through(op, Catalog::apply)?;
++        self.media.forget(id);
++        self.undo.clear();
++        self.redo.clear();
++        self.pending_log.clear();
++        self.journal.clear();
++        self.before.remove(&id);
++        self.selection.ids.retain(|photo| *photo != id);
++        self.selection.active = self.selection.active.filter(|photo| *photo != id);
++        self.previous_active = self.previous_active.filter(|photo| *photo != id);
++        Ok(())
++    }
++
+     pub fn develop_of(&self, id: PhotoId) -> Option<Arc<DevelopSettings>> {
+         self.catalog.photo(id).map(|p| p.develop.clone())
+     }
 diff --git a/crates/engine/src/media/quick.rs b/crates/engine/src/media/quick.rs
 index f7163b069322c239488aca24d1bc09c48f0eb2b9..768e2b49b2c3e260cafc751826af5cac1f4b39df 100644
 --- a/crates/engine/src/media/quick.rs
@@ -216,10 +255,196 @@ index b05dae56ff5fccab298fc6dee10239ddd47ed4b9..2de01852f042f6d57040223c2e9764fd
 +sha2 = { workspace = true }
  log = { workspace = true }
 diff --git a/crates/mcp/src/headless.rs b/crates/mcp/src/headless.rs
-index 11de914173043a86ea701ee0f9d55a89e92f2add..43f9209cccd8b2da09331a69d0f3b1819031ea51 100644
+index 11de914173043a86ea701ee0f9d55a89e92f2add..59101bfbc8b3bd811169ad3fcf6bf228313d5784 100644
 --- a/crates/mcp/src/headless.rs
 +++ b/crates/mcp/src/headless.rs
-@@ -139,15 +139,209 @@ impl Backend for Headless {
+@@ -1,6 +1,7 @@
+ //! An in-process [`Session`] that answers the control-channel methods the MCP tools use, so the
+ //! MCP server (and the CLI) work without a window.
+ 
++use std::collections::{HashSet, VecDeque};
+ use std::path::Path;
+ 
+ use lightcraft_engine::Session;
+@@ -14,6 +15,10 @@ use crate::backend::{Backend, ProgressHook};
+ pub struct Headless {
+     pub session: Session,
+     progress: Option<ProgressHook>,
++    resident_order: VecDeque<PhotoId>,
++    released: HashSet<PhotoId>,
++    #[cfg(test)]
++    force_cache_pressure: bool,
+ }
+ 
+ impl Drop for Headless {
+@@ -38,7 +43,13 @@ impl Default for Headless {
+ 
+ impl Headless {
+     pub fn new(session: Session) -> Self {
+-        Self { session, progress: None }
++        let resident_order = session.catalog.photos().map(|photo| photo.id).collect();
++        Self { session, progress: None, resident_order, released: HashSet::new(), #[cfg(test)] force_cache_pressure: false }
++    }
++
++    #[cfg(test)]
++    pub(crate) fn force_cache_pressure(&mut self) {
++        self.force_cache_pressure = true;
+     }
+ 
+     /// A headless session with the procedurally generated demo library.
+@@ -47,6 +58,97 @@ impl Headless {
+         Self::new(session.with_default_sam3_model().with_default_slide_templates())
+     }
+ 
++    fn touch(&mut self, id: PhotoId) {
++        self.resident_order.retain(|resident| *resident != id);
++        self.resident_order.push_back(id);
++        self.released.remove(&id);
++    }
++
++    fn record_import(&mut self, result: &Value) {
++        for id in ["imported", "restored"].into_iter().flat_map(|key| result[key].as_array().into_iter().flatten()).filter_map(Value::as_u64) {
++            self.touch(PhotoId(id));
++        }
++    }
++
++    fn cache_pressure(&self) -> bool {
++        #[cfg(test)]
++        if self.force_cache_pressure {
++            return true;
++        }
++        let memory = self.session.memory_report();
++        memory.cache_budget > 0 && memory.engine_bytes >= memory.cache_budget
++    }
++
++    fn import_with_eviction(&mut self, params: &Value) -> Result<Value, String> {
++        if self.session.library.is_some() {
++            return Err("resident replacement requires a transient session".into());
++        }
++        let path = match params.get("paths") {
++            Some(Value::Array(paths)) if paths.len() == 1 => paths[0].as_str().map(str::to_owned),
++            Some(Value::String(path)) => Some(path.clone()),
++            _ => None,
++        }
++        .ok_or("give one `path` or a single-item `paths`")?;
++        let paths = expand_paths(&[path]);
++        let Some(path) = paths.first() else {
++            return Err("no photo found".into());
++        };
++
++        let mut retired = Vec::new();
++        let requested_path = std::fs::canonicalize(path).unwrap_or_else(|_| Path::new(path).to_path_buf());
++        let already_resident = self.session.catalog.photos().find(|photo| match &photo.source {
++            lightcraft_engine::catalog::Source::File { path } => {
++                std::fs::canonicalize(path).unwrap_or_else(|_| Path::new(path).to_path_buf()) == requested_path
++            }
++            lightcraft_engine::catalog::Source::Demo { .. } => false,
++        }).map(|photo| photo.id);
++        if let Some(photo_id) = already_resident {
++            self.touch(photo_id);
++            return Ok(json!({"status": "ok", "importedIds": [photo_id.0], "retiredIds": [], "error": null}));
++        }
++        if self.cache_pressure() {
++            let candidate = self.resident_order.iter().copied().find(|id| {
++                self.released.contains(id) && !self.session.selection.ids.contains(id) && self.session.active() != Some(*id)
++            });
++            let Some(candidate) = candidate else {
++                return Ok(json!({"status": "rejected", "importedIds": [], "retiredIds": [],
++                    "error": "cache pressure has no released inactive photo"}));
++            };
++            if let Err(error) = self.session.retire_headless_photo(candidate) {
++                return Ok(json!({"status": "unknown", "importedIds": [], "retiredIds": retired, "unknownId": candidate.0,
++                    "error": error.to_string()}));
++            }
++            self.resident_order.retain(|id| *id != candidate);
++            self.released.remove(&candidate);
++            retired.push(candidate.0);
++        }
++
++        match self.session.execute("library.import", &json!({"paths": [path]})) {
++            Ok(report) => {
++                self.record_import(&report);
++                let imported: Vec<u64> = ["imported", "restored"]
++                    .into_iter()
++                    .flat_map(|key| report[key].as_array().into_iter().flatten())
++                    .filter_map(Value::as_u64)
++                    .collect();
++                let failed = report["failed"].as_array().is_some_and(|items| !items.is_empty());
++                let duplicate = report["duplicates"].as_array().is_some_and(|items| !items.is_empty());
++                let status = match (failed, retired.is_empty(), imported.is_empty(), duplicate) {
++                    (true, true, true, _) => "rejected",
++                    (true, _, _, _) | (false, false, true, _) => "partial_failure",
++                    (false, true, true, true) => "rejected",
++                    _ => "ok",
++                };
++                let error = failed.then(|| report["failed"].clone());
++                let error_code = duplicate.then_some("duplicate_source");
++                Ok(json!({"status": status, "importedIds": imported, "retiredIds": retired,
++                    "error": error, "errorCode": error_code}))
++            }
++            Err(error) => Ok(json!({"status": if retired.is_empty() { "rejected" } else { "partial_failure" },
++                "importedIds": [], "retiredIds": retired, "error": error.to_string()})),
++        }
++    }
++
+     fn photo_or_active(&self, p: &Value) -> Result<PhotoId, String> {
+         p.get("id").and_then(Value::as_u64).map(PhotoId).or(self.session.active()).ok_or_else(|| "no photo (import one or pass `id`)".to_string())
+     }
+@@ -123,13 +225,52 @@ impl Backend for Headless {
+     fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+         let p = if params.is_null() { json!({}) } else { params };
+         match method {
++            "headless.releasePhoto" => {
++                if self.session.library.is_some() {
++                    return Err("photo release requires a transient session".into());
++                }
++                let id = p.get("id").and_then(Value::as_u64).ok_or("missing or invalid `id`")?;
++                let id = PhotoId(id);
++                if self.session.catalog.photo(id).is_none() {
++                    return Err(format!("no such photo {}", id.0));
++                }
++                if self.session.interaction.is_some() {
++                    return Err("cannot release during an interaction".into());
++                }
++                // A closed document can leave its photo selected; release clears that stale headless selection.
++                self.session.selection.ids.retain(|selected| *selected != id);
++                self.session.selection.active = self.session.selection.active.filter(|selected| *selected != id);
++                self.session.previous_active = self.session.previous_active.filter(|selected| *selected != id);
++                self.released.insert(id);
++                Ok(json!({"released": id.0}))
++            }
++            "headless.importWithEviction" => self.import_with_eviction(&p),
++            "headless.retirePhoto" => {
++                let id = p.get("id").and_then(Value::as_u64).ok_or("missing or invalid `id`")?;
++                self.session.retire_headless_photo(PhotoId(id)).map_err(|e| e.to_string())?;
++                self.resident_order.retain(|resident| resident.0 != id);
++                self.released.remove(&PhotoId(id));
++                Ok(json!({"retired": id}))
++            }
+             "engine.execute" | "ui.menu.invoke" | "command" => {
+                 let id = p.get("command").or(p.get("id")).and_then(Value::as_str).ok_or("missing `command`")?;
+                 let params = p.get("params").cloned().filter(|v| !v.is_null()).unwrap_or(json!({}));
+                 if id == "app.export" {
+                     return self.export(&params);
+                 }
+-                self.session.execute(id, &params).map_err(|e| e.to_string())
++                let result = self.session.execute(id, &params).map_err(|e| e.to_string())?;
++                if id == "library.import" {
++                    self.record_import(&result);
++                } else if id == "library.select" {
++                    let selected = self.session.selection.ids.clone();
++                    for id in selected {
++                        self.touch(id);
++                    }
++                    if let Some(active) = self.session.active() {
++                        self.touch(active);
++                    }
++                }
++                Ok(result)
+             }
+             "engine.commands" => {
+                 let mut v: Vec<Value> = self.session.commands().into_iter().map(|c| serde_json::to_value(c).unwrap_or_default()).collect();
+@@ -139,15 +280,209 @@ impl Backend for Headless {
                  Ok(Value::Array(v))
              }
              "ui.render" => {
@@ -600,10 +825,141 @@ index 0000000000000000000000000000000000000000..6b3a5371dfef3a3337a7fbe2afc68414
 +  }
 +}
 diff --git a/crates/mcp/src/tests.rs b/crates/mcp/src/tests.rs
-index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..5dec4aa3eb00e95ac7b80d737f4362520516defc 100644
+index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..a6e99c0948c01535aa47b6682963f619371ccf71 100644
 --- a/crates/mcp/src/tests.rs
 +++ b/crates/mcp/src/tests.rs
-@@ -79,6 +79,27 @@ fn tools_list_has_helpers_and_every_command() {
+@@ -13,6 +13,130 @@ fn server() -> Server {
+     Server::new(Box::new(Headless::demo()))
+ }
+ 
++#[test]
++fn headless_photo_retirement_keeps_other_photo_and_drops_history_references() {
++    let mut headless = Headless::demo();
++    let ids: Vec<_> = headless.session.catalog.photos().map(|photo| photo.id).take(2).collect();
++    let retired = ids[0];
++    let kept = ids[1];
++    assert!(headless.session.retire_headless_photo(lightcraft_engine::catalog::PhotoId(u64::MAX)).is_err());
++    headless.session.execute("library.select", &json!({"ids": [retired.0], "active": retired.0})).unwrap();
++    assert!(headless.session.retire_headless_photo(retired).is_err(), "the active photo is refused");
++    assert!(headless.session.catalog.photo(retired).is_some());
++    headless.session.execute("library.select", &json!({"ids": [kept.0], "active": kept.0})).unwrap();
++    let kept_photo = headless.session.catalog.photo(kept).unwrap().clone();
++    headless.session.before.insert(kept, kept_photo.develop.clone());
++    headless.session.before.insert(retired, kept_photo.develop.clone());
++
++    headless.session.retire_headless_photo(retired).unwrap();
++
++    assert!(headless.session.catalog.photo(retired).is_none());
++    assert_eq!(headless.session.catalog.photo(kept).unwrap().develop, kept_photo.develop);
++    assert_eq!(headless.session.catalog.photo(kept).unwrap().history, kept_photo.history);
++    assert!(headless.session.before.contains_key(&kept));
++    assert!(!headless.session.before.contains_key(&retired));
++    assert!(headless.session.undo.is_empty());
++    assert!(headless.session.redo.is_empty());
++    assert!(headless.session.journal.is_empty());
++    assert!(headless.session.drain_log().is_empty());
++    assert!(headless.session.retire_headless_photo(retired).is_err());
++}
++
++#[test]
++fn headless_import_replaces_only_released_least_recent_photo() {
++    let base = std::env::temp_dir().join(format!("lc-mcp-resident-p2-3-{}", std::process::id()));
++    let _ = std::fs::remove_dir_all(&base);
++    std::fs::create_dir_all(&base).unwrap();
++    for (index, name) in ["A", "B", "C", "D", "E", "F"].into_iter().enumerate() {
++        let image = lightcraft_raster::Rgba8 { width: 12, height: 8, data: vec![[80 + index as u8, 120, 160, 255]; 96] };
++        let png = lightcraft_codecs::encode_png(&lightcraft_codecs::EncodeImage::rgba8(&image), &lightcraft_codecs::EncodeMeta::default()).unwrap();
++        std::fs::write(base.join(format!("{name}.png")), png).unwrap();
++    }
++    let mut headless = Headless::new(lightcraft_engine::Session::new().with_fs());
++    let import = |headless: &mut Headless, name: &str| {
++        headless.call("headless.importWithEviction", json!({"paths": [base.join(format!("{name}.png")).to_string_lossy()]})).unwrap()
++    };
++    let a = import(&mut headless, "A")["importedIds"][0].as_u64().unwrap();
++    let b = import(&mut headless, "B")["importedIds"][0].as_u64().unwrap();
++    let duplicate = import(&mut headless, "A");
++    assert_eq!(duplicate["status"], "ok");
++    assert_eq!(duplicate["importedIds"], json!([a]), "a resident Import request returns the existing photo ID");
++    assert!(duplicate["retiredIds"].as_array().unwrap().is_empty(), "a resident reimport request must not evict another photo");
++    assert_eq!(headless.session.catalog.photos().count(), 2);
++
++    for id in [a, b, a] {
++        headless.call("engine.execute", json!({"command": "library.select", "params": {"ids": [id], "active": id}})).unwrap();
++    }
++    headless.call("headless.releasePhoto", json!({"id": a})).unwrap();
++    assert_eq!(headless.session.active(), None, "release clears selection left by the closed headless document");
++    headless.call("engine.execute", json!({"command": "library.select", "params": {"ids": [a], "active": a}})).unwrap();
++    headless.call("headless.releasePhoto", json!({"id": b})).unwrap();
++    headless.force_cache_pressure();
++    let c_result = import(&mut headless, "C");
++    assert_eq!(c_result["status"], "ok");
++    assert_eq!(c_result["retiredIds"], json!([b]));
++    let c = c_result["importedIds"][0].as_u64().unwrap();
++    assert!(headless.session.catalog.photo(lightcraft_engine::catalog::PhotoId(a)).is_some(), "the recently selected photo remains resident");
++    assert!(headless.session.catalog.photo(lightcraft_engine::catalog::PhotoId(b)).is_none());
++
++    headless.call("engine.execute", json!({"command": "library.select", "params": {"ids": [c], "active": c}})).unwrap();
++    headless.call("headless.releasePhoto", json!({"id": a})).unwrap();
++    let d_result = import(&mut headless, "D");
++    assert_eq!(d_result["retiredIds"], json!([a]));
++    let d = d_result["importedIds"][0].as_u64().unwrap();
++    assert!(headless.session.catalog.photo(lightcraft_engine::catalog::PhotoId(a)).is_none());
++
++    headless.call("engine.execute", json!({"command": "library.select", "params": {"ids": [d], "active": d}})).unwrap();
++    headless.call("headless.releasePhoto", json!({"id": c})).unwrap();
++    let e_result = import(&mut headless, "E");
++    assert_eq!(e_result["retiredIds"], json!([c]));
++    let e = e_result["importedIds"][0].as_u64().unwrap();
++    headless.call("engine.execute", json!({"command": "library.select", "params": {"ids": [e], "active": e}})).unwrap();
++    headless.call("headless.releasePhoto", json!({"id": d})).unwrap();
++    let a_again = import(&mut headless, "A");
++    assert_eq!(a_again["retiredIds"], json!([d]));
++    let a_again = a_again["importedIds"][0].as_u64().unwrap();
++    assert_ne!(a_again, a, "a reimported photo receives a fresh id");
++    assert_eq!(headless.session.catalog.photos().count(), 2);
++    let no_candidate = import(&mut headless, "F");
++    assert_eq!(no_candidate["status"], "rejected");
++    assert!(no_candidate["retiredIds"].as_array().unwrap().is_empty());
++    assert_eq!(headless.session.catalog.photos().count(), 2);
++    let _ = std::fs::remove_dir_all(&base);
++}
++
++#[test]
++fn headless_resident_replacement_refuses_persistent_libraries() {
++    let dir = std::env::temp_dir().join(format!("lc-mcp-resident-persistent-{}", std::process::id()));
++    let _ = std::fs::remove_dir_all(&dir);
++    let mut headless = Headless::new(lightcraft_engine::Session::new());
++    headless.session.open_library(&dir, false).unwrap();
++    assert!(headless.call("headless.releasePhoto", json!({"id": 1})).unwrap_err().contains("transient"));
++    assert!(headless.call("headless.importWithEviction", json!({})).unwrap_err().contains("transient"));
++    headless.session.close_library().unwrap();
++    let _ = std::fs::remove_dir_all(dir);
++}
++
++#[test]
++fn headless_import_does_not_apply_a_fixed_resident_count() {
++    let base = std::env::temp_dir().join(format!("lc-mcp-resident-unbounded-{}", std::process::id()));
++    let _ = std::fs::remove_dir_all(&base);
++    std::fs::create_dir_all(&base).unwrap();
++    for index in 0..6u8 {
++        let image = lightcraft_raster::Rgba8 { width: 12, height: 8, data: vec![[80 + index, 120, 160, 255]; 96] };
++        let png = lightcraft_codecs::encode_png(&lightcraft_codecs::EncodeImage::rgba8(&image), &lightcraft_codecs::EncodeMeta::default()).unwrap();
++        std::fs::write(base.join(format!("{index}.png")), png).unwrap();
++    }
++    let mut headless = Headless::new(lightcraft_engine::Session::new().with_fs());
++    for index in 0..6 {
++        let result = headless.call("headless.importWithEviction", json!({"paths": [base.join(format!("{index}.png")).to_string_lossy()]})).unwrap();
++        assert_eq!(result["status"], "ok");
++        assert!(result["retiredIds"].as_array().unwrap().is_empty());
++    }
++    assert_eq!(headless.session.catalog.photos().count(), 6);
++    let _ = std::fs::remove_dir_all(base);
++}
++
+ fn rpc(s: &mut Server, id: u64, method: &str, params: Value) -> Value {
+     let line = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}).to_string();
+     let reply = s.handle_line(&line).expect("reply");
+@@ -79,6 +203,27 @@ fn tools_list_has_helpers_and_every_command() {
      assert!(r["result"]["tools"].as_array().unwrap().iter().all(|t| !t["name"].as_str().unwrap().starts_with("cmd_")));
  }
  
@@ -631,7 +987,7 @@ index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..5dec4aa3eb00e95ac7b80d737f436252
  /// The `import` helper passes the copy options through: a folder template files the copy.
  #[test]
  fn import_tool_copies_with_a_folder_template() {
-@@ -421,6 +442,9 @@ fn core_tools_have_hints_and_reject_unknown_keys() {
+@@ -421,6 +566,9 @@ fn core_tools_have_hints_and_reject_unknown_keys() {
              assert!(r["error"]["message"].as_str().unwrap().contains("misspelled"), "{r}");
          }
          let preview = tools.iter().find(|t| t["name"] == "render_preview").unwrap();
@@ -641,7 +997,7 @@ index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..5dec4aa3eb00e95ac7b80d737f436252
          assert_eq!(preview["annotations"]["readOnlyHint"], true);
          assert!(preview["inputSchema"]["properties"].get("path").is_none());
          let writer = tools.iter().find(|t| t["name"] == "render_photo").unwrap();
-@@ -602,3 +626,170 @@ fn render_and_screenshot_pngs_go_through_a_private_folder() {
+@@ -602,3 +750,170 @@ fn render_and_screenshot_pngs_go_through_a_private_folder() {
          folders.push(dir);
      }
  }
@@ -813,7 +1169,7 @@ index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..5dec4aa3eb00e95ac7b80d737f436252
 +    assert_eq!(h.session.execute("develop.get", &json!({"id": id})).unwrap(), before);
 +}
 diff --git a/crates/mcp/src/tools.rs b/crates/mcp/src/tools.rs
-index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..e218722388b7556e09b488f9b5d013e0133ddb7b 100644
+index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..239a08e80726b3885bd826a59cefb4d432f42655 100644
 --- a/crates/mcp/src/tools.rs
 +++ b/crates/mcp/src/tools.rs
 @@ -78,7 +78,29 @@ fn ids_schema(what: &str) -> Value {
@@ -871,7 +1227,37 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..e218722388b7556e09b488f9b5d013e0
                  "format": {"type": "string", "enum": ["png", "jpeg"], "description": "Image encoding (default png; jpeg is smaller)"},
                  "path": {"type": "string", "description": "Also save the rendered file here"}
              }),
-@@ -334,6 +367,23 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
+@@ -273,6 +306,29 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
+             &[],
+         ),
+     ];
++    if !has_ui {
++        v.push(tool(
++            "headless_retire_photo",
++            "Retire headless photo",
++            "Permanently removes an inactive photo from this transient Headless session.",
++            json!({"id": {"type": "integer", "minimum": 1}}),
++            &["id"],
++        ));
++        v.push(tool(
++            "headless_release_photo",
++            "Release headless photo",
++            "Mark a transient photo as no longer in use. The headless session may later select it for replacement.",
++            json!({"id": {"type": "integer", "minimum": 1}}),
++            &["id"],
++        ));
++        v.push(tool(
++            "headless_import_with_eviction",
++            "Import headless photo with replacement",
++            "Import one photo in a transient session. When LightCraft's managed cache budget is exhausted, it may replace the least-recently-used released photo. The result reports importedIds and retiredIds; partial_failure means retirement succeeded but import did not.",
++            json!({"paths": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 1}]}}),
++            &["paths"],
++        ));
++    }
+     if has_ui {
+         v.extend([
+             tool("ui_inspect", "Inspect UI", "UI state and selection (same as inspect_ui).", json!({}), &[]),
+@@ -334,6 +390,23 @@ pub fn helper_tools(has_ui: bool) -> Vec<Value> {
              ),
          ]);
      }
@@ -895,7 +1281,7 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..e218722388b7556e09b488f9b5d013e0
      v
  }
  
-@@ -378,6 +428,7 @@ fn annotations(name: &str, title: &str) -> Value {
+@@ -378,6 +451,7 @@ fn annotations(name: &str, title: &str) -> Value {
              | "list_commands"
              | "doc_inspect"
              | "render_preview"
@@ -903,7 +1289,7 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..e218722388b7556e09b488f9b5d013e0
              | "query_photos"
              | "list_controls"
              | "get_develop"
-@@ -557,11 +608,29 @@ fn render_photo(b: &mut dyn Backend, args: &Value) -> ToolResult {
+@@ -557,11 +631,29 @@ fn render_photo(b: &mut dyn Backend, args: &Value) -> ToolResult {
          Err(e) => return ToolResult::error(e),
      };
      let path = tmp.file.to_string_lossy().to_string();
@@ -934,7 +1320,7 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..e218722388b7556e09b488f9b5d013e0
      meta["id"] = json!(id);
      image_result(&tmp.file, None, args.get("format").and_then(Value::as_str).unwrap_or("png"), args.get("path").and_then(Value::as_str), meta)
  }
-@@ -609,6 +678,88 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
+@@ -609,6 +701,88 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
          return ToolResult::from(exec(b, &rest.replace('_', "."), args.clone()));
      }
      match name {
@@ -1023,7 +1409,23 @@ index 1c7ae37011dca4b68cacfc9511543ec7f6b5439a..e218722388b7556e09b488f9b5d013e0
          "list_commands" | "command_list" => {
              let filter = s("filter").unwrap_or("").to_lowercase();
              let enabled_only = args.get("enabled_only").and_then(Value::as_bool).unwrap_or(false);
-@@ -664,7 +815,10 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
+@@ -632,6 +806,15 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
+             Some(c) => ToolResult::from(exec(b, c, args.get("params").cloned().filter(|p| !p.is_null()).unwrap_or(json!({})))),
+             None => ToolResult::error("missing `id`"),
+         },
++        "headless_retire_photo" => match args.get("id").and_then(Value::as_u64) {
++            Some(id) => ToolResult::from(b.call("headless.retirePhoto", json!({"id": id}))),
++            None => ToolResult::error("missing or invalid `id`"),
++        },
++        "headless_release_photo" => match args.get("id").and_then(Value::as_u64) {
++            Some(id) => ToolResult::from(b.call("headless.releasePhoto", json!({"id": id}))),
++            None => ToolResult::error("missing or invalid `id`"),
++        },
++        "headless_import_with_eviction" => ToolResult::from(b.call("headless.importWithEviction", args.clone())),
+         "command_batch" => {
+             let Some(steps) = args.get("steps").and_then(Value::as_array) else { return ToolResult::error("missing `steps`") };
+             let stop = args.get("stop_on_error").and_then(Value::as_bool).unwrap_or(true);
+@@ -664,7 +847,10 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> ToolResult {
          }
          "doc_inspect" => ToolResult::from(doc_inspect(b)),
          "render_preview" => {

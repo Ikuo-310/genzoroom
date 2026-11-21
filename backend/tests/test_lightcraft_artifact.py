@@ -20,7 +20,8 @@ def write_receipt(executable, **changes):
                 if MANAGED.get('regionContract') == 1 else {}),
              **({'wbContract': 1} if MANAGED.get('wbContract') == 1 else {}),
              **({'pointColorRangeContract': 1} if MANAGED.get('pointColorRangeContract') == 1 else {}),
-             **({'sharpenPreviewContract': 1} if MANAGED.get('sharpenPreviewContract') == 1 else {}), **changes}
+             **({'sharpenPreviewContract': 1} if MANAGED.get('sharpenPreviewContract') == 1 else {}),
+             **({'headlessResidentContract': 1} if MANAGED.get('headlessResidentContract') == 1 else {}), **changes}
     executable.with_suffix('.genzoroom.json').write_text(json.dumps(value), encoding='utf-8')
     return digest
 
@@ -35,6 +36,7 @@ def write_receipt(executable, **changes):
     {'wbContract': True}, {'wbContract': 2}, {'wbContract': None},
     {'pointColorRangeContract': True}, {'pointColorRangeContract': 2}, {'pointColorRangeContract': None},
     {'sharpenPreviewContract': True}, {'sharpenPreviewContract': 2}, {'sharpenPreviewContract': None},
+    {'headlessResidentContract': True}, {'headlessResidentContract': 2}, {'headlessResidentContract': None},
 ])
 def test_receipt_mismatch_never_claims_a_managed_version(tmp_path, changes):
     executable = tmp_path / 'engine.exe'
@@ -95,6 +97,17 @@ def test_receipt_without_crop_edit_contract_is_not_managed(tmp_path):
     path = executable.with_suffix('.genzoroom.json')
     receipt = json.loads(path.read_text(encoding='utf-8'))
     del receipt['cropEditContract']
+    path.write_text(json.dumps(receipt), encoding='utf-8')
+    assert verified_artifact(executable, digest, ENGINE_VERSION) is None
+
+
+def test_receipt_without_headless_resident_contract_is_not_managed(tmp_path):
+    executable = tmp_path / 'engine.exe'
+    executable.write_bytes(b'actual engine')
+    digest = write_receipt(executable)
+    path = executable.with_suffix('.genzoroom.json')
+    receipt = json.loads(path.read_text(encoding='utf-8'))
+    del receipt['headlessResidentContract']
     path.write_text(json.dumps(receipt), encoding='utf-8')
     assert verified_artifact(executable, digest, ENGINE_VERSION) is None
 

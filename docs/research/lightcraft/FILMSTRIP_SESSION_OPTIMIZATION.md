@@ -327,3 +327,36 @@ LightCraft側Headlessがselection／importを監視し、最近使ったIDの順
 LightCraft Headless内で「利用終了の通知→LightCraft自身による候補選択→既存退役→通常Import」の同期経路が成立し、退役対象を呼出側が選ばずに同一Sessionで複数回の入替を続けられた。GenzoRoom接続に必要となる最小契約は、保存確定・Document Close後のPhoto解放通知、`import_with_eviction`の結果中の新PhotoId／退役PhotoIdの受領、`partial_failure`／`unknown`時のWorkspace破棄判断である。Recipe／History永続化やSession再生成をNative側へ移すものではない。
 
 これはNative API／Headlessの成立性をみるPoCで、製品のメモリ容量に対する最適Resident数、候補選択の長時間性能、async Native jobとの排他、transport応答喪失からの状態回復、正式MCP APIとしての互換性は未確定である。P2-3では製品用Capacity設定、GenzoRoom Backend接続、manifest／正式managed patch更新を行わない。正式採用時はP2-2BとP2-3を合わせてmanaged patch化し、UPDATE_GUIDEに従って固定upstreamへの順次適用、Native build、実binaryの契約確認、GenzoRoom adapter統合を別工程で行う。
+
+## P2-4 LightCraft Resident自律入替の正式統合
+
+### 製品patchと適用基準
+
+P2-4はGenzoRoom main `a10f6338ef509c8b3d0fc332498cd74d6d8e48f3` を基準に実装した。LightCraftはv0.20.0、upstream commit `192ff72923c39e6623f2c7ff67ab3a119deb8071`。現行正式patch `native/lightcraft/patches/0001-v0.20.0-whole-frame.patch` にP2-2BのHeadless個別退役とP2-3のHeadless入替を統合し、重複targetの独立patchを作らない。製品への適用順は固定upstreamにこのmanaged patchを1回適用する。旧PoC patchは再現・履歴用として `native/lightcraft/poc/` に保持し、manifestの正式patch列には加えない。
+
+統合patchは18 Nativeファイル、1100 insertions、37 deletionsを変更する。patch SHA-256は `ECF7C183FC4DB9D2F9DA679E2ACBB30720B0609E019BC073F5555F3495DFF723`。主な境界はEngine `Session::retire_headless_photo` とMCP Headless tool `headless_retire_photo`、`headless_release_photo`、`headless_import_with_eviction`。正式patchは従来の描画・Before・Region・WB・Point Color・Sharpening契約も含む。manifestのtarget/hashと固定upstreamからの適用を `build.py --source ... --apply` で確認した。
+
+### Native APIと責務境界
+
+- `headless_retire_photo({id})` は一時Headless Sessionの明示PhotoIdを退役する。永続library、未知ID、選択中またはactive、interaction中は拒否する。既存Catalog除去・media cache invalidationを使い、通常削除のUndo commitは通さない。Before、選択関連、HeadlessのResident順序／released集合から対象を除く。残存Photoのsettings、Photo History、Beforeは保持する。
+- `headless_release_photo({id})` はPhotoを直ちに削除せず、利用終了をNativeへ通知する。Headlessの古い選択参照を除去し、再選択されたPhotoは入替候補から外す。応答は `{released: id}`。
+- `headless_import_with_eviction({paths:[onePath]})` は一時Sessionに限る。Resident内のcanonical pathは既存PhotoIdを返して再利用し、他の写真を退役しない。新規Import時はLightCraft `Session::memory_report()` のEngine cache budgetが圧迫されている場合に限り、LightCraft内部の最近使われていない利用終了済み・非active・非選択Photoを退役する。枚数上限は設けない。新規Importの成功応答は `{status:"ok", importedIds:[id], retiredIds:[...], error:null, errorCode:null}`。既存Residentへの要求もそのPhotoIdを `importedIds` に含めるが、`errorCode` は省略される。
+- 圧迫中に候補がない場合は変更なしの `rejected`。退役後のImport失敗は確定退役IDを含む `partial_failure`。重複原本拒否は `errorCode:"duplicate_source"`。退役結果不明は `unknown` として成功扱いしない。
+
+LightCraftがPhoto順序、利用終了状態、候補選択、cache pressure、PhotoIdとNative media cacheを管理する。GenzoRoomはNative応答の確定PhotoIdだけをAsset対応へ反映し、CPU/GPU予算、LRU、Resident上限を持たない。Native Undo／RedoはGenzoRoom Historyの永続化に使わない。退役時に一時SessionのUndo／Redo、pending log、command journalを整理するP2-2B契約を維持し、残存Photo状態を保つ。
+
+### BackendのClose／Open
+
+`RawPreviewApi._close_document_owned()` は保存checkpoint後、画像taskと送信response leaseを排出し、ownerを再確認して `LightCraftRawSession.release_photo()` を呼んでからDocumentを失効させる。Workspace、Native generation、原本cacheは維持する。利用終了通知と実際の退役は別であり、Nativeは直ちにPhotoを削除しない。再訪時は `_photos` のPhotoIdでNative selectし、Residentなら再利用する。退役済みPhotoは `photo_id=None` となり、新Import IDへImport defaultsを起点にSQLiteの確定済みRecipe／Historyを復元する。
+
+二重のResident集合 `_resident` と `MAX_RAW_FILES=2` を削除した。`_photos` はAsset、fingerprint、Import defaults、PhotoIdの対応を保持するアプリケーション状態であり、Native resource管理の代用ではない。退役結果不明、未知／重複ID、部分成功では確認済みIDを反映したうえでdesynchronizedにし、既存Workspace Release／Session再生成経路を使う。保存失敗時はCloseとrelease通知を行わない。変更予算200／256はSession単位のまま、Resident入替でresetしない。
+
+`RawSourceCache` はImmich原本コピーを管理し、Native Residentとは独立する。本工程では容量と削除規則を変えていない。Nativeが参照中のコピーを先行削除しない契約を維持する。多数Assetではディスクcache上限が先に効くか、別途実測して判断する。
+
+### 検証と残件
+
+Backend focused suiteは指定Python 3.14環境で5ファイル373件成功。初回実行の4失敗は非active写真を編集する旧テスト手順、fixture再生成時の原本fingerprint不一致、重複原本応答、Recipe／Historyの期待値に関するもので、原因を修正して全focused範囲を再実行した。Native focused `cargo test -p lightcraft-mcp --no-default-features headless_ -- --nocapture` は7 unit testと1 MCP integration testが成功した。
+
+固定upstreamの独立worktreeにmanaged patchを適用し、`native/lightcraft/build.py --source ... --apply --build` を実行した。Whole Frame、Crop、Region、WBのNative focused contract tests、Release CLI buildと既存Whole／Before／Region／WB／Point Color Range／Sharpening probeが成功した。更新後manifestでbuild gateを再実行し、Headless schema／response probeを含む `--binary` 検証も成功。実binary SHA-256は `535F30F311C42F596F4EC1E9E44A87DB64DED7BA5DA6F74A1A1464D362495BF7`。receiptは `headlessResidentContract:1` と現manifestを記録する。DX12 probeではRadeon RX 580 adapterが利用可能だった。未使用optional egui patch、craft-fonts未配置、Windows incremental hardlinkの警告が出たがbuild/testは成功した。
+
+自動binary probeは実バイナリのtool schema、structured response、release→同一Session Import→retire契約を確認する。これはWindows DesktopのRAW/JPEG混在操作や性能測定ではない。実機写真負荷でのcache pressure発生点、長期多数Assetのメモリ推移、実transport応答喪失、原本disk cache上限はP2-5への未検証事項とする。

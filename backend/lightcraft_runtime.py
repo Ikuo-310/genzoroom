@@ -573,6 +573,17 @@ class LightCraftManager:
         self._check_raw_session(session)
         return result
 
+    async def _raw_headless(self, generation, tool, arguments, *, timeout):
+        if tool not in {"headless_release_photo", "headless_import_with_eviction"}:
+            raise LightCraftError("lightcraft_unsupported_raw_command")
+        session = self._raw_session(generation)
+        result = await session.client.call_tool(tool, arguments, timeout=timeout)
+        self._check_raw_session(session)
+        if not isinstance(result, dict):
+            self._abort_raw(generation, "lightcraft_invalid_headless_response")
+            raise MCPTransportError("lightcraft_invalid_headless_response")
+        return result
+
     async def _raw_native_settings(self, generation, photo_id, *, timeout):
         session = self._raw_session(generation)
         result = await session.client.call_tool_result('get_develop', {'id': photo_id}, timeout=timeout)

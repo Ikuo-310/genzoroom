@@ -824,6 +824,10 @@ class RawProcess(FakeProcess):
         super().__init__()
         self.pid = 12345
         self.photos = {}
+        self.next_photo_id = 1
+        self.released_photos = []
+        self.eviction_on_import = False
+        self.resident_results = []
         self.active = None
         self.commands = []
         self.gate = None
@@ -899,6 +903,58 @@ class RawProcess(FakeProcess):
         if message["method"] != "tools/call":
             return super().respond(message)
         args = message["params"]["arguments"]
+        tool_name = message["params"]["name"]
+        if tool_name == "headless_release_photo":
+            photo_id = args["id"]
+            if photo_id not in self.photos or self.interaction is not None:
+                return self.tool(message, error=True)
+            self.released_photos = [item for item in self.released_photos if item != photo_id]
+            self.released_photos.append(photo_id)
+            if self.active == photo_id:
+                self.active = None
+            self.commands.append(("headless.releasePhoto", copy.deepcopy(args)))
+            result = {"released": photo_id}
+            self.resident_results.append((tool_name, copy.deepcopy(result)))
+            return self.tool(message, result)
+        if tool_name == "headless_import_with_eviction":
+            path = args["paths"][0]
+            self.commands.append(("headless.importWithEviction", copy.deepcopy(args)))
+            retired = []
+            if self.eviction_on_import:
+                candidate = next((item for item in self.released_photos if item != self.active), None)
+                if candidate is None:
+                    result = {"status": "rejected", "importedIds": [], "retiredIds": [],
+                              "error": "cache pressure has no released inactive photo"}
+                    self.resident_results.append((tool_name, copy.deepcopy(result)))
+                    return self.tool(message, result)
+                self.photos.pop(candidate)
+                self.released_photos.remove(candidate)
+                retired.append(candidate)
+                if self.partial_failure:
+                    result = {"status": "partial_failure", "importedIds": [], "retiredIds": retired,
+                              "error": "fixture import failure"}
+                    self.resident_results.append((tool_name, copy.deepcopy(result)))
+                    return self.tool(message, result)
+            if self.import_failure:
+                status = "partial_failure" if retired else "rejected"
+                result = {"status": status, "importedIds": [], "retiredIds": retired, "error": "fixture import failure"}
+                self.resident_results.append((tool_name, copy.deepcopy(result)))
+                return self.tool(message, result)
+            digest = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+            if any(value["hash"] == digest for value in self.photos.values()):
+                result = {"status": "rejected", "importedIds": [], "retiredIds": retired,
+                          "error": "duplicate source", "errorCode": "duplicate_source"}
+                self.resident_results.append((tool_name, copy.deepcopy(result)))
+                return self.tool(message, result)
+            photo_id = self.next_photo_id
+            self.next_photo_id += 1
+            settings = copy.deepcopy(DEFAULT)
+            settings["detail"]["nr_outliers"] = True
+            self.photos[photo_id] = {"hash": digest, "settings": settings}
+            self.commands.append(("library.import", {"paths": [path], "mode": "add"}))
+            result = {"status": "ok", "importedIds": [photo_id], "retiredIds": retired, "error": None}
+            self.resident_results.append((tool_name, copy.deepcopy(result)))
+            return self.tool(message, result)
         if message["params"]["name"] == "get_develop":
             settings = self.photos[args['id']]['settings']
             return reply(self.stdout, message, {'isError': False, 'content': [{'type': 'text', 'text': json.dumps(settings, sort_keys=True)}],
@@ -1014,7 +1070,8 @@ class RawProcess(FakeProcess):
             elif old is not None:
                 value["duplicates"] = [{"existing": old, "reason": "content", "path": path}]
             else:
-                photo_id = len(self.photos) + 1
+                photo_id = self.next_photo_id
+                self.next_photo_id += 1
                 settings = copy.deepcopy(DEFAULT)
                 settings["detail"]["nr_outliers"] = True
                 self.photos[photo_id] = {"hash": digest, "settings": settings}
@@ -1032,6 +1089,7 @@ class RawProcess(FakeProcess):
             value = {"checked": len(params.get("ids", [])), "database": True, "found": []}
         elif command == "library.select":
             self.active = params["active"]
+            self.released_photos = [item for item in self.released_photos if item != self.active]
             value = {"selected": 1}
         elif command == "beforeAfter.setBefore":
             assert params == {"source": "import"}
@@ -1226,7 +1284,8 @@ async def create(tmp_path, *, timeouts=QUICK, adaptive=False):
            if MANAGED.get('regionContract') == 1 else {}),
         **({'wbContract': 1} if MANAGED.get('wbContract') == 1 else {}),
         **({'pointColorRangeContract': 1} if MANAGED.get('pointColorRangeContract') == 1 else {}),
-        **({'sharpenPreviewContract': 1} if MANAGED.get('sharpenPreviewContract') == 1 else {})}), encoding='utf-8')
+        **({'sharpenPreviewContract': 1} if MANAGED.get('sharpenPreviewContract') == 1 else {}),
+        **({'headlessResidentContract': 1} if MANAGED.get('headlessResidentContract') == 1 else {})}), encoding='utf-8')
     children = []
 
     async def spawn(*args, **kwargs):
@@ -1253,7 +1312,7 @@ def test_import_edit_readback_restore_preview_and_capacity(tmp_path):
             handle, initial = await raw.open_raw("pixel", files[0])
             child = children[0]
             assert child.commands[0] == ("app.memoryBudget", {"mb": 1024})
-            assert child.commands[1] == ("library.import", {"paths": [str(files[0])], "mode": "add"})
+            assert child.commands[2] == ("library.import", {"paths": [str(files[0])], "mode": "add"})
             changed = await raw.set_controls(handle, {"light.exposure": 1000}, initial.revision)
             assert changed.settings["light"]["exposure"] == 5
             leaked = changed.settings
@@ -1272,10 +1331,10 @@ def test_import_edit_readback_restore_preview_and_capacity(tmp_path):
             assert frame.handle == handle and frame.revision == restored.revision
             second, _ = await raw.open_raw("pentax", files[1])
             assert (await raw.select(handle)).handle == handle
-            with pytest.raises(LightCraftError, match="raw_session_capacity"):
-                await raw.open_raw("third", files[2])
+            third, _ = await raw.open_raw("third", files[2])
+            assert third.generation == handle.generation
             await raw.select(second)
-            assert raw.status().resident_count == 2
+            assert raw.status().resident_count == 3
         finally:
             session = manager._session
             await raw.close()
@@ -2042,7 +2101,7 @@ def test_curve_interaction_transport_failure_and_reset_release_owner(tmp_path):
     asyncio.run(run())
 
 
-def test_capacity_rejection_keeps_existing_photo_editable_and_previewable(tmp_path):
+def test_unbounded_native_residency_keeps_existing_photo_editable_and_previewable(tmp_path):
     async def run():
         raw, manager, children, files = await create(tmp_path)
         try:
@@ -2050,16 +2109,18 @@ def test_capacity_rejection_keeps_existing_photo_editable_and_previewable(tmp_pa
             second, _ = await raw.open_raw("pentax", files[1])
             await raw.select(first)
             old_epoch = raw.status().selection_epoch
-            with pytest.raises(LightCraftError, match="raw_session_capacity"):
-                await raw.open_raw("third", files[2])
-            assert raw.status().selection_epoch == old_epoch
+            third, _ = await raw.open_raw("third", files[2])
+            assert third.generation == first.generation and raw.status().resident_count == 3
+            assert raw.status().selection_epoch > old_epoch
+            old_epoch = raw.status().selection_epoch
             with pytest.raises(LightCraftError):
                 await raw.open_raw("bad-path", tmp_path / "missing.DNG")
             assert raw.status().selection_epoch == old_epoch
+            await raw.select(first)
             changed = await raw.set_controls(first, {"light.exposure": .75}, snapshot.revision)
             frame = await raw.request_preview(first, changed.revision)
             assert frame.data.startswith(b"\x89PNG") and frame.handle == first
-            assert raw.status().resident_count == 2
+            assert raw.status().resident_count == 3
         finally:
             await raw.close()
     asyncio.run(run())
@@ -2105,21 +2166,40 @@ def test_a_b_a_reuses_resident_and_restores_import_snapshot(tmp_path):
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("mode,code", [("failed", "raw_import_failed"), ("partial", "raw_import_failed")])
-def test_import_failures_and_raw_confirmation(tmp_path, mode, code):
+def test_native_rejected_import_does_not_desynchronize_known_residents(tmp_path):
     async def run():
         raw, manager, children, files = await create(tmp_path)
         child = children[0]
-        child.import_failure = mode == "failed"
-        child.partial_failure = mode == "partial"
-        child.kind = "raw"
-        child.preview_only = None
+        handle, _ = await raw.open_raw("existing", files[0])
+        child.eviction_on_import = True
         try:
-            with pytest.raises(LightCraftError, match=code):
-                await raw.open_raw("raw", files[0])
+            with pytest.raises(LightCraftError, match="raw_import_failed"):
+                await raw.open_raw("new", files[1])
             assert manager.status().state == "ready"
-            if mode != "failed":
-                assert raw.status().state == "desynchronized"
+            assert raw.status().state == "synced" and raw._photos["existing"].photo_id == 1
+            assert (await raw.get_settings(handle)).handle == handle
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
+def test_partial_failure_applies_confirmed_retirements_before_recovery(tmp_path):
+    async def run():
+        raw, _, children, files = await create(tmp_path)
+        try:
+            handle, _ = await raw.open_raw("a", files[0])
+            await raw.release_photo(handle)
+            child = children[0]
+            child.eviction_on_import = True
+            child.partial_failure = True
+            with pytest.raises(LightCraftError, match="raw_import_failed"):
+                await raw.open_raw("b", files[1])
+            assert raw.status().state == "desynchronized"
+            assert raw.status().resident_count == 0
+            assert raw._photos["a"].photo_id is None
+            assert child.resident_results[-1][1] == {
+                "status": "partial_failure", "importedIds": [], "retiredIds": [1],
+                "error": "fixture import failure"}
         finally:
             await raw.close()
     asyncio.run(run())

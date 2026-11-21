@@ -2505,8 +2505,14 @@ Commit `7673ed2`ではShow Range一時停止中に通常のPoint Color Draftま�
 
 ## シャープニング半径・ディテール・一時可視化（P0〜P2）
 
-LightCraft v0.20.0の固定upstream commit `192ff72923c39e6623f2c7ff67ab3a119deb8071`を維持し、既存managed patchへNative Previewの`sharpen_preview`を追加した。`sharpenPreviewContract: 1`。manifest patch SHA-256は`8ff0bc48ee420f4a9f322c9a3536012002bf7450f02fe50f7da7b9553f926473`であり、実バイナリSHA-256とreceiptはNative管理成果物を参照する。LightCraft内部の現像アルゴリズムは変更していない。
+LightCraft v0.20.0の固定upstream commit `192ff72923c39e6623f2c7ff67ab3a119deb8071`を維持し、既存managed patchへNative Previewの`sharpen_preview`を追加した。`sharpenPreviewContract: 1`。P2-4統合後のmanifest patch SHA-256は`ECF7C183FC4DB9D2F9DA679E2ACBB30720B0609E019BC073F5555F3495DFF723`であり、実バイナリSHA-256とreceiptはResident統合記録を参照する。LightCraft内部の現像アルゴリズムは変更していない。
 
 半径`detail.sharpenRadius`は既定1.0、範囲0.5〜3.0、刻み0.1。ディテール`detail.sharpenDetail`は既定25、範囲0〜100、刻み1。Process V3未満では無効。シャープ、半径、ディテール、マスクのAltドラッグ可視化はそれぞれgrayscale、detail、detail、mask。ディテール帯域表示はLightCraft現行仕様により値の変更中も変化しない。一時可視化の解除後は通常Draft／Fullへ戻り、Point Color範囲表示は復帰する。可視化中はRegion表示を抑止する。可視化状態はHistory、Recipe、Exportに保存しない。設定値と通常編集の保存は既存経路を使う。
 
 P0/P0追加調査、P1 Native API公開、P2 UI・Preview統合を実施。修正後Windows Desktopではユーザーが半径・ディテールの通常現像効果とAltドラッグ可視化を確認済み。F1は操作終了時の解除漏れ、F2は対象外スライダーへの影響、F3は同一Preview serialへの重複取消として検出し、`86f315f`および`d603d0b`で修正した。工程ごとのテスト件数は各記録を参照し、合算しない。限定再監査では実装上のFindingは解消。Draft可視化の応答待ち中に確定する一部条件のテスト範囲不足は残るが追加対応不要と判断した。
+
+## P2-4：LightCraft Resident自律入替の正式統合
+
+LightCraft v0.20.0（upstream `192ff72923c39e6623f2c7ff67ab3a119deb8071`）の既存managed patchへ、P2-2Bの個別退役とP2-3のHeadless入替を統合した。BackendはDocumentの保存checkpointと画像処理排出後に `headless_release_photo` を呼び、Photo利用終了をNativeへ伝える。以後の `headless_import_with_eviction` で既存Residentの再利用、またはNative cache pressure時の利用終了済みPhoto退役と新規Importを行う。退役候補選択、Resident保持、CPU/GPU資源管理はLightCraftに属し、GenzoRoomはAsset／PhotoId対応と確定Recipe／History復元を担う。
+
+固定枚数上限とBackend `_resident` 重複集合を削除した。200／256変更予算はSession単位で維持する。部分失敗や結果不明は確定退役IDを反映し、既存Workspace Release／Session再生成で回復する。patch SHA、Native receipt、focused test結果と未検証事項は[研究記録](research/lightcraft/FILMSTRIP_SESSION_OPTIMIZATION.md)に記録する。

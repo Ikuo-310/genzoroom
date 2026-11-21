@@ -239,7 +239,7 @@ Nativeへ未接続3値を実装するなら、CPU式だけでなくGPU params/sh
 
 ## Sharpening Radius, Detail and overlays (P0–P2)
 
-The current LightCraft integration keeps v0.20.0 upstream commit `192ff72923c39e6623f2c7ff67ab3a119deb8071` and extends the existing managed patch with `sharpen_preview`, contract 1. The patch digest is `8ff0bc48ee420f4a9f322c9a3536012002bf7450f02fe50f7da7b9553f926473`. Consult the managed Native receipt for the binary digest. LightCraft development algorithms were not changed.
+The current LightCraft integration keeps v0.20.0 upstream commit `192ff72923c39e6623f2c7ff67ab3a119deb8071` and extends the existing managed patch with `sharpen_preview`, contract 1. The P2-4 managed patch digest is `ECF7C183FC4DB9D2F9DA679E2ACBB30720B0609E019BC073F5555F3495DFF723`; consult the managed Native receipt for the binary digest. LightCraft development algorithms were not changed.
 
 Native Radius defaults to 1.0 with range 0.5–3.0 and step 0.1. Native Detail defaults to 25 with range 0–100 and step 1. GenzoRoom disables both below Process V3. Alternate/Alt drag requests grayscale for Sharpening, detail for Radius and Detail, and mask for Masking. Detail-band visualization remains unchanged as its value changes under the current LightCraft behavior. The temporary After/Whole Preview yields to normal Draft/Full on release, pauses Point Color range display and suppresses Region composition. History, Recipe and Export contain persistent settings only.
 

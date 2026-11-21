@@ -2,10 +2,11 @@
   "patches": [
     {
       "file": "patches/0001-v0.20.0-whole-frame.patch",
-      "purpose": "Expose Whole/Crop Frame, Before/After, Draft/Full, Region rendering, WB candidate and Point Color Range",
+      "purpose": "Expose Whole/Region rendering and headless resident release, admission and retirement",
       "targets": [
         "Cargo.lock",
         "crates/engine/src/cmd/develop.rs",
+        "crates/engine/src/lib.rs",
         "crates/engine/src/media/quick.rs",
         "crates/engine/src/media/render.rs",
         "crates/engine/src/slide_title.rs",
@@ -22,10 +23,10 @@
         "crates/pipeline/src/lib.rs",
         "crates/ui-egui/src/render.rs"
       ],
-      "sha256": "8ff0bc48ee420f4a9f322c9a3536012002bf7450f02fe50f7da7b9553f926473",
-      "files": 17,
-      "insertions": 773,
-      "deletions": 35
+      "sha256": "ecf7c183fc4db9d2f9da679e2acbb30720b0609e019bc073f5555f3495dff723",
+      "files": 18,
+      "insertions": 1100,
+      "deletions": 37
     }
   ],
   "commit": "192ff72923c39e6623f2c7ff67ab3a119deb8071",
@@ -39,5 +40,6 @@
   "geometryDescriptorContract": 2,
   "wbContract": 1,
   "pointColorRangeContract": 1,
-  "sharpenPreviewContract": 1
+  "sharpenPreviewContract": 1,
+  "headlessResidentContract": 1
 }
