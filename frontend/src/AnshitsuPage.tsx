@@ -131,6 +131,8 @@ export function AnshitsuPage() {
   const [viewerShowsBefore, setViewerShowsBefore] = useState(false);
   const [switching, setSwitching] = useState(false);
   const switchingRef = useRef(false);
+  const transitionTargetRef = useRef<string | null>(null);
+  const observedRouteAssetRef = useRef(assetId);
   const [failedSwitch, setFailedSwitch] = useState<{ nextId: string; error: EditStateApiErrorKind; code?: string; raw?: boolean } | null>(null);
   const [exitSaving, setExitSaving] = useState(false);
   const exitRef = useRef(false);
@@ -156,6 +158,32 @@ export function AnshitsuPage() {
   const jpegOriginal = useJpegOriginal(developmentEngine === 'jpeg' ? activeDetail : null, settings.initialImage,
     initialGpu?.assetId === assetId && initialGpu.usable);
   const rawDocument = useRawDocument(usesLightcraft && activeDetail ? assetId : null, viewerShowsBefore);
+  // Back/Forward can change the route without activateAsset, so unlock only after the target settles.
+  useEffect(() => {
+    if (observedRouteAssetRef.current !== assetId) {
+      observedRouteAssetRef.current = assetId;
+      if (transitionTargetRef.current !== assetId) {
+        transitionTargetRef.current = assetId;
+        switchingRef.current = true;
+        setSwitching(true);
+      }
+    }
+    if (transitionTargetRef.current !== assetId) return;
+    const rawReady = usesLightcraft
+      ? rawDocument?.assetId === assetId && rawDocument.status === 'ready' && !rawDocument.locked
+        && !rawDocument.pending && !rawDocument.historyLoading && !!rawDocument.history
+      : detailState === 'ready' && activeDetail?.id === assetId;
+    const transitionFailed = usesLightcraft
+      ? rawDocument?.assetId === assetId && (rawDocument.status === 'error' || rawDocument.status === 'unavailable')
+      : detailState === 'error';
+    if (!rawReady && !transitionFailed) return;
+    transitionTargetRef.current = null;
+    switchingRef.current = false;
+    exclusionBusy.current = false;
+    setSwitching(false);
+    setExcluding(false);
+  }, [assetId, rawDocument?.assetId, rawDocument?.status, rawDocument?.locked, rawDocument?.pending,
+    rawDocument?.historyLoading, rawDocument?.history, detailState, activeDetail?.id, usesLightcraft]);
   const observedRawRecipe = useRef<{ assetId: string; revision: number } | null>(null);
   useEffect(() => {
     const recipeRevision = rawDocument?.settings?.recipeRevision;
@@ -474,6 +502,7 @@ export function AnshitsuPage() {
   function navigateToAsset(nextId: string) {
     const currentState: WorkspaceNavigationState = { selectedAssets, activeAssetId: assetId, homeReturn: initialNavigation?.homeReturn };
     const nextState = activateWorkspaceAsset(currentState, nextId);
+    transitionTargetRef.current = nextId;
     navigate(workspacePath(nextState.activeAssetId), { state: nextState });
   }
 
@@ -493,10 +522,17 @@ export function AnshitsuPage() {
         }
       } catch (cause) {
         setFailedSwitch({ nextId, error: 'unexpected', raw: true, code: cause instanceof RawApiError ? cause.code : 'raw_connection_failed' });
-      } finally { switchingRef.current = false; setSwitching(false); }
+      } finally {
+        if (transitionTargetRef.current !== nextId) { switchingRef.current = false; setSwitching(false); }
+      }
       return;
     }
-    if (!editable) { navigateToAsset(nextId); return; }
+    if (!editable) {
+      switchingRef.current = true;
+      setSwitching(true);
+      navigateToAsset(nextId);
+      return;
+    }
     commitAdjustmentsInScope(selectedOperationPanelRef.current);
     switchingRef.current = true;
     pauseAutosave(assetId);
@@ -518,8 +554,10 @@ export function AnshitsuPage() {
     } catch {
       setFailedSwitch({ nextId, error: 'unexpected' });
     } finally {
-      switchingRef.current = false;
-      setSwitching(false);
+      if (transitionTargetRef.current !== nextId) {
+        switchingRef.current = false;
+        setSwitching(false);
+      }
     }
   }
 
@@ -626,6 +664,7 @@ export function AnshitsuPage() {
     setExcludeFailure(false);
     pauseAutosave(id);
     logExclusion('start', { assetId: id });
+    let waitingForDocument = false;
     try {
       const activeRawAsset = id === assetId && usesLightcraft;
       if (activeRawAsset) await rawDocument?.prepareSave();
@@ -651,7 +690,10 @@ export function AnshitsuPage() {
       };
       if (id === assetId) {
         // Automatic removal navigation must preserve the newly created workspace Undo.
+        switchingRef.current = true;
+        setSwitching(true);
         navigateToAsset(destination);
+        waitingForDocument = true;
       }
       logExclusion('complete', { assetId: id, remainingCount: visibleAssets.length - 1 });
     } catch (cause) {
@@ -662,8 +704,10 @@ export function AnshitsuPage() {
     } finally {
       resumeAutosave(id);
       if (id === assetId) rawDocument?.resumeEditing();
-      exclusionBusy.current = false;
-      if (queueMounted.current) setExcluding(false);
+      if (!waitingForDocument) {
+        exclusionBusy.current = false;
+        if (queueMounted.current) setExcluding(false);
+      }
     }
   }
   excludeRef.current = excludeAsset;

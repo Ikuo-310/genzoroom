@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { AnshitsuPage } from './AnshitsuPage';
 import { RawEditHistory } from './RawEditHistory';
@@ -34,6 +34,7 @@ vi.mock('./AdjustedImage', () => ({ AdjustedImage: (props: unknown) => { adjuste
 vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(),
   rawCapability: vi.fn(), createRawWorkspace: vi.fn(async () => 'workspace'), openRawDocument: vi.fn(async (workspaceId, assetId) => ({
     workspaceId, assetId, handle: 'handle', generation: 1, documentToken: 'token', revision: 1 })),
+  closeRawDocument: vi.fn(async () => {}),
   discardRawWorkspace:vi.fn(async()=>{}), beginRawGeometry:vi.fn(), updateRawGeometry:vi.fn(), rawPreview: vi.fn(), readRawDocument: vi.fn(async doc => doc), readRawSettings: vi.fn(async doc => rawSettings(doc)),
   setRawControls: vi.fn(async (doc, patch) => ({ ...rawSettings(doc), revision: doc.revision + 1,
     settingsFingerprint: String(doc.revision + 1).padStart(64, '0'),
@@ -45,6 +46,11 @@ vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawA
   beginRawCurveInteraction: vi.fn(async () => 'a'.repeat(32)), cancelRawCurveInteraction: vi.fn(async () => {}) }));
 const commitHistory = vi.fn(async (request: rawApi.RawHistoryRequest): Promise<rawApi.RawHistoryResult> => rawHistoryResult(request));
 let root: Root, host: HTMLDivElement;
+function RouteHistoryControls() {
+  const navigate = useNavigate();
+  return <><button data-testid="route-back" onClick={() => navigate(-1)}>Back route</button>
+    <button data-testid="route-forward" onClick={() => navigate(1)}>Forward route</button></>;
+}
 async function flush() { await act(async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); }); }
 function dispatchPointer(target: Element, type: string, pointerId: number, clientX: number, clientY: number) {
   const event = new Event(type, { bubbles: true, cancelable: true });
@@ -54,7 +60,7 @@ function dispatchPointer(target: Element, type: string, pointerId: number, clien
 async function mount(activeAssetId = base.id) {
   await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: `/anshitsu/${activeAssetId}`,
     state: { selectedAssets: [base, jpeg, rawB], activeAssetId } }]}><DesktopLifecycleProvider><SettingsProvider><Routes>
-    <Route path="/anshitsu/:assetId" element={<AnshitsuPage />} />
+    <Route path="/anshitsu/:assetId" element={<><AnshitsuPage /><RouteHistoryControls /></>} />
     <Route path="/" element={<div data-gallery />} />
   </Routes></SettingsProvider></DesktopLifecycleProvider></MemoryRouter>));
   await flush();
@@ -78,6 +84,7 @@ beforeEach(async () => {
   vi.mocked(rawApi.rawCapability).mockResolvedValue(true);
   vi.mocked(rawApi.openRawDocument).mockReset().mockImplementation(async (workspaceId, assetId) => ({ workspaceId, assetId,
     handle: 'handle', generation: 1, documentToken: 'token', revision: 1 }));
+  vi.mocked(rawApi.closeRawDocument).mockReset().mockResolvedValue();
   vi.mocked(rawApi.readRawSettings).mockReset().mockImplementation(async doc => rawSettings(doc));
   vi.mocked(rawApi.setRawControls).mockReset().mockImplementation(async (doc, patch) => ({ ...rawSettings(doc),
     revision: doc.revision + 1, settingsFingerprint: String(doc.revision + 1).padStart(64, '0'),
@@ -115,6 +122,107 @@ it('routes a non-RAW asset through Native without fetching or rendering the lega
   expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes(`/assets/${jpeg.id}/original`))).toBe(false);
   expect(host.querySelector('[data-jpeg-renderer]')).toBeNull();
   expect(host.querySelector('.viewer-panel img')?.getAttribute('src')).toBe('blob:lightcraft');
+});
+
+it('keeps the Filmstrip switch guard through Document Close and successor initialization', async () => {
+  const order: string[] = [];
+  const model = historyBackend();
+  const saveHistory = vi.mocked(rawApi.saveRawHistory).getMockImplementation()!;
+  let finishHistory!: () => void;
+  vi.mocked(rawApi.saveRawHistory).mockImplementation(request => request.action === 'undo'
+    ? new Promise(resolve => { finishHistory = () => { order.push('save-ack'); resolve(model.save(request)); }; })
+    : saveHistory(request));
+  let finishOpen!: () => void;
+  vi.mocked(rawApi.closeRawDocument).mockImplementation(async () => { order.push('close'); });
+  vi.mocked(rawApi.openRawDocument).mockImplementation(async (workspaceId, assetId) => {
+    order.push(`open:${assetId}`);
+    if (assetId === rawB.id) await new Promise<void>(resolve => { finishOpen = resolve; });
+    return { workspaceId, assetId, handle: `handle:${assetId}`, generation: 1, documentToken: `token:${assetId}`, revision: 1 };
+  });
+  await mount();
+  order.length = 0;
+  historyKey();
+  await flush();
+  expect(vi.mocked(rawApi.saveRawHistory).mock.calls.at(-1)?.[0].action).toBe('undo');
+
+  act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[2].click());
+  await flush();
+  expect(order).toEqual([]);
+  expect(host.querySelector('.workspace-save-status')).not.toBeNull();
+  await act(async () => finishHistory());
+  await flush();
+  expect(order).toEqual(['save-ack', 'close', `open:${rawB.id}`]);
+  expect(host.querySelector<HTMLButtonElement>('.filmstrip-item[aria-current="true"]')?.getAttribute('aria-label')).toBe('c.DNG');
+  expect(host.querySelector('.workspace-save-status')).not.toBeNull();
+
+  const historyWrites = vi.mocked(rawApi.saveRawHistory).mock.calls.length;
+  historyKey();
+  expect(vi.mocked(rawApi.saveRawHistory)).toHaveBeenCalledTimes(historyWrites);
+  act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[0].click());
+  await flush();
+  expect(vi.mocked(rawApi.openRawDocument).mock.calls.filter(([, id]) => id === base.id)).toHaveLength(1);
+  expect(host.querySelector<HTMLButtonElement>('.filmstrip-item[aria-current="true"]')?.getAttribute('aria-label')).toBe('c.DNG');
+
+  await act(async () => finishOpen());
+  await flush();
+  expect(host.querySelector('.workspace-save-status')).toBeNull();
+  expect(host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')?.disabled).toBe(false);
+});
+
+it('keeps active Filmstrip exclusion guarded until the replacement Document is initialized', async () => {
+  let finishOpen!: () => void;
+  vi.mocked(rawApi.openRawDocument).mockImplementation(async (workspaceId, assetId) => {
+    if (assetId === jpeg.id) await new Promise<void>(resolve => { finishOpen = resolve; });
+    return { workspaceId, assetId, handle: `handle:${assetId}`, generation: 1, documentToken: `token:${assetId}`, revision: 1 };
+  });
+  await mount();
+  act(() => host.querySelector<HTMLButtonElement>('[aria-label="Exclude a.DNG from Filmstrip"]')!.click());
+  await flush();
+  expect(host.querySelector<HTMLButtonElement>('.filmstrip-item[aria-current="true"]')?.getAttribute('aria-label')).toBe('b.jpg');
+  expect(host.querySelector('.workspace-save-status')).not.toBeNull();
+  expect(host.querySelectorAll('.filmstrip-item')).toHaveLength(2);
+  await act(async () => finishOpen());
+  await flush();
+  expect(host.querySelector('.workspace-save-status')).toBeNull();
+  expect(host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')?.disabled).toBe(false);
+});
+
+it('routes Back and Forward through the same guarded Document owner queue', async () => {
+  await mount();
+  act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[2].click());
+  await flush();
+  expect(rawApi.openRawDocument).toHaveBeenLastCalledWith('workspace', rawB.id);
+
+  let finishBackOpen!: () => void;
+  vi.mocked(rawApi.openRawDocument).mockImplementation(async (workspaceId, assetId) => {
+    if (assetId === base.id) await new Promise<void>(resolve => { finishBackOpen = resolve; });
+    return { workspaceId, assetId, handle: `handle:${assetId}`, generation: 1, documentToken: `token:${assetId}`, revision: 1 };
+  });
+  act(() => host.querySelector<HTMLButtonElement>('[data-testid="route-back"]')!.click());
+  await flush();
+  expect(rawApi.openRawDocument).toHaveBeenLastCalledWith('workspace', base.id);
+  expect(host.querySelector('.workspace-save-status')).not.toBeNull();
+  await act(async () => finishBackOpen());
+  await flush();
+  expect(host.querySelector('.workspace-save-status')).toBeNull();
+
+  act(() => host.querySelector<HTMLButtonElement>('[data-testid="route-forward"]')!.click());
+  await flush();
+  expect(rawApi.openRawDocument).toHaveBeenLastCalledWith('workspace', rawB.id);
+  expect(host.querySelector('.workspace-save-status')).toBeNull();
+});
+
+it('ends the switch guard only after a failed successor Open is exposed as an error', async () => {
+  vi.mocked(rawApi.openRawDocument).mockImplementation(async (workspaceId, assetId) => {
+    if (assetId === rawB.id) throw new rawApi.RawApiError('raw_import_failed');
+    return { workspaceId, assetId, handle: `handle:${assetId}`, generation: 1, documentToken: `token:${assetId}`, revision: 1 };
+  });
+  await mount();
+  act(() => host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')[2].click());
+  await flush();
+  expect(rawApi.openRawDocument).toHaveBeenLastCalledWith('workspace', rawB.id);
+  expect(host.querySelector('.workspace-save-status')).toBeNull();
+  expect(host.querySelector('.viewer-panel')?.textContent).toContain('could not read this image');
 });
 
 it('refreshes inactive Native edit badges after a confirmed Recipe revision', async () => {
