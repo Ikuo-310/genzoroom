@@ -84,6 +84,7 @@ class RawPreviewApi:
         self._discarding = False
         self._document_close_task = None
         self._document_close_identity = None
+        self._document_close_draining = False
         self._touched = monotonic()
         self._workspace_state = "empty"
         self._native_released = False
@@ -454,7 +455,7 @@ class RawPreviewApi:
             self._lease_tickets[lease] = ticket
         frame = await ticket
         async with self._lock:
-            if frame is SUPERSEDED or self.document is not doc or target["documentRevision"] != doc["revision"]:
+            if frame is SUPERSEDED or self._document_close_draining or self.document is not doc or target["documentRevision"] != doc["revision"]:
                 return Response(status_code=204, headers={"X-Raw-Superseded-Reason": ticket.reason})
             self._document(doc["handle"])
             metadata = {**frame.metadata["response"], "geometryId": target["geometryId"]}
@@ -581,10 +582,21 @@ class RawPreviewApi:
                         else doc["recipeFingerprint"]):
                     raise LightCraftError("raw_history_commit_required")
                 await self._history_checkpoint()
-                # P1-2A retains the existing release; P1-2B will replace this boundary.
+                self._document_close_draining = True
+            # Image handlers reacquire the control lock before retiring their owner.
+            if self._image_tasks:
+                await asyncio.gather(*tuple(self._image_tasks), return_exceptions=True)
+            await self._images_idle.wait()
+            async with self._lock:
+                self._owner(identity[0])
+                if self._document(identity[1]) is not doc or doc["generation"] != identity[2] or doc["documentToken"] != identity[3]:
+                    raise LightCraftError("raw_stale_handle")
+                if doc["revision"] != identity[4]:
+                    raise LightCraftError("raw_revision_conflict")
                 await self._release(checkpoint_history=False)
                 return Response(status_code=204, headers={"Cache-Control": "no-store"})
         finally:
+            self._document_close_draining = False
             self._document_close_task = self._document_close_identity = None
             self._touched = monotonic()
 
@@ -896,7 +908,7 @@ class RawPreviewApi:
                 self._lease_tickets[lease] = ticket
         frame = await ticket
         async with self._lock:
-            if frame is SUPERSEDED or self.document is not doc or adaptive and self._preview_latest.get(latest_key) != body["serial"]:
+            if frame is SUPERSEDED or self._document_close_draining or self.document is not doc or adaptive and self._preview_latest.get(latest_key) != body["serial"]:
                 return Response(status_code=204, headers={"X-Raw-Superseded-Reason": ticket.reason})
             return self._hold_image_response(self._preview_response(frame, doc, body, kind, handle), lease)
 
@@ -975,7 +987,7 @@ class RawPreviewApi:
         if frame is SUPERSEDED:
             return Response(status_code=204, headers={"X-Raw-Superseded-Reason": "replaced", "Cache-Control": "no-store"})
         async with self._lock:
-            if self.document is not doc or self._document(doc["handle"]) is not doc or \
+            if self._document_close_draining or self.document is not doc or self._document(doc["handle"]) is not doc or \
                     frame.interaction_id != body["interactionId"] or frame.interaction_sequence is None:
                 return Response(status_code=204, headers={"X-Raw-Superseded-Reason": "cancelled", "Cache-Control": "no-store"})
             response = self._preview_response(frame, doc, {"revision": doc["revision"], "serial": body["serial"],
@@ -1042,7 +1054,7 @@ class RawPreviewApi:
         if frame is SUPERSEDED:
             return Response(status_code=204, headers={"X-Raw-Superseded-Reason": "replaced", "Cache-Control": "no-store"})
         async with self._lock:
-            if self.document is not doc or self._document(doc["handle"]) is not doc or \
+            if self._document_close_draining or self.document is not doc or self._document(doc["handle"]) is not doc or \
                     frame.interaction_id != body["interactionId"] or frame.interaction_sequence != body["interactionSequence"]:
                 return Response(status_code=204, headers={"X-Raw-Superseded-Reason": "cancelled", "Cache-Control": "no-store"})
             response = self._preview_response(frame, doc, {"revision": doc["revision"],
@@ -1127,7 +1139,7 @@ class RawPreviewApi:
         if frame is SUPERSEDED:
             return Response(status_code=204, headers={"X-Raw-Superseded-Reason": "replaced", "Cache-Control": "no-store"})
         async with self._lock:
-            if self.document is not doc or self._document(doc["handle"]) is not doc or \
+            if self._document_close_draining or self.document is not doc or self._document(doc["handle"]) is not doc or \
                     frame.interaction_id != body["interactionId"] or frame.interaction_sequence != body["interactionSequence"]:
                 return Response(status_code=204, headers={"X-Raw-Superseded-Reason": "cancelled", "Cache-Control": "no-store"})
             response = self._preview_response(frame, doc, {"revision": doc["revision"], "serial": body["serial"],

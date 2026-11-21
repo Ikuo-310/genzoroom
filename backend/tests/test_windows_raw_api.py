@@ -54,6 +54,66 @@ def close_headers(doc):
             "X-Raw-Token": doc["documentToken"], "X-Raw-Revision": str(doc["revision"])}
 
 
+def test_document_close_drains_preview_before_release(local, tmp_path, monkeypatch):
+    async def run():
+        api, manager, children, root = await setup(tmp_path, local, monkeypatch)
+        child = children[0]
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                workspace, doc = await open_document(http)
+                child.gate = asyncio.Event()
+                child.render_started.clear()
+                url = f'/api/raw/documents/{doc["handle"]}'
+                preview = asyncio.create_task(http.post(url + "/preview", json=preview_body(doc)))
+                await child.render_started.wait()
+                closing = asyncio.create_task(http.delete(url, headers=close_headers(doc)))
+                await until(lambda: api._document_close_draining)
+                assert not closing.done() and not api._lock.locked()
+                blocked = await http.post(url + "/preview", json=preview_body(doc, 2))
+                assert blocked.status_code == 409 and blocked.json()["code"] == "raw_busy"
+                child.gate.set()
+                assert (await preview).status_code == 204
+                assert (await closing).status_code == 204
+                assert api.workspace is None and manager.status().generation > doc["generation"]
+                assert not list(root.iterdir())
+        finally:
+            if child.gate:
+                child.gate.set()
+            await api.close()
+    asyncio.run(asyncio.wait_for(run(), 15))
+
+
+def test_document_close_waits_for_response_send_lease(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, _, root = await setup(tmp_path, local, monkeypatch)
+        gate, sending = asyncio.Event(), asyncio.Event()
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                _, doc = await open_document(http)
+                lease = object()
+                api._image_leases.add(lease)
+                response = api._hold_image_response(module._ImageResponse(b"image"), lease)
+                async def send(message):
+                    if message["type"] == "http.response.body":
+                        sending.set()
+                        await gate.wait()
+                transfer = asyncio.create_task(response({"type": "http", "method": "GET"}, None, send))
+                await sending.wait()
+                closing = asyncio.create_task(http.delete(f'/api/raw/documents/{doc["handle"]}', headers=close_headers(doc)))
+                await until(lambda: api._document_close_draining)
+                assert not closing.done() and not api._lock.locked() and list(root.iterdir())
+                gate.set()
+                await transfer
+                assert (await closing).status_code == 204
+                assert not api._image_leases and not list(root.iterdir())
+        finally:
+            gate.set()
+            await api.close()
+    asyncio.run(asyncio.wait_for(run(), 15))
+
+
 @pytest.mark.parametrize("header,value,code,status", [
     ("X-Raw-Workspace", "wrong", "raw_workspace_conflict", 409),
     ("X-Raw-Generation", "999", "raw_stale_handle", 409),

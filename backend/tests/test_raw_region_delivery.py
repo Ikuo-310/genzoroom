@@ -7,7 +7,7 @@ from dataclasses import replace
 import pytest
 
 from tests.test_windows_local import local, client, authenticate
-from tests.test_windows_raw_api import setup, open_document
+from tests.test_windows_raw_api import setup, open_document, close_headers
 from tests.test_raw_region import enable, target
 from tests.test_raw_adaptive_preview import target as whole_target
 from tests.test_lightcraft_mcp import until
@@ -33,6 +33,34 @@ def body(api, geometry, operation='render', view=1):
     t['identity']['documentToken'] = api.document['documentToken']
     t['geometryId'] = geometry
     return {'workspaceId': api.workspace, 'operation': operation, 'target': t}
+
+
+def test_document_close_drains_region_and_rejects_late_response(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, root = await setup(tmp_path, local, monkeypatch)
+        child = children[0]
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                doc, geometry = await connect(api, http, child)
+                child.gate = asyncio.Event()
+                child.render_started.clear()
+                url = f'/api/raw/documents/{doc["handle"]}'
+                region = asyncio.create_task(http.post(url + '/region', json=body(api, geometry)))
+                await child.render_started.wait()
+                closing = asyncio.create_task(http.delete(url, headers=close_headers(doc)))
+                await until(lambda: api._document_close_draining)
+                assert not closing.done() and not api._lock.locked()
+                assert (await http.post(url + '/region', json=body(api, geometry, view=2))).status_code == 409
+                child.gate.set()
+                assert (await region).status_code == 204
+                assert (await closing).status_code == 204
+                assert api.workspace is None and not list(root.iterdir())
+        finally:
+            if child.gate:
+                child.gate.set()
+            await api.close()
+    asyncio.run(asyncio.wait_for(run(), 15))
 
 
 def test_public_region_plan_render_and_common_worker(local, tmp_path, monkeypatch):
