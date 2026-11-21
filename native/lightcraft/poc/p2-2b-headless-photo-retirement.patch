@@ -1,0 +1,121 @@
+diff --git a/crates/engine/src/lib.rs b/crates/engine/src/lib.rs
+--- a/crates/engine/src/lib.rs
++++ b/crates/engine/src/lib.rs
+@@ -947,6 +947,33 @@
+         self.selection.active.filter(|id| self.catalog.photo(*id).is_some())
+     }
+ 
++    /// Permanently forget one inactive photo in a disposable, non-persistent session.
++    pub fn retire_headless_photo(&mut self, id: PhotoId) -> Result<()> {
++        if self.library.is_some() {
++            return Err(EngineError::Other("photo retirement requires a transient session".into()));
++        }
++        if self.catalog.photo(id).is_none() {
++            return Err(EngineError::Other(format!("no such photo {}", id.0)));
++        }
++        if self.active() == Some(id) || self.selection.ids.contains(&id) {
++            return Err(EngineError::Other("cannot retire a selected photo".into()));
++        }
++        if self.interaction.is_some() {
++            return Err(EngineError::Other("cannot retire during an interaction".into()));
++        }
++        let op = self.catalog.delete_photos_permanently_ops(&[id]);
++        self.apply_through(op, Catalog::apply)?;
++        self.undo.clear();
++        self.redo.clear();
++        self.pending_log.clear();
++        self.journal.clear();
++        self.before.remove(&id);
++        self.selection.ids.retain(|photo| *photo != id);
++        self.selection.active = self.selection.active.filter(|photo| *photo != id);
++        self.previous_active = self.previous_active.filter(|photo| *photo != id);
++        Ok(())
++    }
++
+     pub fn develop_of(&self, id: PhotoId) -> Option<Arc<DevelopSettings>> {
+         self.catalog.photo(id).map(|p| p.develop.clone())
+     }
+diff --git a/crates/mcp/src/headless.rs b/crates/mcp/src/headless.rs
+--- a/crates/mcp/src/headless.rs
++++ b/crates/mcp/src/headless.rs
+@@ -123,6 +123,11 @@
+     fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+         let p = if params.is_null() { json!({}) } else { params };
+         match method {
++            "headless.retirePhoto" => {
++                let id = p.get("id").and_then(Value::as_u64).ok_or("missing or invalid `id`")?;
++                self.session.retire_headless_photo(PhotoId(id)).map_err(|e| e.to_string())?;
++                Ok(json!({"retired": id}))
++            }
+             "engine.execute" | "ui.menu.invoke" | "command" => {
+                 let id = p.get("command").or(p.get("id")).and_then(Value::as_str).ok_or("missing `command`")?;
+                 let params = p.get("params").cloned().filter(|v| !v.is_null()).unwrap_or(json!({}));
+diff --git a/crates/mcp/src/tools.rs b/crates/mcp/src/tools.rs
+--- a/crates/mcp/src/tools.rs
++++ b/crates/mcp/src/tools.rs
+@@ -306,6 +306,15 @@
+             &[],
+         ),
+     ];
++    if !has_ui {
++        v.push(tool(
++            "headless_retire_photo",
++            "Retire headless photo",
++            "P2-2B PoC only. Permanently removes an inactive photo from this transient Headless session.",
++            json!({"id": {"type": "integer", "minimum": 1}}),
++            &["id"],
++        ));
++    }
+     if has_ui {
+         v.extend([
+             tool("ui_inspect", "Inspect UI", "UI state and selection (same as inspect_ui).", json!({}), &[]),
+@@ -782,6 +791,10 @@
+         "command_run" => match s("id") {
+             Some(c) => ToolResult::from(exec(b, c, args.get("params").cloned().filter(|p| !p.is_null()).unwrap_or(json!({})))),
+             None => ToolResult::error("missing `id`"),
++        },
++        "headless_retire_photo" => match args.get("id").and_then(Value::as_u64) {
++            Some(id) => ToolResult::from(b.call("headless.retirePhoto", json!({"id": id}))),
++            None => ToolResult::error("missing or invalid `id`"),
+         },
+         "command_batch" => {
+             let Some(steps) = args.get("steps").and_then(Value::as_array) else { return ToolResult::error("missing `steps`") };
+diff --git a/crates/mcp/src/tests.rs b/crates/mcp/src/tests.rs
+--- a/crates/mcp/src/tests.rs
++++ b/crates/mcp/src/tests.rs
+@@ -11,6 +11,35 @@
+ 
+ fn server() -> Server {
+     Server::new(Box::new(Headless::demo()))
++}
++
++#[test]
++fn headless_photo_retirement_keeps_other_photo_and_drops_history_references() {
++    let mut headless = Headless::demo();
++    let ids: Vec<_> = headless.session.catalog.photos().map(|photo| photo.id).take(2).collect();
++    let retired = ids[0];
++    let kept = ids[1];
++    assert!(headless.session.retire_headless_photo(lightcraft_engine::catalog::PhotoId(u64::MAX)).is_err());
++    headless.session.execute("library.select", &json!({"ids": [retired.0], "active": retired.0})).unwrap();
++    assert!(headless.session.retire_headless_photo(retired).is_err(), "the active photo is refused");
++    assert!(headless.session.catalog.photo(retired).is_some());
++    headless.session.execute("library.select", &json!({"ids": [kept.0], "active": kept.0})).unwrap();
++    let kept_photo = headless.session.catalog.photo(kept).unwrap().clone();
++    headless.session.before.insert(kept, kept_photo.develop.clone());
++    headless.session.before.insert(retired, kept_photo.develop.clone());
++
++    headless.session.retire_headless_photo(retired).unwrap();
++
++    assert!(headless.session.catalog.photo(retired).is_none());
++    assert_eq!(headless.session.catalog.photo(kept).unwrap().develop, kept_photo.develop);
++    assert_eq!(headless.session.catalog.photo(kept).unwrap().history, kept_photo.history);
++    assert!(headless.session.before.contains_key(&kept));
++    assert!(!headless.session.before.contains_key(&retired));
++    assert!(headless.session.undo.is_empty());
++    assert!(headless.session.redo.is_empty());
++    assert!(headless.session.journal.is_empty());
++    assert!(headless.session.drain_log().is_empty());
++    assert!(headless.session.retire_headless_photo(retired).is_err());
+ }
+ 
+ fn rpc(s: &mut Server, id: u64, method: &str, params: Value) -> Value {

@@ -260,3 +260,39 @@ LightCraftは現像・描画・Export、写真カタログ、Resident入替とCP
 | C.jpg | 444,722 | `428F38C740E98BF5A4D9D7A8CAAC93916B4469E82F62AEB73571DD584A13FDEA` | なし |
 
 以上により、P2-2Aの削除・再Import、独立Undo／Redo、原本・sidecar比較は実行した。未検証は非デフォルト編集状態を含むUndo、Beforeの実行時値、pending log／journalの実行時内部内容、Nativeの内部PhotoId参照とCPU／GPU資源解放である。pending log等の観測には公開APIがなく、内部状態を露出する診断機能は追加していない。恒久削除はUndoで旧IDを復活させるため、安全なResident退役としては不適合というP2-1の判断を維持する。
+
+
+## P2-2B Native個別退役PoC
+
+### 実装と適用順
+
+PoCはLightCraft v0.20.0 upstream `192ff72923c39e6623f2c7ff67ab3a119deb8071` に、manifest記載の現行managed patch `0001-v0.20.0-whole-frame.patch` を適用した後、GenzoRoom管理の [PoC patch](../../../native/lightcraft/poc/p2-2b-headless-photo-retirement.patch) を適用する構成。PoC patch SHA-256は `5EABCA72874338CDD0C338250F352CE24809975952123E8EBFCC7690918FE202`。正式manifest、正式patch、配布バイナリには含めない。patchはmanaged patch適用済みの固定upstream worktreeに対して `git apply --check` が成功した。
+
+Engineの `Session::retire_headless_photo(PhotoId)` は永続library、未知ID、activeまたは選択中、interaction中を変更前に拒否する。成功時は既存 `Catalog::delete_photos_permanently_ops` を作り、通常の `Session::commit` を通さず `apply_through` で適用する。これによりCatalogの関係整理と `media.forget` による既存デコードcache無効化を利用する。Before、選択、previous-activeの対象IDを消し、Undo／Redo、pending log、command journalを一時Session全体で破棄する。Import／編集操作に含まれる逆操作から旧IDが復活しないことを優先したPoC上の制約で、残存写真のNative Undo履歴は保持しない。残存写真のカタログ内settingsとPhoto History、Beforeは保持する。
+
+HeadlessのMCP transportに `headless.retirePhoto` とPoC tool `headless_retire_photo` を追加した。toolはUI接続時には公開しない。通常の削除commandは変更していない。最初の `lightcraft-cli run --script` 試行ではMCP用methodをEngine commandとして呼ぶためunknown commandになった。Native MCP stdioの `tools/call` から専用toolを呼ぶことで実行し、Headless専用境界を通ることを確認した。
+
+### 検証結果
+
+固定commitとmanaged patch適用済みの独立worktreeで `cargo check -p lightcraft-mcp --no-default-features` と `cargo build -p lightcraft-cli --no-default-features` が成功した。新しいCLIはversion 0.20.0。focused test `headless_photo_retirement_keeps_other_photo_and_drops_history_references` は1件成功した。テストはunknown ID、active写真の拒否、退役後のCatalog不在、残存写真のsettings／Native History／Before維持、Undo／Redo・journal・pending logの整理、同じIDへの重複退役拒否を確認する。
+
+既存fixture A（合成DNG）、B（JPEG）、C（別JPEG）を使い、CLIのHeadless MCP stdioで一連の操作を実行した。
+
+| 操作 | 結果 |
+| --- | --- |
+| A・B Import、A→B→A再選択 | A/BはPhotoId 1/2。Aはexposure 0.4、Bは-0.3に編集。A/Bとも再選択に成功。 |
+| B選択中にAを退役 | `headless_retire_photo(id:1)` は `retired:1`。旧Aのinspect、select、render_photoはいずれも失敗。 |
+| 残存Bの状態 | 退役前後ともID 2、exposure -0.3、Photo History length 1。退役後にBefore renderが成功し、before fingerprintを返した。Native focused testではBのBefore map保持も直接確認。 |
+| CとAの再Import | CはID 3、A再ImportはID 4。旧AのID 1とは異なる。 |
+| Undo／Redo | Import AのUndo／Redo後も旧A ID 1のinspectは失敗。退役時に旧Aを参照するNative Undo／Redoエントリ自体を消去した。 |
+| 永続library拒否 | `--library` 付きMCP Sessionで同じtoolを呼び、`photo retirement requires a transient session` を返して拒否。 |
+
+原本比較ではA/B/Cの実行後サイズとSHA-256が試験用コピー元と一致した。Aは24,938 bytes、SHA-256 `00FDAF88EFAED361056369C0612311A4B9F94C2BB6A3102CEF53EBF655A40942`。Bは406,494 bytes、SHA-256 `58AD0FE7C10ED3E7C54F07A3664449D04E54E87CEC7F268068934C1D0421CF6F`。Cは444,722 bytes、SHA-256 `428F38C740E98BF5A4D9D7A8CAAC93916B4469E82F62AEB73571DD584A13FDEA`。隣接XMPはどれも存在せず、sidecarは生成されなかった。
+
+### 成立範囲と未解決事項
+
+このPoCでは、一時Headlessの単一Sessionで非active写真をCatalogから除去し、Undo／Redoで同じPhotoIdが復活しない状態にして、残存写真を維持したままImportと再Importを行えた。通常のEngine削除APIと永続libraryは変更していない。
+
+Engine処理は `&mut Session` 上で同期実行される。PoCはHeadlessの同期コマンド経路を対象とし、別threadが保持するRenderJob、activity/job内のPhotoId参照を列挙する公開APIは追加していない。interactionの拒否は実装とソースで確認したが、fixtureを使ったinteraction中の実行試験は未実施。Redo、pending log、journalの内容と対象Photo IDの非参照はNative focused testのSession内部状態で確認し、BeforeのB保持もfocused testで確認した。OSのworking set、GPU allocator、長時間反復時のメモリ回収は測定していない。選択中の写真はPoC契約上拒否する。Undo／RedoとlogをSession全体で破棄するため、この処理は一時Headless Sessionにのみ使える。
+
+正式managed patch化を判断する前に、interaction中の拒否、繰り返し退役・再Import、残存job参照のないことをNative側で保証する境界を確認する必要がある。特に履歴全消去がEngineの一時Headless利用で許容されるか、かつ他のPhotoId参照がないことを追加Native testで確定してから、managed patch対象と公開API契約を検討する。P2-2BのPoC patchは製品へ適用しない。
