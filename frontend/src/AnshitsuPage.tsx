@@ -703,7 +703,7 @@ export function AnshitsuPage() {
       });
     } finally {
       resumeAutosave(id);
-      if (id === assetId) rawDocument?.resumeEditing();
+      if (id === assetId && !waitingForDocument) rawDocument?.resumeEditing();
       if (!waitingForDocument) {
         exclusionBusy.current = false;
         if (queueMounted.current) setExcluding(false);

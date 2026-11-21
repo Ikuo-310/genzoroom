@@ -176,11 +176,13 @@ it('keeps active Filmstrip exclusion guarded until the replacement Document is i
     return { workspaceId, assetId, handle: `handle:${assetId}`, generation: 1, documentToken: `token:${assetId}`, revision: 1 };
   });
   await mount();
+  const oldDocumentPreviewCount = vi.mocked(rawApi.rawPreview).mock.calls.length;
   act(() => host.querySelector<HTMLButtonElement>('[aria-label="Exclude a.DNG from Filmstrip"]')!.click());
   await flush();
   expect(host.querySelector<HTMLButtonElement>('.filmstrip-item[aria-current="true"]')?.getAttribute('aria-label')).toBe('b.jpg');
   expect(host.querySelector('.workspace-save-status')).not.toBeNull();
   expect(host.querySelectorAll('.filmstrip-item')).toHaveLength(2);
+  expect(vi.mocked(rawApi.rawPreview).mock.calls.slice(oldDocumentPreviewCount).some(([doc]) => doc.assetId === base.id)).toBe(false);
   await act(async () => finishOpen());
   await flush();
   expect(host.querySelector('.workspace-save-status')).toBeNull();
