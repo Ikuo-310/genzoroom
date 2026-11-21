@@ -13,7 +13,7 @@ import './i18n';
 
 vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(),
   closeRawDocument: vi.fn(), discardRawWorkspace:vi.fn(), beginRawGeometry: vi.fn(),updateRawGeometry: vi.fn(),recoverRawGeometry: vi.fn(), beginRawCurveInteraction: vi.fn(), cancelRawCurveInteraction: vi.fn(), updateRawTargetedCurve: vi.fn(), beginRawMixerInteraction: vi.fn(), updateRawMixerInteraction: vi.fn(), cancelRawMixerInteraction: vi.fn(), endRawMixerInteraction: vi.fn(), rawCapability: vi.fn(), createRawWorkspace: vi.fn(), openRawDocument: vi.fn(),
-  rawRegionOwner: vi.fn(), rawRegion: vi.fn(), cancelRawRegion: vi.fn(async () => {}),
+  rawRegionOwner: vi.fn(), rawRegion: vi.fn(), cancelRawRegion: vi.fn(async () => {}), abortRawWorkspaceRequests: vi.fn(),
   rawPreview: vi.fn(), cancelRawPreview: vi.fn(async () => {}), readRawDocument: vi.fn(), readRawSettings: vi.fn(), setRawControls: vi.fn(), releaseRawWorkspace: vi.fn(), rawWorkspaceEmpty: vi.fn(),
   readRawHistory: vi.fn(), saveRawHistory: vi.fn(), saveRawRecipe: vi.fn(), readRawRecipe: vi.fn(),
   beginRawPointColorInteraction: vi.fn(), updateRawPointColorInteraction: vi.fn(), cancelRawPointColorInteraction: vi.fn() }));
@@ -113,6 +113,39 @@ it('connects Region only explicitly and clears document-owned candidates on phot
   await render(null); await flush();
   expect(delivery.candidate).toBeUndefined(); expect(delivery.state.pending).toBeUndefined();
   expect(delivery.submit({ planGeneration: 101, items: [item] })).toBe(false);
+});
+
+it('rejects a delayed Region response from the first A after A to B to A', async () => {
+  const asset = regionRequest().identity.assetId, pending = deferred<api.RawRegionResult>();
+  let openCount = 0;
+  vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => ({ workspaceId, assetId,
+    handle: `handle-${++openCount}`, generation: 1, documentToken: String(openCount).padStart(32, '0'), revision: 1 }));
+  vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(['whole']), width: 16, height: 12, epoch: 1, sequence: 1,
+    frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000, aspect: 4/3,
+      fullWidth: 16, fullHeight: 12, window: null } });
+  vi.mocked(api.rawRegion).mockReturnValueOnce(pending.promise);
+  await render(asset); await flush();
+  await act(async () => { expect(await current!.connectRegion()).toBe(true); });
+  const firstA = current!.document!, oldDelivery = current!.regionDelivery!;
+  const item = regionRequest({ identity: { assetId: asset, sourceId: 'b'.repeat(64), generation: firstA.generation,
+    documentToken: firstA.documentToken, kind: 'after', revision: firstA.revision }, documentRevision: firstA.revision });
+  await act(async () => { expect(oldDelivery.submit({ planGeneration: 100, items: [item] })).toBe(true); });
+  await flush();
+
+  await render('next-photo'); await flush();
+  await render(asset); await flush();
+  expect(current!.document!.generation).toBe(firstA.generation);
+  expect(current!.document!.documentToken).not.toBe(firstA.documentToken);
+  const currentUrl = current!.url;
+  const urlCount = createURL.mock.calls.length;
+  expect(currentUrl).toBeDefined();
+
+  await act(async () => pending.resolve({ operation: 'render', metadata: regionResponse(item), blob: new Blob(['old-region']) }));
+  await flush();
+  expect(current?.url).toBe(currentUrl);
+  expect(current?.regionDisplay).toBeUndefined();
+  expect(oldDelivery.candidate).toBeUndefined();
+  expect(createURL.mock.calls).toHaveLength(urlCount);
 });
 
 it('turns targeted mode off on hover Escape and cancels one active interaction without saving History', async () => {
@@ -953,6 +986,7 @@ describe('RAW native Before cache', () => {
 
     expect(api.closeRawDocument).toHaveBeenCalledOnce();
     expect(api.openRawDocument).toHaveBeenCalledOnce();
+    expect(api.abortRawWorkspaceRequests).not.toHaveBeenCalled();
     expect(current).toMatchObject({ assetId: 'b', status: 'error' });
     expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
   });
@@ -1021,6 +1055,51 @@ describe('RAW native Before cache', () => {
     await act(async () => pending.resolve()); await flush();
     expect(current?.assetId).toBe('b'); expect(current?.beforeUrl).toBeUndefined();
     expect(revokeURL).toHaveBeenCalledWith(candidate);
+  });
+  it('does not restore the first A Before decode after A to B to A', async () => {
+    enableBefore();
+    let openCount = 0;
+    vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => ({ workspaceId, assetId,
+      handle: `handle-${++openCount}`, generation: 1, documentToken: String(openCount).padStart(32, '0'), revision: 1 }));
+    await render('a'); await flush();
+    const oldDecode = deferred<void>(); decode = () => oldDecode.promise;
+    await render('a', true); await flush();
+    const oldCandidate = `blob:raw-${createURL.mock.calls.length}`;
+    expect(vi.mocked(api.rawPreview).mock.calls.at(-1)?.[3]).toBe('before');
+
+    decode = async () => {};
+    await render('b', true); await flush();
+    await render('a', true); await flush();
+    const newBeforeUrl = current!.beforeUrl;
+    expect(newBeforeUrl).toBeDefined(); expect(newBeforeUrl).not.toBe(oldCandidate);
+    await act(async () => oldDecode.resolve()); await flush();
+    expect(current?.beforeUrl).toBe(newBeforeUrl);
+    expect(revokeURL).toHaveBeenCalledWith(oldCandidate);
+  });
+  it('rejects the first A Before response after A to B to A', async () => {
+    enableBefore();
+    let openCount = 0;
+    vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => ({ workspaceId, assetId,
+      handle: `handle-${++openCount}`, generation: 1, documentToken: String(openCount).padStart(32, '0'), revision: 1 }));
+    await render('a'); await flush();
+    const firstA = current!.document!, pendingBefore = deferred<api.RawFrame>();
+    const normalPreview = vi.mocked(api.rawPreview).getMockImplementation()!;
+    vi.mocked(api.rawPreview).mockImplementation((doc, serial, signal, kind = 'after', target, ...rest) =>
+      kind === 'before' && doc.documentToken === firstA.documentToken ? pendingBefore.promise
+        : normalPreview(doc, serial, signal, kind, target, ...rest));
+    await render('a', true); await flush();
+    expect(vi.mocked(api.rawPreview).mock.calls.at(-1)?.[3]).toBe('before');
+
+    await render('b', true); await flush();
+    await render('a', true); await flush();
+    const newBeforeUrl = current!.beforeUrl;
+    const urlCount = createURL.mock.calls.length;
+    expect(newBeforeUrl).toBeDefined();
+    await act(async () => pendingBefore.resolve({ blob: new Blob(['old-before']), width: 16, height: 12,
+      epoch: 1, sequence: 99, kind: 'before', key: firstA.beforeKey ?? undefined }));
+    await flush();
+    expect(current?.beforeUrl).toBe(newBeforeUrl);
+    expect(createURL.mock.calls).toHaveLength(urlCount);
   });
 });
 describe('RAW document lifetime', () => {
@@ -1449,11 +1528,87 @@ describe('RAW document lifetime', () => {
     expect(vi.mocked(api.releaseRawWorkspace).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(api.openRawDocument).mock.invocationCallOrder[1]);
     expect(api.rawPreview).toHaveBeenCalledOnce();
   });
+  it('keeps the successor Open behind Document Close while an old Preview response is draining', async () => {
+    const pendingPreview = deferred<api.RawFrame>(), pendingClose = deferred<void>();
+    vi.mocked(api.rawPreview).mockReturnValueOnce(pendingPreview.promise);
+    vi.mocked(api.closeRawDocument).mockReturnValueOnce(pendingClose.promise);
+    await render('a'); await flush();
+    await render('b'); await flush();
+    expect(api.closeRawDocument).toHaveBeenCalledOnce();
+    expect(api.openRawDocument).toHaveBeenCalledOnce();
+    expect(api.abortRawWorkspaceRequests).not.toHaveBeenCalled();
+
+    await act(async () => pendingPreview.resolve({ blob: new Blob(['old-A']), width: 16, height: 12, epoch: 1, sequence: 1 }));
+    await flush();
+    expect(api.openRawDocument).toHaveBeenCalledOnce();
+    expect(createURL).not.toHaveBeenCalled();
+
+    await act(async () => pendingClose.resolve()); await flush();
+    expect(api.openRawDocument).toHaveBeenLastCalledWith('workspace', 'b');
+    expect(current?.document?.assetId).toBe('b');
+    expect(api.abortRawWorkspaceRequests).not.toHaveBeenCalled();
+  });
   it('rejects an old HTTP Preview after switching to JPEG', async () => {
     const pending = deferred<api.RawFrame>(); vi.mocked(api.rawPreview).mockReturnValueOnce(pending.promise);
     await render('raw'); await flush(); await render(null);
     await act(async () => pending.resolve({ blob: new Blob(['old']), width: 16, height: 12, epoch: 1, sequence: 1 }));
     await flush(); expect(current).toBeNull(); expect(createURL).not.toHaveBeenCalled();
+  });
+  it('rejects the first A Preview after A to B to A when generation is unchanged', async () => {
+    const oldPreview = deferred<api.RawFrame>(), order: string[] = [];
+    let openCount = 0;
+    vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => {
+      const opened = ++openCount;
+      order.push(`open:${assetId}`);
+      return { workspaceId, assetId, handle: `handle-${opened}`, generation: 1,
+        documentToken: String(opened).padStart(32, '0'), revision: 1 };
+    });
+    vi.mocked(api.closeRawDocument).mockImplementation(async doc => { order.push(`close:${doc.assetId}`); });
+    vi.mocked(api.rawPreview).mockImplementationOnce(() => oldPreview.promise).mockResolvedValue({
+      blob: new Blob(['current']), width: 16, height: 12, epoch: 1, sequence: 1 });
+
+    await render('a'); await flush();
+    const firstA = vi.mocked(api.rawPreview).mock.calls[0]![0];
+    order.length = 0;
+    await render('b'); await flush();
+    await render('a'); await flush();
+    const currentA = current!.document!;
+    const currentUrl = current!.url;
+    const urlsBeforeOldReply = createURL.mock.calls.length;
+
+    expect(currentA.generation).toBe(firstA.generation);
+    expect(currentA.documentToken).not.toBe(firstA.documentToken);
+    expect(currentUrl).toBeDefined();
+    expect(order).toEqual(['close:a', 'open:b', 'close:b', 'open:a']);
+
+    await act(async () => oldPreview.resolve({ blob: new Blob(['old-A']), width: 16, height: 12, epoch: 1, sequence: 2 }));
+    await flush();
+    expect(current?.document?.documentToken).toBe(currentA.documentToken);
+    expect(current?.url).toBe(currentUrl);
+    expect(createURL.mock.calls).toHaveLength(urlsBeforeOldReply);
+    expect(api.abortRawWorkspaceRequests).not.toHaveBeenCalled();
+  });
+  it('revokes the first A decode candidate after A to B to A without replacing the new A Preview', async () => {
+    const oldDecode = deferred<void>();
+    let decodeCount = 0, openCount = 0;
+    decode = () => ++decodeCount === 1 ? oldDecode.promise : Promise.resolve();
+    vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => ({ workspaceId, assetId,
+      handle: `handle-${++openCount}`, generation: 1, documentToken: String(openCount).padStart(32, '0'), revision: 1 }));
+    vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(['frame']), width: 16, height: 12, epoch: 1, sequence: 1 });
+
+    await render('a'); await flush();
+    const oldCandidate = `blob:raw-${createURL.mock.calls.length}`;
+    expect(createURL).toHaveBeenCalledOnce();
+    await render('b'); await flush();
+    await render('a'); await flush();
+    const newAUrl = current!.url;
+    const currentUrlCount = createURL.mock.calls.length;
+    expect(newAUrl).toBeDefined(); expect(newAUrl).not.toBe(oldCandidate);
+
+    await act(async () => oldDecode.resolve()); await flush();
+    expect(current?.url).toBe(newAUrl);
+    expect(createURL.mock.calls).toHaveLength(currentUrlCount);
+    expect(revokeURL).toHaveBeenCalledWith(oldCandidate);
   });
   it('revokes a decode candidate on navigation and never publishes the old document', async () => {
     const pending = deferred<void>(); decode = () => pending.promise;
