@@ -1,0 +1,47 @@
+# フィルムストリップ切替とNative Sessionの寿命
+
+基準はGenzoRoom main `3edfc505778577d8bbcc3197326e57d78a593d9a`。P0・P1事前調査とP1-1の実装結果をまとめる。P1-2以降は設計段階である。
+
+## 目的と計測
+
+現像作業中のフィルムストリップ画像切替、特に訪問済み写真への往復を高速化する。Immichからの初回原本取得と初回Native Importの高速化は主目的ではない。
+
+P0・P1事前調査では、画像切替に伴うNativeプロセス再生成と、同一Sessionの初回Previewと2回目Previewの時間差を調査対象とした。今回参照できる記録には、それぞれのログの計測値・測定条件・対象画像が残っていないため、数値や改善幅は確定できない。元ログの所在と値の対応付けは未解決である。別条件の過去記録には初回RAW open約2秒、初回Region Plan約660ms、同一Documentの再Plan約0.25msがあるが、これらを今回のフィルムストリップ切替のPreview計測値として扱わない。詳細は [LightCraft更新ガイド](UPDATE_GUIDE.md) と [Region Plan計測](REGION_C3B_PLAN_TIMING.md) を参照する。
+
+## 現行ライフサイクル
+
+BackendのWorkspaceは単一の公開Documentと、そのWorkspace専用のRawSourceCacheを所有する。LightCraftRawSessionはNativeプロセスのgenerationに紐づく写真snapshotとResidentのPhotoIdを管理する。RawSourceCacheの完成コピーはNativeが参照する期間を通じて保持する。
+
+通常の写真切替ではFrontendが入力を停止し、Native readbackとRecipe／Historyの保存を確定してから移動する。Asset単位の `useRawDocument` は旧Workspaceを解放し、新WorkspaceとDocumentを開く。現行Backendでは `DELETE /documents/{handle}` と `DELETE /workspaces/{id}` が同じ `_release()` に入り、History checkpointを確認してDocumentを失効させる。その後、画像応答の所有期間を待ち、`reset_session(restore_active=False)` により旧Nativeプロセスを回収して新generationを起動し、RawSourceCacheを閉じる。通常切替で再生成される原因はこの寿命の結合である。
+
+Preview／RegionはNative処理後にBackendのownerやrevisionを再確認する。送信済み操作はHTTP待機側の取消だけでは終了せず、画像応答のleaseはASGI送信完了まで所有される。保存未確定の場合は旧ownerを保持し、確認できない状態を保存成功として扱わない。明示Discardと通常Releaseは別の終了経路を持つ。
+
+## P1-1の完了記録
+
+Commit `3edfc505` でRawSourceCacheは同一Workspace内のAssetごとの完成コピーを保持し、パスとファイル情報のfingerprintを照合して再利用する。コピーはWorkspaceの回収まで保持する。Native側は写真ごとのImport直後の既定設定を保持し、Residentを再選択した際にも既定値のfingerprintを編集後の値で置き換えない。
+
+Document OpenはSQLiteのRecipeとHistoryのidentity・revisionを照合し、保存済みRecipeを復元する。Recipeがない場合とエンジン非互換の回復経路では、必要に応じてImport既定設定へ戻す。Native Session内のA→B→AではAを再Importせず、tokenを更新する。原本コピーが変化した場合や復元に失敗した場合はDocumentを公開しない。Backend focused testsは250件成功した。これらは自動テストの結果であり、通常の画面切替では現時点でもWorkspaceが解放される。
+
+## P1-2の設計
+
+採用する方針はDocument CloseとWorkspace Releaseの分離である。`DELETE /documents/{handle}` は旧Documentを終了し、Workspace、Native Session、Resident写真とRawSourceCacheを保持する。`DELETE /workspaces/{id}` は全体を解放する。
+
+Closeは旧Documentのownerと保存チェックポイントを確認し、Closing状態で新規操作を拒否する。旧Documentが所有するPreview／Region等の実行中処理と応答の終了を待ち、旧ownerを失効させる。処理が残っている間は次のDocumentを公開しない。Close成功後のWorkspaceはDocumentなしとなり、次のDocumentを同一WorkspaceでOpenできる。Open時はP1-1のコピーとResident再利用、SQLiteとの照合と復元を使う。旧handle、token、generation、revisionや遅延した画像応答は新Documentに採用しない。
+
+保存チェックポイントに失敗した場合は旧Documentを維持し、既存のRetryと保存保護を使う。Native障害や明示Discardは既存の安全な終了・回収経路を維持する。Closeの応答喪失時は旧ownerの結果を確認できるようにし、再送が新Documentを閉じないようにする必要がある。
+
+実装前に以下を判断する。
+
+- CloseのHTTP契約。Workspace ID、generation、Document token、revisionをどの入力に含め、成功応答喪失後の再送をどう識別するか。
+- checkpoint確認とClosing受付停止の原子性。既に受理された保存・対話操作をどう完了させ、未確定の状態を拒否するか。
+- `_lock` と待機の具体的な順序。Preview／RegionはNative完了後に同じlockを再取得するため、Closeがlockを保持したまま処理終了を待つとデッドロックする。owner状態の確定と受付停止をlock内で行い、処理・画像leaseの待機をlock外で行う案を、取消・再送・Workspace Releaseとの競合を含めて検証する。
+- 応答送信中の画像leaseをCloseが待つ範囲と、Closing後に到着した旧応答の破棄方法。次Documentの公開前に旧ownerの処理が終了するという条件を満たす。
+- Close成功前後のNative障害、保存結果不明、Discard、Workspace lease期限、Open応答喪失における所有権と再試行方法。
+
+P1ではResident最大2枚、変更試行の再生成閾値200・上限256を維持する。上限やNative障害に達した場合は、保存確定と旧プロセスの回収を前提に既存の安全な再生成経路を使う。新たな写真退役APIはP1に含めない。
+
+## P1-3以降
+
+P1-3ではFrontendのWorkspace所有期間を暗室単位へ移し、保存確定、Document Close、次のOpenと画面初期化を既存のownerと世代管理に接続する。高速連続切替、遅延Preview／Region／Before、RAWとJPEGの混在、離脱と保存失敗を対象にする。
+
+P2ではResident上限とSession再生成の頻度を見直し、Nativeカタログ、Undo、pending log、原本コピー、メモリ使用量の実測を踏まえて回収方針を決める。必要に応じてPreview再利用を検討する。初回読込みの高速化、先読み、暫定表示、サムネイル再利用は優先度を下げ、別工程で扱う。
