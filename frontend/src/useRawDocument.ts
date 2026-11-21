@@ -893,6 +893,26 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       workspaceOwner.effectSerial = currentSerial;
       workspaceOwner.documentState = 'opening';
     };
+    // A lost Open reply has no handle to close, so retry only after the whole Workspace is confirmed released.
+    const releaseFailedOpenWorkspace = async (workspaceId: string) => {
+      if (workspaceOwner.workspaceId !== workspaceId || workspaceOwner.effectSerial !== currentSerial)
+        throw new RawApiError('raw_stale_handle');
+      let owner: RawWorkspaceTermination;
+      owner = new RawWorkspaceTermination(workspaceId, 'recovery', undefined, async () => {}, async () => {
+        if (workspaceOwner.workspaceId !== workspaceId || workspaceOwner.effectSerial !== currentSerial)
+          throw new RawApiError('raw_stale_handle');
+        await releaseWorkspaceConfirmed(workspaceId);
+      }, async () => {
+        if (workspaceOwner.workspaceId !== workspaceId || workspaceOwner.effectSerial !== currentSerial)
+          throw new RawApiError('raw_stale_handle');
+        workspaceOwner.workspaceId = undefined;
+        workspaceOwner.effectSerial = undefined;
+        workspaceOwner.documentState = undefined;
+        if (pointColorTermination === owner) pointColorTermination = undefined;
+      });
+      pointColorTermination = owner;
+      await owner.run();
+    };
     const terminateStaleRecoveryWorkspace = async (workspaceId: string) => {
       let owner = pointColorTermination;
       if (owner?.state.stage === 'complete') {
@@ -1124,7 +1144,28 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
           adoptWorkspace(openWorkspace);
         }
         if (!current()) return;
-        const doc = await openRawDocument(openWorkspace, assetId);
+        let doc: RawDocument;
+        try { doc = await openRawDocument(openWorkspace, assetId); }
+        catch {
+          if (!current()) return;
+          recoveryInProgress = true;
+          try {
+            await releaseFailedOpenWorkspace(openWorkspace);
+            if (!current()) return;
+            const replacementWorkspace = await createRawWorkspace();
+            adoptWorkspace(replacementWorkspace);
+            if (!current()) {
+              await terminateStaleRecoveryWorkspace(replacementWorkspace);
+              return;
+            }
+            openWorkspace = replacementWorkspace;
+            try { doc = await openRawDocument(openWorkspace, assetId); }
+            catch (retryError) {
+              await releaseFailedOpenWorkspace(openWorkspace);
+              throw retryError;
+            }
+          } finally { recoveryInProgress = false; }
+        }
         if (!current()) return;
         workspaceOwner.documentState = 'open';
         const settings = await readRawSettings(doc);
@@ -1414,6 +1455,9 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         });
       } else if (discardOperation) {
         // A non-Point-Color discard already owns this Workspace and continues after the hook leaves.
+      } else if (pointColorTermination?.kind === 'recovery' && pointColorTermination.workspaceId === workspace.current) {
+        const owner = pointColorTermination;
+        void owner.run().catch(cause => log(cause instanceof RawApiError ? cause.code : 'raw_connection_failed', 'raw.releaseFailed'));
       } else if (recoveryInProgress) {
         // Recovery owns the Workspace until it can transfer the known outcome to a termination owner.
       } else if (workspace.current) {

@@ -1468,6 +1468,92 @@ describe('RAW document lifetime', () => {
     expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
     expect(current?.document?.assetId).toBe('c');
   });
+  it.each(['raw_connection_failed', 'raw_session_capacity'] as const)(
+    'releases an uncertain or full Resident Workspace before one Open retry: %s', async failureCode => {
+      const order: string[] = [];
+      let createCount = 0, bOpens = 0, releaseCount = 0;
+      vi.mocked(api.createRawWorkspace).mockImplementation(async () => {
+        const id = `workspace-${++createCount}`; order.push(`create:${id}`); return id;
+      });
+      vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => {
+        order.push(`open:${workspaceId}:${assetId}`);
+        if (assetId === 'b' && ++bOpens === 1) throw new api.RawApiError(failureCode);
+        return { workspaceId, assetId, handle: `handle-${assetId}-${bOpens}`, generation: 1,
+          documentToken: String(bOpens + 1).padStart(32, '0'), revision: 1 };
+      });
+      vi.mocked(api.closeRawDocument).mockImplementation(async doc => { order.push(`close:${doc.assetId}`); });
+      vi.mocked(api.releaseRawWorkspace).mockImplementation(async workspaceId => {
+        order.push(`release:${workspaceId}`);
+        if (workspaceId === 'workspace-1' && releaseCount++ === 0) throw new api.RawApiError('raw_connection_failed');
+      });
+      vi.mocked(api.rawWorkspaceEmpty).mockResolvedValueOnce(false);
+
+      await render('a'); await flush();
+      await render('b'); await flush();
+
+      expect(order).toEqual(['create:workspace-1', 'open:workspace-1:a', 'close:a', 'open:workspace-1:b',
+        'release:workspace-1', 'release:workspace-1', 'create:workspace-2', 'open:workspace-2:b']);
+      expect(api.rawWorkspaceEmpty).toHaveBeenCalledWith('workspace-1');
+      const restoredDoc = current!.document!;
+      expect(restoredDoc).toMatchObject({ workspaceId: 'workspace-2', assetId: 'b' });
+      expect(vi.mocked(api.readRawSettings).mock.calls.at(-1)?.[0]).toMatchObject({ workspaceId: 'workspace-2', assetId: 'b' });
+      expect(vi.mocked(api.readRawHistory).mock.calls.at(-1)?.[0]).toMatchObject({ workspaceId: 'workspace-2', assetId: 'b' });
+      expect(current?.history).toBeDefined();
+    });
+  it('keeps Open stopped when old Workspace release and emptiness checks cannot confirm recovery', async () => {
+    let createCount = 0;
+    vi.mocked(api.createRawWorkspace).mockImplementation(async () => `workspace-${++createCount}`);
+    vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => {
+      if (assetId === 'b') throw new api.RawApiError('raw_connection_failed');
+      return { workspaceId, assetId, handle: 'handle-a', generation: 1, documentToken: 'a'.repeat(32), revision: 1 };
+    });
+    vi.mocked(api.releaseRawWorkspace).mockRejectedValue(new api.RawApiError('raw_connection_failed'));
+    vi.mocked(api.rawWorkspaceEmpty).mockResolvedValue(false);
+    await render('a'); await flush();
+    await render('b'); await flush();
+    expect(api.releaseRawWorkspace).toHaveBeenCalledTimes(2);
+    expect(api.rawWorkspaceEmpty).toHaveBeenCalledTimes(2);
+    expect(api.createRawWorkspace).toHaveBeenCalledOnce();
+    expect(api.openRawDocument).toHaveBeenCalledTimes(2);
+    expect(current?.status).toBe('error');
+  });
+  it('does not loop when the one recovery Open also fails and cleans that Workspace', async () => {
+    let createCount = 0;
+    const releases: string[] = [];
+    vi.mocked(api.createRawWorkspace).mockImplementation(async () => `workspace-${++createCount}`);
+    vi.mocked(api.releaseRawWorkspace).mockImplementation(async id => { releases.push(id); });
+    vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => {
+      if (assetId === 'b') throw new api.RawApiError('raw_connection_failed');
+      return { workspaceId, assetId, handle: 'handle-a', generation: 1, documentToken: 'a'.repeat(32), revision: 1 };
+    });
+    await render('a'); await flush();
+    await render('b'); await flush();
+    expect(api.openRawDocument).toHaveBeenCalledTimes(3);
+    expect(api.createRawWorkspace).toHaveBeenCalledTimes(2);
+    expect(releases.filter(id => id === 'workspace-2')).toEqual(['workspace-2']);
+    expect(current?.status).toBe('error');
+  });
+  it('does not keep or open a replacement Workspace when unmounted during recovery Open', async () => {
+    const retry = deferred<api.RawDocument>();
+    let createCount = 0, bOpens = 0;
+    vi.mocked(api.createRawWorkspace).mockImplementation(async () => `workspace-${++createCount}`);
+    vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => {
+      if (assetId === 'b' && ++bOpens === 1) throw new api.RawApiError('raw_session_capacity');
+      if (assetId === 'b') return retry.promise;
+      return { workspaceId, assetId, handle: 'handle-a', generation: 1, documentToken: 'a'.repeat(32), revision: 1 };
+    });
+    await render('a'); await flush();
+    await render('b'); await flush();
+    expect(api.openRawDocument).toHaveBeenCalledTimes(3);
+    expect(api.createRawWorkspace).toHaveBeenCalledTimes(2);
+    await render(null);
+    await act(async () => retry.resolve({ workspaceId: 'workspace-2', assetId: 'b', handle: 'handle-b',
+      generation: 1, documentToken: 'b'.repeat(32), revision: 1 }));
+    await flush();
+    expect(api.createRawWorkspace).toHaveBeenCalledTimes(2);
+    expect(api.readRawSettings).not.toHaveBeenCalledWith(expect.objectContaining({ workspaceId: 'workspace-2' }));
+    expect(api.releaseRawWorkspace).toHaveBeenCalledWith('workspace-2');
+  });
   it('rejects old slider callbacks after a successor RAW document has opened', async () => {
     await render('a'); await flush(); const old = current!;
     await render('b'); await flush();
