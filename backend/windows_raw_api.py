@@ -624,7 +624,9 @@ class RawPreviewApi:
                 try:
                     source = await self.cache.download(asset_id)
                     handle, snapshot = await self.raw.open_raw(str(asset_id), str(source))
-                    import_defaults_fingerprint = self._fingerprint(snapshot.settings)
+                    photo = self.raw._photo(handle, active=True)
+                    import_defaults = json.loads(photo.import_settings_json)
+                    import_defaults_fingerprint = self._fingerprint(import_defaults)
                     snapshot, recipe_status, recipe_revision, recovery_pending = await self._restore_document(handle, snapshot)
                 except BaseException:
                     # Import may have partially registered the source; reap before deleting it.
@@ -1894,10 +1896,14 @@ class RawPreviewApi:
             raise LightCraftError("raw_recipe_unavailable") from None
         verify()
         self._recipe_recovery_baseline = None
+        photo = self.raw._photo(handle, active=True)
+        import_defaults = json.loads(photo.import_settings_json)
         if saved["status"] == "source_mismatch":
             raise LightCraftError(f'raw_recipe_{saved["status"]}')
         if saved["status"] == "engine_incompatible":
-            self._recipe_recovery_baseline = json.loads(_settings_json(snapshot.settings))
+            if snapshot.settings != import_defaults:
+                snapshot = await self.raw.restore_import_defaults(handle, snapshot.revision)
+            self._recipe_recovery_baseline = import_defaults
             lightcraft_log("raw.recipe.incompatible", level="warn", assetId=identity["assetId"],
                            generation=handle.generation, engineVersion=identity["engineVersion"])
             history = await run_in_threadpool(get_raw_history, identity)
@@ -1919,6 +1925,9 @@ class RawPreviewApi:
         self._history_identity = identity
         self._history_initialized = history["initialized"]
         if saved["status"] == "none":
+            if snapshot.settings != import_defaults:
+                snapshot = await self.raw.restore_import_defaults(handle, snapshot.revision)
+                verify()
             lightcraft_log("raw.recipe.none", level="debug", assetId=identity["assetId"])
             return snapshot, "none", 0, False
         snapshot = await self.raw.restore_persisted_settings(handle, saved["recipe"], snapshot.revision)

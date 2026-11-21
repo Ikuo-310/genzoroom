@@ -306,6 +306,7 @@ class _Photo:
     before_fingerprint: str | None = None
     source_size: tuple[int, int] | None = None
     import_optics_json: str = field(default="{}", repr=False)
+    import_settings_json: str = field(default="{}", repr=False)
     lens_profile_info_json: str = field(default_factory=lambda: _lens_profile_info_json(None), repr=False)
 
 
@@ -1095,6 +1096,7 @@ class LightCraftRawSession:
             # Native allReset restores the photo's import look, including embedded lens defaults.
             # Capture it before restoring a persisted After recipe or a resident edit snapshot.
             photo.import_optics_json = json.dumps(json.loads(settings)['optics'], sort_keys=True)
+            photo.import_settings_json = settings
             # Only expose Kelvin editing when the engine supplies a measured as-shot white.
             photo.wb_auto = await self.manager._raw_wb_supported(self._generation)
             white = info.get("as_shot_wb")
@@ -1148,7 +1150,10 @@ class LightCraftRawSession:
                 await self._command("library.select", {"ids": [photo.photo_id], "active": photo.photo_id, "mode": "replace"}, deadline)
                 await self._refresh_lens_profile_info(photo, deadline)
                 photo.handle = RawHandle(source_key, uuid.uuid4().hex, self._generation)
-                self._commit(photo, await self._read_settings(photo, deadline))
+                settings = await self._read_settings(photo, deadline)
+                if settings != photo.settings_json:
+                    self._invalidate()
+                    self._commit(photo, settings)
             else:
                 if len(self._resident) >= MAX_RAW_FILES:
                     raise LightCraftError("raw_session_capacity")
@@ -2824,6 +2829,19 @@ class LightCraftRawSession:
                     "raw_recipe_restore_unknown" if error.code == "raw_operation_timeout" else
                     "raw_recipe_restore_failed")
             raise LightCraftError(code) from None
+
+    async def restore_import_defaults(self, handle, expected_revision):
+        photo = self._photo(handle, active=True)
+        encoded = photo.import_settings_json
+        identity = photo.fingerprint, photo.content_hash
+
+        def verify():
+            current = self._photo(handle, active=True)
+            if (current.fingerprint, current.content_hash) != identity:
+                raise LightCraftError("raw_source_changed")
+
+        return await self._mutate(handle, "develop.merge", {}, expected_revision,
+                                  restored=encoded, verify=verify)
 
     @staticmethod
     def _before_geometry(photo):

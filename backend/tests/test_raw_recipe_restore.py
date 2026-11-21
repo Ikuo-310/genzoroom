@@ -492,6 +492,53 @@ def test_windows_restores_before_publish_and_preview_then_preserves_c2(local, tm
     asyncio.run(asyncio.wait_for(run(), 15))
 
 
+@pytest.mark.parametrize("recipe_status", ["restored", "none", "incompatible"])
+def test_resident_revisit_restores_recipe_history_and_discards_uncommitted_state(
+        local, tmp_path, monkeypatch, recipe_status):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            asset_id = uuid4()
+            from tests.test_raw_history_api import headers, url
+            if recipe_status == "incompatible":
+                seed(asset_id, engineVersion="0.18.1")
+            async with client(local) as http:
+                await authenticate(http, local)
+                workspace = (await http.post("/api/raw/workspaces", json={})).json()["workspaceId"]
+                source = await api.cache.download(asset_id)
+                # Prime the adapter directly while the HTTP document slot is empty.
+                first, initial = await api.raw.open_raw(str(asset_id), str(source))
+                expected = initial.settings
+                if recipe_status == "restored":
+                    identity = api.raw.recipe_identity(first)
+                    baseline = store.initialize_raw_history(identity, 0, uuid4(), initial.settings)
+                    expected = copy.deepcopy(initial.settings)
+                    expected["light"]["exposure"] = 1.25
+                    store.append_raw_history(identity, baseline["current"]["revision"], uuid4(), expected,
+                                             kind="control", metadata={"control": "light.exposure"})
+                await api.raw.set_controls(first, {"light.exposure": 2.}, initial.revision)
+                other = tmp_path / "other-resident.dng"
+                other.write_bytes(b"distinct original")
+                await api.raw.open_raw(str(uuid4()), str(other))
+                response = await http.post("/api/raw/documents", json={
+                    "workspaceId": workspace, "assetId": str(asset_id)})
+                assert response.status_code == 200, response.text
+                reopened = response.json()
+                assert reopened["recipeStatus"] == recipe_status
+                assert reopened["documentToken"] != first.document_token
+                assert reopened["generation"] == first.generation
+                assert reopened["importDefaultsFingerprint"] == api._fingerprint(initial.settings)
+                assert sum(name == "library.import" for name, _ in children[0].commands) == 2
+                assert sum(name == "develop.merge" for name, _ in children[0].commands) == 1
+                assert children[0].photos[1]["settings"] == expected
+                history = await http.get(url(reopened), headers=headers(reopened))
+                assert history.status_code == 200
+                assert history.json()["history"]["cursor"] == (1 if recipe_status == "restored" else 0)
+        finally:
+            await api.close()
+    asyncio.run(asyncio.wait_for(run(), 15))
+
+
 def test_no_recipe_for_current_asset_opens_initial_settings(local, tmp_path, monkeypatch):
     async def run():
         api, _, children, _ = await setup(tmp_path, local, monkeypatch)

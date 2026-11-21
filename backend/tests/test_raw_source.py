@@ -108,6 +108,24 @@ def test_completed_source_is_private_and_cleanup_preserves_neighbors(tmp_path):
     asyncio.run(run())
 
 
+def test_completed_source_is_reused_only_while_its_copy_matches(tmp_path):
+    async def run():
+        asset = uuid4()
+        calls = []
+        async def acquire(asset_id):
+            calls.append(asset_id)
+            return Original(), "dng"
+        cache = RawSourceCache(root=tmp_path, acquire=acquire)
+        first = await cache.download(asset)
+        assert await cache.download(asset) == first
+        assert calls == [asset]
+        first.write_bytes(b"changed")
+        with pytest.raises(LightCraftError, match="raw_source_changed"):
+            await cache.download(asset)
+        await cache.close()
+    asyncio.run(run())
+
+
 def test_stopped_download_releases_network_and_retains_owned_partial_until_cleanup(tmp_path):
     async def run():
         original = Original(gate=asyncio.Event())

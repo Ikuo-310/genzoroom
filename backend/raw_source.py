@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import stat
 import shutil
 import threading
 import uuid
@@ -18,6 +19,14 @@ MAX_CACHE_BYTES = 1024 * 1024 * 1024
 MIN_FREE_BYTES = 1024 * 1024 * 1024
 DOWNLOAD_SECONDS = 120
 IO_SECONDS = 5
+
+
+def _cached_source_info(value):
+    path = value.resolve(strict=True)
+    info = path.stat()
+    if not stat.S_ISREG(info.st_mode) or info.st_size <= 0:
+        raise LightCraftError("raw_source_unavailable")
+    return str(path), (info.st_size, info.st_mtime_ns, info.st_dev, info.st_ino)
 
 
 async def get_raw_original(asset_id, *, transport=None):
@@ -48,6 +57,7 @@ class RawSourceCache:
         self.directory = None
         self._parent = None
         self._bytes = 0
+        self._sources = {}
         self._owned = False
         self._download = None
         self._io_worker = None
@@ -130,6 +140,13 @@ class RawSourceCache:
     async def download(self, asset_id):
         if self._closing:
             raise LightCraftError("raw_cache_closed")
+        cached = self._sources.get(str(asset_id))
+        if cached is not None:
+            path, fingerprint = cached
+            current = await self._io(_cached_source_info, path)
+            if current == fingerprint:
+                return path
+            raise LightCraftError("raw_source_changed")
         self._download = asyncio.create_task(self._download_file(asset_id), name="raw-source-download")
         try:
             return await asyncio.shield(self._download)
@@ -160,6 +177,8 @@ class RawSourceCache:
                 if not total or length is not None and total != int(length):
                     raise LightCraftError("raw_source_incomplete")
                 await self._io(self._finish, partial, complete)
+                fingerprint = await self._io(_cached_source_info, complete)
+                self._sources[str(asset_id)] = complete, fingerprint
                 return complete
         except TimeoutError:
             raise LightCraftError("raw_download_timeout") from None

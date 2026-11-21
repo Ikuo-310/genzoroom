@@ -2086,6 +2086,25 @@ def test_reopen_rotates_token_and_reuses_photo_without_import(tmp_path):
     asyncio.run(run())
 
 
+def test_a_b_a_reuses_resident_and_restores_import_snapshot(tmp_path):
+    async def run():
+        raw, _, children, files = await create(tmp_path)
+        try:
+            a, initial_a = await raw.open_raw("a", files[0])
+            edited_a = await raw.set_controls(a, {"light.exposure": 2.}, initial_a.revision)
+            await raw.open_raw("b", files[1])
+            reopened_a, state_a = await raw.open_raw("a", files[0])
+            assert reopened_a.generation == a.generation
+            assert reopened_a.document_token != a.document_token
+            assert state_a.settings == edited_a.settings
+            assert sum(name == "library.import" for name, _ in children[0].commands) == 2
+            defaults = await raw.restore_import_defaults(reopened_a, state_a.revision)
+            assert defaults.settings == json.loads(raw._photos["a"].import_settings_json)
+        finally:
+            await raw.close()
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("mode,code", [("failed", "raw_import_failed"), ("partial", "raw_import_failed")])
 def test_import_failures_and_raw_confirmation(tmp_path, mode, code):
     async def run():
