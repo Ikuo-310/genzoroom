@@ -113,6 +113,22 @@ def test_resident_capacity_and_hard_budget_recover_by_workspace_release(local, t
                 assert opened.status_code == 200
                 doc = opened.json()
                 assert doc["generation"] > generation and api.raw.status().resident_count == 1
+                assert doc["regenerationThreshold"] == 200 and doc["mutationLimit"] == 256
+                for attempt in range(200 - doc["mutationAttempts"]):
+                    doc = await change(http, doc, (attempt % 30) / 10)
+                assert doc["mutationAttempts"] == doc["regenerationThreshold"] == 200
+                doc = await change(http, doc, 1.25)
+                assert doc["mutationAttempts"] == 201
+                saved = await http.put(f'/api/raw/documents/{doc["handle"]}/recipe', json=save_body(doc))
+                assert saved.status_code == 200
+                assert (await http.delete(f'/api/raw/workspaces/{workspace}')).status_code == 204
+                workspace, reopened = await open_asset(http, third_asset)
+                assert reopened.status_code == 200
+                next_doc = reopened.json()
+                assert next_doc["generation"] > doc["generation"]
+                assert next_doc["mutationAttempts"] == 1 and next_doc["regenerationThreshold"] == 200
+                assert next_doc["settingsFingerprint"] == doc["settingsFingerprint"]
+                doc = next_doc
                 api.raw._edits = 256
                 denied = await http.post(f'/api/raw/documents/{doc["handle"]}/controls',
                     json=identity(doc) | {"expectedRevision": doc["revision"], "values": {"light.exposure": 1.}})
