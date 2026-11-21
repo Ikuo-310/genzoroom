@@ -1,6 +1,6 @@
 # フィルムストリップ切替とNative Sessionの寿命
 
-基準はGenzoRoom main `0bd6018c2536889e89090868c0e69853b950a78f`。P0・P1事前調査とP1-1の実装結果をまとめる。P1-2の契約は確定済みで、実装は未着手である。
+基準はGenzoRoom main `b5296dd0fdde7f82f1623fa168585c167b44b102`。P1-1〜P1-3は実装済み。2026-11-21のWindows Desktop実測と、P2のResident管理に関するソース調査・設計案を記録する。
 
 ## 目的と計測
 
@@ -12,7 +12,7 @@ P0・P1事前調査では、画像切替に伴うNativeプロセス再生成と�
 
 BackendのWorkspaceは単一の公開Documentと、そのWorkspace専用のRawSourceCacheを所有する。LightCraftRawSessionはNativeプロセスのgenerationに紐づく写真snapshotとResidentのPhotoIdを管理する。RawSourceCacheの完成コピーはNativeが参照する期間を通じて保持する。
 
-通常の写真切替ではFrontendが入力を停止し、Native readbackとRecipe／Historyの保存を確定してから移動する。Asset単位の `useRawDocument` は旧Workspaceを解放し、新WorkspaceとDocumentを開く。現行Backendでは `DELETE /documents/{handle}` と `DELETE /workspaces/{id}` が同じ `_release()` に入り、History checkpointを確認してDocumentを失効させる。その後、画像応答の所有期間を待ち、`reset_session(restore_active=False)` により旧Nativeプロセスを回収して新generationを起動し、RawSourceCacheを閉じる。通常切替で再生成される原因はこの寿命の結合である。
+通常の写真切替ではFrontendが入力を停止し、Native readbackとRecipe／Historyの保存を確定してから移動する。P1以前はAsset単位のcleanupがWorkspaceも解放していた。現在は `useRawDocument` の暗室単位ownerがWorkspaceを保持し、`DELETE /documents/{handle}` が保存チェックポイントと画像処理・送信の排出を経て旧Documentだけを閉じる。同じWorkspaceで次のAssetを開ける。Workspace全体の `DELETE /workspaces/{id}` は引き続きSessionと原本コピーを回収する。
 
 Preview／RegionはNative処理後にBackendのownerやrevisionを再確認する。送信済み操作はHTTP待機側の取消だけでは終了せず、画像応答のleaseはASGI送信完了まで所有される。保存未確定の場合は旧ownerを保持し、確認できない状態を保存成功として扱わない。明示Discardと通常Releaseは別の終了経路を持つ。
 
@@ -20,11 +20,11 @@ Preview／RegionはNative処理後にBackendのownerやrevisionを再確認す�
 
 Commit `3edfc505` でRawSourceCacheは同一Workspace内のAssetごとの完成コピーを保持し、パスとファイル情報のfingerprintを照合して再利用する。コピーはWorkspaceの回収まで保持する。Native側は写真ごとのImport直後の既定設定を保持し、Residentを再選択した際にも既定値のfingerprintを編集後の値で置き換えない。
 
-Document OpenはSQLiteのRecipeとHistoryのidentity・revisionを照合し、保存済みRecipeを復元する。Recipeがない場合とエンジン非互換の回復経路では、必要に応じてImport既定設定へ戻す。Native Session内のA→B→AではAを再Importせず、tokenを更新する。原本コピーが変化した場合や復元に失敗した場合はDocumentを公開しない。Backend focused testsは250件成功した。これらは自動テストの結果であり、通常の画面切替では現時点でもWorkspaceが解放される。
+Document OpenはSQLiteのRecipeとHistoryのidentity・revisionを照合し、保存済みRecipeを復元する。Recipeがない場合とエンジン非互換の回復経路では、必要に応じてImport既定設定へ戻す。Native Session内のA→B→AではAを再Importせず、tokenを更新する。原本コピーが変化した場合や復元に失敗した場合はDocumentを公開しない。P1-1完了時のBackend focused testsは250件成功した。
 
 ## P1-2の設計
 
-以下はP1-2で採用する契約であり、現行コードの動作ではない。
+以下はP1-2で採用した契約。Close本体は `RawPreviewApi._close_document_owned()` が所有する。
 
 ### HTTP契約と所有権
 
@@ -70,11 +70,11 @@ P1ではResident最大2枚、変更試行の再生成閾値200・上限256を維
 
 ## P1-3 Frontend実装設計
 
-基準はmain `7bb85c81c0b3fd8c496977f2341e428fa98848af`。P1-1とP1-2A〜Dは実装済みであり、以下のFrontend変更は設計である。
+P1-3の設計基準はmain `7bb85c81c0b3fd8c496977f2341e428fa98848af`。Frontend接続・表示失効・異常回復の実装は `b5296dd` までに完了した。
 
 ### 現行の所有関係
 
-`App.tsx` の `/anshitsu/:assetId` は同じ `AnshitsuPage` を描画する。`AnshitsuPage` は詳細情報が現在のAssetに一致し、現像方針がLightCraftのとき `useRawDocument(assetId)` を有効にする。`useRawDocument.ts` の `[assetId]` effectはWorkspace ID、Document、`RawControls`、`RawRecipeSave`、Preview／Region、heartbeatを所有し、Asset変更や `activeDetail` が一時的に空になるとcleanupで保存後のWorkspace Releaseを始める。新effectのOpenはmodule内の `ownership` queueと `pointColorTermination` を待つ。
+`App.tsx` の `/anshitsu/:assetId` は同じ `AnshitsuPage` を描画する。`AnshitsuPage` は詳細情報が現在のAssetに一致し、現像方針がLightCraftのとき `useRawDocument(assetId)` を有効にする。Workspace IDはHookの `workspaceOwnerRef` が保持する。`[assetId]` effectがDocument、`RawControls`、`RawRecipeSave`、Preview／Region、heartbeatを所有する。新effectのOpenはmodule内の `ownership` queueと `pointColorTermination` を待つ。
 
 `activateAsset()`、`excludeAsset()`、`exitToHome()`、`useDesktopCloseGuard` は `prepareSave()` を通す。`prepareSave()` は入力と表示を停止し、interaction、Controlsのreadback、HistoryとRecipeの保存が確定するまで待つ。`RawWorkspaceTermination` は保存・解放の段階を保持し、応答不明時の再試行を所有する。これらは継続して利用する。
 
@@ -92,7 +92,7 @@ Workspaceは暗室滞在中に生存する `AnshitsuPage` 内の `useRawDocument
 4. Close成功後に旧DocumentのControls／SaverとDocument単位の表示・要求を破棄する。Workspace ownerは保持し、ルート更新後に対象Assetの詳細が準備できた時点で同じWorkspaceへ `openRawDocument()` を送る。Close応答の確認前に次Openを送らない。
 5. 新DocumentのSettingsを読み、`install()` で新しい `RawControls`／`RawRecipeSave` を作り、History取得とViewerを初期化する。旧DocumentのHistory cursorやControlsを再利用しない。入力は新ownerの準備完了まで抑止する。
 
-通常の切替、Filmstrip除外とUndo、ブラウザ履歴によるAsset route変更は同じ所有queueのDocument交代を通す。画面に接続する `switchingRef`／`switching` は保存から新DocumentのOpen結果確定まで維持し、連続クリックやショートカットは既存Filmstripのdisabledとガードで拒否する。現在の `activateAsset()` はroute移動直後にガードを解除するため、Open完了・失敗の通知に合わせて解除する。予期しないunmountやroute変更も旧ownerの保存／Close完了を待ち、古いOpen結果を採用しない。
+通常の切替、Filmstrip除外とUndo、ブラウザ履歴によるAsset route変更は同じ所有queueのDocument交代を通す。画面の `switchingRef`／`switching` は保存から新Documentの準備または失敗が確定するまで維持し、連続クリックやショートカットは既存Filmstripのdisabledとガードで拒否する。予期しないunmountやroute変更でも終了ownerが保存と回収を管理し、古いOpen結果を採用しない。
 
 ### 画像応答とWorkspace終了
 
@@ -127,6 +127,73 @@ WindowsのLightCraft方針ではRAWとJPEGの両方がNative Documentなので�
 
 P1-3の設計上の未決定事項はない。実装時はroute変更やunmountが既存queueを迂回しないこと、およびOpen成功応答喪失からの回収を重点的に確認する。
 
-## P2以降
+## P1統合検証とWindows Desktop実測
 
-P2ではResident上限とSession再生成の頻度を見直し、Nativeカタログ、Undo、pending log、原本コピー、メモリ使用量の実測を踏まえて回収方針を決める。必要に応じてPreview再利用を検討する。初回読込みの高速化、先読み、暫定表示、サムネイル再利用は優先度を下げ、別工程で扱う。
+`b5296dd` の統合検証では、Backend focused 38件、Frontend focused 204件（Hook 194、画面6、API／JPEG renderer 4）、TypeScript、差分チェックが成功した。BackendはWindowsのリポジトリ内Python 3.14を権限付きで実行した。Frontend既存テストにReactの `act(...)` 警告があった。この自動検証では、同一Workspace ID・generationでのA→B→AとImport回数、保存済みRecipe／History cursor／fingerprintの復元、Close再送と旧画像の排除、上限・結果不明時の回復、LightCraft／Docker JPEG経路を確認した。主な根拠は `test_raw_history_api.py` の `test_document_switch_reuses_resident_and_restores_history_cursor`、`test_raw_recipe_restore.py`、`test_windows_raw_api.py`、`useRawDocument.test.tsx`、`AnshitsuRawPreview.test.tsx`。
+
+### 計測対象と結果
+
+2026-11-21の提供ログ2本を使用した。ファイル名の時刻はUTC。ケースと画像形式は測定時の説明に従い、ログ中ではAsset IDで照合した。以下の「初回」は各ログ区間内での初回訪問。Aは両ケース共通のDNG（Asset ID先頭 `46b4db82`）、Bはもう一方のDNG（`a6523bda`）、JはJPEG（`eae5ece5`）。
+
+- Frontend `raw / preview.received` の `responseWaitMs` は `rawApi.ts` で計測するPreview HTTP要求開始から応答受領まで。本文読み取りと画像decodeは別計測。クリックから画面表示までの所要時間ではない。
+- Backend `lightcraft / preview.measured` の `nativeMs` は `lightcraft_raw.py` のNative呼び出し直前からPreview readback・geometry取得とlock解放までの区間。Backend応答検証の `validationMs` は別項目で、GPU処理時間単体の指標ではない。
+- `raw.document.ready` のgeneration・revisionでDocumentを特定し、両側のPreviewをgeneration・revision・kind・quality・要求長辺で対応させた。各DocumentでAfter／Fullが2件あり、Frontend serial 1が1024px、serial 2が1472px。表はms、小数1桁。Open→readyはBackendイベントの時刻差で、原本確保と復元を含み得る。
+
+| ログ・訪問順 | generation / revision | Open→ready | 1024 FE待ち | 1024 BE Native | 1472 FE待ち | 1472 BE Native |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 124935Z A初回 | 2 / 11 | 403 | 2896.6 | 2869.0 | 176.0 | 132.7 |
+| 124935Z B初回 | 2 / 13 | 395 | 1007.2 | 983.5 | 179.0 | 134.5 |
+| 124935Z A再訪 | 2 / 14 | 108 | 129.9 | 105.2 | 177.3 | 134.5 |
+| 124935Z B再訪 | 2 / 15 | 20 | 130.4 | 106.2 | 228.7 | 140.7 |
+| 125017Z J初回 | 3 / 16 | 244 | 2156.0 | 2124.6 | 182.1 | 135.4 |
+| 125017Z A初回 | 3 / 18 | 416 | 1049.3 | 1024.6 | 177.8 | 134.9 |
+| 125017Z J再訪 | 3 / 19 | 109 | 100.7 | 76.6 | 163.0 | 99.9 |
+| 125017Z A再訪 | 3 / 20 | 20 | 129.6 | 105.3 | 182.2 | 136.6 |
+
+出所は `genzoroom-all-logs-20261121T124935Z.json`（A→B→A→B）と `genzoroom-all-logs-20261121T125017Z.json`（J→A→J→A）。各画像の1024px再訪PreviewでFrontend待ち・Backend Native時間の両方が短くなった。1472pxの追加Previewでは全画像に共通する短縮は見られない。P1適用前との同条件比較や所要時間の分布は、この2本からは算出できない。
+
+### 所有権・永続化・異常
+
+- 各ログ区間の4回のOpenは同一Native generationで完了した（順に2と3）。区間内にSession再生成・結果不明・再試行のイベントは見当たらない。ログ間でgenerationは異なるが、変化の理由は記録範囲外。ログにWorkspace IDがなく、IDの一致そのものは自動テストの証拠に限られる。
+- BackendのImmich `request.start`／`request.response` では、各ログで各Assetの `/original` は初回に1件ずつ成功し、再訪時の追加取得は記録されていない。これは原本コピーの再利用と整合する。Native `library.import`／`library.select`、PhotoId、Resident hit/missは記録されていない。Native再Import省略は `open_raw()` の分岐と自動テストで確認し、実測ログだけからは確定しない。
+- DNG同士では `raw.recipe.restored` が4件。混在ではJPEG初回のみ `raw.recipe.none`、残る3回は `raw.recipe.restored`。両ケースとも各訪問でBackend `raw.history.saved` が成功し、cursor／lengthは全件0／0。非ゼロcursorの復元や設定fingerprintの一致は実測対象外。Backend `preview.measured` のPNG SHA-256は同じ画像・長辺の初回と再訪で一致したが、これは画像出力の一致であり設定fingerprintとは別。
+- errorレベルは両ケース0件。各Openで `raw.lensProfileInfo.unavailable`（`lightcraft_tool_error`）が計8件あり、各回ともDocument readyとPreview成功へ進んだ。初回1024pxに上表の長い待ちがあり、その後の再訪ではタイムアウトや同程度の待ちは観測されなかった。警告の原因、他の待ち時間、容量超過時の実機回復はこの測定では確認していない。
+
+## P2 Resident管理の事前調査
+
+目的は多数の写真を順に開き、少数の写真へ戻る利用でも、Resident容量だけを理由とするSession再生成を避けること。根拠はLightCraft v0.20.0固定commit `192ff72923c39e6623f2c7ff67ab3a119deb8071` のローカルGitオブジェクトと、[manifest](../../../native/lightcraft/manifest.json) が指定する [managed patch](../../../native/lightcraft/patches/0001-v0.20.0-whole-frame.patch)。patchのSHA-256はmanifestと一致した。以下はソース調査で、退役APIの実行やメモリ実測は行っていない。
+
+### Nativeの状態と回収境界
+
+| 項目 | 固定upstreamとGenzoRoomで確認したこと |
+| --- | --- |
+| PhotoIdとResident | `crates/mcp/src/headless.rs` の `Headless` はEngineの `Session` を1つ保持し、`library.import`／`library.select` は同じカタログと選択を操作する。`crates/catalog/src/lib.rs` は単調に進む `next_photo` からPhotoIdを割り当てる。GenzoRoom側の `_photos` はsource keyからPhotoId・原本パス／fingerprint・Import既定値等への対応、`_resident` は登録済みPhotoId集合。公開Documentは1件で、再訪でも新tokenを発行する。 |
+| 既存削除API | `crates/engine/src/cmd/library/specs.rs` の `photo.delete` はRecently Deletedへの移動。`photo.deletePermanently` は指定写真をカタログから除去し、`library.emptyRecentlyDeleted` は一括処理する。どちらの恒久除去も `Session::commit` を使う。`photo.delete` と `photo.deletePermanently` は処理前にinteractionを終了する。用途に合う安全な個別退役APIはupstream／現行patchに見当たらない。 |
+| Native History、Undo、ログ | `Catalog::delete_photos_permanently_ops` はアルバム・スタック参照を整理して `Op::RemovePhoto` を生成する。逆操作の `AddPhoto` は写真（設定とNative Historyを含む）を保持し、`Session::commit` は逆操作をUndo、順方向を `pending_log` に積む。Undoに件数上限があっても削除直後の解放は保証されない。永続ライブラリがなければ `run_command` の永続化分岐・`close_library` のflushは働かない。コマンド `journal` は別の領域であり、こちらも計測対象。SQLiteのGenzoRoom HistoryはこのNative状態から独立している。 |
+| CPU／GPUと原本 | `Session::apply_through` は `RemovePhoto` 時に `media.forget(id)` を呼び、`media/cache.rs` でデコード済みthumb／preview／fullを外す。これは他のキャッシュ、Beforeマップ、実行中jobの共有参照、GPU allocatorまで一括解放する契約ではない。CPU `StageCache` はview／jobに渡す任意のキャッシュでGPU extensionを持てる。通常の `render_job` は `stages: None` で作成され、現行のmanaged HeadlessのWhole／Region経路は標準jobを実行・acceptする。UIのview用StageCacheと、headlessでのデコード再利用やGPU buffer poolを同一視しない。 |
+| 予算 | GenzoRoomがImport時に指定する `app.memoryBudget` 1024 MiBはLightCraft内部のキャッシュ等への配分。process working setやGPU全体の上限ではない。RawSourceCacheは別のディスク予算（1原本512 MiB、Workspace合計1 GiB、空き容量の検査あり）を持ち、P1ではWorkspace終了までコピーを保持する。変更試行はPhoto単位ではなく `LightCraftRawSession._edits` に集計し、Recipe復元のNative変更も消費し得る。200はFrontendの安全な再生成閾値、256はBackend adapterの上限。退役でリセットしない。 |
+
+### 推奨案と成立条件
+
+| 方式 | 多数の写真を扱う場合の評価 |
+| --- | --- |
+| Resident上限だけを増やす | 固定枚数内の再Importは減る。訪問した写真と原本コピーが蓄積し、新上限／ディスク上限で従来どおり全体回収が必要。枠数を増やすだけでは容量超過時のSession再生成を解消できない。 |
+| 有界Resident＋個別退役・入替 | 最近使った写真を保持し、空きがなければ安全に退役できる最も古い写真を除いてから次の写真をImportする。同一generationで総訪問枚数をResident枠より大きくできる。退役済みの再訪にはImportとSQLiteからの復元が必要。Nativeの参照回収とディスク予算を実証できれば採用する。 |
+
+**ソース上は同一Sessionでの入替が成立し得る。** カタログ除去とデコード済みソース無効化を再利用できる。PoCでは永続ライブラリを持たないGenzoRoom専用Headlessに限定し、明示PhotoIdを受け取るmanaged toolとEngine内の小さな専用処理を候補にする。永続ライブラリやinteraction中は拒否し、原本、sidecar、Immich、SQLiteに書き込まない。通常の `commit` を経由せず、既存のカタログ除去・キャッシュ無効化を通して逆操作を保持しない。選択／previous active、Before、設定hash、メディアキャッシュとその他のPhotoId参照を点検する。最後に選択していたNative写真でも、HTTP Document Closeと全lease排出後なら安全に選択解除して退役できるか、PoCで確認する。
+
+既存Undo／Redoにはインポートや複数写真を含む操作が入り得る。個別の記録を安易に部分削除せず、GenzoRoom専用の一時SessionでNative Undo／Redoと不要なpending logをまとめて破棄できるか検証する。永続ライブラリや未確定操作には適用しない。GenzoRoomのUndo／RedoはSQLite Historyとして維持し、新PhotoIdのImport時に既定設定・Beforeを再取得してRecipeとHistoryを復元する。Native Undoの整理に必要な変更の規模、補助キャッシュの全参照、GPU共有資源の残留量は未確定。個別退役が成功してもプロセスのworking setがその場で減ることまでは前提にしない。
+
+### Backend／Frontendへの接続案
+
+- Backendの退役はClose成功後のDocumentなし状態で、Workspace ownerの下でOpen admissionと直列化する。最新の保存チェックポイントが確定し、対象のPreview／Region／Before処理、送信lease、Native job、Curve／Mixer／Point Color／Geometry操作が残っていない写真だけを候補にする。使用順はOpen成功時に更新し、容量逼迫時は退役可能な最古を選ぶ。Native ACKと旧PhotoIdの不在を確認後に `_photos`／`_resident` を更新する。退役結果不明なら追加Importや原本削除を止め、既存のWorkspace回収・再生成経路へ渡す。
+- 原本コピーのディスク管理はResident管理と分ける。短期再訪向けにコピーを残す場合もWorkspaceの既存バイト上限内に収める。空きが不足したら、Nativeが参照しないと確認済みで、ダウンロード・jobの所有もないコピーだけを古い順に回収する。コピーがあればfingerprintを照合して再Importに再利用し、なければImmichから再取得する。退役を越えたPreview PNGの再利用や先読みは別工程。
+- 最初のPoCはResident 2枠のまま入替を検証する。本番枚数は代表的な高画素DNG／JPEGと長時間巡回で、CPU private bytes／working set、GPUメモリ、Native内部カウンタ、ディスク占有量、再Import頻度を別々に測って決める。枚数ガードとバイトガードを併用し、既存のNative memory budgetを総メモリの上限に流用しない。実測に基づく初期値や追加のメモリ上限は未決定。
+- Frontendは既存の保存→Close→Openと表示ownerを再利用する。通常の入替が同じOpen契約に収まれば操作UIの変更は不要。容量エラー時の既存回復は、退役不能・結果不明のフォールバックとして維持する。200／256はSession累積のままとし、容量による再生成の削減と変更試行による再生成の削減を別に検証する。
+
+### 最小PoCと実装順
+
+1. **Native単体PoC。** 固定commit・managed EXEで2枠にA／BをImportし、退役→C→A再Importを同一プロセスで実行する。同じNative Sessionで非退役写真のIDと設定が維持され、退役IDがinspect／render／selectで使えず、再Importで有効な新IDが発行されることを確認する。原本とsidecarの非変更、編集中／永続ライブラリでの拒否、カタログ・Before・Undo／Redo・pending log・キャッシュ参照を確認する。
+2. **長時間巡回と上限の決定。** 枠数を大きく超えるDNG／JPEGを読み直し、サイズの異なる原本、高画素、GPU利用有無、Before／Regionを含めてメモリ・ディスクの傾向と失敗境界を測る。容量要因を単独で測る試験と、編集・復元で200／256に達する試験を分ける。累積増加の原因が残る場合は修正範囲を見直し、必要なら再生成を残す。ここでmanaged APIの確定と実装着手可否を判断する。
+3. **Backend接続。** 退役所有権とACK検証をNative adapterへ追加し、Open admission、Resident LRU、原本コピーの回収を接続する。保存未確定、画像lease排出、退役応答喪失、Import失敗、ディスク上限、200／256、再訪時のRecipe／非ゼロHistory cursor／fingerprintをfocused testsで検証する。
+4. **統合確認。** 現行Frontendで枠数を超える連続切替、退役後の再訪、失敗時の既存回復、旧画像の排除を確認する。Windows DesktopでSession／generation・Importの有無を取得できるよう診断を整え、初回訪問、Resident hit、退役後の再Importを区別して計測する。
