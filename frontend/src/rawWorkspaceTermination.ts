@@ -1,6 +1,6 @@
 import type { RawRecipeSave } from './rawRecipeSave';
 
-type TerminationKind = 'release' | 'discard' | 'recovery';
+type TerminationKind = 'release' | 'discard' | 'recovery' | 'close';
 type TerminationState =
   | { stage: 'saving' }
   | { stage: 'releasing' }

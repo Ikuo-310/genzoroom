@@ -8,7 +8,7 @@ import { rawSettings } from './test/rawSettings';
 import { rawHistoryData, rawHistoryResult } from './test/rawHistory';
 
 vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(),
-  discardRawWorkspace: vi.fn(), rawCapability: vi.fn(), createRawWorkspace: vi.fn(), openRawDocument: vi.fn(),
+  closeRawDocument: vi.fn(), discardRawWorkspace: vi.fn(), rawCapability: vi.fn(), createRawWorkspace: vi.fn(), openRawDocument: vi.fn(),
   rawRegionOwner: vi.fn(), rawRegion: vi.fn(), cancelRawRegion: vi.fn(async () => {}), rawPreview: vi.fn(),
   cancelRawPreview: vi.fn(async () => {}), readRawDocument: vi.fn(), readRawSettings: vi.fn(), setRawControls: vi.fn(),
   releaseRawWorkspace: vi.fn(), rawWorkspaceEmpty: vi.fn(), readRawHistory: vi.fn(), saveRawHistory: vi.fn(),
@@ -44,6 +44,7 @@ beforeEach(() => {
   vi.mocked(api.saveRawHistory).mockImplementation(async request => request.action === 'initialize'
     ? rawHistoryResult(request) : commitHistory(request));
   vi.mocked(api.releaseRawWorkspace).mockResolvedValue();
+  vi.mocked(api.closeRawDocument).mockResolvedValue();
   vi.mocked(api.rawWorkspaceEmpty).mockResolvedValue(false);
 });
 

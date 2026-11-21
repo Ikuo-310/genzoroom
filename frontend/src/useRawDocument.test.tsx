@@ -12,7 +12,7 @@ import { ImageViewer } from './ImageViewer';
 import './i18n';
 
 vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(),
-  discardRawWorkspace:vi.fn(), beginRawGeometry: vi.fn(),updateRawGeometry: vi.fn(),recoverRawGeometry: vi.fn(), beginRawCurveInteraction: vi.fn(), cancelRawCurveInteraction: vi.fn(), updateRawTargetedCurve: vi.fn(), beginRawMixerInteraction: vi.fn(), updateRawMixerInteraction: vi.fn(), cancelRawMixerInteraction: vi.fn(), endRawMixerInteraction: vi.fn(), rawCapability: vi.fn(), createRawWorkspace: vi.fn(), openRawDocument: vi.fn(),
+  closeRawDocument: vi.fn(), discardRawWorkspace:vi.fn(), beginRawGeometry: vi.fn(),updateRawGeometry: vi.fn(),recoverRawGeometry: vi.fn(), beginRawCurveInteraction: vi.fn(), cancelRawCurveInteraction: vi.fn(), updateRawTargetedCurve: vi.fn(), beginRawMixerInteraction: vi.fn(), updateRawMixerInteraction: vi.fn(), cancelRawMixerInteraction: vi.fn(), endRawMixerInteraction: vi.fn(), rawCapability: vi.fn(), createRawWorkspace: vi.fn(), openRawDocument: vi.fn(),
   rawRegionOwner: vi.fn(), rawRegion: vi.fn(), cancelRawRegion: vi.fn(async () => {}),
   rawPreview: vi.fn(), cancelRawPreview: vi.fn(async () => {}), readRawDocument: vi.fn(), readRawSettings: vi.fn(), setRawControls: vi.fn(), releaseRawWorkspace: vi.fn(), rawWorkspaceEmpty: vi.fn(),
   readRawHistory: vi.fn(), saveRawHistory: vi.fn(), saveRawRecipe: vi.fn(), readRawRecipe: vi.fn(),
@@ -36,6 +36,11 @@ function TargetedViewerHarness({ id }: { id: string }) {
     onToggleLeft={() => {}} onToggleRight={() => {}} /> : null;
 }
 async function render(id: string | null, before = false) { await act(async () => { root.render(<Harness id={id} before={before} />); }); }
+async function remount(id: string) {
+  await act(async () => root.unmount()); await flush();
+  root = createRoot(document.createElement('div'));
+  await render(id); await flush();
+}
 async function flush() { await act(async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); }); }
 function deferred<T>() {
   let resolve!: (value: T) => void, reject!: (reason: unknown) => void;
@@ -79,6 +84,7 @@ beforeEach(() => {
   vi.mocked(api.saveRawHistory).mockReset().mockImplementation(async request => request.action === 'initialize'
     ? rawHistoryResult(request) : commitHistory(request));
   vi.mocked(api.releaseRawWorkspace).mockReset().mockResolvedValue();
+  vi.mocked(api.closeRawDocument).mockReset().mockResolvedValue();
   vi.mocked(api.rawWorkspaceEmpty).mockResolvedValue(false);
 });
 
@@ -446,9 +452,10 @@ it('RAW Viewer smoke representative lifecycle', async () => {
       viewGeneration: [...vi.mocked(api.rawPreview).mock.calls].reverse().find(call => call[3] === 'after')![4]!.viewGeneration, quality: current!.quality,
       geometryId: current!.frame!.geometryId, regionActive: !!current!.regionDisplay, ownerReleased: false };
     stage = 'close'; const delivery = current!.regionDelivery;
-    await render(null); await flush(); expect(current).toBeNull(); expect(api.releaseRawWorkspace).toHaveBeenCalledOnce();
+    await render(null); await flush(); expect(current).toBeNull(); expect(api.closeRawDocument).toHaveBeenCalledOnce();
+    expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
     expect(delivery?.state.pending).toBeUndefined(); expect(delivery?.state.running).toBeUndefined(); pass();
-    report.finalState = { ...(report.finalState as object), ownerReleased: true };
+    report.finalState = { ...(report.finalState as object), ownerReleased: false };
   } catch (cause) {
     report.stages[stage] = 'fail'; report.failure = { stage,
       code: stage === 'geometryStability' ? 'draft_full_geometry_changed' : 'viewer_transition_failed',
@@ -906,19 +913,87 @@ describe('RAW native Before cache', () => {
     expect(vi.mocked(api.rawPreview).mock.calls.filter(call => call[3] === 'before')).toHaveLength(2);
   });
 
-  it('keeps Workspace ownership with the active Asset effect through switch and unmount', async () => {
+  it('keeps the Workspace across Asset effects and releases it on hook unmount', async () => {
     let created = 0;
     vi.mocked(api.createRawWorkspace).mockImplementation(async () => `owner-${++created}`);
     await render('a'); await flush();
     await render('b'); await flush();
 
-    expect(api.releaseRawWorkspace).toHaveBeenCalledWith('owner-1');
-    expect(api.openRawDocument).toHaveBeenLastCalledWith('owner-2', 'b');
-    expect(current?.document?.workspaceId).toBe('owner-2');
+    expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
+    expect(api.closeRawDocument).toHaveBeenCalledOnce();
+    expect(api.createRawWorkspace).toHaveBeenCalledOnce();
+    expect(api.openRawDocument).toHaveBeenLastCalledWith('owner-1', 'b');
+    expect(current?.document?.workspaceId).toBe('owner-1');
 
     await act(async () => root.unmount()); await flush();
     expect(vi.mocked(api.releaseRawWorkspace).mock.calls.map(([workspaceId]) => workspaceId))
-      .toEqual(['owner-1', 'owner-2']);
+      .toEqual(['owner-1']);
+  });
+
+  it('closes the confirmed Document before opening the next Asset in the same Workspace', async () => {
+    await render('a'); await flush();
+    const previous = current!.document!;
+    await render('b'); await flush();
+
+    expect(api.createRawWorkspace).toHaveBeenCalledOnce();
+    expect(api.closeRawDocument).toHaveBeenCalledOnce();
+    const closed = vi.mocked(api.closeRawDocument).mock.calls[0]![0];
+    expect(closed).toMatchObject({ workspaceId: previous.workspaceId, handle: previous.handle,
+      generation: previous.generation, documentToken: previous.documentToken, revision: previous.revision });
+    expect(api.openRawDocument).toHaveBeenNthCalledWith(2, previous.workspaceId, 'b');
+    expect(vi.mocked(api.closeRawDocument).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(api.openRawDocument).mock.invocationCallOrder[1]);
+    expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
+  });
+
+  it('does not open the successor when Document Close fails', async () => {
+    vi.mocked(api.closeRawDocument).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'));
+    await render('a'); await flush();
+    await render('b'); await flush();
+
+    expect(api.closeRawDocument).toHaveBeenCalledOnce();
+    expect(api.openRawDocument).toHaveBeenCalledOnce();
+    expect(current).toMatchObject({ assetId: 'b', status: 'error' });
+    expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
+  });
+
+  it('retries an uncertain Close with the same identity before opening the latest Asset', async () => {
+    vi.mocked(api.closeRawDocument).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'));
+    await render('a'); await flush();
+    await render('b'); await flush();
+    const identity = vi.mocked(api.closeRawDocument).mock.calls[0]![0];
+    await render('c'); await flush();
+
+    expect(api.closeRawDocument).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(api.closeRawDocument).mock.calls.map(([doc]) => doc)).toEqual([identity, identity]);
+    expect(api.createRawWorkspace).toHaveBeenCalledOnce();
+    expect(api.openRawDocument).toHaveBeenLastCalledWith(identity.workspaceId, 'c');
+    expect(api.openRawDocument).not.toHaveBeenCalledWith(identity.workspaceId, 'b');
+  });
+
+  it('retains a closed Workspace across a temporary missing Asset and releases it on hook unmount', async () => {
+    await render('a'); await flush();
+    await render(null); await flush();
+    expect(api.closeRawDocument).toHaveBeenCalledOnce();
+    expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
+
+    await render('b'); await flush();
+    expect(api.createRawWorkspace).toHaveBeenCalledOnce();
+    expect(api.openRawDocument).toHaveBeenLastCalledWith('workspace', 'b');
+    expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
+
+    await act(async () => root.unmount()); await flush();
+    expect(api.releaseRawWorkspace).toHaveBeenCalledWith('workspace');
+  });
+
+  it('releases a retained closed Workspace on pagehide while no Asset effect is active', async () => {
+    await render('a'); await flush();
+    await render(null); await flush();
+    expect(api.closeRawDocument).toHaveBeenCalledOnce();
+    expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
+
+    await act(async () => window.dispatchEvent(new Event('pagehide'))); await flush();
+    expect(api.releaseRawWorkspace).toHaveBeenCalledWith('workspace');
   });
 
   it('keeps After editing usable when Before fails or decoded dimensions do not match', async () => {
@@ -1192,7 +1267,8 @@ describe('RAW document lifetime', () => {
     expect(current?.settings?.point_colors[0]?.hue_shift).toBe(0);
     await render('b'); await flush();
     expect(current?.assetId).toBe('b');
-    expect(api.releaseRawWorkspace).toHaveBeenCalledOnce();
+    expect(api.closeRawDocument).toHaveBeenCalledOnce();
+    expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
   });
 
   it('waits for Point Color Native cancel ACK before releasing a workspace on unmount', async () => {
@@ -1210,7 +1286,7 @@ describe('RAW document lifetime', () => {
     const priorHistoryCalls = vi.mocked(api.saveRawHistory).mock.calls.length;
     act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); });
     await flush();
-    await render(null); await flush();
+    await act(async () => root.unmount()); await flush();
     expect(api.cancelRawPointColorInteraction).toHaveBeenCalledOnce();
     expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
     expect(api.saveRawHistory).toHaveBeenCalledTimes(priorHistoryCalls);
@@ -1245,7 +1321,8 @@ describe('RAW document lifetime', () => {
     expect(api.cancelRawPointColorInteraction).not.toHaveBeenCalled();
     await render('b'); await flush(); await new Promise(resolve => setTimeout(resolve, 0)); await flush();
     expect(current?.assetId).toBe('b');
-    expect(api.releaseRawWorkspace).toHaveBeenCalledOnce();
+    expect(api.closeRawDocument).toHaveBeenCalledOnce();
+    expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
   });
 
   it('drains an accepted adjacent control when departure freezes a pending first commit', async () => {
@@ -1278,7 +1355,7 @@ describe('RAW document lifetime', () => {
     expect(current?.saveError).toBeUndefined(); expect(current?.settings?.values['light.exposure']).toBe(2);
     expect(commitHistory).toHaveBeenCalledOnce(); expect(current?.dirty).toBe(false);
   });
-  it('commits an unmounted document before releasing or opening its successor', async () => {
+  it('commits a departing document before closing it or opening its successor', async () => {
     await render('a'); await flush();
     act(() => current!.changeControls({ 'light.exposure': 2 }));
     const pending = deferred<api.RawHistoryResult>(); commitHistory.mockReturnValueOnce(pending.promise);
@@ -1287,37 +1364,29 @@ describe('RAW document lifetime', () => {
     const request = commitHistory.mock.calls[0][0]; expect(request.doc.assetId).toBe('a');
     await act(async () => pending.resolve(rawHistoryResult(request))); await flush();
     expect(current?.assetId).toBe('b'); expect(current?.dirty).toBe(false);
-    expect(api.releaseRawWorkspace).toHaveBeenCalledOnce();
+    expect(api.closeRawDocument).toHaveBeenCalledOnce();
+    expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
   });
-  it('retains a normal departure release owner and retries the same workspace before opening only the latest successor', async () => {
-    let created = 0, releases = 0;
-    const firstRelease = deferred<void>();
+  it('waits for a successful Close before opening only the latest successor in the same Workspace', async () => {
+    let created = 0;
+    const close = deferred<void>();
     vi.mocked(api.createRawWorkspace).mockImplementation(async () => `normal-${++created}`);
-    vi.mocked(api.releaseRawWorkspace).mockImplementation(async id => {
-      if (id !== 'normal-1') return;
-      releases++;
-      if (releases === 1) return firstRelease.promise;
-      if (releases === 2) throw new api.RawApiError('raw_connection_failed');
-    });
-    vi.mocked(api.rawWorkspaceEmpty).mockResolvedValue(false);
+    vi.mocked(api.closeRawDocument).mockReturnValueOnce(close.promise);
 
     await render('a'); await flush();
     await render('b'); await flush();
-    expect(api.releaseRawWorkspace).toHaveBeenCalledOnce();
+    expect(api.closeRawDocument).toHaveBeenCalledOnce();
     expect(api.createRawWorkspace).toHaveBeenCalledOnce();
-
-    await act(async () => firstRelease.reject(new api.RawApiError('raw_connection_failed')));
-    await flush();
-    expect(api.releaseRawWorkspace).toHaveBeenCalledTimes(2);
-    expect(api.createRawWorkspace).toHaveBeenCalledOnce();
+    expect(api.openRawDocument).toHaveBeenCalledOnce();
 
     await render('c'); await flush();
-    expect(api.releaseRawWorkspace).toHaveBeenCalledTimes(3);
-    expect(api.createRawWorkspace).toHaveBeenCalledTimes(2);
-    expect(api.openRawDocument).toHaveBeenCalledWith('normal-2', 'c');
-    expect(api.openRawDocument).not.toHaveBeenCalledWith('normal-2', 'b');
-    expect(vi.mocked(api.releaseRawWorkspace).mock.invocationCallOrder[2])
-      .toBeLessThan(vi.mocked(api.createRawWorkspace).mock.invocationCallOrder[1]);
+    expect(api.openRawDocument).toHaveBeenCalledOnce();
+    await act(async () => { close.resolve(); await flush(); });
+    expect(api.closeRawDocument).toHaveBeenCalledOnce();
+    expect(api.createRawWorkspace).toHaveBeenCalledOnce();
+    expect(api.openRawDocument).toHaveBeenLastCalledWith('normal-1', 'c');
+    expect(api.openRawDocument).not.toHaveBeenCalledWith('normal-1', 'b');
+    expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
     expect(current?.document?.assetId).toBe('c');
   });
   it('rejects old slider callbacks after a successor RAW document has opened', async () => {
@@ -1346,7 +1415,7 @@ describe('RAW document lifetime', () => {
     await render(null);
     await act(async () => pending.resolve({ ...rawSettings({ workspaceId: 'workspace', handle: 'raw', assetId: 'raw',
       generation: 1, documentToken: 'raw', revision: 2 }) })); await flush();
-    expect(current).toBeNull(); expect(api.rawPreview).toHaveBeenCalledOnce(); expect(api.releaseRawWorkspace).toHaveBeenCalledWith('workspace');
+    expect(current).toBeNull(); expect(api.rawPreview).toHaveBeenCalledOnce(); expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
   });
   it('does nothing for JPEG and only publishes a decoded, verified native frame', async () => {
     await render(null); expect(api.rawCapability).not.toHaveBeenCalled();
@@ -1355,7 +1424,8 @@ describe('RAW document lifetime', () => {
     expect(api.rawPreview).toHaveBeenCalledOnce(); expect(api.readRawDocument).toHaveBeenCalledOnce();
     await render(null); await flush();
     expect(revokeURL).toHaveBeenCalledWith('blob:raw-1');
-    expect(api.releaseRawWorkspace).toHaveBeenCalledWith('workspace');
+    expect(api.closeRawDocument).toHaveBeenCalledOnce();
+    expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
   });
   it('does not open a document when capability is unavailable', async () => {
     vi.mocked(api.rawCapability).mockResolvedValue(false);
@@ -1518,7 +1588,8 @@ describe('RAW History document integration', () => {
     act(() => { current!.undo(); root.render(<Harness id="b" />); }); await flush();
     expect(vi.mocked(api.saveRawHistory).mock.calls.map(([r]) => [r.doc.assetId, r.action])).toEqual([
       ['a', 'initialize'], ['a', 'undo'], ['b', 'initialize']]);
-    expect(current?.assetId).toBe('b'); expect(api.releaseRawWorkspace).toHaveBeenCalledOnce();
+    expect(current?.assetId).toBe('b'); expect(api.closeRawDocument).toHaveBeenCalledOnce();
+    expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
   });
   it('keeps a confirmed cursor save when only its Preview fails', async () => {
     backend(); await render('a'); await flush();
@@ -1744,7 +1815,8 @@ describe('bounded RAW session renewal', () => {
     expect(current?.regenerating).toBe(false); await render(null);
     await act(async () => gate.resolve({ blob: new Blob(['stale']), width: 16, height: 12, epoch: 2, sequence: 1 })); await drain();
     expect(current).toBeNull(); expect(createURL).toHaveBeenCalledTimes(2);
-    expect(api.releaseRawWorkspace).toHaveBeenCalledTimes(2);
+    expect(api.releaseRawWorkspace).toHaveBeenCalledOnce();
+    expect(api.closeRawDocument).toHaveBeenCalledOnce();
   });
   it('waits for renewal save before allowing departure and rejects edits during renewal', async () => {
     vi.useFakeTimers(); renewal(); await threshold();
@@ -1936,7 +2008,7 @@ it('discards a local unsent Crop gesture on unexpected unmount without Native up
  cropVisualFixture();vi.mocked(api.recoverRawGeometry).mockImplementation(async doc=>doc);
  await render('a');await flush();await act(async()=>current!.crop.setMode(true));await flush();
  await act(async()=>current!.crop.begin('straighten'));await act(async()=>current!.crop.update({type:'straighten',params:{angle:30}}));
- await render(null);for(let n=0;n<3;n++)await flush();
+ await act(async()=>root.unmount());for(let n=0;n<3;n++)await flush();
  expect(api.updateRawGeometry).not.toHaveBeenCalled();expect(vi.mocked(api.saveRawHistory).mock.calls.filter(([r])=>r.action==='commit')).toHaveLength(0);expect(api.releaseRawWorkspace).toHaveBeenCalledOnce();
 });
 
@@ -1976,20 +2048,20 @@ it('keeps a conflicting Point Color release owner and retries the same ID on a l
   let created = 0, releaseAttempts = 0;
   vi.mocked(api.createRawWorkspace).mockImplementation(async () => `pc-retry-${++created}`);
   vi.mocked(api.releaseRawWorkspace).mockImplementation(async id => {
-    if (id === 'pc-retry-1' && releaseAttempts++ < 2) throw new api.RawApiError('raw_workspace_conflict', 409);
+    if (id === 'pc-retry-1' && releaseAttempts++ < 4) throw new api.RawApiError('raw_workspace_conflict', 409);
   });
   vi.mocked(api.rawWorkspaceEmpty).mockImplementation(async () => false);
   await render('a'); await flush();
   act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); });
   await flush();
-  await render('b'); await flush();
+  await remount('b');
   expect(api.cancelRawPointColorInteraction).toHaveBeenCalledOnce();
-  expect(vi.mocked(api.releaseRawWorkspace).mock.calls.filter(([id]) => id === 'pc-retry-1')).toHaveLength(2);
+  expect(vi.mocked(api.releaseRawWorkspace).mock.calls.filter(([id]) => id === 'pc-retry-1')).toHaveLength(4);
   expect(vi.mocked(api.openRawDocument).mock.calls.filter(([id]) => id.startsWith('pc-retry-'))).toHaveLength(1);
   expect(current).toMatchObject({ assetId: 'b', status: 'error', code: 'raw_workspace_conflict' });
 
-  await render('c'); await flush();
-  expect(vi.mocked(api.releaseRawWorkspace).mock.calls.filter(([id]) => id === 'pc-retry-1')).toHaveLength(3);
+  await remount('c');
+  expect(vi.mocked(api.releaseRawWorkspace).mock.calls.filter(([id]) => id === 'pc-retry-1')).toHaveLength(5);
   expect(vi.mocked(api.openRawDocument).mock.calls.filter(([id]) => id.startsWith('pc-retry-'))).toHaveLength(2);
   expect(current?.assetId).toBe('c');
 });
@@ -2013,7 +2085,7 @@ it.each([
   await render('a'); await flush();
   act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); });
   await flush();
-  await render('b'); await flush();
+  await remount('b');
   expect(vi.mocked(api.releaseRawWorkspace).mock.calls.filter(([id]) => id === 'pc-empty-1')).toHaveLength(1);
   expect(vi.mocked(api.rawWorkspaceEmpty).mock.calls.filter(([id]) => id === 'pc-empty-1')).toHaveLength(1);
   expect(vi.mocked(api.openRawDocument).mock.calls.filter(([id]) => id.startsWith('pc-empty-'))).toHaveLength(2);
@@ -2037,7 +2109,7 @@ it('retries a pre-send Point Color release failure once with the same workspace 
   await render('a'); await flush();
   act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); });
   await flush();
-  await render('b'); await flush();
+  await remount('b');
   expect(vi.mocked(api.releaseRawWorkspace).mock.calls.filter(([id]) => id === 'pc-pre-send-1')).toHaveLength(2);
   expect(vi.mocked(api.rawWorkspaceEmpty).mock.calls.filter(([id]) => id === 'pc-pre-send-1')).toHaveLength(1);
   expect(vi.mocked(api.openRawDocument).mock.calls.filter(([id]) => id.startsWith('pc-pre-send-'))).toHaveLength(2);
@@ -2055,20 +2127,21 @@ it('retains the release owner when status lookup fails and retries it on a later
   let releaseAttempts = 0;
   vi.mocked(api.createRawWorkspace).mockImplementation(async () => `pc-query-${++created}`);
   vi.mocked(api.releaseRawWorkspace).mockImplementation(async id => {
-    if (id === 'pc-query-1' && releaseAttempts++ === 0)
+  if (id === 'pc-query-1' && releaseAttempts++ < 2)
       throw new api.RawApiError('raw_connection_failed');
   });
-  vi.mocked(api.rawWorkspaceEmpty).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'));
+  vi.mocked(api.rawWorkspaceEmpty).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'))
+    .mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'));
   await render('a'); await flush();
   act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); });
   await flush();
-  await render('b'); await flush();
-  expect(vi.mocked(api.releaseRawWorkspace).mock.calls.filter(([id]) => id === 'pc-query-1')).toHaveLength(1);
+  await remount('b');
+  expect(vi.mocked(api.releaseRawWorkspace).mock.calls.filter(([id]) => id === 'pc-query-1')).toHaveLength(2);
   expect(vi.mocked(api.openRawDocument).mock.calls.filter(([id]) => id.startsWith('pc-query-'))).toHaveLength(1);
   expect(current).toMatchObject({ assetId: 'b', status: 'error' });
 
-  await render('c'); await flush();
-  expect(vi.mocked(api.releaseRawWorkspace).mock.calls.filter(([id]) => id === 'pc-query-1')).toHaveLength(2);
+  await remount('c');
+  expect(vi.mocked(api.releaseRawWorkspace).mock.calls.filter(([id]) => id === 'pc-query-1')).toHaveLength(3);
   expect(vi.mocked(api.openRawDocument).mock.calls.filter(([id]) => id.startsWith('pc-query-'))).toHaveLength(2);
   expect(current?.document?.assetId).toBe('c');
 });
@@ -2096,13 +2169,16 @@ it.each((['discard', 'create', 'open', 'settings'] as const).flatMap(stage =>
     });
     vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => {
       if (workspaceId === 'source-ws') return sourceDoc;
-      if (workspaceId === 'recovery-ws') return stage === 'open' ? openGate.promise : recoveryDoc;
+      if (workspaceId === 'recovery-ws') {
+        if (assetId === 'b') return { ...nextDoc, workspaceId };
+        return stage === 'open' ? openGate.promise : recoveryDoc;
+      }
       return nextDoc;
     });
     let settingsCalls = 0;
     vi.mocked(api.readRawSettings).mockImplementation(async doc => {
       settingsCalls++;
-      if (doc.workspaceId === 'recovery-ws' && stage === 'settings') return settingsGate.promise;
+      if (doc.workspaceId === 'recovery-ws' && doc.assetId === 'a' && stage === 'settings') return settingsGate.promise;
       return { ...rawSettings(doc), point_colors: doc.workspaceId === 'source-ws' ? [pointColor] : [] };
     });
     vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(['png']), width: 16, height: 12,
@@ -2137,17 +2213,28 @@ it.each((['discard', 'create', 'open', 'settings'] as const).flatMap(stage =>
     await flush();
 
     if (stage !== 'discard') {
-      expect(vi.mocked(api.releaseRawWorkspace).mock.calls.filter(([id]) => id === 'recovery-ws')).toHaveLength(1);
-      expect(vi.mocked(api.openRawDocument).mock.calls.filter(([, assetId]) => assetId === 'b')).toHaveLength(0);
-      if (timing === 'unmountWhileWaiting') { await render('b'); await flush(); }
-      await act(async () => { releaseGate.resolve(); }); await flush();
+      if (stage === 'settings' && timing === 'switchAtCompletion') {
+        expect(vi.mocked(api.releaseRawWorkspace).mock.calls.filter(([id]) => id === 'recovery-ws')).toHaveLength(0);
+        expect(vi.mocked(api.closeRawDocument).mock.calls.map(([doc]) => doc.handle)).toEqual(['recovery-handle']);
+        expect(vi.mocked(api.openRawDocument).mock.calls.filter(([, assetId]) => assetId === 'b')).toHaveLength(1);
+      } else {
+        expect(vi.mocked(api.releaseRawWorkspace).mock.calls.filter(([id]) => id === 'recovery-ws')).toHaveLength(1);
+        expect(vi.mocked(api.openRawDocument).mock.calls.filter(([, assetId]) => assetId === 'b')).toHaveLength(0);
+        if (timing === 'unmountWhileWaiting') { await render('b'); await flush(); }
+        await act(async () => { releaseGate.resolve(); }); await flush();
+      }
     } else if (timing === 'unmountWhileWaiting') {
       await render('b'); await flush();
     }
 
     expect(current?.document?.assetId).toBe('b');
     expect(vi.mocked(api.openRawDocument).mock.calls.filter(([, assetId]) => assetId === 'b')).toHaveLength(1);
-    expect(vi.mocked(api.openRawDocument).mock.calls.find(([, assetId]) => assetId === 'b')?.[0]).toBe('next-ws');
+    const expectedWorkspace = stage === 'settings' && timing === 'switchAtCompletion' ? 'recovery-ws' : 'next-ws';
+    expect(vi.mocked(api.openRawDocument).mock.calls.find(([, assetId]) => assetId === 'b')?.[0]).toBe(expectedWorkspace);
+    if (stage === 'settings' && timing === 'switchAtCompletion') {
+      await act(async () => root.unmount()); await flush();
+      releaseGate.resolve(); await flush();
+    }
   });
 
 it.each([['raw_connection_failed', undefined], ['raw_workspace_conflict', 409], ['raw_request_failed', 503]] as const)

@@ -1,7 +1,7 @@
 import { provisionalCrop, reusableCropBitmap, sameCropOwner, type CropSnapshot, type CropPresentation } from './rawCropDisplay';
 import { useEffect, useRef, useState } from 'react';
 import { createRawWorkspace, openRawDocument, rawCapability, rawPreview, cancelRawPreview, RawSuperseded, readRawDocument, readRawSettings,
-  abortRawWorkspaceRequests, discardRawWorkspace, releaseRawWorkspace, resetRawEdits as resetRawEditsApi, rawWorkspaceEmpty, RawApiError, type RawDocument, type RawSettings, type RawValues, type RawHistoryControlId, type RawDisplayTarget,
+  abortRawWorkspaceRequests, closeRawDocument, discardRawWorkspace, releaseRawWorkspace, resetRawEdits as resetRawEditsApi, rawWorkspaceEmpty, RawApiError, type RawDocument, type RawSettings, type RawValues, type RawHistoryControlId, type RawDisplayTarget,
   type RawPickTarget, type RawPickFrame, type RawHistoryResult, type RawHistoryStep, type RawHistoryOperation, type RawFrame, type RawGeometry, type RawCropDisplay, type RawGeometryOperation } from './rawApi';
 import { frontendLogger } from './frontendLogging';
 import { RawControls } from './rawControls';
@@ -113,7 +113,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   const editorRef = useRef<RawControls | null>(null);
   const saverRef = useRef<RawRecipeSave | null>(null);
   // The Workspace outlives an Asset effect; each operation still checks the ID it captured.
-  const workspaceOwnerRef = useRef<{ workspaceId?: string; effectSerial?: number }>({});
+  const workspaceOwnerRef = useRef<{ workspaceId?: string; effectSerial?: number; documentState?: 'opening' | 'open' | 'closing' | 'closed' }>({});
+  const darkroomActiveRef = useRef(true);
   const frozen = useRef(false);
   const restartRef = useRef<(retry?: boolean) => Promise<void>>(async () => {});
   const discardRef=useRef<()=>Promise<void>>(async()=>{});
@@ -164,6 +165,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
           if (workspaceOwner.effectSerial === currentSerial) {
             workspaceOwner.workspaceId = undefined;
             workspaceOwner.effectSerial = undefined;
+            workspaceOwner.documentState = undefined;
           }
           return;
         }
@@ -171,6 +173,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
           throw new RawApiError('raw_workspace_conflict');
         workspaceOwner.workspaceId = workspaceId;
         workspaceOwner.effectSerial = currentSerial;
+        workspaceOwner.documentState = 'opening';
       },
     };
     let recoveryInProgress = false;
@@ -380,6 +383,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     let resetOperation: Promise<void> | undefined;
     const controller = new AbortController();
     const current = () => active && !retired && identity.current === assetId && serial.current === currentSerial;
+    let pagehideRequested = false;
     const revoke = () => {
       cropSnapshotRef.current=null;
       if (wholeSurfaces.current.after?.url === url) wholeSurfaces.current.after = undefined;
@@ -635,6 +639,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       evaluateAuto();
     };
     const install = (settings: RawSettings) => {
+      workspaceOwner.documentState = 'open';
       region.resetDocument(); auto?.reset(); regionOwner = undefined; regionConnection = undefined;
       wholeSurfaces.current = {};
       frameSerial = 0;
@@ -882,6 +887,12 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     const adoptWorkspace = (workspaceId: string) => {
       workspace.current = workspaceId;
     };
+    const claimClosedWorkspace = (workspaceId: string) => {
+      if (workspaceOwner.workspaceId !== workspaceId || workspaceOwner.documentState !== 'closed')
+        throw new RawApiError('raw_workspace_conflict');
+      workspaceOwner.effectSerial = currentSerial;
+      workspaceOwner.documentState = 'opening';
+    };
     const terminateStaleRecoveryWorkspace = async (workspaceId: string) => {
       let owner = pointColorTermination;
       if (owner?.state.stage === 'complete') {
@@ -1103,11 +1114,19 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         if (!await rawCapability(controller.signal)) throw new RawApiError('raw_unavailable');
         available = true;
         if (!current()) return;
-        const createdWorkspace = await createRawWorkspace();
-        adoptWorkspace(createdWorkspace);
+        const retainedWorkspace = workspaceOwner.workspaceId;
+        let openWorkspace: string;
+        if (retainedWorkspace) {
+          claimClosedWorkspace(retainedWorkspace);
+          openWorkspace = retainedWorkspace;
+        } else {
+          openWorkspace = await createRawWorkspace();
+          adoptWorkspace(openWorkspace);
+        }
         if (!current()) return;
-        const doc = await openRawDocument(createdWorkspace, assetId);
+        const doc = await openRawDocument(openWorkspace, assetId);
         if (!current()) return;
+        workspaceOwner.documentState = 'open';
         const settings = await readRawSettings(doc);
         if (!current()) return;
         install(settings);
@@ -1318,7 +1337,56 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         }
         return true;
       };
-      if (discardTermination) {
+      const assetTransition = !pagehideRequested && darkroomActiveRef.current && identity.current !== assetId
+        && !!workspace.current && !!editor && !!saver && !discarded && !discardTermination && !discardOperation && !recoveryInProgress;
+      if (assetTransition) {
+        const ownedWorkspace = workspace.current!;
+        let closeDocument: RawDocument | undefined;
+        workspaceOwner.documentState = 'closing';
+        const termination = new RawWorkspaceTermination(ownedWorkspace, 'close', saver, async () => {
+          if (pointColorDeparture) await saver?.preparePointColorForDeparture();
+          else await finalSave;
+          if (saver?.dirty || saver?.error || editor?.unsettled)
+            throw new RawApiError('raw_save_unconfirmed');
+          const confirmed = editor?.confirmed;
+          if (!confirmed || confirmed.workspaceId !== ownedWorkspace || confirmed.assetId !== assetId)
+            throw new RawApiError('raw_stale_handle');
+          closeDocument = { ...confirmed };
+        }, async () => {
+          await owned(async () => {
+            if (workspace.current !== ownedWorkspace || !closeDocument)
+              throw new RawApiError('raw_stale_handle');
+            await closeRawDocument(closeDocument);
+          });
+        }, async () => {
+          if (workspaceOwner.workspaceId !== ownedWorkspace) throw new RawApiError('raw_stale_handle');
+          workspaceOwner.documentState = 'closed';
+          editor?.dispose(); saver?.dispose();
+          if (editorRef.current === editor) editorRef.current = null;
+          if (saverRef.current === saver) saverRef.current = null;
+          if (!darkroomActiveRef.current) {
+            await new Promise<void>((resolve, reject) => enqueue(async () => {
+              try {
+                if (workspaceOwner.workspaceId !== ownedWorkspace || workspaceOwner.documentState !== 'closed')
+                  throw new RawApiError('raw_stale_handle');
+                await releaseWorkspaceConfirmed(ownedWorkspace);
+                if (workspaceOwner.workspaceId === ownedWorkspace) {
+                  workspaceOwner.workspaceId = undefined;
+                  workspaceOwner.effectSerial = undefined;
+                  workspaceOwner.documentState = undefined;
+                }
+                resolve();
+              } catch (error) { reject(error); }
+            }));
+          }
+        });
+        pointColorTermination = termination;
+        void termination.run().then(() => {
+          if (pointColorTermination === termination) pointColorTermination = undefined;
+        }).catch(cause => {
+          log(cause instanceof RawApiError ? cause.code : 'raw_connection_failed', 'document.closeFailed');
+        });
+      } else if (discardTermination) {
         // The explicit discard owner already holds Cancel and Workspace termination across unmount.
       } else if (pointColorDeparture) {
         const ownedWorkspace = workspace.current;
@@ -1380,6 +1448,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       });
     };
     const pagehide = () => {
+      pagehideRequested = true;
+      darkroomActiveRef.current = false;
       if (current()) setState({ assetId, status: 'error', code: 'raw_document_closed' });
       dispose();
     };
@@ -1390,6 +1460,52 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     window.addEventListener('beforeunload', beforeUnload);
     return () => { window.removeEventListener('pagehide', pagehide); window.removeEventListener('beforeunload', beforeUnload); dispose(); };
   }, [assetId]);
+  useEffect(() => {
+    darkroomActiveRef.current = true;
+    const releaseClosedOwner = () => {
+      const owner = workspaceOwnerRef.current;
+      if (!owner.workspaceId) return;
+      const pending = pointColorTermination;
+      const pendingActive = pending && pending.state.stage !== 'complete';
+      if (pendingActive && pending?.workspaceId === owner.workspaceId && owner.documentState === 'closing') {
+        void pending.run().then(() => {
+          if (pointColorTermination === pending) pointColorTermination = undefined;
+        }).catch(() => {});
+        return;
+      }
+      if (owner.documentState !== 'closed' || pendingActive) return;
+      const workspaceId = owner.workspaceId;
+      const termination = new RawWorkspaceTermination(workspaceId, 'release', undefined, async () => {}, async () => {
+        await new Promise<void>((resolve, reject) => enqueue(async () => {
+          try {
+            if (owner.workspaceId !== workspaceId || owner.documentState !== 'closed')
+              throw new RawApiError('raw_stale_handle');
+            await releaseWorkspaceConfirmed(workspaceId);
+            if (owner.workspaceId === workspaceId) {
+              owner.workspaceId = undefined;
+              owner.effectSerial = undefined;
+              owner.documentState = undefined;
+            }
+            resolve();
+          } catch (error) { reject(error); }
+        }));
+      });
+      pointColorTermination = termination;
+      void termination.run().then(() => {
+        if (pointColorTermination === termination) pointColorTermination = undefined;
+      }).catch(cause => log(cause instanceof RawApiError ? cause.code : 'raw_connection_failed', 'raw.releaseFailed'));
+    };
+    const pagehide = () => {
+      darkroomActiveRef.current = false;
+      releaseClosedOwner();
+    };
+    window.addEventListener('pagehide', pagehide);
+    return () => {
+      window.removeEventListener('pagehide', pagehide);
+      darkroomActiveRef.current = false;
+      releaseClosedOwner();
+    };
+  }, []);
   // A comparison toggle and ordinary After revisions do not own the native Before cache lifetime.
   const beforeKey = !state?.cropMode && state?.assetId === assetId ? state.document?.beforeKey : null;
   const generation = state?.document?.generation, token = state?.document?.documentToken;
