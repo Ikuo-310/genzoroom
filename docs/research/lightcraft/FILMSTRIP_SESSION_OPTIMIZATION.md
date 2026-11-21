@@ -159,41 +159,72 @@ P1-3の設計上の未決定事項はない。実装時はroute変更やunmount�
 - DNG同士では `raw.recipe.restored` が4件。混在ではJPEG初回のみ `raw.recipe.none`、残る3回は `raw.recipe.restored`。両ケースとも各訪問でBackend `raw.history.saved` が成功し、cursor／lengthは全件0／0。非ゼロcursorの復元や設定fingerprintの一致は実測対象外。Backend `preview.measured` のPNG SHA-256は同じ画像・長辺の初回と再訪で一致したが、これは画像出力の一致であり設定fingerprintとは別。
 - errorレベルは両ケース0件。各Openで `raw.lensProfileInfo.unavailable`（`lightcraft_tool_error`）が計8件あり、各回ともDocument readyとPreview成功へ進んだ。初回1024pxに上表の長い待ちがあり、その後の再訪ではタイムアウトや同程度の待ちは観測されなかった。警告の原因、他の待ち時間、容量超過時の実機回復はこの測定では確認していない。
 
-## P2 Resident管理の事前調査
+## P2-1 Native APIの適合性とResident入替契約
 
-目的は多数の写真を順に開き、少数の写真へ戻る利用でも、Resident容量だけを理由とするSession再生成を避けること。根拠はLightCraft v0.20.0固定commit `192ff72923c39e6623f2c7ff67ab3a119deb8071` のローカルGitオブジェクトと、[manifest](../../../native/lightcraft/manifest.json) が指定する [managed patch](../../../native/lightcraft/patches/0001-v0.20.0-whole-frame.patch)。patchのSHA-256はmanifestと一致した。以下はソース調査で、退役APIの実行やメモリ実測は行っていない。
+基準はGenzoRoom main `9ecc38bf25455b5a8a9f64cf8b2fdea9339d3853`。LightCraft v0.20.0の固定commit `192ff72923c39e6623f2c7ff67ab3a119deb8071` と、[manifest](../../../native/lightcraft/manifest.json) が指定する [managed patch](../../../native/lightcraft/patches/0001-v0.20.0-whole-frame.patch) を参照した。patchのSHA-256はmanifestと一致した。P1の実測は同一generation内での再訪を対象としており、容量到達後の退役はこの節のソース調査と次工程の検証対象である。
 
-### Nativeの状態と回収境界
+### 既存APIでできること
 
-| 項目 | 固定upstreamとGenzoRoomで確認したこと |
+Headlessは1つのEngine `Session` を保持する。MCPのコマンド実行は `crates/mcp/src/tools.rs` から `headless.rs` の `engine.execute` を経て同じSessionに届く。既存managed patchはWhole／Region、Before等の描画契約を拡張しており、Residentの退役や入替を追加していない。
+
+| 操作 | 固定版の判定と根拠 |
 | --- | --- |
-| PhotoIdとResident | `crates/mcp/src/headless.rs` の `Headless` はEngineの `Session` を1つ保持し、`library.import`／`library.select` は同じカタログと選択を操作する。`crates/catalog/src/lib.rs` は単調に進む `next_photo` からPhotoIdを割り当てる。GenzoRoom側の `_photos` はsource keyからPhotoId・原本パス／fingerprint・Import既定値等への対応、`_resident` は登録済みPhotoId集合。公開Documentは1件で、再訪でも新tokenを発行する。 |
-| 既存削除API | `crates/engine/src/cmd/library/specs.rs` の `photo.delete` はRecently Deletedへの移動。`photo.deletePermanently` は指定写真をカタログから除去し、`library.emptyRecentlyDeleted` は一括処理する。どちらの恒久除去も `Session::commit` を使う。`photo.delete` と `photo.deletePermanently` は処理前にinteractionを終了する。用途に合う安全な個別退役APIはupstream／現行patchに見当たらない。 |
-| Native History、Undo、ログ | `Catalog::delete_photos_permanently_ops` はアルバム・スタック参照を整理して `Op::RemovePhoto` を生成する。逆操作の `AddPhoto` は写真（設定とNative Historyを含む）を保持し、`Session::commit` は逆操作をUndo、順方向を `pending_log` に積む。Undoに件数上限があっても削除直後の解放は保証されない。永続ライブラリがなければ `run_command` の永続化分岐・`close_library` のflushは働かない。コマンド `journal` は別の領域であり、こちらも計測対象。SQLiteのGenzoRoom HistoryはこのNative状態から独立している。 |
-| CPU／GPUと原本 | `Session::apply_through` は `RemovePhoto` 時に `media.forget(id)` を呼び、`media/cache.rs` でデコード済みthumb／preview／fullを外す。これは他のキャッシュ、Beforeマップ、実行中jobの共有参照、GPU allocatorまで一括解放する契約ではない。CPU `StageCache` はview／jobに渡す任意のキャッシュでGPU extensionを持てる。通常の `render_job` は `stages: None` で作成され、現行のmanaged HeadlessのWhole／Region経路は標準jobを実行・acceptする。UIのview用StageCacheと、headlessでのデコード再利用やGPU buffer poolを同一視しない。 |
-| 予算 | GenzoRoomがImport時に指定する `app.memoryBudget` 1024 MiBはLightCraft内部のキャッシュ等への配分。process working setやGPU全体の上限ではない。RawSourceCacheは別のディスク予算（1原本512 MiB、Workspace合計1 GiB、空き容量の検査あり）を持ち、P1ではWorkspace終了までコピーを保持する。変更試行はPhoto単位ではなく `LightCraftRawSession._edits` に集計し、Recipe復元のNative変更も消費し得る。200はFrontendの安全な再生成閾値、256はBackend adapterの上限。退役でリセットしない。 |
+| 同一SessionへA・BをImportし、A→B→Aと再訪 | **可能。** `library.import` の `mode: add` で写真を登録し、`library.select` に明示IDを渡して再訪する。P1ではこの経路を使用済み。Engine内のカタログIDはSession内で採番され、GenzoRoomのDocument tokenはOpenごとに更新する。 |
+| Aを安全に退役 | **不足。** `photo.delete` はRecently Deletedに移す。 `photo.deletePermanently` はAをカタログから除去できるが、Aの状態をUndoに保持する。 `library.emptyRecentlyDeleted` も対象範囲が一括で、同じUndo付きcommitを使う。 |
+| BのPhotoIdと編集状態を維持 | **条件付きで可能。** Bを選択した状態でAのみを明示指定する場合、独立したBの設定を削除処理は書き換えない。スタック・アルバム等の関連は更新され得る。Aが選択中の場合は削除後に選択が移る。編集中は削除API自体がinteractionを終了するため、A／Bとも未確定操作のない条件で確認する。 |
+| CをImportし、Aを再Import | **条件付きで可能。** 恒久除去後にAのパス・内容が他の登録写真と重複せず、UndoでAを戻していなければ、`import/commit.rs` の新規登録経路が新しいIDを割り当てる。重複報告やRecently Deletedからの復元を新規Importとして扱わない。 |
+| Session／generationの維持 | **カタログ操作としては可能。** 上記コマンドはSessionを作り直さない。ただし現行GenzoRoomは3枚目を制限する。既存APIだけでは有界なResident入替に必要な保持状態と回収の契約が揃わない。 |
 
-### 推奨案と成立条件
+LightCraftには独自のメモリ予算とメディアキャッシュの回収がある。 `app.memoryBudget` は `crates/engine/src/memory.rs` でプロセス内の予算とSessionのキャッシュ配分を設定する。これはカタログから写真を退役させるAPIではない。 `library.browse` と `library.forgetLocal` はLocalの未変更レコードを対象にし、期間、表示、選択、Before、Undo／Redoなどの保持条件を持つ。通常Importした編集済み写真を指定して入れ替える用途には使えない。対象のHeadless／通常Import経路には、容量に応じて通常写真を自律退役する公開契約は見当たらなかった。
 
-| 方式 | 多数の写真を扱う場合の評価 |
+### 恒久削除を採用しない根拠
+
+- **Catalog・選択。** `crates/engine/src/cmd/library/specs.rs` は対象を解決し、`end_interaction()`、`Catalog::delete_photos_permanently_ops`、`Session::commit`、`select_after_deletion` の順に進む。 `RemovePhoto` はIDをカタログから除去し、逆操作 `AddPhoto` に写真全体を持たせる。選択は残存IDに整理され、アクティブ写真が変わると `run_command` が旧IDを `previous_active` に記録し得る。
+- **Undo／Redo・ログ。** `Session::commit` は逆操作をUndoに積み、既存Redoを破棄し、順方向の操作を `pending_log` に保持する。Undoによって旧IDと設定・Native Historyを復元できる。退役操作だけをUndo対象外にしても、既存Importは `AddPhoto` をpending logに積み、既存編集や複数写真操作が旧IDを参照し得る。 `run_command` のメモリ上のコマンド `journal` と、永続ライブラリのディスクjournalは別。永続ライブラリ付きでは `persist()` が働き、保存失敗でもメモリに操作が適用済みの場合がある。一時Headlessではその永続化分岐が働かないため、ディスクに出ないことはメモリ内保持が消える根拠にならない。
+- **Before・キャッシュ。** `Session::apply_through` は `RemovePhoto` で `media.forget(id)` を呼び、デコード済みthumb／preview／fullを無効化する。 `cmd/before.rs` の独立した `Session.before` マップに対する消去はこの経路にない。写真側の設定・HistoryもUndoで残る。共有job参照、CPU／GPUキャッシュの割当やプロセスの常駐メモリが即時に減ることまでは保証されない。
+- **Preview／job。** Headlessの描画呼び出しは `&mut self` を取り、現行Whole／Region経路は呼び出し内でjobを実行する。恒久削除自体はすべてのNative jobの参照終了やHTTP画像leaseを確認するAPIではない。GenzoRoomのDocument Closeによる画像task・送信leaseの排出と、Native側での残存job参照の確認が必要。
+- **原本・sidecar。** 恒久削除のコマンド本体はカタログを変更し、原本の移動や削除を直接呼ばない。 `run_command` にはXMP自動書込みが有効な場合の処理があり、`auto_write_sidecar_ids` はカタログに現存する対象を扱う。削除と再Importの一連の操作を無副作用とみなすには、モード `add`、自動書込み無効、一時Session、interaction終了済みの条件を固定し、PoCで原本とsidecarを比較する。通常の永続ライブラリの削除をP2の退役に転用しない。
+
+### 採用方針と代替案
+
+| 案 | 判定と変更範囲 |
 | --- | --- |
-| Resident上限だけを増やす | 固定枚数内の再Importは減る。訪問した写真と原本コピーが蓄積し、新上限／ディスク上限で従来どおり全体回収が必要。枠数を増やすだけでは容量超過時のSession再生成を解消できない。 |
-| 有界Resident＋個別退役・入替 | 最近使った写真を保持し、空きがなければ安全に退役できる最も古い写真を除いてから次の写真をImportする。同一generationで総訪問枚数をResident枠より大きくできる。退役済みの再訪にはImportとSQLiteからの復元が必要。Nativeの参照回収とディスク予算を実証できれば採用する。 |
+| 既存APIの組み合わせ | **比較用。** 差分なしで選択・恒久除去・再Importを検証できるが、旧IDの復活と写真資源の保持を防げない。Local整理、Recently Deleted、キャッシュ予算の操作を組み合わせても、通常写真の安全な退役にはならない。 |
+| 既存削除APIへのオプション追加 | **不採用。** カタログ除去は再利用できるが、Undo・永続化・副作用を切り替える別契約が必要になる。通常の削除入口に一時Session専用分岐を持ち込み、upstream更新時に既存削除との互換確認が増える。 |
+| 一時Headless専用の個別退役入口 | **P2-2の推奨。** MCPで明示PhotoIdを受け、Engineの一時Session処理に委譲する。差分の候補はHeadlessの入口とEngineの退役処理。既存カタログの関連整理、`apply_through` のメディア無効化を活用する。通常の削除・永続ライブラリ・UIの経路を共用の特別モードにしない。 |
+| Nativeによる容量判定と自律入替 | **個別退役が成立した後の採用候補。** Nativeの入場判定と候補選択で容量を管理すれば、GenzoRoomにLRUは要らない。頻度管理、入替とImportの失敗境界、退役ID通知が必要になり、個別退役より差分・移植負担が増える。初回PoCは明示IDで退役の意味だけを検証する。 |
 
-**ソース上は同一Sessionでの入替が成立し得る。** カタログ除去とデコード済みソース無効化を再利用できる。PoCでは永続ライブラリを持たないGenzoRoom専用Headlessに限定し、明示PhotoIdを受け取るmanaged toolとEngine内の小さな専用処理を候補にする。永続ライブラリやinteraction中は拒否し、原本、sidecar、Immich、SQLiteに書き込まない。通常の `commit` を経由せず、既存のカタログ除去・キャッシュ無効化を通して逆操作を保持しない。選択／previous active、Before、設定hash、メディアキャッシュとその他のPhotoId参照を点検する。最後に選択していたNative写真でも、HTTP Document Closeと全lease排出後なら安全に選択解除して退役できるか、PoCで確認する。
+### 退役と呼び出し側の契約
 
-既存Undo／Redoにはインポートや複数写真を含む操作が入り得る。個別の記録を安易に部分削除せず、GenzoRoom専用の一時SessionでNative Undo／Redoと不要なpending logをまとめて破棄できるか検証する。永続ライブラリや未確定操作には適用しない。GenzoRoomのUndo／RedoはSQLite Historyとして維持し、新PhotoIdのImport時に既定設定・Beforeを再取得してRecipeとHistoryを復元する。Native Undoの整理に必要な変更の規模、補助キャッシュの全参照、GPU共有資源の残留量は未確定。個別退役が成功してもプロセスのworking setがその場で減ることまでは前提にしない。
+1. **受付。** GenzoRoomは既存の保存確定→Document Closeで、操作とPreview／Region／Beforeを排出し、画像応答lease終了を待つ。DocumentなしのWorkspaceでOpenと直列化する。Nativeは管理対象の一時Headless Sessionに限り、明示した対象IDの存在を確認する。永続ライブラリ、編集中、対象を参照する処理が残る場合は変更前に拒否する。PoCではBを選択し、非アクティブのAを退役する。選択中の写真の退役は初回契約に含めない。
+2. **成功。** NativeはAのIDをカタログとSession内の参照から外し、AのBeforeや選択関連の参照を整理する。BのID、編集設定、Native HistoryとBeforeは維持する。退役IDがUndo／Redoで復活せず、pending logが旧写真を保持し続けないことを検証する。Native側で記録方針を決める。専用の一時モードでNative Undo／Redoと不要なpending logをまとめて整理する方法も候補とし、複数写真を含む操作をID単位で安易に切り取らない。通常モードのUndo／Redoには適用しない。コマンドjournalの扱いと、以後のImport／編集による再蓄積も確認する。
+3. **受領と再Open。** Nativeの成功応答で退役済みIDを明示する。GenzoRoomは対応表のみ更新し、退役した写真を再訪する場合は既存のImport、原本照合、SQLite Recipe／History復元を使う。退役結果が不明なら追加Importと該当原本コピーの回収を止め、既存のWorkspace解放・Session再生成経路を使う。副作用なしと分かる拒否と、適用済みか分からないエラーを区別する。
+4. **製品での入替。** 容量到達時の候補選択と内部リソース管理はLightCraftが担当する。PoC成功後に、Nativeが候補と結果を明示する方式と、NativeがImportの一部として退役し結果に退役IDを返す方式を比較する。どちらも公開中のDocumentの写真を暗黙に無効化しない。Importに失敗した場合も確定した退役結果を返せることが条件となる。容量だけでSessionを作り直さずに済む可能性はあるが、容量制御と参照回収がPoCで成立するまで製品契約とはしない。
 
-### Backend／Frontendへの接続案
+### GenzoRoom側の責務と見直し対象
 
-- Backendの退役はClose成功後のDocumentなし状態で、Workspace ownerの下でOpen admissionと直列化する。最新の保存チェックポイントが確定し、対象のPreview／Region／Before処理、送信lease、Native job、Curve／Mixer／Point Color／Geometry操作が残っていない写真だけを候補にする。使用順はOpen成功時に更新し、容量逼迫時は退役可能な最古を選ぶ。Native ACKと旧PhotoIdの不在を確認後に `_photos`／`_resident` を更新する。退役結果不明なら追加Importや原本削除を止め、既存のWorkspace回収・再生成経路へ渡す。
-- 原本コピーのディスク管理はResident管理と分ける。短期再訪向けにコピーを残す場合もWorkspaceの既存バイト上限内に収める。空きが不足したら、Nativeが参照しないと確認済みで、ダウンロード・jobの所有もないコピーだけを古い順に回収する。コピーがあればfingerprintを照合して再Importに再利用し、なければImmichから再取得する。退役を越えたPreview PNGの再利用や先読みは別工程。
-- 最初のPoCはResident 2枠のまま入替を検証する。本番枚数は代表的な高画素DNG／JPEGと長時間巡回で、CPU private bytes／working set、GPUメモリ、Native内部カウンタ、ディスク占有量、再Import頻度を別々に測って決める。枚数ガードとバイトガードを併用し、既存のNative memory budgetを総メモリの上限に流用しない。実測に基づく初期値や追加のメモリ上限は未決定。
-- Frontendは既存の保存→Close→Openと表示ownerを再利用する。通常の入替が同じOpen契約に収まれば操作UIの変更は不要。容量エラー時の既存回復は、退役不能・結果不明のフォールバックとして維持する。200／256はSession累積のままとし、容量による再生成の削減と変更試行による再生成の削減を別に検証する。
+LightCraftは現像・描画・Export、写真カタログ、Resident入替とCPU／GPU資源の寿命を管理する。GenzoRoomはUI、現像パラメーター、Recipe／History、Immich、Document／Workspaceの所有と、保存・直列化・通信失敗の回復を担当する。
 
-### 最小PoCと実装順
+| 現行制御 | 分類とP2での扱い |
+| --- | --- |
+| `LightCraftRawSession._photos`／`_resident` | `_photos` のAsset・原本・Import既定値・PhotoIdの対応はアプリケーション制御。 `_resident` は現在の登録確認に使う複製状態。Nativeが退役結果を返す場合はその結果に従い、独立した追跡集合が必要か見直す。利用順管理は追加しない。 |
+| `MAX_RAW_FILES = 2` | P1の安全制約。代替のNative入場／退役契約が検証できてから見直す。枚数を増やすだけの案では、次の上限で再生成が必要になる。 |
+| `app.memoryBudget` | LightCraft公開APIの利用。現行adapterは初回Import前に1024 MiBを指定する。これは写真枠や総CPU／GPUメモリの上限を表さない。PoCでは同条件で観測し、GenzoRoomに別予算や資源解放命令を設けない。 |
+| StageCache設定 | 現行adapterの `GENZOROOM_RAW_STAGE_CACHE` と予算は初期化時に検証・保持するが、その値をNativeへ渡す利用箇所は確認できない。固定版の該当Headless job構築は `stages: None`。設定を退役設計の前提にしない。 |
+| `reset_session()` | GenzoRoomの障害・結果不明・変更予算からの回復。正常な容量入替の成功時には不要。 |
+| Document Close→Open | アプリケーション制御。 `RawPreviewApi._close_document_owned()` の保存チェックポイント、task／lease排出、owner失効を利用する。Frontendの通常切替契約は既存のまま接続できる見込み。 |
+| `RawSourceCache` | Immich原本コピーの所有、同一性、ディスク上限の管理。現行は1原本512 MiB、Workspace全体1 GiB。Nativeが参照しないと分かる前に削除しない。多数の写真でディスク上限が先に効く場合の原本コピーの寿命は後続のBackend設計で扱う。Nativeのメモリやキャッシュ管理から独立させる。 |
+| 変更予算200／256 | P1のSession単位の安全制約。200はFrontend再生成閾値、256はadapterの上限。Recipe復元でNativeの変更試行を消費し得る。写真退役ではリセットせず、容量入替の成否と分けて扱う。 |
 
-1. **Native単体PoC。** 固定commit・managed EXEで2枠にA／BをImportし、退役→C→A再Importを同一プロセスで実行する。同じNative Sessionで非退役写真のIDと設定が維持され、退役IDがinspect／render／selectで使えず、再Importで有効な新IDが発行されることを確認する。原本とsidecarの非変更、編集中／永続ライブラリでの拒否、カタログ・Before・Undo／Redo・pending log・キャッシュ参照を確認する。
-2. **長時間巡回と上限の決定。** 枠数を大きく超えるDNG／JPEGを読み直し、サイズの異なる原本、高画素、GPU利用有無、Before／Regionを含めてメモリ・ディスクの傾向と失敗境界を測る。容量要因を単独で測る試験と、編集・復元で200／256に達する試験を分ける。累積増加の原因が残る場合は修正範囲を見直し、必要なら再生成を残す。ここでmanaged APIの確定と実装着手可否を判断する。
-3. **Backend接続。** 退役所有権とACK検証をNative adapterへ追加し、Open admission、Resident LRU、原本コピーの回収を接続する。保存未確定、画像lease排出、退役応答喪失、Import失敗、ディスク上限、200／256、再訪時のRecipe／非ゼロHistory cursor／fingerprintをfocused testsで検証する。
-4. **統合確認。** 現行Frontendで枠数を超える連続切替、退役後の再訪、失敗時の既存回復、旧画像の排除を確認する。Windows DesktopでSession／generation・Importの有無を取得できるよう診断を整え、初回訪問、Resident hit、退役後の再Importを区別して計測する。
+### P2-2の開始条件と最小PoC
+
+固定commitと現行patchを照合できる状態を起点とする。破棄可能なRAW／JPEG fixtureとsidecarを用意し、一時Headless、Import `add`、XMP自動書込み無効を確認する。PoC開始前に比較用の既存API操作と、専用入口での検証を分ける。数値上限や製品用の候補選択は、この段階の前提にしない。
+
+| 検証 | 受入条件 |
+| --- | --- |
+| 退役patch不要の対照試験 | 同一HeadlessでA・BをImportし、A→B→Aを `library.select` のみで切り替え、ID、設定、Before、Previewを確認する。別の一時SessionでBを選択してAを恒久削除し、C ImportとA再Importが可能か確認する。Undoの検証は再Importと分け、削除直後にUndoして旧IDが復活することを確認する。pending log／journalの差分も記録し、カタログ除去と退役の違いを示す。 |
+| 専用入口の正常系 | A・Bの登録後、Aを退役しCをImportする。2件を維持する巡回では次にCを退役してAを再Importする。処理全体で同一プロセス・Sessionを維持し、adapter経由の観測を行う場合はgenerationが変わらない。BのID・編集設定・History・Beforeが維持され、旧Aのinspect／render／selectは拒否され、新Aに異なるIDが発行される。新AでImport基準を取得でき、保存設定を再適用できる。SQLite連携は後続のBackend接続で検証する。 |
+| 専用入口の保持状態・失敗 | Undo／Redoで退役IDが復活せず、pending logが退役写真を保持し続けない。journalとBefore・選択等の参照を確認する。未知ID・選択中・編集中・job参照中・永続ライブラリを拒否し、既知の拒否でBや選択・履歴を変えない。退役成功後のImport失敗と応答喪失を区別し、状態が不明なら同一Sessionで追加操作を続けない。 |
+| ファイルと長時間動作 | 原本と既存sidecarの内容・存在が同じで、新規sidecarも発生しない。少数枠を越えて繰り返し巡回し、Nativeの参照・ログ蓄積を確認する。必要に応じてCPU／GPUメモリを観測し、allocatorに残る容量と写真への有効な参照を区別する。 |
+
+未解決なのは、破棄できるNative Undo／Redo・pending logの範囲、残存jobと各種補助参照の判定、長時間巡回時の資源の傾向、選択中写真の扱い、製品用のNative入場契約、原本コピーのディスク寿命である。P2-2で個別退役の成功・拒否・結果不明を判別でき、保持する写真が無傷であることを確認してから、Nativeの容量制御とBackend接続の具体化へ進む。
