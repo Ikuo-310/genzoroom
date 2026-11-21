@@ -1,6 +1,6 @@
 # フィルムストリップ切替とNative Sessionの寿命
 
-基準はGenzoRoom main `3edfc505778577d8bbcc3197326e57d78a593d9a`。P0・P1事前調査とP1-1の実装結果をまとめる。P1-2以降は設計段階である。
+基準はGenzoRoom main `0bd6018c2536889e89090868c0e69853b950a78f`。P0・P1事前調査とP1-1の実装結果をまとめる。P1-2の契約は確定済みで、実装は未着手である。
 
 ## 目的と計測
 
@@ -24,19 +24,47 @@ Document OpenはSQLiteのRecipeとHistoryのidentity・revisionを照合し、�
 
 ## P1-2の設計
 
-採用する方針はDocument CloseとWorkspace Releaseの分離である。`DELETE /documents/{handle}` は旧Documentを終了し、Workspace、Native Session、Resident写真とRawSourceCacheを保持する。`DELETE /workspaces/{id}` は全体を解放する。
+以下はP1-2で採用する契約であり、現行コードの動作ではない。
 
-Closeは旧Documentのownerと保存チェックポイントを確認し、Closing状態で新規操作を拒否する。旧Documentが所有するPreview／Region等の実行中処理と応答の終了を待ち、旧ownerを失効させる。処理が残っている間は次のDocumentを公開しない。Close成功後のWorkspaceはDocumentなしとなり、次のDocumentを同一WorkspaceでOpenできる。Open時はP1-1のコピーとResident再利用、SQLiteとの照合と復元を使う。旧handle、token、generation、revisionや遅延した画像応答は新Documentに採用しない。
+### HTTP契約と所有権
 
-保存チェックポイントに失敗した場合は旧Documentを維持し、既存のRetryと保存保護を使う。Native障害や明示Discardは既存の安全な終了・回収経路を維持する。Closeの応答喪失時は旧ownerの結果を確認できるようにし、再送が新Documentを閉じないようにする必要がある。
+`DELETE /documents/{handle}` は本文を持たず、`X-Raw-Workspace`、`X-Raw-Generation`、`X-Raw-Token`、`X-Raw-Revision` を必須とする。generationとrevisionは非負の10進整数、handleとtokenは発行済みの不透明な値とする。Workspace、handle、generation、token、revisionの組をCloseの識別情報とし、ownerと現在のrevisionを照合する。不正な形式は400、owner・generation・tokenの不一致は409 `raw_stale_handle`、revision不一致は409 `raw_revision_conflict` とする。Workspace所有者でない要求は既存の `raw_workspace_conflict` とする。認証・コマンド認可は既存の境界を通す。
 
-実装前に以下を判断する。
+成功は本文なしの204と `Cache-Control: no-store` を返す。成功後もWorkspace ID、Native generation、Resident、原本コピー、Workspace leaseは継続し、公開Documentは空になる。完了前は次DocumentのOpenを409 `raw_busy` で拒否する。完了後は既存の `POST /documents` によって同じWorkspaceでOpenできる。OpenはP1-1の `RawSourceCache.download()`、`LightCraftRawSession.open_raw()`、`_restore_document()` を使い、新しい公開handleとdocument tokenを発行する。旧handleの操作は `_document()` で拒否し、旧Preview／Region／Beforeの結果は旧ownerにしか属さない。
 
-- CloseのHTTP契約。Workspace ID、generation、Document token、revisionをどの入力に含め、成功応答喪失後の再送をどう識別するか。
-- checkpoint確認とClosing受付停止の原子性。既に受理された保存・対話操作をどう完了させ、未確定の状態を拒否するか。
-- `_lock` と待機の具体的な順序。Preview／RegionはNative完了後に同じlockを再取得するため、Closeがlockを保持したまま処理終了を待つとデッドロックする。owner状態の確定と受付停止をlock内で行い、処理・画像leaseの待機をlock外で行う案を、取消・再送・Workspace Releaseとの競合を含めて検証する。
-- 応答送信中の画像leaseをCloseが待つ範囲と、Closing後に到着した旧応答の破棄方法。次Documentの公開前に旧ownerの処理が終了するという条件を満たす。
-- Close成功前後のNative障害、保存結果不明、Discard、Workspace lease期限、Open応答喪失における所有権と再試行方法。
+Closeの成功receiptはWorkspace内に直近1件の識別情報だけ保持する。次のDocumentが開かれていても、完全一致する旧Closeの再送にはそのreceiptに基づき204を返し、現Documentを参照・変更しない。次のClose成功時またはWorkspace終了時にreceiptを破棄する。それより古い再送や識別情報が異なる要求は409とし、現Documentには作用しない。新たな汎用トランザクションや永続receiptは設けない。Workspace終了後の再送は `raw_workspace_conflict` とする。
+
+### 受付、チェックポイント、終了待ち
+
+状態は `active(document)` → `closing(document)` → `active(no document)` とする。失敗して保存状況が未確定の場合は `active(document)` に戻し、旧Documentと保存ownerを保持する。Native Sessionが失われた場合は旧Documentを再利用可能と扱わず、既存のSession喪失・Discard／Workspace回収経路に渡す。
+
+1. `endpoint()` のClose専用受付でWorkspaceと識別情報を確認する。event loop上でawaitする前に閉鎖対象を固定し、新規のDocument操作とOpenの受付を止める。同一識別情報の並行Closeは同じshieldされたClose taskに合流する。異なるClose、Workspace Release、edit resetと新しい画像・編集・保存操作は409 `raw_busy` を返す。新規DiscardはClose終了を待ってから処理し、既存の明示Discardの意味を維持する。状態確認や認証不要の公開情報は既存の範囲で利用できる。
+2. 受付停止前に既に受理した操作を、Close自身を除く既存 `_tasks` と `_history_tasks` の所有taskで待つ。中断したHTTP waiterに代わり、`endpoint()` が使う `asyncio.shield` と同じくtaskが完了まで所有する。新たなNative interactionは開始せず、受付済みinteractionの終了を待つ。未終了のcurve／mixer／point-color interaction、geometry gesture、保存結果不明はチェックポイントで拒否する。受付済み操作の結果、revisionが指定値から変化した場合もCloseを拒否する。
+3. `_lock` 内でownerとrevisionを再照合し、`_history_checkpoint()`／`_history_checkpoint_reserved()` と既存のRecipe保存・Native同期検査を使って保存確定を確認する。初期History未作成やエンジン非互換回復では、保存済みRecipeの有無とImport既定状態を確認し、未保存編集や未確定保存を通さない。checkpoint失敗時はClosingを解除し、旧DocumentのRetry／Discardを可能にする。
+4. checkpoint成功後は旧ownerを採用不可にする。未送信ticketを既存の無効化で終結させ、受付済み `_image_tasks` が終了するのを `_lock` の外で待つ。`_preview()`、`_region()` とinteraction previewはNative完了後に同じlockを再取得するため、待機中にlockを保持しない。Closing後にまだ生成中だった結果は旧ownerの失効判定で204 supersededまたは既存エラーとし、PNGを新たに送らない。
+5. 既に返却済みの `_ImageResponse` は `_hold_image_response()` と `_images_idle` でASGI送信完了・切断・timeoutまで待つ。`_images_idle` はresponse leaseだけを追跡するため、実行中の `_image_tasks` の待機を省略しない。いずれもlock外で待つ。既に送信が始まった応答は途中で取り消せないため、旧token／revisionを持つ応答として完了させ、次Documentの公開前にleaseを解放する。
+6. `_lock` を再取得して同一Workspace・旧Document・Closing task・generationを再確認し、Document、`_raw_handle`、Preview serial、Region／WB、Recipe／History／gestureのDocument所有状態を破棄する。成功receiptを記録して空Document状態を公開し、204を返す。Native写真、CacheとWorkspace leaseは保持する。
+
+Close中はownerの外部受付を閉じるが、既に受理されたtaskの内部 `_document()`／`_history_verify()` 再確認は完了できるよう区別する。全呼出しを一律にClosingで拒否すると保存確認や画像処理が完了できない。新規受付側で遮断し、checkpoint成功後の応答採用判定でClosingを確認する。Native喪失、checkpoint失敗、待機失敗、shutdownは成功receiptを作らない。Close ownerが終結するまでWorkspace leaseの自動解放を保留し、Close完了・失敗時にleaseを更新する。shutdownは既存 `close()` がClose ownerの完了を待ってからSessionとCacheを回収する。
+
+### 応答喪失と再試行
+
+| 状態 | 契約 |
+| --- | --- |
+| Close受付前に失敗 | 旧Documentが有効。保存・owner・revisionを確認し、同じ識別情報で再送できる。 |
+| Close実行中にHTTP切断 | shieldされた同一Close taskが処理を継続する。同じ識別情報の再送はそのtaskに合流し、成功または失敗を受け取る。 |
+| Close成功後に応答だけ喪失 | 直近receiptと完全一致する再送は、空Workspaceでも次DocumentのOpen後でも204を返す。 |
+| Close成功後に次Openが失敗 | Close済みの旧Documentは復活しない。現行Openの失敗処理は `_release()` によりWorkspaceも回収し得る。P1-2ではこの既存契約を維持し、クライアントはWorkspaceの終了を確認して新Workspaceを作り、保存済みRecipeからOpenを再試行する。 |
+| 遅延した旧Close | receipt一致なら204、それ以外は409。いずれも現Documentを終了しない。 |
+
+保存が未確定なら旧Documentを保持し、既存Retryまたは明示Discardを使う。Close成功後のOpen応答喪失は、現行のWorkspace状態確認と安全なRelease／再Openで回復する。Openの冪等化や新たな公開状態照会APIはP1-3以降の課題とする。
+
+### 実装順と受入条件
+
+1. **Close ownerとcheckpoint**。対象は `endpoint()`、`_document()`、`_history_checkpoint()` とDocument所有状態。旧ownerの完全一致、受付停止、受理済み操作の完了、未保存・revision競合時の旧Document保持を実装する。最小回帰は保存未確定、同時mutation、interaction、同一／異なるClose重複。
+2. **画像処理の排出と失効**。対象は `_preview()`、`_region()`、interaction preview、`_image_tasks`、`_images_idle` とClose task。lock外でtask・送信leaseを待ち、旧結果を抑止してから空Documentを公開する。最小回帰は進行中Preview／Region、ASGI送信停止・切断、遅延応答、Open競合、Native障害。
+3. **再送とWorkspaceとの統合**。対象はClose receipt、`_execute()` のDocument Open／Workspace Release、`_discard()`、`_expire()`、`close()`。Close応答喪失の再送が新Documentへ作用しないこと、Discard・lease・shutdownがClose ownerと直列化されること、Releaseが従来どおり回収することを確認する。最小回帰はClose中切断、成功後再送、新Document後の旧再送、Open失敗、Discard／Release／期限との競合。
+4. **Residentと予算の統合確認**。同一WorkspaceでA→B→Aを行い、Workspace IDとNative generationを維持し、Aを再Importせず保存済みRecipe／History cursorを復元する。3枚目の容量拒否、200／256試行到達後には既存の保存確定・Workspace Release／再生成経路で続行できることをfocused testsで確認する。
 
 P1ではResident最大2枚、変更試行の再生成閾値200・上限256を維持する。上限やNative障害に達した場合は、保存確定と旧プロセスの回収を前提に既存の安全な再生成経路を使う。新たな写真退役APIはP1に含めない。
 
