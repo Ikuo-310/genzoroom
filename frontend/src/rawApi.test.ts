@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { LIGHTCRAFT_ENGINE } from './lightcraftEngine';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createRawWorkspace,abortRawWorkspaceRequests,discardRawWorkspace, rawCapability, rawPreview, beginRawCurveInteraction, cancelRawCurveInteraction, updateRawTargetedCurve, beginRawMixerInteraction, updateRawMixerInteraction, cancelRawMixerInteraction, endRawMixerInteraction, readRawDocument, readRawSettings, setRawControls, saveRawRecipe, saveRawHistory, readRawHistory, readRawRecipe, rawWorkspaceEmpty,
+import { createRawWorkspace,closeRawDocument,abortRawWorkspaceRequests,discardRawWorkspace, rawCapability, rawPreview, beginRawCurveInteraction, cancelRawCurveInteraction, updateRawTargetedCurve, beginRawMixerInteraction, updateRawMixerInteraction, cancelRawMixerInteraction, endRawMixerInteraction, readRawDocument, readRawSettings, setRawControls, saveRawRecipe, saveRawHistory, readRawHistory, readRawRecipe, rawWorkspaceEmpty,
   RAW_CONTROL_IDS, RAW_HISTORY_CONTROL_IDS, RawSaveError, type RawDocument, type RawHistoryRequest, type RawHistoryOperation, validRawCurve, validRawCurveInput } from './rawApi';
 import { downloadRawLensDatabase, readRawLensDatabaseStatus } from './rawApi';
 import { rawSettings } from './test/rawSettings';
@@ -17,6 +17,20 @@ function response(patch: Record<string, string> = {}, bytes = png) {
     'X-Raw-Epoch': '1', 'X-Raw-Sequence': '1', 'X-Raw-Width': '16', 'X-Raw-Height': '12', ...patch } });
 }
 afterEach(() => vi.unstubAllGlobals());
+
+it('closes a document with its complete confirmed owner identity', async () => {
+  const fetch = vi.fn(async () => new Response(null, { status: 204 }));
+  vi.stubGlobal('fetch', fetch);
+  await closeRawDocument(doc);
+  const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+  expect(url).toBe(`/api/raw/documents/${doc.handle}`);
+  expect(init.method).toBe('DELETE');
+  expect(init.body).toBeUndefined();
+  expect(Object.fromEntries(new Headers(init.headers))).toEqual({
+    'x-raw-workspace': doc.workspaceId, 'x-raw-generation': '1',
+    'x-raw-token': doc.documentToken, 'x-raw-revision': '2',
+  });
+});
 
 describe('RAW point curve readback contract', () => {
   it('accepts all four channels as finite object points', () => {

@@ -360,6 +360,12 @@ export async function readRawDocument(doc: RawDocument, signal?: AbortSignal) {
     throw new RawApiError('raw_stale_handle');
   return next;
 }
+export async function closeRawDocument(doc: RawDocument) {
+  await request(`/documents/${doc.handle}`, { method: 'DELETE', headers: {
+    'X-Raw-Workspace': doc.workspaceId, 'X-Raw-Generation': String(doc.generation),
+    'X-Raw-Token': doc.documentToken, 'X-Raw-Revision': String(doc.revision),
+  } });
+}
 export async function discardRawWorkspace(doc: RawDocument | {workspaceId:string}) {
   await request(`/workspaces/${doc.workspaceId}/discard`, post('handle' in doc?{handle:doc.handle,generation:doc.generation,documentToken:doc.documentToken}:{scope:'workspace'}));
   workspaceTransports.delete(doc.workspaceId);
