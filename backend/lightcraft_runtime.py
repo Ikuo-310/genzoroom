@@ -302,6 +302,15 @@ class LightCraftManager:
     def status(self):
         return LightCraftStatus(self._state, self._generation, self._version, self._sha256, self._error)
 
+    def generation_ended(self, generation):
+        """Return true only after this generation's process is reaped or superseded by a ready one."""
+        session = self._session
+        if self._generation != generation:
+            return self._state == "ready" and session is not None and session.generation == self._generation
+        if self._state == "stopped":
+            return session is None
+        return self._state == "failed" and session is not None and session.generation == generation and session.reaped
+
     def lensfun_override_configured(self):
         return any(key.upper() == "LIGHTCRAFT_LENSFUN_DIR" and bool(value)
                    for key, value in self._environment.items())

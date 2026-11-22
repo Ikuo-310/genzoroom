@@ -1005,6 +1005,31 @@ describe('RAW native Before cache', () => {
     expect(api.openRawDocument).not.toHaveBeenCalledWith(identity.workspaceId, 'b');
   });
 
+  it('replaces a Workspace confirmed empty after Native-loss Close before opening the successor', async () => {
+    let created = 0, oldWorkspaceOpen = 0;
+    vi.mocked(api.createRawWorkspace).mockImplementation(async () => `workspace-${++created}`);
+    vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => {
+      if (workspaceId === 'workspace-1' && assetId === 'b' && oldWorkspaceOpen++ === 0)
+        throw new api.RawApiError('raw_workspace_conflict', 409);
+      return { workspaceId, assetId, handle: assetId, generation: workspaceId === 'workspace-1' ? 1 : 2,
+        documentToken: assetId, revision: 1, sourceWidth: 4000, sourceHeight: 3000 };
+    });
+    vi.mocked(api.releaseRawWorkspace).mockImplementation(async id => {
+      if (id === 'workspace-1') throw new api.RawApiError('raw_workspace_conflict', 409);
+    });
+    vi.mocked(api.rawWorkspaceEmpty).mockImplementation(async id => id === 'workspace-1');
+
+    await render('a'); await flush();
+    await render('b'); await flush();
+
+    expect(api.closeRawDocument).toHaveBeenCalledOnce();
+    expect(api.releaseRawWorkspace).toHaveBeenCalledWith('workspace-1');
+    expect(api.rawWorkspaceEmpty).toHaveBeenCalledWith('workspace-1');
+    expect(api.createRawWorkspace).toHaveBeenCalledTimes(2);
+    expect(api.openRawDocument).toHaveBeenCalledWith('workspace-2', 'b');
+    expect(current).toMatchObject({ assetId: 'b', status: 'ready', document: { generation: 2 } });
+  });
+
   it('retains a closed Workspace across a temporary missing Asset and releases it on hook unmount', async () => {
     await render('a'); await flush();
     await render(null); await flush();
@@ -2184,7 +2209,8 @@ describe('bounded RAW session renewal', () => {
     vi.mocked(api.releaseRawWorkspace).mockRejectedValueOnce(new api.RawApiError('raw_workspace_conflict', 409));
     vi.mocked(api.rawWorkspaceEmpty).mockResolvedValueOnce(true);
     act(() => current!.retryRegeneration()); await drain();
-    expect(api.rawWorkspaceEmpty).toHaveBeenCalledOnce(); expect(current?.document?.generation).toBe(2);
+    expect(api.rawWorkspaceEmpty).toHaveBeenCalledOnce(); expect(api.rawWorkspaceEmpty).toHaveBeenCalledWith('workspace-1');
+    expect(current?.document?.generation).toBe(2);
     expect(current?.regenerationError).toBeUndefined();
   });
   it('serializes A to B to C to A with an in-flight import on the existing queue', async () => {

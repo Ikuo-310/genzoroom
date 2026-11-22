@@ -617,6 +617,35 @@ def test_expired_workspace_releases_native_source_and_allows_new_owner(local, tm
     asyncio.run(run())
 
 
+def test_expired_workspace_retries_cleanup_after_confirmed_native_loss(local, tmp_path, monkeypatch):
+    async def run():
+        monkeypatch.setattr(module, "LEASE_POLL_SECONDS", .01)
+        api, manager, children, root = await setup(tmp_path, local, monkeypatch)
+        reset = api.raw.reset_session
+        attempts = 0
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                await open_document(http)
+                await manager.close()
+
+                async def fail_once(*args, **kwargs):
+                    nonlocal attempts
+                    attempts += 1
+                    if attempts == 1:
+                        raise LightCraftError("raw_reset_failed")
+                    return await reset(*args, **kwargs)
+                monkeypatch.setattr(api.raw, "reset_session", fail_once)
+                api._touched -= module.LEASE_SECONDS + 1
+                await until(lambda: api.workspace is None)
+                assert attempts == 2
+                assert manager.status().state == "ready"
+                assert children[0].returncode is not None and not list(root.iterdir())
+        finally:
+            await api.close()
+    asyncio.run(asyncio.wait_for(run(), 20))
+
+
 @pytest.mark.parametrize("failure", ["timeout", "io_error"])
 def test_failed_open_cleanup_blocks_reopen_until_explicit_release(local, tmp_path, monkeypatch, failure):
     async def run():

@@ -544,16 +544,29 @@ class RawPreviewApi:
                 or int(generation) >= 2**53 or int(revision) >= 2**53):
             raise LightCraftError("raw_invalid_request")
         identity = (workspace, handle, int(generation), token, int(revision))
-        self._owner(workspace)
         if identity == self._document_close_receipt:
             return Response(status_code=204, headers={"Cache-Control": "no-store"})
+        self._owner(workspace)
         if self._document_close_task is not None:
             if identity != self._document_close_identity:
                 raise LightCraftError("raw_busy")
+            if self._document_close_task.done() and self._document_close_task.exception() is not None:
+                if self._workspace_state != "cleanup_failed" or self.document is not None:
+                    raise self._document_close_task.exception()
+                self._document_close_task = asyncio.create_task(
+                    self._retry_lost_document_close(identity), name="raw-document-close-cleanup-retry")
             return await asyncio.shield(self._document_close_task)
         if self._closing or self._history_draining or self._discarding:
             raise LightCraftError("raw_busy")
-        doc = self._document(handle)
+        doc = self.document
+        if doc is None or doc["handle"] != handle:
+            raise LightCraftError("raw_stale_handle")
+        raw_state = self.raw.status().state
+        if raw_state in {"lost", "stopped", "closing"}:
+            if not self._native_loss_confirmed(identity[2]):
+                raise LightCraftError("raw_unavailable")
+        else:
+            self._document(handle)
         if doc["generation"] != identity[2] or doc["documentToken"] != token:
             raise LightCraftError("raw_stale_handle")
         if doc["revision"] != identity[4]:
@@ -565,26 +578,30 @@ class RawPreviewApi:
         return await asyncio.shield(self._document_close_task)
 
     async def _close_document_owned(self, identity, doc, pending):
+        retain_identity = False
         try:
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
             async with self._lock:
                 self._owner(identity[0])
-                if self._document(identity[1]) is not doc or doc["generation"] != identity[2] or doc["documentToken"] != identity[3]:
+                if self.document is not doc or doc["handle"] != identity[1] or doc["generation"] != identity[2] or doc["documentToken"] != identity[3]:
                     raise LightCraftError("raw_stale_handle")
                 if doc["revision"] != identity[4]:
                     raise LightCraftError("raw_revision_conflict")
                 self.raw._ensure_curve_interaction_owner()
                 self._history_unsettled()
-                if self.raw.status().state != "synced":
-                    raise LightCraftError("raw_history_commit_required")
                 if self._recipe_save and not self._recipe_save.get("settled", False):
                     raise LightCraftError("raw_recipe_save_pending")
-                if not self._history_initialized and doc["settingsFingerprint"] != (
-                        doc["importDefaultsFingerprint"] if doc.get("recipeRecoveryPending")
-                        else doc["recipeFingerprint"]):
-                    raise LightCraftError("raw_history_commit_required")
-                await self._history_checkpoint()
+                if self._native_loss_confirmed(identity[2]):
+                    await self._verify_persisted_document_checkpoint(doc)
+                else:
+                    if self.raw.status().state != "synced":
+                        raise LightCraftError("raw_history_commit_required")
+                    if not self._history_initialized and doc["settingsFingerprint"] != (
+                            doc["importDefaultsFingerprint"] if doc.get("recipeRecoveryPending")
+                            else doc["recipeFingerprint"]):
+                        raise LightCraftError("raw_history_commit_required")
+                    await self._history_checkpoint()
                 self._document_close_draining = True
             # Image handlers reacquire the control lock before retiring their owner.
             if self._image_tasks:
@@ -592,18 +609,63 @@ class RawPreviewApi:
             await self._images_idle.wait()
             async with self._lock:
                 self._owner(identity[0])
-                if self._document(identity[1]) is not doc or doc["generation"] != identity[2] or doc["documentToken"] != identity[3]:
+                if self.document is not doc or doc["handle"] != identity[1] or doc["generation"] != identity[2] or doc["documentToken"] != identity[3]:
                     raise LightCraftError("raw_stale_handle")
                 if doc["revision"] != identity[4]:
                     raise LightCraftError("raw_revision_conflict")
-                await self.raw.release_photo(self._raw_handle)
-                self._clear_document()
+                if self._native_loss_confirmed(identity[2]):
+                    # The session reset drops all Native photo references; release_photo cannot succeed here.
+                    lightcraft_log("raw.document.closeRecovered", assetId=doc["assetId"],
+                                   generation=identity[2], revision=identity[4],
+                                   recipeRevision=doc["recipeRevision"])
+                    try:
+                        await self._release(checkpoint_history=False)
+                    except BaseException:
+                        retain_identity = self.workspace is not None and self._workspace_state == "cleanup_failed"
+                        raise
+                else:
+                    await self.raw.release_photo(self._raw_handle)
+                    self._clear_document()
                 self._document_close_receipt = identity
                 return Response(status_code=204, headers={"Cache-Control": "no-store"})
         finally:
             self._document_close_draining = False
-            self._document_close_task = self._document_close_identity = None
+            if not retain_identity:
+                self._document_close_task = self._document_close_identity = None
             self._touched = monotonic()
+
+    def _native_loss_confirmed(self, generation):
+        return self.raw.status().state in {"lost", "stopped", "closing"} and self.manager.generation_ended(generation)
+
+    async def _verify_persisted_document_checkpoint(self, doc):
+        from raw_recipe_store import InvalidRawRecipe, StoreUnavailable, get_raw_history
+        if self._history_save and self._history_save.get("stage") != "complete":
+            raise LightCraftError("raw_history_save_pending")
+        identity = self._history_identity
+        if identity is None:
+            raise LightCraftError("raw_history_commit_required")
+        try:
+            state = await run_in_threadpool(get_raw_history, identity)
+        except (InvalidRawRecipe, StoreUnavailable):
+            raise LightCraftError("raw_history_unavailable") from None
+        if state["revision"] != doc["recipeRevision"] or state["initialized"] != self._history_initialized:
+            raise LightCraftError("raw_history_revision_conflict")
+        settings = state["recipe"]["settings"] if state["recipe"] is not None else \
+            state["history"]["baselineSettings"] if state["history"] is not None else None
+        fingerprint = self._fingerprint(settings) if settings is not None else doc["recipeFingerprint"]
+        if fingerprint != doc["settingsFingerprint"]:
+            raise LightCraftError("raw_history_commit_required")
+
+    async def _retry_lost_document_close(self, identity):
+        completed = False
+        try:
+            await self._release(checkpoint_history=False)
+            self._document_close_receipt = identity
+            completed = True
+            return Response(status_code=204, headers={"Cache-Control": "no-store"})
+        finally:
+            if completed:
+                self._document_close_task = self._document_close_identity = None
 
     async def _discard(self, request, body):
         identity = (request.path_params['workspace'], body)
@@ -2042,7 +2104,11 @@ class RawPreviewApi:
         if self.workspace is None:
             return
         if checkpoint_history:
-            await self._history_checkpoint()
+            doc = self.document
+            if doc is not None and self._native_loss_confirmed(doc["generation"]):
+                await self._verify_persisted_document_checkpoint(doc)
+            else:
+                await self._history_checkpoint()
         self._clear_document()
         self._document_close_receipt = None
         self._workspace_state = "releasing"
@@ -2130,7 +2196,13 @@ class RawPreviewApi:
                 await asyncio.sleep(LEASE_POLL_SECONDS)
                 async with self._lock:
                     if self._document_close_task is None and monotonic() - self._touched >= LEASE_SECONDS:
-                        await self._release()
+                        try:
+                            await self._release()
+                        except Exception:
+                            if self._workspace_state != "cleanup_failed":
+                                raise
+                            lightcraft_log("raw.lease.cleanupFailed", level="warn",
+                                           errorCode="raw_cache_cleanup_failed")
         except asyncio.CancelledError:
             pass
         except Exception:

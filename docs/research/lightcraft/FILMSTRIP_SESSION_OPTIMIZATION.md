@@ -380,3 +380,33 @@ P2-4で成功済みのBackend focused 373件はBackend/nativeコードに変更�
 Open失敗／`raw_session_capacity`、Workspace回収未確定、再生成時の保存・owner保持は既存Hook testsの対象。200／256変更予算のSession回復はP2-4 Backend focused結果を再利用する。Native `rejected`／`partial_failure`／`unknown` のNative実契約とResponse形状はP2-4のBackend接続・Native probe結果の範囲である。本工程はLightCraft Nativeの実画像処理やメモリ管理を試験していない。
 
 この作業ではWindows Desktop実機、実写真のRAW/JPEG混在、長時間の多数写真巡回と性能、実際のcache pressureによる退役、実transport応答喪失は確認していない。P2-6では実写真でRAW/JPEG混在とA→B→A・多数枚巡回を行い、Workspace ID／Native generation、退役後のPhoto再Import、保存済みRecipe／History／Before、切替エラーの有無を確認する。初回表示、Resident再訪、退役後再訪のFrontend `responseWaitMs` とBackend `nativeMs` は対象イベントと出所を分けて記録し、200／256到達による意図したSession再生成と通常切替を区別する。P2-5の自動テスト成功を実機受入や性能改善率の証明とは扱わない。
+
+## P2-6 Windows Desktop開発環境のNative成果物復旧（2026-11-22）
+
+実機ログの2026-11-22 03:28:00 UTCの `process.artifact` はSHA-256 `2ba6adbd45a681ccd2ba252578e70c51a2db7243a7ff6b34a2983aa9f817bbd0` と `managedArtifact: false` を記録した。続く `process.ready` はv0.20.0、停止時の終了コードは0で、その後に `raw_thumbnail_failed` が記録された。バージョン確認を通過したプロセスでも、`LightCraftRawSession` は現行receiptで管理された成果物とResident契約がなければ `raw_unverified_artifact` で処理を拒否する。
+
+Desktop開発起動は `backend/windows_local.py` を起動し、Backendは `GENZOROOM_LIGHTCRAFT_EXE` の明示指定がなければ現行manifestの `developmentTargetDir` で候補を選ぶ。調査時のProcess／User／Machineにoverrideはなく、既定の先頭候補 `.tmp/lightcraft-0.20.0-p3/target-p1-sharpen/release/lightcraft-cli.exe` の実SHAはログと一致した。ログ自体には絶対パスがなく、実行先はこの一致と既定の選択順から特定した。隣接receiptのbinary SHA、version、upstream commitは当該EXEと一致したが、patch SHAは `8ff0bc48ee420f4a9f322c9a3536012002bf7450f02fe50f7da7b9553f926473` で、現行の `ecf7c183fc4db9d2f9da679e2acbb30720b0609e019bc073f5555f3495dff723` と不一致だった。さらに `headlessResidentContract` が欠落していた。P2-4の新しい成果物が既定候補の外にあり、旧patchの成果物が残っていたことが原因だった。
+
+P2-4の `.tmp/lightcraft-p2-4-build/target-p1-sharpen/release/` に残っていたEXEとreceiptを使用した。固定upstream `192ff72923c39e6623f2c7ff67ab3a119deb8071` とmanaged patchの適用状態、元のEXEを `build.py --source ... --binary ...` で照合した。既定候補の旧EXEとreceiptをバックアップし、検証済みの組を配置した。配置先でも `build.py --binary ...` が成功し、現行manifestとreceiptのpatch情報、`headlessResidentContract: 1`、実SHA-256 `535f30f311c42f596f4ec1e9e44a87db64ded7ba5da6f74a1a1464d362495bf7`、実バイナリのschemaと応答を確認した。
+
+WindowsのPython 3.14でBackend focused 47件成功。実Native試験ではoverrideなしの既定パスから起動し、`process.artifact` の `managedArtifact: true` と上記SHA、ready時のResident契約1を確認した。合成DNG A→JPEG B→DNG Aで各DocumentのOpenとPNG PreviewがHTTP 200となり、Workspaceとgenerationを維持しながらDocument tokenが更新され、AのNative PhotoIdは再訪時にも一致した。JPEGの保存済みRecipeサムネイルも既存の実Nativeテストで確認した。Windows Desktopの画面、実写真での検証、Resident入替の性能測定は未実施。
+
+## FS-01 Native停止後のDocument Close回復
+
+### 確定原因
+
+通常の`DELETE /documents/{handle}`は、owner照合後に`_document()`を通じてNativeのready状態と同期状態を要求する。Nativeプロセス終了後は`LightCraftRawSession.status()`が`lost`となるため、Closeの保存checkpointより前に要求が失敗する。FrontendはClose応答不明時の同一identity再送を維持するが、この経路では終了済みSessionに対する同じCloseが繰り返し失敗し、後続写真をOpenできなかった。
+
+### 修正した回復契約
+
+`LightCraftManager.generation_ended()`が、対象generationのプロセスreap完了、停止済みでSession ownerがない状態、または後続generationがreadyになった状態を確認した場合だけNative Session喪失として扱う。単なるrequest timeout、managerの起動中状態、Nativeの一時遅延はこの条件を満たさず、通常のClose checkpointを維持する。
+
+終了確定後のCloseは通常のNative `release_photo()`を呼ばず、画像taskとresponse leaseを排出してから、保存task／History task／interactionの未確定状態を検査する。さらにSQLiteのRecipe revisionがDocumentの`recipeRevision`と一致し、History revisionと初期化状態がBackend ownerと一致し、永続Recipe（またはHistory baseline）のfingerprintが確定Document fingerprintと一致することを照合する。状態が未確定・不一致・読出不能ならCloseを成立させず、DocumentとWorkspaceを保持する。
+
+照合成功後は既存のWorkspace全体Release／Native Session reset経路で古いNative写真参照と原本cacheを回収し、Native Sessionを再生成する。回収完了時だけDocument Closeを204として確定し、直近receiptを保持する。receipt照合はWorkspace owner検査より先に行うため、回収後にClose応答だけを失った再送も同一identityに限り204となる。cleanupが途中失敗した場合は同一Close identityを保持し、同じClose再送でWorkspace cleanupを再試行する。期限切れ回収も、保存checkpoint後のcleanup段階で失敗した場合に限り、Workspace ownerを維持してLease poll周期で再試行する。通常の応答喪失、保存保護、owner／generation／token／revision照合は維持する。次のOpenが旧Workspaceを使えない場合、Frontend既存のOpen失敗回復がWorkspace empty確認後に新Workspaceを作る。
+
+### 検証結果と境界
+
+Backend focused testsは`test_windows_raw_api.py`と`test_raw_history_api.py`の104件が成功した。保存済みRecipe／Historyを持つDocumentで終了済みNativeからCloseし、DB内容を保持したままSession generationを更新して次WorkspaceでOpenすること、Close再送が追加resetを起こさないこと、未確定save・fingerprint不一致を拒否すること、一時request timeoutをNative喪失と誤認しないこと、reset失敗後の同一Close再送でcleanupを完了すること、期限切れcleanupがcleanup_failed後に再試行することを確認した。checkpoint検証を単一SQLite read snapshotにまとめた後も関連するBackend 5件を再実行して成功した。Frontendの`useRawDocument.test.tsx`は195件成功し、Close後の旧WorkspaceがBackendでemptyの場合に既存のempty確認経路から新Workspaceへ切り替わることを確認した。`npx tsc --noEmit`も成功した。
+
+これらはモックNative／Backend API契約での自動検証であり、実Windows Nativeプロセスを強制終了する実機試験ではない。一時request timeoutはcheckpoint処理がtimeoutを返すモックで回復経路に入らないことを確認した。Native応答を実際に遅延させる試験、実機でのプロセス強制終了、SQLite I/O障害中の回収、Windows Desktopの連続切替は未確認。FS-02のcache pressure判定とFS-03のパス照合は変更していない。

@@ -260,6 +260,142 @@ def test_metadata_is_lazy_bounded_and_does_not_expose_settings(local, tmp_path, 
     asyncio.run(run())
 
 
+def test_document_close_recovers_only_after_reaped_native_and_verified_recipe_history(local, tmp_path, monkeypatch):
+    async def run():
+        api, manager, _, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                workspace, doc = await open_document(http)
+                doc = await operation(http, doc, "initialize")
+                doc = await change(http, doc, 1.25)
+                doc = await operation(http, doc, "commit", commit_body(doc))
+                identity = dict(api._history_identity)
+                persisted = store.get_raw_recipe(identity)
+                history = store.get_raw_history(identity)
+                assert persisted["revision"] == doc["recipeRevision"] == history["revision"]
+                assert store._digest(store._settings_json(persisted["recipe"]["settings"], identity["settingsSchemaVersion"])) == doc["settingsFingerprint"]
+                before = rows()
+                old_generation = doc["generation"]
+
+                await manager.close()
+                assert manager.status().state == "stopped"
+                closed = await http.delete(f'/api/raw/documents/{doc["handle"]}', headers=close_headers(doc))
+                assert closed.status_code == 204, closed.text
+                assert api.workspace is None and api.document is None
+                assert manager.status().state == "ready" and manager.status().generation > old_generation
+                assert rows() == before
+
+                # A lost Close response remains idempotent even though recovery released its Workspace.
+                generation_after_close = manager.status().generation
+                replay = await http.delete(f'/api/raw/documents/{doc["handle"]}', headers=close_headers(doc))
+                assert replay.status_code == 204 and manager.status().generation == generation_after_close
+
+                next_workspace = (await http.post("/api/raw/workspaces", json={})).json()["workspaceId"]
+                assert next_workspace != workspace
+                opened = await http.post("/api/raw/documents", json={"workspaceId": next_workspace, "assetId": str(uuid4())})
+                assert opened.status_code == 200, opened.text
+                assert opened.json()["generation"] == generation_after_close
+                assert rows() == before
+                assert (await http.delete(f'/api/raw/workspaces/{next_workspace}')).status_code == 204
+        finally:
+            await api.close()
+    asyncio.run(asyncio.wait_for(run(), 20))
+
+
+def test_document_close_does_not_recover_native_loss_with_unsettled_or_mismatched_persistence(local, tmp_path, monkeypatch):
+    async def run():
+        api, manager, _, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                workspace, doc = await open_document(http)
+                doc = await operation(http, doc, "initialize")
+                doc = await change(http, doc, .5)
+                doc = await operation(http, doc, "commit", commit_body(doc))
+                await manager.close()
+
+                api._history_save = {"stage": "recovering"}
+                history_pending = await http.delete(f'/api/raw/documents/{doc["handle"]}', headers=close_headers(doc))
+                assert history_pending.status_code == 409 and history_pending.json()["code"] == "raw_history_save_pending"
+                assert api.workspace == workspace and api.document["handle"] == doc["handle"]
+
+                api._history_save = None
+                api._recipe_save = {"settled": False}
+                pending = await http.delete(f'/api/raw/documents/{doc["handle"]}', headers=close_headers(doc))
+                assert pending.status_code == 409 and pending.json()["code"] == "raw_recipe_save_pending"
+                assert api.workspace == workspace and api.document["handle"] == doc["handle"]
+                assert api._document_close_receipt is None
+
+                api._recipe_save = None
+                api.document["settingsFingerprint"] = "0" * 64
+                mismatch_doc = dict(doc, settingsFingerprint="0" * 64)
+                mismatch = await http.delete(f'/api/raw/documents/{doc["handle"]}', headers=close_headers(mismatch_doc))
+                assert mismatch.status_code == 409 and mismatch.json()["code"] == "raw_history_commit_required"
+                assert api.workspace == workspace and api.document["handle"] == doc["handle"]
+                assert api._document_close_receipt is None
+        finally:
+            if api.workspace is not None:
+                await api._release(checkpoint_history=False)
+            await api.close()
+    asyncio.run(asyncio.wait_for(run(), 20))
+
+
+def test_document_close_does_not_treat_temporary_native_delay_as_session_loss(local, tmp_path, monkeypatch):
+    async def run():
+        api, manager, _, _ = await setup(tmp_path, local, monkeypatch)
+        checkpoint = api._history_checkpoint
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                workspace, doc = await open_document(http)
+                async def delayed_failure():
+                    raise LightCraftError("raw_request_timeout")
+                monkeypatch.setattr(api, "_history_checkpoint", delayed_failure)
+                failed = await http.delete(f'/api/raw/documents/{doc["handle"]}', headers=close_headers(doc))
+                assert failed.status_code == 502 and failed.json()["code"] == "raw_request_timeout"
+                assert manager.status().state == "ready"
+                assert api.workspace == workspace and api.document["handle"] == doc["handle"]
+                monkeypatch.setattr(api, "_history_checkpoint", checkpoint)
+                assert (await http.delete(f'/api/raw/documents/{doc["handle"]}', headers=close_headers(doc))).status_code == 204
+        finally:
+            await api.close()
+    asyncio.run(asyncio.wait_for(run(), 20))
+
+
+def test_lost_document_close_retries_workspace_cleanup_without_losing_close_identity(local, tmp_path, monkeypatch):
+    async def run():
+        api, manager, _, _ = await setup(tmp_path, local, monkeypatch)
+        reset = api.raw.reset_session
+        failed_once = True
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                workspace, doc = await open_document(http)
+                await manager.close()
+
+                async def fail_once(*args, **kwargs):
+                    nonlocal failed_once
+                    if failed_once:
+                        failed_once = False
+                        raise LightCraftError("raw_reset_failed")
+                    return await reset(*args, **kwargs)
+                monkeypatch.setattr(api.raw, "reset_session", fail_once)
+                url = f'/api/raw/documents/{doc["handle"]}'
+                failed = await http.delete(url, headers=close_headers(doc))
+                assert failed.status_code == 502 and api.workspace == workspace
+                assert api.document is None and api._workspace_state == "cleanup_failed"
+                assert api._document_close_identity is not None and api._document_close_receipt is None
+
+                recovered = await http.delete(url, headers=close_headers(doc))
+                assert recovered.status_code == 204, recovered.text
+                assert api.workspace is None and api._document_close_receipt == (
+                    workspace, doc["handle"], doc["generation"], doc["documentToken"], doc["revision"])
+        finally:
+            await api.close()
+    asyncio.run(asyncio.wait_for(run(), 20))
+
+
 def test_incompatible_recipe_stays_untouched_until_first_changed_history_append(local, tmp_path, monkeypatch):
     async def run():
         api, _, children, _ = await setup(tmp_path, local, monkeypatch)

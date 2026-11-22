@@ -879,7 +879,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       if (!ownedWorkspace) return;
       try { await releaseRawWorkspace(ownedWorkspace); }
       catch (cause) {
-        if (!(cause instanceof RawApiError) || cause.code !== 'raw_workspace_conflict' || !await rawWorkspaceEmpty()) throw cause;
+        if (!(cause instanceof RawApiError) || cause.code !== 'raw_workspace_conflict' || !await rawWorkspaceEmpty(ownedWorkspace)) throw cause;
       }
       if (workspace.current !== ownedWorkspace) throw new RawApiError('raw_stale_handle');
       workspace.current = undefined;
