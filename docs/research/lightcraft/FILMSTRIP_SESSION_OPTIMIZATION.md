@@ -470,3 +470,27 @@ Headless Session内に、成功して解決できたResidentについてPhotoId�
 変更は正式managed patch `native/lightcraft/patches/0001-v0.20.0-whole-frame.patch`へ反映した。patch SHA-256は `a72ebfa66ce04b3aea5232b8d5a665ab8a4e0a1e2e169a8deb6286639778f974`、18 files、1342 insertions、38 deletionsであり、manifestも同じhash／統計に更新した。検証checkoutのHEADは固定upstream `192ff72923c39e6623f2c7ff67ab3a119deb8071`。`build.py --source .tmp/lightcraft-p2-4-build --build`と`--binary`は成功し、Native schema／response、Before、Region、WB、Point Color、Sharpeningの既存probeを確認した。検証checkoutのrelease CLI SHA-256は `2e04fea8da7d84018baf7384043656af482a23986a1c63361f8200923e77eef7`、生成receipt SHA-256は `ad136120c2b9d4841303f49c6a881f7dbf38c3b4f59b1e13f980fa7f31c17f52`。receiptは新managed patch、固定upstream、`headlessResidentContract: 1`と一致し、検証checkoutの`--binary` gateに成功した。
 
 既定Windows開発候補 `.tmp/lightcraft-0.20.0-p3/target-p1-sharpen/release/lightcraft-cli.exe` へ検証済みEXEとreceiptを配置した。既定EXE SHA-256は `2e04fea8da7d84018baf7384043656af482a23986a1c63361f8200923e77eef7`、隣接receipt SHA-256は `ad136120c2b9d4841303f49c6a881f7dbf38c3b4f59b1e13f980fa7f31c17f52`で、検証checkoutの生成物と一致する。既定パスで `build.py --binary` が成功し、receiptとmanifestのupstream、patch SHA、binary SHA、`headlessResidentContract: 1`、実CLI schema／responseを確認した。Backend `LightCraftManager`を明示的なEXE overrideなしで起動し、default resolverが上記既定パスを選び、status `ready`、`managedPatch: true`、`headlessResidentContract: 1`を返すことを確認して正常終了した。配置前のEXE／receiptは `.tmp/lightcraft-fs03-backup-705901f1cc9543f39510725030ac32d5`へ保管した。Native変更はHeadless path照合とfocused testsのみで、Engine Catalog、cache pressure、退役条件、Backend／Frontendの製品コードは変更していない。
+
+## P1〜P2-6 総合監査の完了（2026-11-22）
+
+### Findingの最終状態
+
+| Finding | 最終状態 | 対応Commit |
+| --- | --- | --- |
+| FS-01：Native停止後のDocument Close復旧不能 | 修正完了。保存済みRecipe／Historyとrevision／fingerprintを照合した回復経路を追加 | `a493752` |
+| FS-01-R1：Close回収失敗後の期限切れcleanup停止 | 修正完了。安全なcheckpoint後のcleanup失敗だけを期限切れ時に再試行 | `408d8aa` |
+| FS-02：cache pressureとResident退役の検証不足 | 強制フラグを使わない本番判定のNative回帰テスト追加により完了 | `e82ec713` |
+| FS-03：Resident重複パス照合の反復I/O | Headless内でPhotoId別の解決済みパスを再利用するNative最適化により完了 | `1ec4a333` |
+| FS-03-R1：symlink参照先変更後の旧参照先照合 | Lowの既知制約として受容。追加実装なし | — |
+
+### FS-03-R1の既知制約
+
+Headlessは解決済みResident pathをPhotoId単位で保持する。このためsymlinkの参照先が変わった後、旧参照先を別パスからImportすると、キャッシュ済みの旧canonical pathにより既存PhotoIdが再利用される可能性がある。これは修正前に毎回`canonicalize()`していた実装とは異なる挙動である。GenzoRoomの通常運用ではWorkspace内の原本コピーをNativeへ渡すため、通常のFilmstrip切替への影響は限定的と評価した。重大なデータ不整合や原本破損は確認されていない。
+
+この条件はコードレビューで到達可能と確認したが、実Nativeでの再現は未確認である。Windowsの権限制約（symlink作成時のOS error 1314）により参照先変更テストは実行していない。FS-03-R1への追加実装は行わず既知の制約として受容し、具体的な実害が確認された場合に再評価する。
+
+### アーキテクチャ評価と完了判定
+
+P1〜P2-6を通じ、LightCraft NativeがResidentの保持・cache pressure判定・退役、パス照合、Decode／Renderを担当し、GenzoRoom Backend／Frontendがこれらを重複管理しない責務分担を維持した。Workspace／Native Sessionを写真切替間で再利用し、Resident再訪時の不要なImportを抑え、退役後は同じSessionで再Importできる。再訪時はGenzoRoomの確定Recipe／Historyを復元する。Native停止時も保存状態を確認した後にWorkspace回収・再Openする経路を整え、本番cache pressureによる退役をNative回帰テストで確認し、重複パス照合の反復I/OをNative内部で削減した。
+
+以上により、P1〜P2-6の写真切り替え効率化と総合監査Findingへの対応を完了とする。工程別の実装記録、性能値、テスト件数は各節の記録を維持し、異なる工程の件数を合算しない。完了判定を妨げない未実施・制約は、(1) 実Nativeプロセス強制終了を伴うWindows Desktop検証、(2) 高解像度RAWを多数巡回した際の詳細なメモリ推移測定、(3) FS-03-R1のsymlink参照先変更の実Native再現である。これらを未解決Findingとは扱わない。

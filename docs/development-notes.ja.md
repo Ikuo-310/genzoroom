@@ -2522,3 +2522,7 @@ P0/P0追加調査、P1 Native API公開、P2 UI・Preview統合を実施。修�
 LightCraft v0.20.0（upstream `192ff72923c39e6623f2c7ff67ab3a119deb8071`）の既存managed patchへ、P2-2Bの個別退役とP2-3のHeadless入替を統合した。BackendはDocumentの保存checkpointと画像処理排出後に `headless_release_photo` を呼び、Photo利用終了をNativeへ伝える。以後の `headless_import_with_eviction` で既存Residentの再利用、またはNative cache pressure時の利用終了済みPhoto退役と新規Importを行う。退役候補選択、Resident保持、CPU/GPU資源管理はLightCraftに属し、GenzoRoomはAsset／PhotoId対応と確定Recipe／History復元を担う。
 
 固定枚数上限とBackend `_resident` 重複集合を削除した。200／256変更予算はSession単位で維持する。部分失敗や結果不明は確定退役IDを反映し、既存Workspace Release／Session再生成で回復する。patch SHA、Native receipt、focused test結果と未検証事項は[研究記録](research/lightcraft/FILMSTRIP_SESSION_OPTIMIZATION.md)に記録する。
+
+## 写真切り替え効率化 P1〜P2-6 総合監査完了（2026-11-22）
+
+総合監査Finding FS-01、FS-01-R1、FS-02、FS-03はそれぞれ`a493752`、`408d8aa`、`e82ec713`、`1ec4a333`で対応完了。FS-03-R1はsymlink参照先変更に関するLowの既知制約として受容し、実Native再現はWindows権限制約により未実施。P1〜P2-6の完了記録、工程別テスト件数、アーキテクチャ評価、制約は[写真切り替え効率化の研究記録](research/lightcraft/FILMSTRIP_SESSION_OPTIMIZATION.md)を参照。実Nativeプロセス強制終了のWindows Desktop検証と高解像度RAW多数巡回時の詳細メモリ測定も未実施だが、完了判定を妨げるFindingではない。将来のLightCraft更新ではResident管理、cache-pressure退役、重複path照合を管理patchの移植判断対象として扱う。

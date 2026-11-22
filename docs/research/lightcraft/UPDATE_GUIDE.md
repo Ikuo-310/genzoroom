@@ -138,6 +138,8 @@ A2導入時点はnative契約までで、A3でGenzoRoom runtime／HTTP／Fronten
 7. focused regressionに問題がなく、有用な修正・改善がある新versionを採用する。旧versionより高速であることや画素完全一致は条件にしない。
 8. 更新後のmanifest／receiptと変更した関連文書を揃える。旧Recipeの事前変換、旧engine切替やmigration frameworkは導入しない。
 
+Resident管理、cache-pressure退役、Headlessの重複path照合はGenzoRoom管理patchがLightCraft内部で拡張している機能である。LightCraft更新時は、上流に同等のResident lifecycle／退役契約やpath lookupが入ったかを対象コードとfocused testsで照合し、必要な差分だけを移植する。既存patchを機械的に削除・重複適用せず、Headless API応答、退役済みID、再Import、path alias／missing-path契約を確認してmanifest・receiptへ反映する。FS-03-R1のsymlink参照先変更は既知の受容制約として扱い、具体的な実害がない限り更新範囲を広げない。
+
 性能benchmark、RSS／VRAM長時間測定、Pan trace、scheduler timing matrix、budget policy比較などはこの標準フローに含めない。明確な回帰等の兆候がある場合だけ、原因を絞る追加調査として実施する。
 
 ### RAW Viewer Smokeと任意のBenchmark
