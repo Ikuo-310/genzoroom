@@ -13,6 +13,7 @@ from PIL import Image
 import edit_store
 import main
 import raw_recipe_store as store
+import windows_raw_api as module
 from lightcraft_mcp import LightCraftError
 from tests.test_windows_local import local, client, authenticate
 from tests.test_windows_raw_api import setup, open_document, close_headers
@@ -305,7 +306,10 @@ def test_document_close_recovers_only_after_reaped_native_and_verified_recipe_hi
 
 def test_document_close_does_not_recover_native_loss_with_unsettled_or_mismatched_persistence(local, tmp_path, monkeypatch):
     async def run():
+        monkeypatch.setattr(module, "LEASE_POLL_SECONDS", .01)
         api, manager, _, _ = await setup(tmp_path, local, monkeypatch)
+        reset = api.raw.reset_session
+        resets = 0
         try:
             async with client(local) as http:
                 await authenticate(http, local)
@@ -334,6 +338,17 @@ def test_document_close_does_not_recover_native_loss_with_unsettled_or_mismatche
                 assert mismatch.status_code == 409 and mismatch.json()["code"] == "raw_history_commit_required"
                 assert api.workspace == workspace and api.document["handle"] == doc["handle"]
                 assert api._document_close_receipt is None
+
+                async def count_reset(*args, **kwargs):
+                    nonlocal resets
+                    resets += 1
+                    return await reset(*args, **kwargs)
+                monkeypatch.setattr(api.raw, "reset_session", count_reset)
+                monkeypatch.setattr(module, "LEASE_SECONDS", 0)
+                api._touched -= 1
+                await until(lambda: api._lease_task.done())
+                assert api.workspace == workspace and api.document["handle"] == doc["handle"]
+                assert api._workspace_state == "active" and resets == 0
         finally:
             if api.workspace is not None:
                 await api._release(checkpoint_history=False)
@@ -392,6 +407,104 @@ def test_lost_document_close_retries_workspace_cleanup_without_losing_close_iden
                 assert api.workspace is None and api._document_close_receipt == (
                     workspace, doc["handle"], doc["generation"], doc["documentToken"], doc["revision"])
         finally:
+            await api.close()
+    asyncio.run(asyncio.wait_for(run(), 20))
+
+
+def test_expired_failed_close_retries_without_frontend_and_preserves_receipt(local, tmp_path, monkeypatch):
+    async def run():
+        monkeypatch.setattr(module, "LEASE_POLL_SECONDS", .01)
+        api, manager, _, _ = await setup(tmp_path, local, monkeypatch)
+        reset = api.raw.reset_session
+        attempts = 0
+        allow_final_retry = asyncio.Event()
+        final_retry_started = asyncio.Event()
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                workspace, doc = await open_document(http)
+                doc = await operation(http, doc, "initialize")
+                doc = await change(http, doc, .75)
+                doc = await operation(http, doc, "commit", commit_body(doc))
+                identity = (workspace, doc["handle"], doc["generation"], doc["documentToken"], doc["revision"])
+                before = rows()
+                await manager.close()
+
+                async def fail_repeatedly(*args, **kwargs):
+                    nonlocal attempts
+                    attempts += 1
+                    if attempts <= 3:
+                        raise LightCraftError("raw_reset_failed")
+                    final_retry_started.set()
+                    await allow_final_retry.wait()
+                    return await reset(*args, **kwargs)
+                monkeypatch.setattr(api.raw, "reset_session", fail_repeatedly)
+                url = f'/api/raw/documents/{doc["handle"]}'
+                first = await http.delete(url, headers=close_headers(doc))
+                assert first.status_code == 502 and api.workspace == workspace
+                assert api.document is None and api._workspace_state == "cleanup_failed"
+                assert api._document_close_identity == identity and api._document_close_receipt is None
+
+                monkeypatch.setattr(module, "LEASE_SECONDS", 0)
+                api._touched -= 1
+                await asyncio.wait_for(final_retry_started.wait(), 5)
+                assert attempts == 4 and api._document_close_identity == identity
+                assert api.workspace == workspace and api._workspace_state == "releasing"
+                allow_final_retry.set()
+                await until(lambda: api.workspace is None)
+                assert api._document_close_receipt == identity and rows() == before
+
+                generation = manager.status().generation
+                replay = await http.delete(url, headers=close_headers(doc))
+                assert replay.status_code == 204
+                assert attempts == 4 and manager.status().generation == generation
+        finally:
+            allow_final_retry.set()
+            await api.close()
+    asyncio.run(asyncio.wait_for(run(), 20))
+
+
+def test_expiry_and_explicit_close_join_one_failed_close_cleanup(local, tmp_path, monkeypatch):
+    async def run():
+        monkeypatch.setattr(module, "LEASE_POLL_SECONDS", .01)
+        api, manager, _, _ = await setup(tmp_path, local, monkeypatch)
+        reset = api.raw.reset_session
+        attempts = 0
+        retry_started, allow_retry = asyncio.Event(), asyncio.Event()
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                workspace, doc = await open_document(http)
+                identity = (workspace, doc["handle"], doc["generation"], doc["documentToken"], doc["revision"])
+                await manager.close()
+
+                async def gate_retry(*args, **kwargs):
+                    nonlocal attempts
+                    attempts += 1
+                    if attempts == 1:
+                        raise LightCraftError("raw_reset_failed")
+                    retry_started.set()
+                    await allow_retry.wait()
+                    return await reset(*args, **kwargs)
+                monkeypatch.setattr(api.raw, "reset_session", gate_retry)
+                url = f'/api/raw/documents/{doc["handle"]}'
+                first = await http.delete(url, headers=close_headers(doc))
+                assert first.status_code == 502 and api._document_close_identity == identity
+
+                monkeypatch.setattr(module, "LEASE_SECONDS", 0)
+                api._touched -= 1
+                await asyncio.wait_for(retry_started.wait(), 5)
+                retry_task = api._document_close_task
+                duplicate = asyncio.create_task(http.delete(url, headers=close_headers(doc)))
+                await asyncio.sleep(0)
+                assert not duplicate.done() and api._document_close_task is retry_task and attempts == 2
+                allow_retry.set()
+                response = await duplicate
+                assert response.status_code == 204
+                await until(lambda: api.workspace is None)
+                assert api._document_close_receipt == identity and attempts == 2
+        finally:
+            allow_retry.set()
             await api.close()
     asyncio.run(asyncio.wait_for(run(), 20))
 

@@ -546,16 +546,25 @@ class RawPreviewApi:
         identity = (workspace, handle, int(generation), token, int(revision))
         if identity == self._document_close_receipt:
             return Response(status_code=204, headers={"Cache-Control": "no-store"})
-        self._owner(workspace)
         if self._document_close_task is not None:
             if identity != self._document_close_identity:
                 raise LightCraftError("raw_busy")
-            if self._document_close_task.done() and self._document_close_task.exception() is not None:
-                if self._workspace_state != "cleanup_failed" or self.document is not None:
-                    raise self._document_close_task.exception()
-                self._document_close_task = asyncio.create_task(
-                    self._retry_lost_document_close(identity), name="raw-document-close-cleanup-retry")
-            return await asyncio.shield(self._document_close_task)
+            task = self._document_close_task
+            if task.done() and not task.cancelled() and task.exception() is not None:
+                async with self._lock:
+                    if identity == self._document_close_receipt:
+                        return Response(status_code=204, headers={"Cache-Control": "no-store"})
+                    task = self._document_close_task
+                    if task is None or identity != self._document_close_identity:
+                        raise LightCraftError("raw_stale_handle")
+                    if task.done() and not task.cancelled() and task.exception() is not None:
+                        if not self._lost_close_cleanup_retryable(identity, task):
+                            raise task.exception()
+                        task = asyncio.create_task(
+                            self._retry_lost_document_close(identity), name="raw-document-close-cleanup-retry")
+                        self._document_close_task = task
+            return await asyncio.shield(task)
+        self._owner(workspace)
         if self._closing or self._history_draining or self._discarding:
             raise LightCraftError("raw_busy")
         doc = self.document
@@ -659,6 +668,9 @@ class RawPreviewApi:
     async def _retry_lost_document_close(self, identity):
         completed = False
         try:
+            if (self.workspace != identity[0] or self._document_close_identity != identity
+                    or self.document is not None or self._workspace_state != "cleanup_failed"):
+                raise LightCraftError("raw_stale_handle")
             await self._release(checkpoint_history=False)
             self._document_close_receipt = identity
             completed = True
@@ -666,6 +678,17 @@ class RawPreviewApi:
         finally:
             if completed:
                 self._document_close_task = self._document_close_identity = None
+
+    def _lost_close_cleanup_retryable(self, identity, task):
+        # A retained Close identity exists only after its durable checkpoint and Document invalidation succeeded.
+        return (task is self._document_close_task and task.done() and not task.cancelled()
+                and task.exception() is not None and identity == self._document_close_identity
+                and self.workspace == identity[0] and self.document is None
+                and self._workspace_state == "cleanup_failed" and not self._closing
+                and not self._discarding and not self._history_draining and not self._document_close_draining
+                and not any(not owner.done() for owner in self._tasks)
+                and not any(not owner.done() for owner in self._image_tasks)
+                and not self._image_leases and not self._response_leases and self._images_idle.is_set())
 
     async def _discard(self, request, body):
         identity = (request.path_params['workspace'], body)
@@ -2195,7 +2218,31 @@ class RawPreviewApi:
             while self.workspace is not None:
                 await asyncio.sleep(LEASE_POLL_SECONDS)
                 async with self._lock:
-                    if self._document_close_task is None and monotonic() - self._touched >= LEASE_SECONDS:
+                    if monotonic() - self._touched < LEASE_SECONDS:
+                        continue
+                    close_task = self._document_close_task
+                    if close_task is not None:
+                        identity = self._document_close_identity
+                        if identity is None or not self._lost_close_cleanup_retryable(identity, close_task):
+                            continue
+                        close_task = asyncio.create_task(
+                            self._retry_lost_document_close(identity), name="raw-document-close-expiry-retry")
+                        self._document_close_task = close_task
+                        try:
+                            await asyncio.shield(close_task)
+                        except Exception:
+                            if self._workspace_state != "cleanup_failed":
+                                raise
+                            lightcraft_log("raw.lease.cleanupFailed", level="warn",
+                                           errorCode="raw_cache_cleanup_failed")
+                        continue
+                    if self._closing or self._history_draining or self._discarding or self._document_close_draining:
+                        continue
+                    if self._tasks or self._image_tasks or self._image_leases or self._response_leases:
+                        continue
+                    if self._workspace_state not in {"active", "cleanup_failed"}:
+                        continue
+                    if self.workspace is not None:
                         try:
                             await self._release()
                         except Exception:
