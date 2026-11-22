@@ -255,35 +255,38 @@ index b05dae56ff5fccab298fc6dee10239ddd47ed4b9..2de01852f042f6d57040223c2e9764fd
 +sha2 = { workspace = true }
  log = { workspace = true }
 diff --git a/crates/mcp/src/headless.rs b/crates/mcp/src/headless.rs
-index 11de914173043a86ea701ee0f9d55a89e92f2add..59101bfbc8b3bd811169ad3fcf6bf228313d5784 100644
+index 11de914173043a86ea701ee0f9d55a89e92f2add..d1a8a0229b457257c9f2938795b48c6aa89ec206 100644
 --- a/crates/mcp/src/headless.rs
 +++ b/crates/mcp/src/headless.rs
-@@ -1,6 +1,7 @@
+@@ -1,7 +1,8 @@
  //! An in-process [`Session`] that answers the control-channel methods the MCP tools use, so the
  //! MCP server (and the CLI) work without a window.
  
-+use std::collections::{HashSet, VecDeque};
- use std::path::Path;
+-use std::path::Path;
++use std::collections::{HashMap, HashSet, VecDeque};
++use std::path::{Path, PathBuf};
  
  use lightcraft_engine::Session;
-@@ -14,6 +15,10 @@ use crate::backend::{Backend, ProgressHook};
+ use lightcraft_engine::catalog::PhotoId;
+@@ -14,6 +15,11 @@ use crate::backend::{Backend, ProgressHook};
  pub struct Headless {
      pub session: Session,
      progress: Option<ProgressHook>,
 +    resident_order: VecDeque<PhotoId>,
 +    released: HashSet<PhotoId>,
++    resolved_paths: HashMap<PhotoId, (String, PathBuf)>,
 +    #[cfg(test)]
 +    force_cache_pressure: bool,
  }
  
  impl Drop for Headless {
-@@ -38,7 +43,13 @@ impl Default for Headless {
+@@ -38,7 +44,13 @@ impl Default for Headless {
  
  impl Headless {
      pub fn new(session: Session) -> Self {
 -        Self { session, progress: None }
 +        let resident_order = session.catalog.photos().map(|photo| photo.id).collect();
-+        Self { session, progress: None, resident_order, released: HashSet::new(), #[cfg(test)] force_cache_pressure: false }
++        Self { session, progress: None, resident_order, released: HashSet::new(), resolved_paths: HashMap::new(), #[cfg(test)] force_cache_pressure: false }
 +    }
 +
 +    #[cfg(test)]
@@ -292,7 +295,7 @@ index 11de914173043a86ea701ee0f9d55a89e92f2add..59101bfbc8b3bd811169ad3fcf6bf228
      }
  
      /// A headless session with the procedurally generated demo library.
-@@ -47,6 +58,97 @@ impl Headless {
+@@ -47,6 +59,150 @@ impl Headless {
          Self::new(session.with_default_sam3_model().with_default_slide_templates())
      }
  
@@ -300,6 +303,44 @@ index 11de914173043a86ea701ee0f9d55a89e92f2add..59101bfbc8b3bd811169ad3fcf6bf228
 +        self.resident_order.retain(|resident| *resident != id);
 +        self.resident_order.push_back(id);
 +        self.released.remove(&id);
++        self.remember_path(id);
++    }
++
++    fn remember_path(&mut self, id: PhotoId) {
++        let path = self.session.catalog.photo(id).and_then(|photo| match &photo.source {
++            lightcraft_engine::catalog::Source::File { path } => Some(path.clone()),
++            lightcraft_engine::catalog::Source::Demo { .. } => None,
++        });
++        let Some(path) = path else {
++            self.resolved_paths.remove(&id);
++            return;
++        };
++        if self.resolved_paths.get(&id).is_some_and(|(source, _)| source == &path) {
++            return;
++        }
++        match std::fs::canonicalize(&path) {
++            Ok(resolved) => {
++                self.resolved_paths.insert(id, (path, resolved));
++            }
++            Err(_) => {
++                self.resolved_paths.remove(&id);
++            }
++        }
++    }
++
++    fn resident_path(paths: &mut HashMap<PhotoId, (String, PathBuf)>, id: PhotoId, path: &str, cache_success: bool) -> PathBuf {
++        if cache_success && let Some((source, resolved)) = paths.get(&id) && source == path {
++            return resolved.clone();
++        }
++        match std::fs::canonicalize(path) {
++            Ok(resolved) => {
++                if cache_success {
++                    paths.insert(id, (path.to_owned(), resolved.clone()));
++                }
++                resolved
++            }
++            Err(_) => Path::new(path).to_path_buf(),
++        }
 +    }
 +
 +    fn record_import(&mut self, result: &Value) {
@@ -333,13 +374,24 @@ index 11de914173043a86ea701ee0f9d55a89e92f2add..59101bfbc8b3bd811169ad3fcf6bf228
 +        };
 +
 +        let mut retired = Vec::new();
-+        let requested_path = std::fs::canonicalize(path).unwrap_or_else(|_| Path::new(path).to_path_buf());
-+        let already_resident = self.session.catalog.photos().find(|photo| match &photo.source {
-+            lightcraft_engine::catalog::Source::File { path } => {
-+                std::fs::canonicalize(path).unwrap_or_else(|_| Path::new(path).to_path_buf()) == requested_path
++        let requested_resolved = std::fs::canonicalize(path).ok();
++        let requested_path = requested_resolved.clone().unwrap_or_else(|| Path::new(path).to_path_buf());
++        let mut already_resident = None;
++        let mut retargeted_source = false;
++        let resolved_paths = &mut self.resolved_paths;
++        for photo in self.session.catalog.photos() {
++            let lightcraft_engine::catalog::Source::File { path: source } = &photo.source else { continue };
++            // A successful request can use the path captured for this resident; failed resolution
++            // keeps the old per-path fallback so missing files retain their established behavior.
++            let resolved = Self::resident_path(resolved_paths, photo.id, source, requested_resolved.is_some());
++            if requested_resolved.is_some() && source == path && resolved != requested_path {
++                retargeted_source = true;
 +            }
-+            lightcraft_engine::catalog::Source::Demo { .. } => false,
-+        }).map(|photo| photo.id);
++            if resolved == requested_path {
++                already_resident = Some(photo.id);
++                break;
++            }
++        }
 +        if let Some(photo_id) = already_resident {
 +            self.touch(photo_id);
 +            return Ok(json!({"status": "ok", "importedIds": [photo_id.0], "retiredIds": [], "error": null}));
@@ -358,10 +410,14 @@ index 11de914173043a86ea701ee0f9d55a89e92f2add..59101bfbc8b3bd811169ad3fcf6bf228
 +            }
 +            self.resident_order.retain(|id| *id != candidate);
 +            self.released.remove(&candidate);
++            self.resolved_paths.remove(&candidate);
 +            retired.push(candidate.0);
 +        }
 +
-+        match self.session.execute("library.import", &json!({"paths": [path]})) {
++        // The Catalog also treats the stored spelling as identity; import the new referent under
++        // its resolved path when a symlink was retargeted, rather than reusing the old entry.
++        let import_path = if retargeted_source { requested_path.to_string_lossy().into_owned() } else { path.clone() };
++        match self.session.execute("library.import", &json!({"paths": [import_path]})) {
 +            Ok(report) => {
 +                self.record_import(&report);
 +                let imported: Vec<u64> = ["imported", "restored"]
@@ -390,7 +446,7 @@ index 11de914173043a86ea701ee0f9d55a89e92f2add..59101bfbc8b3bd811169ad3fcf6bf228
      fn photo_or_active(&self, p: &Value) -> Result<PhotoId, String> {
          p.get("id").and_then(Value::as_u64).map(PhotoId).or(self.session.active()).ok_or_else(|| "no photo (import one or pass `id`)".to_string())
      }
-@@ -123,13 +225,52 @@ impl Backend for Headless {
+@@ -123,13 +279,53 @@ impl Backend for Headless {
      fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
          let p = if params.is_null() { json!({}) } else { params };
          match method {
@@ -419,6 +475,7 @@ index 11de914173043a86ea701ee0f9d55a89e92f2add..59101bfbc8b3bd811169ad3fcf6bf228
 +                self.session.retire_headless_photo(PhotoId(id)).map_err(|e| e.to_string())?;
 +                self.resident_order.retain(|resident| resident.0 != id);
 +                self.released.remove(&PhotoId(id));
++                self.resolved_paths.remove(&PhotoId(id));
 +                Ok(json!({"retired": id}))
 +            }
              "engine.execute" | "ui.menu.invoke" | "command" => {
@@ -444,7 +501,7 @@ index 11de914173043a86ea701ee0f9d55a89e92f2add..59101bfbc8b3bd811169ad3fcf6bf228
              }
              "engine.commands" => {
                  let mut v: Vec<Value> = self.session.commands().into_iter().map(|c| serde_json::to_value(c).unwrap_or_default()).collect();
-@@ -139,15 +280,209 @@ impl Backend for Headless {
+@@ -139,15 +335,209 @@ impl Backend for Headless {
                  Ok(Value::Array(v))
              }
              "ui.render" => {
@@ -511,8 +568,7 @@ index 11de914173043a86ea701ee0f9d55a89e92f2add..59101bfbc8b3bd811169ad3fcf6bf228
 +                        || index as usize >= job.settings.point_colors.len()
 +                    {
 +                        return Err("invalid point_color_range_index".into());
-                     }
--                    None => Ok(json!({"width": img.width, "height": img.height})),
++                    }
 +                    job = job.with_overlay(lightcraft_engine::pipeline::Overlay::PointColorRange(index));
 +                }
 +                if quality == lightcraft_engine::pipeline::Quality::Draft {
@@ -594,7 +650,8 @@ index 11de914173043a86ea701ee0f9d55a89e92f2add..59101bfbc8b3bd811169ad3fcf6bf228
 +                    let height = target.get("fullHeight").and_then(Value::as_u64).ok_or("invalid region size")? as usize;
 +                    if width == 0 || height == 0 || width > 65536 || height > 65536 {
 +                        return Err("invalid region size".into());
-+                    }
+                     }
+-                    None => Ok(json!({"width": img.width, "height": img.height})),
 +                    (width, height)
 +                };
 +                let full_geometry = crate::preview::frame_metadata(&frame, (photo.width as usize, photo.height as usize), &source, full_w, full_h)?;
@@ -825,10 +882,10 @@ index 0000000000000000000000000000000000000000..6b3a5371dfef3a3337a7fbe2afc68414
 +  }
 +}
 diff --git a/crates/mcp/src/tests.rs b/crates/mcp/src/tests.rs
-index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..d6f380704ad0e6d46ca65608e2307dd01f99d678 100644
+index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..5e834e0e1a3cf1655171cc39b9eee20f449ec060 100644
 --- a/crates/mcp/src/tests.rs
 +++ b/crates/mcp/src/tests.rs
-@@ -13,6 +13,228 @@ fn server() -> Server {
+@@ -13,6 +13,316 @@ fn server() -> Server {
      Server::new(Box::new(Headless::demo()))
  }
  
@@ -957,6 +1014,94 @@ index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..d6f380704ad0e6d46ca65608e2307dd0
 +}
 +
 +#[test]
++fn headless_import_reuses_canonical_paths_and_keeps_missing_path_fallback() {
++    let current = std::env::current_dir().unwrap();
++    let relative_base = std::path::PathBuf::from(format!(".tmp-fs03-paths-{}", std::process::id()));
++    let base = current.join(&relative_base);
++    let _ = std::fs::remove_dir_all(&base);
++    std::fs::create_dir_all(base.join("nested")).unwrap();
++    for (name, color) in [("A", 80), ("B", 100)] {
++        let image = lightcraft_raster::Rgba8 { width: 12, height: 8, data: vec![[color, 120, 160, 255]; 96] };
++        let png = lightcraft_codecs::encode_png(&lightcraft_codecs::EncodeImage::rgba8(&image), &lightcraft_codecs::EncodeMeta::default()).unwrap();
++        std::fs::write(base.join(format!("{name}.png")), png).unwrap();
++    }
++
++    let mut headless = Headless::new(lightcraft_engine::Session::new().with_fs());
++    let first = headless
++        .call("headless.importWithEviction", json!({"paths": [relative_base.join("A.png").to_string_lossy()]}))
++        .unwrap();
++    let a = first["importedIds"][0].as_u64().unwrap();
++    let alias = base.join("nested/../A.png");
++    let duplicate = headless.call("headless.importWithEviction", json!({"paths": [alias.to_string_lossy()]})).unwrap();
++    assert_eq!(duplicate["status"], "ok");
++    assert_eq!(duplicate["importedIds"], json!([a]));
++    assert_eq!(headless.session.catalog.photos().count(), 1, "relative and normalized aliases reuse one Catalog photo");
++
++    let b_path = base.join("B.png");
++    let b_result = headless.call("headless.importWithEviction", json!({"paths": [b_path.to_string_lossy()]})).unwrap();
++    let b = b_result["importedIds"][0].as_u64().unwrap();
++    assert_ne!(a, b, "different files remain distinct");
++    std::fs::remove_file(&b_path).unwrap();
++    let missing = headless.call("headless.importWithEviction", json!({"paths": [b_path.to_string_lossy()]})).unwrap();
++    assert_eq!(missing["status"], "ok", "canonicalize failure keeps the existing literal-path fallback");
++    assert_eq!(missing["importedIds"], json!([b]));
++
++    headless.call("headless.retirePhoto", json!({"id": a})).unwrap();
++    let a_again = headless
++        .call("headless.importWithEviction", json!({"paths": [relative_base.join("A.png").to_string_lossy()]}))
++        .unwrap();
++    assert_eq!(a_again["status"], "ok");
++    assert_ne!(a_again["importedIds"][0].as_u64().unwrap(), a, "retired path metadata cannot shadow a fresh PhotoId");
++    let _ = std::fs::remove_dir_all(&base);
++}
++
++#[test]
++fn headless_import_does_not_reuse_a_retargeted_symlink_identity() {
++    let base = std::env::temp_dir().join(format!("lc-mcp-fs03-symlink-{}", std::process::id()));
++    let _ = std::fs::remove_dir_all(&base);
++    std::fs::create_dir_all(&base).unwrap();
++    for (name, color) in [("A", 80), ("B", 100), ("C", 120)] {
++        let image = lightcraft_raster::Rgba8 { width: 12, height: 8, data: vec![[color, 120, 160, 255]; 96] };
++        let png = lightcraft_codecs::encode_png(&lightcraft_codecs::EncodeImage::rgba8(&image), &lightcraft_codecs::EncodeMeta::default()).unwrap();
++        std::fs::write(base.join(format!("{name}.png")), png).unwrap();
++    }
++    let link = base.join("current.png");
++    #[cfg(windows)]
++    let create_link = |target: &std::path::Path| std::os::windows::fs::symlink_file(target, &link);
++    #[cfg(unix)]
++    let create_link = |target: &std::path::Path| std::os::unix::fs::symlink(target, &link);
++    #[cfg(not(any(windows, unix)))]
++    let create_link = |_target: &std::path::Path| Err(std::io::ErrorKind::Unsupported.into());
++
++    if let Err(error) = create_link(&base.join("A.png")) {
++        eprintln!("symlink test skipped: {error}");
++        let _ = std::fs::remove_dir_all(&base);
++        return;
++    }
++    let mut headless = Headless::new(lightcraft_engine::Session::new().with_fs());
++    let import_link = |headless: &mut Headless| {
++        headless.call("headless.importWithEviction", json!({"paths": [link.to_string_lossy()]})).unwrap()
++    };
++    let a = import_link(&mut headless)["importedIds"][0].as_u64().unwrap();
++    std::fs::remove_file(&link).unwrap();
++    create_link(&base.join("B.png")).unwrap();
++    let b_result = import_link(&mut headless);
++    assert_eq!(b_result["status"], "ok", "a changed link target is imported under its resolved source path");
++    let b = b_result["importedIds"][0].as_u64().unwrap();
++    assert_ne!(a, b, "a stale canonical path must not return the old photo ID");
++    assert_eq!(import_link(&mut headless)["importedIds"], json!([b]), "an unchanged link target reuses its resident");
++
++    std::fs::remove_file(&link).unwrap();
++    create_link(&base.join("C.png")).unwrap();
++    let c_result = import_link(&mut headless);
++    assert_eq!(c_result["status"], "ok");
++    let c = c_result["importedIds"][0].as_u64().unwrap();
++    assert_ne!(c, b);
++    assert_eq!(headless.session.catalog.photos().count(), 3);
++    let _ = std::fs::remove_dir_all(&base);
++}
++
++#[test]
 +fn headless_import_retires_released_photo_only_after_real_cache_pressure() {
 +    struct RestoreMemoryBudget(usize);
 +    impl Drop for RestoreMemoryBudget {
@@ -1057,7 +1202,7 @@ index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..d6f380704ad0e6d46ca65608e2307dd0
  fn rpc(s: &mut Server, id: u64, method: &str, params: Value) -> Value {
      let line = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}).to_string();
      let reply = s.handle_line(&line).expect("reply");
-@@ -79,6 +301,27 @@ fn tools_list_has_helpers_and_every_command() {
+@@ -79,6 +389,27 @@ fn tools_list_has_helpers_and_every_command() {
      assert!(r["result"]["tools"].as_array().unwrap().iter().all(|t| !t["name"].as_str().unwrap().starts_with("cmd_")));
  }
  
@@ -1085,7 +1230,7 @@ index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..d6f380704ad0e6d46ca65608e2307dd0
  /// The `import` helper passes the copy options through: a folder template files the copy.
  #[test]
  fn import_tool_copies_with_a_folder_template() {
-@@ -421,6 +664,9 @@ fn core_tools_have_hints_and_reject_unknown_keys() {
+@@ -421,6 +752,9 @@ fn core_tools_have_hints_and_reject_unknown_keys() {
              assert!(r["error"]["message"].as_str().unwrap().contains("misspelled"), "{r}");
          }
          let preview = tools.iter().find(|t| t["name"] == "render_preview").unwrap();
@@ -1095,7 +1240,7 @@ index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..d6f380704ad0e6d46ca65608e2307dd0
          assert_eq!(preview["annotations"]["readOnlyHint"], true);
          assert!(preview["inputSchema"]["properties"].get("path").is_none());
          let writer = tools.iter().find(|t| t["name"] == "render_photo").unwrap();
-@@ -602,3 +848,170 @@ fn render_and_screenshot_pngs_go_through_a_private_folder() {
+@@ -602,3 +936,170 @@ fn render_and_screenshot_pngs_go_through_a_private_folder() {
          folders.push(dir);
      }
  }

@@ -446,3 +446,27 @@ LightCraft固定upstream `192ff72923c39e6623f2c7ff67ab3a119deb8071` と現行man
 ### 残る検証境界
 
 この自動テストはLightCraftの固定PNG fixtureと明示した小予算を使うNative回帰であり、実写真や通常1 GiB設定で常に退役することは保証しない。予算未満では退役しないことも意図した契約である。完全一致 `engineBytes == cacheBudget` の独立再現は追加していない。Windows Desktop UIでの手動操作・実写真による性能評価は未実施であり、ユーザー側の画面確認に委ねる。
+
+## FS-03 Headless重複Import時の反復パス解決削減
+
+### 原因と既存のパス契約
+
+`headless_import_with_eviction`は要求パスを`canonicalize()`し、Catalogの各`Source::File.path`も毎回canonicalizeしてResidentの重複を判定していた。解決成功時の既存契約は、相対・絶対、`.`／`..`、separator等の表記差、同じ実体へ向くsymlinkを同一canonical pathとして扱う。Windowsの大文字小文字・volume表記はOSの`canonicalize()`結果とRust `Path`比較に従う。両側の解決が失敗した場合は各入力の元PathBufを比較する。Native Catalog自身にはcanonical path indexはなく、`library_files()`が保持するのは`Source::File.path`文字列の完全一致lookupで、別途import scannerのcontent-hash重複判定がある。
+
+### 最小修正
+
+Headless Session内に、成功して解決できたResidentについてPhotoId別の`(Catalog source spelling, resolved PathBuf)`を保持する。新規Headlessの構築時に一括I/Oは行わず、Import成功・既知Residentのtouch、または最初の重複照合で必要になったときに解決値を記録する。次の成功した要求では要求側だけを新たにcanonicalizeし、source spellingが一致するResidentは記録済みPathBufで比較する。Catalogのsource pathがRelink等で変化した場合はspellingの不一致でそのResidentだけを再解決する。個別退役およびcache-pressure退役ではPhotoIdの項目を削除する。Native API応答、PhotoId／`importedIds`／`retiredIds`、Backend／Frontend契約、Resident候補選択は変えていない。
+
+これにより、解決成功済みN Residentの新規Importでは従来の要求1回＋Resident N回のcanonicalizeを、比較段階で要求1回へ減らす。成功した新規Importでは新Photoの記録に1回加わる。既知Photoの重複要求は要求側1回で済む。未キャッシュResidentは初回比較で一度だけ解決して以後再利用する。要求パスのcanonicalizeが失敗した場合は古いsnapshotを照合に使わず、要求側・Resident側とも現在の`canonicalize().unwrap_or(original PathBuf)`を適用するため、欠落ファイルのfallback意味を維持する。
+
+### ファイルシステム変化と再利用
+
+通常の相対／`.`／`..` aliasはcanonical pathで同じPhotoIdを返す。ファイル移動後、Catalogのsource spellingが更新されたResidentはcache entryのsource spelling mismatchで再解決する。Catalog sourceが古い移動元のままで新しい別パスが要求された場合は一致させず、従来どおりNative import scanner側のpath／content判定へ進む。ファイル削除後に元の同じパスが再要求された場合はcanonicalize失敗のfallbackを使用する。symlinkの参照先が変わる場合は、Import時のresolved path snapshotと新要求のcanonical pathを比較し、古いPhotoIdを新しい参照先へ結び付けない。Catalogが古いsymlink spellingをexact-path duplicateとみなすのを避けるため、同じspellingで参照先変更を検出した新規Importに限り、解決済み対象pathをEngineへ渡す。symlink retarget時のこの実行検証は、Windows検証環境でsymlink作成がOS error 1314（要求特権なし）となり実行できていないため未確認である。hard linkはcanonicalizeでは同一化されず、従来どおり別pathとして扱う。ネットワーク障害、同時path mutationなどのFS raceを監視・同期する汎用機構は追加していない。
+
+### 検証結果とpatch成果物
+
+`headless_import_reuses_canonical_paths_and_keeps_missing_path_fallback`は相対path、absolute pathに`.`／`..`を含むalias、異なる写真の区別、ファイル削除後の元path fallback、明示退役後の再Import／新PhotoIdを検証する。`headless_import_does_not_reuse_a_retargeted_symlink_identity`はsymlink targetの切替、異なるPhotoId、新targetを変えずに再要求した場合のResident再利用を検証するが、前述の権限制約によりこの環境ではtest bodyがsymlink作成時点でskipされた。回帰実行は`cargo test -p lightcraft-mcp headless_ -- --nocapture --test-threads=1`で10 unit testsと1 integration test成功（symlink testは実行skip）、Engine `a_scan_finds_what_the_library_has_by_path_and_by_content`は1件成功。canonicalize呼出回数の計測用hookは追加せず、上記削減数はコード経路から算出した。
+
+変更は正式managed patch `native/lightcraft/patches/0001-v0.20.0-whole-frame.patch`へ反映した。patch SHA-256は `a72ebfa66ce04b3aea5232b8d5a665ab8a4e0a1e2e169a8deb6286639778f974`、18 files、1342 insertions、38 deletionsであり、manifestも同じhash／統計に更新した。検証checkoutのHEADは固定upstream `192ff72923c39e6623f2c7ff67ab3a119deb8071`。`build.py --source .tmp/lightcraft-p2-4-build --build`と`--binary`は成功し、Native schema／response、Before、Region、WB、Point Color、Sharpeningの既存probeを確認した。検証checkoutのrelease CLI SHA-256は `2e04fea8da7d84018baf7384043656af482a23986a1c63361f8200923e77eef7`、生成receipt SHA-256は `ad136120c2b9d4841303f49c6a881f7dbf38c3b4f59b1e13f980fa7f31c17f52`。receiptは新managed patch、固定upstream、`headlessResidentContract: 1`と一致し、検証checkoutの`--binary` gateに成功した。
+
+既定Windows開発候補 `.tmp/lightcraft-0.20.0-p3/target-p1-sharpen/release/lightcraft-cli.exe` へ検証済みEXEとreceiptを配置した。既定EXE SHA-256は `2e04fea8da7d84018baf7384043656af482a23986a1c63361f8200923e77eef7`、隣接receipt SHA-256は `ad136120c2b9d4841303f49c6a881f7dbf38c3b4f59b1e13f980fa7f31c17f52`で、検証checkoutの生成物と一致する。既定パスで `build.py --binary` が成功し、receiptとmanifestのupstream、patch SHA、binary SHA、`headlessResidentContract: 1`、実CLI schema／responseを確認した。Backend `LightCraftManager`を明示的なEXE overrideなしで起動し、default resolverが上記既定パスを選び、status `ready`、`managedPatch: true`、`headlessResidentContract: 1`を返すことを確認して正常終了した。配置前のEXE／receiptは `.tmp/lightcraft-fs03-backup-705901f1cc9543f39510725030ac32d5`へ保管した。Native変更はHeadless path照合とfocused testsのみで、Engine Catalog、cache pressure、退役条件、Backend／Frontendの製品コードは変更していない。
