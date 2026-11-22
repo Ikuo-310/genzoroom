@@ -358,6 +358,29 @@ it('keeps mixed Filmstrip order and uses Native Preview for every asset under th
   expect(adjusted).not.toHaveBeenCalled();
   expect(thumbnailSources()).toEqual(sources);
 });
+
+it('keeps one Workspace through repeated mixed-asset switches and A-B-C-A revisit', async () => {
+  await mount();
+  const ids = [base.id, jpeg.id, rawB.id, base.id];
+  for (const assetId of ids.slice(1)) {
+    const item = [...host.querySelectorAll<HTMLButtonElement>('.filmstrip-item')]
+      .find(button => button.getAttribute('aria-label') === ({
+        [base.id]: 'a.DNG', [jpeg.id]: 'b.jpg', [rawB.id]: 'c.DNG',
+      }[assetId]))!;
+    await act(async () => item.click());
+    await flush();
+    expect(host.querySelector('.workspace-save-status')).toBeNull();
+  }
+
+  expect(vi.mocked(rawApi.createRawWorkspace)).toHaveBeenCalledOnce();
+  expect(vi.mocked(rawApi.openRawDocument).mock.calls.map(([workspaceId, assetId]) => [workspaceId, assetId]))
+    .toEqual(ids.map(assetId => ['workspace', assetId]));
+  expect(vi.mocked(rawApi.closeRawDocument).mock.calls.map(([doc]) => doc.assetId))
+    .toEqual(ids.slice(0, -1));
+  expect(rawApi.releaseRawWorkspace).not.toHaveBeenCalled();
+  expect(host.querySelector('.viewer-panel img')?.getAttribute('src')).toBe('blob:lightcraft');
+});
+
 it('shows Native unavailability without falling back to the viewing Preview', async () => {
   vi.mocked(rawApi.rawCapability).mockResolvedValue(false);
   await mount();

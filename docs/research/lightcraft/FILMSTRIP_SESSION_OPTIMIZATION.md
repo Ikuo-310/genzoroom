@@ -360,3 +360,23 @@ Backend focused suiteは指定Python 3.14環境で5ファイル373件成功。�
 固定upstreamの独立worktreeにmanaged patchを適用し、`native/lightcraft/build.py --source ... --apply --build` を実行した。Whole Frame、Crop、Region、WBのNative focused contract tests、Release CLI buildと既存Whole／Before／Region／WB／Point Color Range／Sharpening probeが成功した。更新後manifestでbuild gateを再実行し、Headless schema／response probeを含む `--binary` 検証も成功。実binary SHA-256は `535F30F311C42F596F4EC1E9E44A87DB64DED7BA5DA6F74A1A1464D362495BF7`。receiptは `headlessResidentContract:1` と現manifestを記録する。DX12 probeではRadeon RX 580 adapterが利用可能だった。未使用optional egui patch、craft-fonts未配置、Windows incremental hardlinkの警告が出たがbuild/testは成功した。
 
 自動binary probeは実バイナリのtool schema、structured response、release→同一Session Import→retire契約を確認する。これはWindows DesktopのRAW/JPEG混在操作や性能測定ではない。実機写真負荷でのcache pressure発生点、長期多数Assetのメモリ推移、実transport応答喪失、原本disk cache上限はP2-5への未検証事項とする。
+
+## P2-5 Filmstrip Frontend回帰・統合検証
+
+### 確認した契約
+
+Frontendは既存のWorkspace owner、`ownership` queue、保存確認、Close→Open、旧Document owner判定を使い、FilmstripのAsset交代ごとにWorkspaceを作り直さない。Workspaceは暗室を離れるときにReleaseする。LightCraft Residentの選択・保持・退役・再Import判断はBackend/native契約のままで、FrontendにResident集合やLRUを追加しない。Windows LightCraft方針ではRAW/JPEGともNative経路、Docker JPEG方針では既存JPEG rendererと編集経路を使う。
+
+### 今回の自動検証
+
+既存のFrontend focused tests 6ファイルに、FilmstripのRAW A→JPEG B→RAW C→A再訪を追加した。結果は6ファイル578件成功、失敗0件。追加テストではWorkspace作成が1回、4回のOpenが同じWorkspace IDを使い、旧Document A/B/Cを順番にCloseし、訪問中にWorkspace Releaseがないことを確認する。既存のFilmstrip混在形式テストは全AssetのNative Preview経路を、Docker JPEGテストは旧renderer経路を確認する。
+
+同じfocused範囲の既存ケースで、保存確定ACK→Close→次Open、切替guard、保存失敗時の停止、Close失敗と固定ownerでの再送、連続切替中の最新Asset選択、route Back/Forward、暗室unmount／pagehide時のRelease、旧Preview／Region／Before応答とdecode結果の拒否、A→B→AのDocument token分離を確認した。Curve／Mixer／Point Color／Geometryの保存・interaction境界は既存Hook・Filmstrip testsで確認した。TypeScriptを含むFrontend buildと差分チェックも今回の変更後に成功した。
+
+P2-4で成功済みのBackend focused 373件はBackend/nativeコードに変更がないため再実行せず、その結果を再利用する。うち `test_document_switch_reuses_resident_and_restores_history_cursor` はResident再利用時に同一generation、Recipe設定、History length/cursorを確認し、`test_native_eviction_reimports_asset_from_committed_recipe_and_history` は退役後の新PhotoId、確定Recipe revision、History cursor/lengthと設定復元を確認する。Frontendの新規テストはHTTP/UIのWorkspace・Document交代を対象にし、LightCraftの内部Resident判断を模擬・再実装しない。
+
+### 異常系・実機確認の境界
+
+Open失敗／`raw_session_capacity`、Workspace回収未確定、再生成時の保存・owner保持は既存Hook testsの対象。200／256変更予算のSession回復はP2-4 Backend focused結果を再利用する。Native `rejected`／`partial_failure`／`unknown` のNative実契約とResponse形状はP2-4のBackend接続・Native probe結果の範囲である。本工程はLightCraft Nativeの実画像処理やメモリ管理を試験していない。
+
+この作業ではWindows Desktop実機、実写真のRAW/JPEG混在、長時間の多数写真巡回と性能、実際のcache pressureによる退役、実transport応答喪失は確認していない。P2-6では実写真でRAW/JPEG混在とA→B→A・多数枚巡回を行い、Workspace ID／Native generation、退役後のPhoto再Import、保存済みRecipe／History／Before、切替エラーの有無を確認する。初回表示、Resident再訪、退役後再訪のFrontend `responseWaitMs` とBackend `nativeMs` は対象イベントと出所を分けて記録し、200／256到達による意図したSession再生成と通常切替を区別する。P2-5の自動テスト成功を実機受入や性能改善率の証明とは扱わない。

@@ -1,5 +1,11 @@
 # GenzoRoom 開発ノート
 
+## Filmstrip P2-5 Frontend回帰・統合検証（2026-11-22）
+
+FilmstripのRAW A→JPEG B→RAW C→A再訪で、同一Workspaceを保ったまま各旧DocumentをCloseし、次DocumentをOpenするFrontend回帰テストを追加した。focused Frontend 6ファイル578件が成功し、TypeScriptを含むFrontend buildと`git diff --check`も成功した。既存テストと合わせ、保存ACK前の切替停止、Close→Open順序、保存失敗、Close再送、route切替、unmount／pagehideのWorkspace Release、遅延Preview／Region／Beforeの旧owner拒否、Windows Native JPEG経路とDocker JPEG rendererを確認した。
+
+Backendは今回変更していないため、P2-4で完了したfocused 5ファイル373件の成功結果を再利用した。Resident再利用時のRecipe／History cursor復元と、Native退役後の再Importで新PhotoId・保存済みRecipe／Historyを復元する既存ケースが含まれる。Windows Desktop実機、実写真での長時間巡回・cache pressure・性能測定は未実施で、P2-6に残す。詳細は[Filmstrip Session Optimization](research/lightcraft/FILMSTRIP_SESSION_OPTIMIZATION.md#p2-5-filmstrip-frontend回帰統合検証)を参照。
+
 ## RAW関連テスト基盤の修復記録（2026-11-20）
 
 過去の調査記録と現行仕様を区別する。T1では基準時点のRAW関連テストにFrontend 137件、Backend 16件の失敗を確認した。原因は、Curve保存失敗後の終了状態残留、Point Color／Vignette UI Mockの不足、LightCraft契約変更後のBackend fixture、Diagnosticsの廃止項目、History応答上限などに分類した。
