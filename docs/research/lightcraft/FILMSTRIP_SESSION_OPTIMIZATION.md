@@ -420,3 +420,29 @@ Backend focused testsは`test_windows_raw_api.py`と`test_raw_history_api.py`の
 この再試行対象となるidentityは、FS-01のSQLite Recipe／History revision・初期化状態・settings fingerprintの照合を通過し、Document invalidation後のNative／cache cleanupで失敗した場合に限って保持される。保存未確定や不整合でClose checkpointが失敗した場合はidentityが残らず、Workspace stateも`cleanup_failed`へ遷移しないため、期限切れ処理からcleanupを強制しない。期限切れcleanup完了後もidentityに対応するClose receiptを記録し、同じCloseの再送を204で処理する。
 
 Backend focused testsは`test_windows_raw_api.py`と`test_raw_history_api.py`の106件が成功した。Frontend再送なしでLease expiryが複数回失敗したcleanupを再試行し、成功receiptを保持すること、expiry中のClose再送が同じtaskへjoinして二重resetしないこと、保存不整合ではexpiryがWorkspaceを解放しないことを確認した。これはモックNativeを用いた契約検証であり、Windows Desktop実Native停止の手動確認は未実施。
+
+## FS-02 本番cache pressureによるResident退役回帰テスト
+
+### Findingと判定境界
+
+監査ではHeadlessの退役条件 `engine_bytes >= cache_budget` とEngine `MediaCache::enforce_budget()` の回収条件 `held_bytes > budget` の境界差、および強制フラグを使う既存テストだけでは本番pressureから退役までの接続を保証しない点をFindingとした。前者は目的の異なる条件であり、Engineは通常cache budgetを超過したキャッシュを回収し、Headlessは通常回収後もNative Engineの計量値が予算以上なら、利用終了済みかつ非active・非選択のResidentを新規Import前に退役させる。調査と実Native試験では境界差による製品不具合は確認されていないため、数値条件は変更せず、テストカバレッジを追加する。
+
+### 追加した自動テスト
+
+LightCraft固定upstream `192ff72923c39e6623f2c7ff67ab3a119deb8071` と現行managed patchを適用した検証checkoutで、`headless_import_retires_released_photo_only_after_real_cache_pressure` を追加した。テストは既存の実 `app.memoryBudget`、`library.memory`、PNG Import、`ui.render`、`headless.releasePhoto`、`headless.importWithEviction` 経路を使用し、`force_cache_pressure()` やテスト専用強制フラグを使わない。
+
+全体予算64 MiB／MediaCache予算32 MiBを設定し、小さい画像A/B/CのImport時は `engineBytes < cacheBudget` と空の `retiredIds` を確認する。2048×2048画像AのNative Preview後に実 `memory_report` が `engineBytes >= cacheBudget` であることをassertする。圧迫中に利用終了候補がない場合はImportが拒否され、Photoが残ること、A/B/CのうちBがactiveかつselectedの場合はBを退役せず、利用終了済み・非active・非選択のAだけを退役することを検証する。応答の `retiredIds`／`importedIds` とCatalogの実状態を照合し、A再Importで旧Aと異なるPhotoIdを得る一方、B/C/DのPhotoIdが維持され、Bの選択を再設定できることも確認する。
+
+今回の検証では、新テストを含むHeadless Resident関連8 unit testsと1 integration test、Engine MediaCache関連2件、Backend artifact focused tests 44件が成功し、失敗はなかった。Engine側はLRU予算回収とdecoded source／renderのmemory report計量を個別に実行した。通常回収後も最新Previewがキャッシュされ、32 MiB予算を超えた実計量値が退役判定へ到達することを追加テストで確認する。既存の強制pressureテストは候補選択・退役応答テストとして残り、本番判定の保証とは区別する。
+
+### managed patchと成果物
+
+テスト変更は正式managed patch `native/lightcraft/patches/0001-v0.20.0-whole-frame.patch` に含め、固定upstreamへ適用可能な形で保持する。今回のpatch SHA-256は `64ad441bc5d4caa92357d752b591f783a6ccb707905f3ca19ff9d7a1206f655e`、18 files、1198 insertions、37 deletions。manifestのSHAと統計をこのpatchに合わせた。Native製品コード、退役アルゴリズム、`>=`／`>` 条件、契約番号は変更していない。
+
+検証用checkoutは固定upstream commit上で、managed patchとの差分が逆適用可能であることを確認した。`native/lightcraft/build.py --source .tmp/lightcraft-p2-4-build --build` はmanifestとのpatch一致、release CLIの契約build／probe、receipt生成まで成功し、その後 `--binary` を検証checkoutと既定候補の両方に対して実行して成功した。managed patch変更後のSHA-256は上記manifest／receipt双方で一致する。
+
+今回の変更はテストだけなのでrelease CLIの生成SHA-256は従来と同じ `535f30f311c42f596f4ec1e9e44a87db64ded7ba5da6f74a1a1464d362495bf7` だった。既定候補 `.tmp/lightcraft-0.20.0-p3/target-p1-sharpen/release/lightcraft-cli.exe` もこのSHAで新しいbuild出力と一致していた。WindowsがそのEXEを使用中として同一内容の上書きを拒否したため、バイナリはそのまま保持し、既定パス隣接の `lightcraft-cli.genzoroom.json` を新manifestに対応するreceiptへ更新した。既定パスでの `build.py --binary` は成功し、receipt SHA-256 `6b3e391cbb7f71295de9147d5995b12181b5253406415dc55875b285e0382137`、upstream commit、patch SHA、`headlessResidentContract: 1` と実バイナリSHAが検証された。Backend `LightCraftManager`からこの既定EXEを実際に起動し、status `ready`、`managedPatch: true`、`headlessResidentContract: 1` を確認して正常終了した。置換前のEXE／receiptは `.tmp/lightcraft-fs02-backup-92669cd94e2347c38df5661954d7a471` に保管した。
+
+### 残る検証境界
+
+この自動テストはLightCraftの固定PNG fixtureと明示した小予算を使うNative回帰であり、実写真や通常1 GiB設定で常に退役することは保証しない。予算未満では退役しないことも意図した契約である。完全一致 `engineBytes == cacheBudget` の独立再現は追加していない。Windows Desktop UIでの手動操作・実写真による性能評価は未実施であり、ユーザー側の画面確認に委ねる。

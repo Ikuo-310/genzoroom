@@ -825,10 +825,10 @@ index 0000000000000000000000000000000000000000..6b3a5371dfef3a3337a7fbe2afc68414
 +  }
 +}
 diff --git a/crates/mcp/src/tests.rs b/crates/mcp/src/tests.rs
-index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..a6e99c0948c01535aa47b6682963f619371ccf71 100644
+index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..d6f380704ad0e6d46ca65608e2307dd01f99d678 100644
 --- a/crates/mcp/src/tests.rs
 +++ b/crates/mcp/src/tests.rs
-@@ -13,6 +13,130 @@ fn server() -> Server {
+@@ -13,6 +13,228 @@ fn server() -> Server {
      Server::new(Box::new(Headless::demo()))
  }
  
@@ -956,10 +956,108 @@ index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..a6e99c0948c01535aa47b6682963f619
 +    let _ = std::fs::remove_dir_all(base);
 +}
 +
++#[test]
++fn headless_import_retires_released_photo_only_after_real_cache_pressure() {
++    struct RestoreMemoryBudget(usize);
++    impl Drop for RestoreMemoryBudget {
++        fn drop(&mut self) {
++            // app.memoryBudget is process-wide, so this test must not affect later sessions.
++            lightcraft_engine::memory::set_budget(self.0);
++        }
++    }
++
++    let base = std::env::temp_dir().join(format!("lc-mcp-resident-pressure-{}", std::process::id()));
++    let _ = std::fs::remove_dir_all(&base);
++    std::fs::create_dir_all(&base).unwrap();
++    let large = lightcraft_raster::Rgba8 { width: 2048, height: 2048, data: vec![[80, 120, 160, 255]; 2048 * 2048] };
++    let b_image = lightcraft_raster::Rgba8 { width: 12, height: 8, data: vec![[80, 120, 160, 255]; 96] };
++    let c_image = lightcraft_raster::Rgba8 { width: 12, height: 8, data: vec![[90, 120, 160, 255]; 96] };
++    let d_image = lightcraft_raster::Rgba8 { width: 12, height: 8, data: vec![[100, 120, 160, 255]; 96] };
++    for (name, image) in [("A", &large), ("B", &b_image), ("C", &c_image), ("D", &d_image)] {
++        let png = lightcraft_codecs::encode_png(&lightcraft_codecs::EncodeImage::rgba8(image), &lightcraft_codecs::EncodeMeta::default()).unwrap();
++        std::fs::write(base.join(format!("{name}.png")), png).unwrap();
++    }
++
++    let previous_budget = lightcraft_engine::memory::budget();
++    let _restore_budget = RestoreMemoryBudget(previous_budget);
++    let mut headless = Headless::new(lightcraft_engine::Session::new().with_fs());
++    let budget = headless.call("engine.execute", json!({"command": "app.memoryBudget", "params": {"mb": 64}})).unwrap();
++    assert_eq!(budget["budget"], json!(64 * 1024 * 1024));
++    assert_eq!(budget["cacheBudget"], json!(32 * 1024 * 1024));
++
++    let import = |headless: &mut Headless, name: &str| {
++        headless.call("headless.importWithEviction", json!({"paths": [base.join(format!("{name}.png")).to_string_lossy()]})).unwrap()
++    };
++    let a_result = import(&mut headless, "A");
++    assert_eq!(a_result["status"], "ok");
++    assert!(a_result["retiredIds"].as_array().unwrap().is_empty());
++    let a = a_result["importedIds"][0].as_u64().unwrap();
++    let b_result = import(&mut headless, "B");
++    assert_eq!(b_result["status"], "ok");
++    assert!(b_result["retiredIds"].as_array().unwrap().is_empty());
++    let b = b_result["importedIds"][0].as_u64().unwrap();
++    let before_preview = headless.call("engine.execute", json!({"command": "library.memory"})).unwrap();
++    assert!(
++        before_preview["engineBytes"].as_u64().unwrap() < before_preview["cacheBudget"].as_u64().unwrap(),
++        "imports unexpectedly reached cache pressure: {before_preview}"
++    );
++    let c_result = import(&mut headless, "C");
++    assert_eq!(c_result["status"], "ok", "below-budget import should not retire a resident: {c_result}");
++    assert!(c_result["retiredIds"].as_array().unwrap().is_empty());
++    let c = c_result["importedIds"][0].as_u64().unwrap();
++
++    headless.call("engine.execute", json!({"command": "library.select", "params": {"ids": [b], "active": b}})).unwrap();
++    let preview = headless.call("ui.render", json!({"id": a, "size": 2048})).unwrap();
++    assert_eq!(preview["width"], json!(2048));
++    assert_eq!(preview["height"], json!(2048));
++    let pressure = headless.call("engine.execute", json!({"command": "library.memory"})).unwrap();
++    assert!(
++        pressure["engineBytes"].as_u64().unwrap() >= pressure["cacheBudget"].as_u64().unwrap(),
++        "fixture did not reach real cache pressure: {pressure}"
++    );
++    assert_eq!(headless.session.active(), Some(lightcraft_engine::catalog::PhotoId(b)));
++    assert!(headless.session.selection.ids.contains(&lightcraft_engine::catalog::PhotoId(b)));
++
++    let no_candidate = import(&mut headless, "D");
++    assert_eq!(no_candidate["status"], "rejected");
++    assert!(no_candidate["retiredIds"].as_array().unwrap().is_empty());
++    assert!(no_candidate["importedIds"].as_array().unwrap().is_empty());
++    assert!(headless.session.catalog.photo(lightcraft_engine::catalog::PhotoId(a)).is_some());
++    assert!(headless.session.catalog.photo(lightcraft_engine::catalog::PhotoId(b)).is_some());
++    assert!(headless.session.catalog.photo(lightcraft_engine::catalog::PhotoId(c)).is_some());
++
++    headless.call("headless.releasePhoto", json!({"id": a})).unwrap();
++    headless.call("headless.releasePhoto", json!({"id": b})).unwrap();
++    // Re-select through Engine to verify an already released active photo is still protected.
++    headless.session.execute("library.select", &json!({"ids": [b], "active": b})).unwrap();
++    assert_eq!(headless.session.active(), Some(lightcraft_engine::catalog::PhotoId(b)));
++    assert!(headless.session.selection.ids.contains(&lightcraft_engine::catalog::PhotoId(b)));
++    let d_result = import(&mut headless, "D");
++    assert_eq!(d_result["status"], "ok");
++    assert_eq!(d_result["retiredIds"], json!([a]));
++    let d = d_result["importedIds"][0].as_u64().unwrap();
++    assert!(headless.session.catalog.photo(lightcraft_engine::catalog::PhotoId(a)).is_none());
++    assert!(headless.session.catalog.photo(lightcraft_engine::catalog::PhotoId(b)).is_some());
++    assert!(headless.session.catalog.photo(lightcraft_engine::catalog::PhotoId(c)).is_some());
++    assert!(headless.session.catalog.photo(lightcraft_engine::catalog::PhotoId(d)).is_some());
++
++    let a_again = import(&mut headless, "A");
++    assert_eq!(a_again["status"], "ok");
++    assert!(a_again["retiredIds"].as_array().unwrap().is_empty());
++    let a_again = a_again["importedIds"][0].as_u64().unwrap();
++    assert_ne!(a_again, a);
++    assert!(headless.session.catalog.photo(lightcraft_engine::catalog::PhotoId(a_again)).is_some());
++    assert!(headless.session.catalog.photo(lightcraft_engine::catalog::PhotoId(b)).is_some());
++    headless.call("engine.execute", json!({"command": "library.select", "params": {"ids": [b], "active": b}})).unwrap();
++    assert_eq!(headless.session.active(), Some(lightcraft_engine::catalog::PhotoId(b)));
++    assert!(headless.session.selection.ids.contains(&lightcraft_engine::catalog::PhotoId(b)));
++    let _ = std::fs::remove_dir_all(base);
++}
++
  fn rpc(s: &mut Server, id: u64, method: &str, params: Value) -> Value {
      let line = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}).to_string();
      let reply = s.handle_line(&line).expect("reply");
-@@ -79,6 +203,27 @@ fn tools_list_has_helpers_and_every_command() {
+@@ -79,6 +301,27 @@ fn tools_list_has_helpers_and_every_command() {
      assert!(r["result"]["tools"].as_array().unwrap().iter().all(|t| !t["name"].as_str().unwrap().starts_with("cmd_")));
  }
  
@@ -987,7 +1085,7 @@ index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..a6e99c0948c01535aa47b6682963f619
  /// The `import` helper passes the copy options through: a folder template files the copy.
  #[test]
  fn import_tool_copies_with_a_folder_template() {
-@@ -421,6 +566,9 @@ fn core_tools_have_hints_and_reject_unknown_keys() {
+@@ -421,6 +664,9 @@ fn core_tools_have_hints_and_reject_unknown_keys() {
              assert!(r["error"]["message"].as_str().unwrap().contains("misspelled"), "{r}");
          }
          let preview = tools.iter().find(|t| t["name"] == "render_preview").unwrap();
@@ -997,7 +1095,7 @@ index 7cc61a31863f15eff39e41516926d4ee4fb62f3c..a6e99c0948c01535aa47b6682963f619
          assert_eq!(preview["annotations"]["readOnlyHint"], true);
          assert!(preview["inputSchema"]["properties"].get("path").is_none());
          let writer = tools.iter().find(|t| t["name"] == "render_photo").unwrap();
-@@ -602,3 +750,170 @@ fn render_and_screenshot_pngs_go_through_a_private_folder() {
+@@ -602,3 +848,170 @@ fn render_and_screenshot_pngs_go_through_a_private_folder() {
          folders.push(dir);
      }
  }

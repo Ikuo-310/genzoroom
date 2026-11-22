@@ -23,9 +23,9 @@
         "crates/pipeline/src/lib.rs",
         "crates/ui-egui/src/render.rs"
       ],
-      "sha256": "ecf7c183fc4db9d2f9da679e2acbb30720b0609e019bc073f5555f3495dff723",
+      "sha256": "64ad441bc5d4caa92357d752b591f783a6ccb707905f3ca19ff9d7a1206f655e",
       "files": 18,
-      "insertions": 1100,
+      "insertions": 1198,
       "deletions": 37
     }
   ],
