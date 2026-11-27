@@ -129,6 +129,10 @@ P2のFrontend対象7ファイルは648件成功。7項目のポインター・�
 
 Backendの実際のControl定義とSection一覧をFrontend定義・Calibrationの7仕様と照合する一時テストは1件成功。トラック色の最終確認を追加した後のFrontend対象テストは5件成功した。
 
-固定commitと現行patchのreceiptおよび実行ファイルのSHA-256を照合したNative v0.20.0に対し、実カメラDNGとJPEGのコピー各1件で、CalibrationとColorの設定・readback、Draft／Full Preview、reset→mergeでの設定復元とJPEG Exportを確認した。これはNative直接の限定確認で、Desktop画面全体やExport Queueの実機受入ではない。Windows Desktopの実画面確認はユーザー受入待ち。
+固定commitと現行patchのreceiptおよび実行ファイルのSHA-256を照合したNative v0.20.0に対し、実カメラDNGとJPEGのコピー各1件で、CalibrationとColorの設定・readback、Draft／Full Preview、reset→mergeでの設定復元とJPEG Exportを確認した。これはNative直接の限定確認で、Desktop画面全体やExport Queueの実機受入ではない。
 
 P2途中のFrontend対象テストでは、既存のカテゴリ数・アクション数の固定期待値により6件が失敗した。新カテゴリを含む期待値に更新した後の上記実行は成功した。P1時のSQLite一時パス問題は、`#` を含まない一時ディレクトリで今回のBackend対象テストを実行して解消した。
+
+### Windows Desktopユーザー受入・統合完了
+
+ユーザーからWindows Desktopでの実画面による受入確認が完了し、問題は報告されなかったとの連絡を受けた。操作別の実機確認内容・結果は報告されていないため、ここでは推測して補わない。このユーザー受入報告をもって、キャリブレーション統合を完了と判定する。上記の自動テスト、Native直接確認、ユーザー受入報告はそれぞれ別の検証結果として扱う。

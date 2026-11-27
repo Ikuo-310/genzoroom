@@ -2,7 +2,7 @@
 
 ## キャリブレーション統合
 
-Windows DesktopのLightCraft編集パネルに、初期状態で折り畳まれた独立キャリブレーションカテゴリを追加した。シャドウとRGB原色の7項目、独立ON／OFFとResetは既存の数値編集、Preview、History、Recipe、Export経路を使用する。RAWとLightCraftが受け付けるJPEGに対応し、Nativeの色変換とbypassを再利用する。managed patchの追加は不要。調査、P1、P2の検証範囲は[統合記録](research/lightcraft/CALIBRATION_INTEGRATION.md)を参照。Windows Desktop実画面のユーザー受入確認は未実施。
+Windows DesktopのLightCraft編集パネルに、初期状態で折り畳まれた独立キャリブレーションカテゴリを追加した。シャドウとRGB原色の7項目、独立ON／OFFとResetは既存の数値編集、Preview、History、Recipe、Export経路を使用する。RAWとLightCraftが受け付けるJPEGに対応し、Nativeの色変換とbypassを再利用する。managed patchの追加は不要。ユーザーからWindows Desktop実画面の受入確認が完了し、問題は報告されなかったとの連絡を受けた。操作別の確認内容は報告されていないため記載せず、この受入報告をもって統合完了とする。調査、P1、P2の検証範囲は[統合記録](research/lightcraft/CALIBRATION_INTEGRATION.md)を参照。
 
 ## Filmstrip P2-5 Frontend回帰・統合検証（2026-11-22）
 
