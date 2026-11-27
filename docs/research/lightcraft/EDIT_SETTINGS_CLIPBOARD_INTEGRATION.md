@@ -1,0 +1,156 @@
+# 写真間の編集設定コピー＆ペースト統合・事前調査
+
+2026-11-27。GenzoRoom `27df6ea010742ed7a6353fa81c72ea847d00dfe5`、LightCraft v0.20.0 upstream `192ff72923c39e6623f2c7ff67ab3a119deb8071` と現行 managed patch を対象とした。以下の upstream 行番号は固定 commit 基準。統合の責務は [LightCraft統合契約](LIGHTCRAFT_INTEGRATION_CONTRACT.md) に従う。対象は Windows Desktop の全設定コピー、選択コピー、ペースト、選択ペースト。比較資料の1・2枚目は LightCraft Desktop の編集メニューとグループ選択、3・4枚目は GenzoRoom Docker の Viewer メニューと個別項目選択。前の写真からのペーストと自動同期は今回の対象外。
+
+**推奨**は、GenzoRoom がコピー時点の値をメモリに保持し、貼り付け先への部分適用を既存 `develop.merge` と GenzoRoom History に委譲する構成。選択粒度は C 案を第一候補とし、実装前に「全設定」の範囲、写真固有項目、WB の異種画像間の扱いを決める。LightCraft の選択単位と抽出を優先する場合も、一時プリセット経由の既存契約がある。現段階で managed patch は不要。
+
+## A. LightCraft Nativeコピー＆ペースト機構
+
+### ソースで確認した事実
+
+| Engine command | 引数・対象 | 応答・副作用 |
+| --- | --- | --- |
+| `develop.copy` | `{groups?: SettingsGroup[]}`。選択中の active 写真から取得。指定時は Session の `copy_groups` を更新し、省略・null 時は現在の選択を再利用する | `{groups:[…]}`。値を `extract_groups` で取り出し、Session の `clipboard: Option<serde_json::Value>` を上書き。写真編集や History 追加は発生しない |
+| `develop.paste` | `{ids?: PhotoId[], groups?: SettingsGroup[]}`。ids 省略時は Session の選択対象。groups 省略・null 時は保存した部分 JSON 全体、指定時はコピー済みグループとの積集合 | `{changed:n}`。選択ペーストではコピーを既定の設定へ一度適用し、対象グループを再抽出する。各対象には `apply_partial(…, 1.0)` を使い、写真ごとの `SetDevelop/PushHistory` を一つの Batch Undo にまとめる |
+| `develop.pastePrevious` / `develop.sync` | 前の active 写真 / active から他の選択写真。コピー済み clipboard の転送経路には使わない | 前者は `{changed,from}`、後者は `{changed}`。Desktop の自動同期 UI と区別する |
+
+出典は [cmd/develop.rs の groups_param](https://github.com/storytold/lightcraft/blob/192ff72923c39e6623f2c7ff67ab3a119deb8071/crates/engine/src/cmd/develop.rs#L29-L34)、[copy / paste / sync](https://github.com/storytold/lightcraft/blob/192ff72923c39e6623f2c7ff67ab3a119deb8071/crates/engine/src/cmd/develop.rs#L979-L1073)、[Session の clipboard](https://github.com/storytold/lightcraft/blob/192ff72923c39e6623f2c7ff67ab3a119deb8071/crates/engine/src/lib.rs#L308-L319)、[targets](https://github.com/storytold/lightcraft/blob/192ff72923c39e6623f2c7ff67ab3a119deb8071/crates/engine/src/lib.rs#L1437)、[commit](https://github.com/storytold/lightcraft/blob/192ff72923c39e6623f2c7ff67ab3a119deb8071/crates/engine/src/lib.rs#L661-L677)、[develop_op](https://github.com/storytold/lightcraft/blob/192ff72923c39e6623f2c7ff67ab3a119deb8071/crates/engine/src/lib.rs#L1069-L1098)。
+
+コピー済み部分 JSON にコピー元への参照はない。元の PhotoId は抽出時だけ必要で、元の再編集・選択変更・Resident 退役後も同じ Session の値を使用できる。新規 Session は `clipboard=None`、`copy_groups=default_copy()` から開始する。OS clipboard を使わない。新規時の無指定コピーは20グループ中16グループ。Crop／Masks／Spots（Remove）／Red Eye は初期選択外で、全20グループを明示すれば対象にできる。 `version`、`process`、`disabled_sections` はどのグループにも入らない。「全設定」に見える Desktop の直接コピーも直前の選択に従う。GenzoRoom の「全設定」は固定した対象集合を指定する方が既存 JPEG の意味に近い。 [Session 初期化](https://github.com/storytold/lightcraft/blob/192ff72923c39e6623f2c7ff67ab3a119deb8071/crates/engine/src/lib.rs#L507-L512) · [SettingsGroup / extract_groups](https://github.com/storytold/lightcraft/blob/192ff72923c39e6623f2c7ff67ab3a119deb8071/crates/develop/src/presets.rs#L23-L130)
+
+Desktop の `dialog.copySettings` と `dialog.pasteSettings` は `copy_groups` を初期選択にし、チェックリストは20グループを表示する。確認ボタンから Engine command を実行する。ペースト画面でコピー元に含まれないグループを選んでも、適用時の積集合には入らない。 `apply_partial` は `DevelopSettings::merged` を使い、オブジェクトを再帰マージし、配列を全体置換する。Native が範囲・カーブ・Crop を正規化し、復号エラーなら `apply_partial` は元の設定に戻る。 `changed` は生成した写真操作数で、同値ペーストも数えられる。GenzoRoom の no-op 判定には readback を使う。 [Desktop メニュー](https://github.com/storytold/lightcraft/blob/192ff72923c39e6623f2c7ff67ab3a119deb8071/crates/ui-egui/src/menus/menubar.rs#L159-L171) · [ダイアログ起動](https://github.com/storytold/lightcraft/blob/192ff72923c39e6623f2c7ff67ab3a119deb8071/crates/ui-egui/src/menus/run.rs#L1183-L1199) · [チェックリスト](https://github.com/storytold/lightcraft/blob/192ff72923c39e6623f2c7ff67ab3a119deb8071/crates/ui-egui/src/dialogs/export.rs#L160-L190) · [確認](https://github.com/storytold/lightcraft/blob/192ff72923c39e6623f2c7ff67ab3a119deb8071/crates/ui-egui/src/dialogs/confirm.rs#L211-L212) · [merge／正規化](https://github.com/storytold/lightcraft/blob/192ff72923c39e6623f2c7ff67ab3a119deb8071/crates/develop/src/lib.rs#L62-L104)
+
+## B. Headless／MCP公開契約
+
+| 方法 | 確認結果 |
+| --- | --- |
+| `command_list` / `command_run {id,params}` | Headless は Engine command の `develop.copy` / `develop.paste` を公開する。groups も指定できる。GUI の `dialog.*` は Headless のカタログに出ない |
+| Native clipboard の直接持ち出し・注入 | `develop.copy` の応答はグループ名のみ。 `doc_inspect` に相当する状態照会の clipboard は有無の bool。固定版の公開カタログに Export/Import Clipboard はない |
+| `develop.get {id?}` / `get_develop` | 指定写真の現在のフル設定 JSON（存在しなければ null 等の結果を処理）。 `process` を明示する。保存向け `to_json()` なので、`to_json_for_merge()` が補う値まで同じとは限らない。コピー時の選択は呼出側が扱う |
+| `develop.merge {settings,label?}` | active 写真へ部分 JSON を適用。成功応答は JSON null。 `merge_settings_for_photo` で WB の片側のみを指定する場合に写真固有の解決を行う。Native のエラーと readback を別々に確認する |
+| `preset.create {name,groups}` → `preset.export {path,ids}` → `preset.delete {id}` | 同じ `extract_groups` の結果を `.lcpreset` JSON の `presets[].settings` として取り出せる。 `presets.list` の応答はメタデータのみ。コピー用のファイルと一時 preset を作る副作用があり、Backend 管理パス・上限付き読込・後始末が必要。抽出した部分を別 Session の `develop.merge` へ渡せる。 `preset.apply` は量の補間やマスク追加等の別契約 |
+
+出典は [MCP tools の登録／実行](https://github.com/storytold/lightcraft/blob/192ff72923c39e6623f2c7ff67ab3a119deb8071/crates/mcp/src/tools.rs#L612-L653)、[query.rs の状態・develop.get・presets.list](https://github.com/storytold/lightcraft/blob/192ff72923c39e6623f2c7ff67ab3a119deb8071/crates/engine/src/cmd/query.rs#L115-L214)、[develop.merge / WB](https://github.com/storytold/lightcraft/blob/192ff72923c39e6623f2c7ff67ab3a119deb8071/crates/engine/src/cmd/develop.rs#L115-L177)、[merge command](https://github.com/storytold/lightcraft/blob/192ff72923c39e6623f2c7ff67ab3a119deb8071/crates/engine/src/cmd/develop.rs#L382-L391)、[preset.create](https://github.com/storytold/lightcraft/blob/192ff72923c39e6623f2c7ff67ab3a119deb8071/crates/engine/src/cmd/develop.rs#L1206-L1216)、[preset.export](https://github.com/storytold/lightcraft/blob/192ff72923c39e6623f2c7ff67ab3a119deb8071/crates/engine/src/cmd/preset_files.rs#L87-L132)。
+
+### 照合済みの実Native結果
+
+EXE は `target-p1-sharpen/release/lightcraft-cli.exe`。隣接 receipt の固定 commit、version、契約番号と [manifest](../../../native/lightcraft/manifest.json) の patch 定義を照合した。実ファイルの SHA-256 は EXE `2e04fea8da7d84018baf7384043656af482a23986a1c63361f8200923e77eef7`、patch `a72ebfa66ce04b3aea5232b8d5a665ab8a4e0a1e2e169a8deb6286639778f974`。 `mcp --headless --compact` の v0.20.0 handshake、上記カタログ、構造化応答および Whole Preview の応答種別を確認。2つの隔離した一時 Session で合成 Bayer DNG 2点と生成 JPEG を使用し、XMP 自動書込みを無効にした。
+
+| 検証 | 実応答・readback |
+| --- | --- |
+| DNG から既定コピー → JPEG に通常ペースト | コピーは前述の16グループ。JPEG は `exposure=1.25`、`saturation=41`、`wb={mode:"custom",scale:"kelvin",temp:5300,tint:8}`。元の `disabled_sections:["light"]` は転送されず、先は `[]`。Native Undo／Redo はともに Paste Settings を返し、exposure は 0 → 1.25 と復元。同値で繰り返しても `{changed:1}`、readback は完全一致 |
+| `groups:["light","color"]` コピー → 元を再編集・退役 → 選択ペースト | 無指定の再コピーも同じ2グループを返した。コピー直後の exposure 1.25 を元で 2 に変更し、MCP `headless_release_photo` / `headless_retire_photo` は `{released:1}` / `{retired:1}`。DNG へ `["light","whiteBalance"]` で貼ると `{changed:1}`、exposure はコピー時の 1.25、非選択の saturation は −15、ペースト先の disabled_sections は ["color"] を維持 |
+| セッション再生成後に外部 snapshot を適用 | 新 Session の Native `develop.paste` は無効で実行拒否。別プロセスに保持した JSON の `light.exposure` 等の `develop.merge` は null 成功。JPEG／DNG とも exposure 1.25、先の contrast −17 を保持。 `get_develop` で省略された元の `detail.nr_outliers=false` は、先を真にしてから Detail を送っても真が残った |
+| 既存のグループ抽出 | `preset.create` で Light／Detail／Profile を指定し、 `preset.export` は `count:1`。ファイルは `format/version/presets`、Detail に明示的な `nr_outliers:false` があった。試験用 preset は削除した |
+| JPEG → DNG の WB と Full Preview | JPEG で `wb:{mode:"custom",temp:20,tint:7}` を適用後に読んだ値は `temp:2000,tint:7`、scale 省略。その WB 全体を DNG に送ると同じ JSON を返した。Whole `render_preview` に `include_frame:true, quality:"full", max_side:128` を渡し、JPEG 96×128／DNG 128×96 とも image と text、メタデータ `kind:"after",quality:"full"` を取得した。画素や色の等価性は未判定 |
+
+## C. GenzoRoom既存JPEG実装
+
+| 確認箇所 | 現行動作と再利用候補 |
+| --- | --- |
+| [editClipboard.ts](../../../frontend/src/editClipboard.ts#L3-L31) | 1タブのモジュールメモリに `values` と元 Asset ID／ファイル名を複製して保持。全16数値、選択数値、Slider／カテゴリからの部分コピーが同じスロットを上書き。無効化中の値も保持する。タブ内の写真切替・Home・現像再入場をまたぎ、reload／close で消える。寿命・所有者を再利用し、値形式に engine 判別を加える候補 |
+| [AdjustmentSelectionDialog](../../../frontend/src/AdjustmentSelectionDialog.tsx#L22-L122)・[項目定義](../../../frontend/src/adjustmentSelection.ts#L8-L29) | Color／Basic／Color Grading の親子チェック、親の中間状態、全選択／全解除、空の確定禁止。Paste はクリップボード所収の項目だけ（値がゼロでも対象）。初期値は毎回全候補を ON。選択自体の記憶はない。 `showModal`、Tab ループ、Escape、Enter／Space、フォーカス復帰を再利用し、候補定義と型をエンジンから渡す |
+| [EditSettingsMenu](../../../frontend/src/EditSettingsMenu.tsx#L91-L126)・[ImageViewer](../../../frontend/src/ImageViewer.tsx#L716-L792) | Viewer の `⋯` とコンテキストメニューの四操作、clipboard がない時の Paste 無効、registry 由来の表示。写真切替・退出保存・失敗・選択／History ダイアログ等は [AnshitsuPage](../../../frontend/src/AnshitsuPage.tsx#L310-L359) と [操作ガード](../../../frontend/src/AnshitsuPage.tsx#L408-L498) が判定。四操作のコールバックの形とキーバインドを再利用可能 |
+| [editing.ts の Paste](../../../frontend/src/editing.ts#L205)・[EditHistory](../../../frontend/src/EditHistory.tsx#L29) | 保留中の編集を先に確定し、該当する数値だけ変更。23の有効フラグはペースト先を維持。変更時のみ1 History 項目、元ファイル名と対象 ID を記録。無変更では Paste 項目も Redo 切断もない。JPEG reducer、Recipe v18、Slider／カテゴリ／色域ごとの固有対象は JPEG の契約として維持 |
+
+コピーは Viewer では全設定、フォーカスなどから Slider／カテゴリ／色域が対象となる場合は文脈に応じた部分。通常ペーストの window keydown は Viewer にフォーカスが戻っていなくても動作し、選択操作は Viewer のハンドラが担当する。現 Windows の `AnshitsuPage` は `useDevelopmentEngine()` の LightCraft 選択で RAW と JPEG を `useRawDocument` に渡し、旧 JPEG の編集コールバックだけでは利用可能にならない。現回帰範囲は [AnshitsuClipboard.test.tsx](../../../frontend/src/AnshitsuClipboard.test.tsx#L387) の写真切替／4操作／Undo／Redo／入力保護／no-op と [選択ダイアログテスト](../../../frontend/src/AdjustmentSelectionDialog.test.tsx)。
+
+## D. コピー対象と選択粒度
+
+グループは Desktop 画面だけの分類ではなく、`groups` 引数の列挙型と抽出キーの境界。任意の葉を指定する機能は `develop.copy/paste` にはなく、Headless の部分 JSON と Control API にはある。以下の Control 単位の可否はソースに基づく。GenzoRoom での対応は設計候補で、個別項目の動作を網羅測定した結果ではない。 [SettingsGroup::keys](https://github.com/storytold/lightcraft/blob/192ff72923c39e6623f2c7ff67ab3a119deb8071/crates/develop/src/presets.rs#L91-L130) · [DevelopSettings](https://github.com/storytold/lightcraft/blob/192ff72923c39e6623f2c7ff67ab3a119deb8071/crates/develop/src/settings.rs#L124-L165) · [GenzoRoom Control 定義](../../../backend/raw_controls.py)
+
+| 対象 | LightCraft 選択単位・JSON | 葉の適用可否と選択候補 |
+| --- | --- | --- |
+| 基本補正 | `light` → `light,hdr` | 露光量、コントラスト、ハイライト、シャドウ、ホワイト、ブラックは独立数値。個別選択しやすい。HDR は別のまとまりとして扱う候補 |
+| WB | `whiteBalance` → `wb` | 温度・Tint 単独 merge は Native にある。モード／scale／as-shot の連動があるため `wb` 一体を第一候補 |
+| 自然な彩度・彩度 | `color` → `color` | `vibrance/saturation` を個別適用可 |
+| ポイントカーブ | `toneCurve` → `curve` | master／RGB のチャンネル配列を個別に渡せる。配列全体が原子で、点単位の合成を避ける。初期候補はカーブ全体 |
+| カラーミキサー | `colorMixer` → `mixer,bw_mix,point_colors` | RGB/HSL バンド・葉は個別 merge 可能。未設定バンドの既定値も考慮。提案はミキサー単位、B&W は Treatment との組合せを確認 |
+| Point Color | `colorMixer` の `point_colors` | JSON 配列を一括置換できる。空配列は明示削除。順序・重複・小数を維持。インデックス単位の貼り付けは位置の意味が異なるため選択対象にしない候補 |
+| カラーグレーディング | `colorGrading` → `grading` | shadows／midtones／highlights／global の葉や色域単位は指定可能。共通設定（blending／balance 等）と組で効果が変わる。初期候補は全体、色域＋共通項目の別選択も可能 |
+| 基本エフェクト・周辺光量 | `effects` / `vignette` | 独立数値の部分適用可。周辺光量は style と数値を一体にする候補。Grain は独立グループ |
+| シャープネス・輝度NR・カラーNR | `detail` → `detail,enhance` | `sharpen_*`、`nr_luminance/detail/contrast`、`nr_color/color_detail/color_smoothness` の葉を適用可。各サブカテゴリ一体を候補。 `nr_outliers` と `enhance` の包含は明示決定 |
+| レンズ補正・色収差補正 | `optics` → `optics` | 補正 ON/OFF、量・色範囲は指定可。プロファイル有効化と量、Defringe の上下限等はまとめる。実プロファイルは先の写真から解決 |
+| キャリブレーション | `calibration` | 7数値の葉を適用可。初期候補は同一グループ |
+| ローカルトーンマッピング | `profile` → `profile.camera_local_tone` | bool は個別 merge 可、OFF は `false` の明示が必要。Profile ID と Amount を移さず個別選択できる |
+| クロップ・水平補正・ジオメトリ | `crop` → `crop,orientation` / `geometry` → `geometry` | Native の専用コマンドと設定入力がある。切り抜き、角度、座標枠、Orientation は一体扱い。別写真の角度だけを当てる場合、専用 Straighten と JSON merge の意味を同一視しない |
+| その他の Native 設定 | `profile,treatment,grain,masks,spots,redEye,lensBlur` と上記各グループ内 | 未公開でも既定コピーに Profile、Treatment、Grain、Lens Blur、Enhance、Geometry 等が含まれる。ピクセル修復やマスクは明示選択時。 `version,process,disabled_sections` は全20でも対象外 |
+
+### 依存関係と貼り付け先の扱い
+
+- **WB。** `asShot` は先の写真の as-shot 白を使う。Kelvin RAW のプリセットモードも Native が写真情報から解決し、Custom や Auto の値には scale が関わる。Native `develop.merge` の特別な変換は片側だけを渡す条件を持ち、両方を渡した時に結果の scale を変換する契約はない。先のカメラ初期値・マトリクスは保持し、GenzoRoom で色温度換算を行わない。形式をまたぐ WB を初期対象に含める場合、readback 後の操作可否も検証する。 [effective_wb / legacy_wb](https://github.com/storytold/lightcraft/blob/192ff72923c39e6623f2c7ff67ab3a119deb8071/crates/pipeline/src/local.rs#L70-L98) · [merge_settings_for_photo](https://github.com/storytold/lightcraft/blob/192ff72923c39e6623f2c7ff67ab3a119deb8071/crates/engine/src/cmd/develop.rs#L119-L177) · [GenzoRoom WB 契約](WB_NATIVE_CONTRACT.md)
+- **ON/OFF。** `disabled_sections` は文字列配列全体が置換単位。Native グループ抽出と同様、最初はペースト先のカテゴリ状態を保持する。フラグ自体が編集項目の `optics.remove_ca`、`optics.lens_profile`、`profile.camera_local_tone` 等は選択ポリシーに従う。コピー範囲に OFF が含まれるときは省略と `false` の差を吸収する。 `to_json_for_merge` が補う `detail.nr_outliers`、`camera_local_tone`、既定 HDR やゼロ HSL バンド等の serde 省略は、実際に対応する項目だけ確認する。既存完全復元用 `complete_snapshot_for_merge` は Mixer や Detail を自動追加するため、部分ペースト全体への適用は選択を壊す。 [Native to_json_for_merge](https://github.com/storytold/lightcraft/blob/192ff72923c39e6623f2c7ff67ab3a119deb8071/crates/develop/src/lib.rs#L34-L52) · [完全復元補完](../../../backend/raw_controls.py#L108-L134) · [Section操作](../../../backend/lightcraft_raw.py#L2593-L2677)
+- **プロファイル・画像寸法。** 写真依存の埋込みレンズ補正は写真レコード側にあり、Optics には有効フラグと量が入る。先の写真の機材と Native レンズ解決を使う。Profile ID は設定値だが、外部 LUT の実体やローカルトーンのカメラメタデータはコピーに含まれない。Crop の正規化範囲や Orientation は写真の縦横・画像寸法に依存し、別写真への同構図を保証できない。Geometry は通常コピーに入る Native グループだが、含める場合は Crop／Orientation／マスクへの影響を確認する。 [EmbeddedLens](https://github.com/storytold/lightcraft/blob/192ff72923c39e6623f2c7ff67ab3a119deb8071/crates/develop/src/settings.rs#L720-L744) · [Native レンズ refresh テスト](https://github.com/storytold/lightcraft/blob/192ff72923c39e6623f2c7ff67ab3a119deb8071/crates/engine/src/tests/lens_refresh.rs#L25-L66) · [GenzoRoom Geometry](../../architecture.md#native-crop-editing-preview-contract-1-phase-1)
+- **Process／未知の項目。** `version` は schema、`process` は描画処理バージョン。両方とも貼り付け先を維持する。フル Recipe の未知項目は既存 restore 契約に従って保持する。コピー対象に含める範囲は UI と Native 契約で決める。未公開設定を含むグループを丸ごと適用する場合は、表示や保存の受入条件も同時に決める。 [Native Process テスト](https://github.com/storytold/lightcraft/blob/192ff72923c39e6623f2c7ff67ab3a119deb8071/crates/engine/src/tests/process.rs#L125-L174)
+
+## E. 選択ダイアログ設計比較
+
+| 案 | Native 再利用と整合性 | 表示量・操作性 | 実装と保守 |
+| --- | --- | --- | --- |
+| A. LightCraft グループ準拠 | 最大。一時 preset から Native 抽出を利用でき、既存グループと同じ境界 | LightCraft 参考画像のような短い一覧。露光量だけ等の選択ができない | 少ない選択定義。グループの追加に追従しやすい。preset の I/O と寿命管理、Native が選んだ未公開設定の受入確認が必要 |
+| B. GenzoRoom JPEG と同じ個別選択 | `develop.merge` は利用できるが、グループ抽出の再利用度は低い。WB・補正・配列の連動を UI に持ち込む | 数十以上の候補。特定パラメーターを移す自由度が高く、スクロールと選択の負担も大きい | 項目の定義、ラベル、依存関係、serde 省略の追従が最大。追加 Control ごとに見直し |
+| C. 独立値とまとまりの混合 | 基本補正・彩度は既存 Control ID を再利用し、WB、カーブ、Point Color、グレーディング等はまとまりを保つ。 `develop.merge` に委譲 | Docker 参考画像の個別選択と親子選択を必要な場所で利用できる | 対応 Control を限定すると A と B の中間。項目定義ごとに既存パスと既知の省略値を確認し、カテゴリ丸ごとの Native 抽出を優先する場合は A の経路を評価 |
+
+第一候補は C。初期対象を決めた上で、独立した Basic／Color の個別対応が小さな投影で済むことを確認する。対応のために写真固有値の変換や広範な合成が必要になる項目は A 相当のまとまりを優先する。選択コピーのデフォルト、前回選択の記憶、全コピー対象と選択コピー候補の一致は未決定。選択ペーストは既存 JPEG のように、コピー済みの候補だけを表示し、毎回全候補 ON を初期案とする。
+
+## F. Desktop編集メニュー
+
+現行は Tauri の `File / View / Help`。 `on_menu_event` が固定 ID から `dispatch_main_event` を使う。main WebView で `CustomEvent` 等を購読する既存パターンがあり、言語は `SettingsDialog` → `__GENZOROOM_DESKTOP__.setMenuLanguage` → `set_native_menu_language` → Rust の日英ラベル表。Preferences／Exit は Native accelerator 付き。編集操作の状態同期は未実装。 [menubar 構築と dispatch](../../../desktop/src/main.rs#L155-L216) · [言語実装](../../../desktop/src/main.rs#L297-L385) · [Desktop bridge](../../../desktop/src/lifecycle.rs#L6-L16) · [Frontend 言語同期](../../../frontend/src/SettingsDialog.tsx#L38-L66)
+
+**設計案。** `Edit / 編集` に「編集設定をコピー / Copy Edit Settings」「選択してコピー… / Choose Settings to Copy…」「編集設定をペースト / Paste Edit Settings」「選択してペースト… / Paste Selected Settings…」を設け、固定コマンド ID を main WebView の現像 owner が受信する。Viewer・ショートカット・Native メニューから同一の四操作を呼ぶ。Frontend から Desktop bridge へ availability を送り、Rust が当該項目の有効状態を反映する。初期・現像離脱・ページ再読込・別ウィンドウ、設定ダイアログ等では無効。Frontend 側で実行直前に現行 owner、文書の準備完了、同一エンジンの payload、未確定操作、保存／復旧、写真切替、退出を再確認する。表示状態の更新が遅れた場合でも後継 Document へ古い操作を送らない。Undo／Redo を載せる場合は既存 `rawHistoryAction` と `canUndo/canRedo` を使い、History メニュー配置は別途決定。Docker は既存 Viewer/キーバインドを利用する。 [現行 History ゲートと操作](../../../frontend/src/AnshitsuPage.tsx#L335-L348)
+
+## G. ショートカット調査
+
+| 操作 | 維持する候補 |
+| --- | --- |
+| コピー／ペースト | Windows の Ctrl+C／Ctrl+V（registry の Primary） |
+| 選択コピー／ペースト | Windows の Ctrl+Alt+C／Ctrl+Alt+V（Primary＋Alternate）。Desktop と Docker 共通 |
+
+現行 registry で Shift 版の照合定義は作れる。Windows の Firefox、Chrome、Edge は公式資料で Ctrl+Shift+C を Inspector／Elements の起動に割り当てる。Firefox と Edge は Ctrl+Shift+V を書式なし貼り付けに割り当てる。Chromium の Ctrl+Shift+V は編集時の貼り付けコマンドとして扱われる。ブラウザーが先に処理するキーやページへ来ないイベントは、ページの `preventDefault()` で一律に抑止できない。WebView2 にもブラウザー用 accelerator があり、ホスト処理が Web コンテンツに先行し得る。公式資料とソースの確認で、実ブラウザー・WebView2 の優先順をこのリポジトリで動的検証した結果はない。 [Firefox](https://support.mozilla.org/en-US/kb/keyboard-shortcuts-perform-firefox-tasks-quickly) · [Chrome DevTools](https://developer.chrome.com/docs/devtools/shortcuts) · [Chromium の編集キー定義](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/third_party/blink/renderer/core/editing/editing_behavior.cc) · [Edge DevTools](https://learn.microsoft.com/en-us/microsoft-edge/devtools/shortcuts/) · [Edge 貼り付け](https://support.microsoft.com/en-us/edge/keyboard-shortcuts-in-microsoft-edge) · [WebView2 accelerator](https://learn.microsoft.com/en-us/microsoft-edge/webview2/reference/winrt/microsoft_web_webview2_core/corewebview2acceleratorkeypressedeventargs) · [preventDefault](https://developer.mozilla.org/en-US/docs/Web/API/Event/preventDefault)
+
+**設計案。** 四操作の Tauri MenuItem には accelerator を登録せず、必要なら registry の表示ラベルをメニューに反映する。実行キーの owner は Frontend とし、Native メニューのクリックはコマンド ID を送る。現行の `defaultPrevented`、IME、repeat、AltGraph、対応修飾キー、入力欄／contenteditable ガードを共有し、数値スライダーの range と数値テキスト欄を区別する。Viewer で処理したイベントは既存ルートの抑止によって window で二重実行させない。入力欄の OS コピー／ペースト、通常のメニューキーボード操作、ウィンドウフォーカス復帰を Windows 手動確認に含める。 [editShortcuts.ts](../../../frontend/src/editShortcuts.ts#L4-L41) · [イベント照合](../../../frontend/src/editShortcuts.ts#L111-L123) · [Viewer keydown](../../../frontend/src/ImageViewer.tsx#L761-L796) · [統合回帰](../../../frontend/src/AnshitsuClipboard.test.tsx#L607-L640)
+
+## H. Workspace／Session・Recipe／History統合
+
+| 場面 | 提案 |
+| --- | --- |
+| コピー時 | 現像 owner の通常の編集排出境界で確定し、Backend の現行 handle／revision から設定を取得。 `RawSettings` は UI 用投影なので、完全な Native JSON が必要な範囲は Backend 経由で取得する。コピー専用の読み取り契約に選択 ID を渡し、エンジン識別子・選択 ID・値を detached payload として既存メモリに差し替える。元の Asset ID／ファイル名は表示・履歴メタデータ。失敗・キャンセル・切替後の遅延応答は現在の clipboard を上書きしない |
+| A → B・退役・Native 再生成・Workspace 再作成 | clipboard の寿命は Frontend のモジュール。Native PhotoId／handle／Session への参照を保持しない。コピー元の再編集と切替・退役・再生成は値を変えない。ページ reload／アプリ終了で消える。異種エンジンは合成せず同一 engine の候補だけを利用 |
+| ペースト時 | 選択ペーストは開始時点の clipboard を束縛し、確定時に対象 Asset ID と Document owner を再照合。その他の操作と同じ `RawRecipeSaver.operate` → `/history/operate` → `RawPreviewApi` → `LightCraftRawSession._mutate` の境界で一度の部分 `develop.merge` と Native readback。先の対象外設定は Native の部分適用で保持する |
+| 履歴と保存 | 本文の部分 payload は操作入力として検証し、 `metadata` には許可された小さい元情報だけを記録。許可済み項目・型・サイズ、Document handle／workspace／generation／token／revision、settings fingerprint と Recipe revision を既存の保存 ID・排他・再試行と同じ境界で検証。Native の `changed` を使わず、保存前後の設定が同一なら Paste History 項目を増やさず Redo を維持する。保存 receipt や revision の扱いは store の既存契約に従う |
+| Undo／Redo／Jump・描画 | 前後の確定 snapshot を既存 History に保存し、Undo／Redo／Jump は既存の snapshot 復元を使う。再訪は保存済み Recipe を復元し、Whole と Region は確認済み revision/fingerprint に更新。Export は Queue が凍結した先の Recipe を別 Session に復元する。clipboard の値を画像処理系に直接渡さない |
+
+既存の `RawRecipeSaver` は操作の直前に保留操作・保存を排出する。Crop／Curve／Mixer／Point Color などの特殊 Interaction は完了またはキャンセルを既存 owner に任せ、正常な確定まで貼り付けをガードする。再送は同一 save ID と同一入力の再照会を利用し、送達不明時は既存の readback・復旧を優先する。Native の内部 History は実行に伴う副作用として扱い、UI の Undo/Redo は GenzoRoom の保存済み History に接続する。ログは操作の開始／失敗／確定、engine、revision、saveId、項目数、転送バイト数程度とし、clipboard／Recipe 本文は収集しない。
+
+根拠は [写真切替・Session設計](FILMSTRIP_SESSION_OPTIMIZATION.md)、[RawDocument の操作と Undo](../../../frontend/src/useRawDocument.ts#L1840)、[RawRecipeSaver.operate](../../../frontend/src/rawRecipeSave.ts#L727)、[RawSettings 投影／操作型](../../../frontend/src/rawApi.ts#L88)、[RawPreviewApi の予約・readback・保存](../../../backend/windows_raw_api.py#L1709)、[Native mutation と部分 merge](../../../backend/lightcraft_raw.py#L2206)、[merge_settings](../../../backend/lightcraft_raw.py#L2800)、[store の append と Redo 切断条件](../../../backend/raw_recipe_store.py#L953)、[Export 復元](../../../backend/raw_export_artifact.py#L379)。
+
+## I. 現像エンジン間の互換性
+
+| コピー元 → ペースト先 | 評価 |
+| --- | --- |
+| LightCraft RAW → LightCraft RAW | 現行 Native group copy/paste と別プロセスへの部分 JSON 適用を合成 DNG で確認。実カメラ間の WB、機材補正、Geometry は受入確認が必要 |
+| LightCraft RAW → LightCraft JPEG | Native グループペースト、別プロセスでの部分 JSON と Preview を確認。RAW 固有項目が JSON に保持されても JPEG で同じ結果になる保証はない |
+| LightCraft JPEG → LightCraft RAW | WB JSON の Native readback と Preview を確認。形式間で数値や scale の解釈が同じであること、GenzoRoom の WB UI が引き続き編集可能であることは別条件 |
+| LightCraft JPEG → LightCraft JPEG | 同じ `DevelopSettings`／部分適用契約で実現可能。今回の probe は JPEG 1枚で、JPEG 2枚間の端末間受入は未実施 |
+| 既存 JPEG → 既存 JPEG | Docker の現行機能。16値・History の既存回帰テストを維持 |
+| LightCraft ↔ 既存 JPEG | 別エンジンの明示的な型で管理し、ペースト候補から外す。調整量の単位、WB、グレーディング、フラグの意味が異なる |
+
+## J. managed patchの要否
+
+**現時点では不要。** C 案の対応済み項目なら `develop.get` の投影と `develop.merge` を利用できる。全グループの抽出を Native へ優先委譲するなら既存 `preset.create/export/delete` が使える。 `develop.get` の投影を選ぶ場合、実測で差が出た `nr_outliers` 等の既知の省略値を、選択した範囲だけ明示できることが条件。既存の完全 snapshot restore は別用途で、貼り付け先を reset してから適用する案は採用しない。
+
+将来、公式グループの挙動との一致が必須となり、既存の一時ファイル契約が採用できない具体的な理由が生じた場合に限り、最小公開案として read-only `develop.extract {id?,groups?} → {groups,settings}` を検討する。既存の `extract_groups` を呼び出してコピー値を返すだけとし、Session 間の clipboard 共有や新規の設定適用エンジンは不要。フォト固有情報や OS clipboard を公開する必要もない。 [現行 managed patch](../../../native/lightcraft/patches/0001-v0.20.0-whole-frame.patch) · [接続API原則](LIGHTCRAFT_INTEGRATION_CONTRACT.md#接続api)
+
+## K. 推奨実装工程
+
+| 工程 | 変更対象・再利用 | Native patch | テスト・完了条件 |
+| --- | --- | --- | --- |
+| 1. 四操作を End-to-End で接続 | 選択範囲を決定し、Backend に認証付きの取得と History Paste 操作を追加。Frontend は clipboard の寿命、選択 dialog、Viewer／registry、 `useRawDocument`・saver を再利用。Docker JPEG の reducer と既存選択を維持 | 不要 | Backend で revision／認証／非対象保持／OFF・空配列／適用後 readback／同値・Redo・Undo／Jump／別 Session／再訪を確認。Frontend で四操作、別写真／異エンジン、遅延応答、ダイアログ操作、編集欄を確認。Preview／Region は既存 revision 無効化、Export は凍結 Recipe の引渡しを重点確認。Windows 実機で RAW/JPEG それぞれの A→B、RAW↔JPEG、保存・再訪、表示更新を確認 |
+| 2. Desktop メニューを接続 | Tauri menubar に四操作を追加し、日英・コマンド dispatch・有効状態を既存 bridge と現像 owner に接続。要件に含める場合は Undo/Redo も同時に接続 | 不要 | Rust の日英メニュー／bridge と Frontend の状態同期・ハンドラ共用・画面遷移を確認。Windows 実機で初期無効、切替、保存中、ダイアログ、キーとクリックで一度だけ実行、通常の入力コピーを確認。Docker の Viewer 操作は既存テストを再実行 |
+
+工程1は Backend の契約・操作ルートと Frontend 呼出しを同じ機能 commit に入れ、利用側だけが先に main に入る状態を避ける。工程2は工程1が動く時点の追加 UI として別 commit にできる。検証は関連する RAW History／Recipe／Export、Frontend Clipboard／Shortcuts、Tauri メニューに限定し、TypeScript・適用ビルド・diff check を行う。推奨実装の受入条件であり、この文書の作成時点で製品コードの試験はしていない。
+
+## L. 未確定仕様・未確認事項
+
+- **決定が必要。** A/B/C の確定、全設定に含める範囲（公開項目、画像固有項目、未公開の Native 設定）、ON/OFF と Crop／Geometry／Orientation の扱い、前回選択の記憶、RAW↔JPEG の WB 選択・警告の要否、Undo/Redo の Edit メニュー配置。初期提案は C、ペースト先のカテゴリ状態・処理バージョンを維持、Crop・マスク・修復は既定の一括対象から外す。
+- **限定試験の残り。** 実機材・異なるレンズ、外部プロファイル、RAW/JPEG それぞれの既定設定と異なる Orientation／アスペクト、JPEG 2枚間、選択された値の保存・失敗時の復旧、実ブラウザーと Tauri／WebView2 のキー優先順・フォーカス。今回実施したのは Native MCP の限定試験とソース調査で、GenzoRoom の新規 Paste を介した Region／Export Queue の実動作、手動 Desktop／Docker 画面と配布環境は未確認。
