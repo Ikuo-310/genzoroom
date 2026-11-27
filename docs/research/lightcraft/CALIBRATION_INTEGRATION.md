@@ -100,3 +100,35 @@ GenzoRoom Backendは汎用の数値操作・Toggle・Reset・History・Preview�
 ## H. 今回の成果物
 
 変更は本調査記録1ファイル。機能実装とWindows Desktopの受入確認は後続工程に残す。
+
+## P1 Backend実装記録（2026-11-27）
+
+この節は上記の事前調査後に行ったP1の実装と検証を記録する。UI配置、初期折り畳み、公式GUIに準じたグラデーション、既存カテゴリと同じ操作、LightCraft経由のRAW／JPEG両方への適用は確定方針であり、P2で接続する。
+
+- `backend/raw_controls.py` に7件の数値仕様とNative設定パスを追加し、`calibration` を独立Sectionとして公開した。既存の型・有限値・範囲検証と小数readbackを使う。
+- `backend/lightcraft_raw.py` は既存の `develop.sectionEnabled`、`develop.resetControl`、`develop.resetSection` を使い、Section Resetの7値とbypassを既存readback検証に含める。全体Resetのbypass保持、完全snapshotによる復元、Previewは共通経路を使う。
+- `backend/raw_recipe_store.py` のHistory metadataに7 ControlとSectionを追加した。Recipe形式とDBスキーマは変更していない。Exportは凍結Recipeを既存の独立Nativeセッションに適用する。
+- `backend/tests/test_lightcraft_raw.py` のNative模擬に設定とコマンドIDを追加した。`test_raw_controls.py`、`test_raw_category_operations.py`、`test_raw_export_artifact.py` で小数・拒否、独立Toggle、個別／Section／全体Reset、History、Undo／Redo／Jump、再訪、非ゼロ値とOFF状態のExport伝搬を確認した。
+
+検証はBackendの関連テストを実行した。 `test_raw_controls.py`、`test_raw_category_operations.py`、`test_raw_history_api.py`、`test_raw_recipe_restore.py`、`test_raw_export_artifact.py`、`test_raw_recipe_store.py` の実行は440成功・1失敗。失敗したrelease Smoke TestのSQLite検証は、Windowsサンドボックスの一時ディレクトリに含まれる `#` がSQLite URIとして解釈されてファイルを開けなかった。同じテストを `#` のないworkspace内の一時ディレクトリで再実行し1成功。 `test_lightcraft_raw.py`、`test_windows_raw_api.py` とCalibration統合ケースは218成功。最終変更後のCalibration関連の重点テストは15成功。これらは模擬Nativeを使うBackend自動テストであり、上記A節の実Native調査とは別の結果である。
+
+### P2への引継ぎ
+
+- 現在の `frontend/src/rawApi.ts` は `RAW_CONTROL_IDS` と `RAW_SETTINGS_CONTROL_IDS` の件数・IDを厳密に照合するため、P1のBackendレスポンスを現行Frontendは拒否する。7 IDを追加し、settings検証と関連fixtureを同期する。
+- `RAW_SECTION_IDS`、Toggle／Resetの型・検証、History metadataと差分のID・件数検証を同期する。`RawEditHistory.tsx` のcontrolラベル・数値書式・sectionラベルも追加する。
+- `RawAdjustmentControls.tsx`、`adjustmentSliderIds.ts`、`appSettings.ts`、日英localeと必要なスタイルを、独立大カテゴリ・初期折り畳み・RAW／JPEG両対応の確定方針に沿って更新する。既存数値スライダー・操作境界を再利用する。
+- P2後にBackend／Frontendの設定レスポンス、History、Recipe、Preview／Exportを一体で検証し、まとめてCommit／Pushする。P1単独ではCommit／Pushしない。
+
+## P2 Frontend実装・統合検証（2026-11-27）
+
+Windows DesktopのLightCraft編集パネル末尾に、初期状態で折り畳まれた独立Calibrationカテゴリを追加した。シャドウTintとRGB各原色のHue／Saturationを既存 `AdjustmentSlider` に接続し、Native ControlSpecのトラック色を使用する。カテゴリのON／OFFとResetはColorから独立する。RAWかJPEGかは拡張子で分岐せず、既存のLightCraft選択に従う。
+
+`rawApi.ts` のControl ID、Section、History metadataとレスポンス検証、`RawEditHistory.tsx` のラベル・数値表示、`appSettings.ts` の開閉状態、日英localeを同期した。既存の数値編集、Draft／Full・Before／Region、History、RecipeとExport経路を再利用する。Native managed patch、manifest、バイナリは変更していない。
+
+P2のFrontend対象7ファイルは648件成功。7項目のポインター・ホイール・キーボード・数値入力と個別Reset、日英表示、独立ToggleとSection Reset、既存のPreview・History・再訪などを既存テストとともに確認した。Backend対象6ファイルは441件成功。P1の検証結果とは別の実行である。TypeScriptを含むFrontend本番ビルドも成功し、既存の大きなchunkとReact Routerのモジュールdirectiveに関する警告が出た。
+
+Backendの実際のControl定義とSection一覧をFrontend定義・Calibrationの7仕様と照合する一時テストは1件成功。トラック色の最終確認を追加した後のFrontend対象テストは5件成功した。
+
+固定commitと現行patchのreceiptおよび実行ファイルのSHA-256を照合したNative v0.20.0に対し、実カメラDNGとJPEGのコピー各1件で、CalibrationとColorの設定・readback、Draft／Full Preview、reset→mergeでの設定復元とJPEG Exportを確認した。これはNative直接の限定確認で、Desktop画面全体やExport Queueの実機受入ではない。Windows Desktopの実画面確認はユーザー受入待ち。
+
+P2途中のFrontend対象テストでは、既存のカテゴリ数・アクション数の固定期待値により6件が失敗した。新カテゴリを含む期待値に更新した後の上記実行は成功した。P1時のSQLite一時パス問題は、`#` を含まない一時ディレクトリで今回のBackend対象テストを実行して解消した。

@@ -256,6 +256,8 @@ def test_saved_curve_recipe_uses_existing_raw_export_native_path(tmp_path, curve
 
     settings = copy.deepcopy(DEFAULT)
     settings['process'] = 1
+    settings['calibration'].update(shadows_tint=12.375, red_hue=-24.5, blue_sat=63.25)
+    settings['disabled_sections'] = ['calibration']
     if curve_case == 'legacy':
         settings.pop('curve')
     elif curve_case == 'identity':

@@ -32,6 +32,65 @@ async def edit(http, doc, kind, metadata):
     return await operation(http, doc, "operate", body(doc) | {"kind": kind, "metadata": metadata})
 
 
+def test_calibration_history_reset_and_reopen(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            async with client(local) as http:
+                doc = await open_history(http, local, api)
+                values = {control: index + .375 for index, control in enumerate(
+                    control for control in CONTROLS if control.startswith("calibration."))}
+                doc = await patch(http, doc, values | {"color.vibrance": 24.5})
+                commands = list(children[0].commands)
+                for invalid in (100.01, -100.01, True, "12"):
+                    response = await http.post(f'/api/raw/documents/{doc["handle"]}/controls',
+                        json=identity(doc) | {"expectedRevision": doc["revision"],
+                                              "values": {"calibration.redHue": invalid}})
+                    assert response.status_code == 400
+                assert children[0].commands == commands
+                doc = await operation(http, doc, "commit", body(doc) | {
+                    "kind": "control", "metadata": {"control": "calibration.redHue"}})
+                first = doc["ack"]["stepId"]
+                assert all(doc["values"][control] == value for control, value in values.items())
+                doc = await edit(http, doc, "sectionToggle", {"section": "color", "enabled": False})
+                assert doc["sections"]["calibration"] and not doc["sections"]["color"]
+                doc = await edit(http, doc, "sectionToggle", {"section": "calibration", "enabled": False})
+                assert all(doc["values"][control] == value for control, value in values.items())
+                doc = await edit(http, doc, "sectionToggle", {"section": "calibration", "enabled": True})
+                assert doc["sections"]["calibration"] and not doc["sections"]["color"]
+                assert all(doc["values"][control] == value for control, value in values.items())
+                doc = await edit(http, doc, "sectionToggle", {"section": "calibration", "enabled": False})
+                before_reset = copy.deepcopy(doc)
+                doc = await edit(http, doc, "controlReset", {"control": "calibration.redHue"})
+                assert doc["values"]["calibration.redHue"] == 0
+                assert not doc["sections"]["calibration"]
+                doc = await operation(http, doc, "undo")
+                assert doc["values"] == before_reset["values"]
+                doc = await operation(http, doc, "redo")
+                doc = await edit(http, doc, "sectionReset", {"section": "calibration"})
+                assert all(doc["values"][control] == 0 for control in values)
+                assert doc["values"]["color.vibrance"] == 24.5
+                assert not doc["sections"]["color"] and not doc["sections"]["calibration"]
+                assert ("develop.resetSection", {"section": "calibration"}) in children[0].commands
+                doc = await operation(http, doc, "undo")
+                assert doc["values"]["calibration.greenHue"] == values["calibration.greenHue"]
+                doc = await operation(http, doc, "jump", body(doc) | {"targetStepId": first})
+                assert doc["sections"]["calibration"] and doc["sections"]["color"]
+                doc = await edit(http, doc, "sectionToggle", {"section": "calibration", "enabled": False})
+                saved = copy.deepcopy(doc)
+                await http.delete(f'/api/raw/workspaces/{doc["workspaceId"]}')
+                _, response = await open_asset(http, doc["assetId"])
+                assert response.status_code == 200, response.text
+                doc = await operation(http, response.json(), "initialize")
+                assert doc["values"] == saved["values"] and doc["sections"] == saved["sections"]
+                doc = await edit(http, doc, "allReset", {})
+                assert all(doc["values"][control] == 0 for control in values)
+                assert not doc["sections"]["calibration"]
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
 def point_colors(settings):
     return settings["point_colors"]
 
@@ -291,7 +350,7 @@ def test_compound_reset_keeps_bypass_one_step_and_reopens(local, tmp_path, monke
                 doc = await edit(http, doc, kind, metadata)
                 assert doc["history"]["length"] == before["history"]["length"] + 1
                 assert doc["sections"] == {"light": False, "color": False, "grading": True, "effects": True,
-                                            "detail": False, "optics": True}
+                                            "detail": False, "optics": True, "calibration": True}
                 actual = store.get_raw_history(api._history_identity)["recipe"]["settings"]
                 assert actual["disabled_sections"] == before_settings["disabled_sections"]
                 if kind == "sectionReset":
@@ -932,6 +991,7 @@ def test_full_history_page_with_repeated_all_reset_deltas_stays_bounded(local, t
                 values = {control: -1.234567891234567 for control in doc["values"] if not control.startswith("optics.")}
                 values["wb.temp"] = 23456.123456789
                 values.update({"detail.sharpenAmount": 123.4567891234567, "detail.sharpenMasking": 98.7654321987654})
+                values.update({"detail.sharpenRadius": 2.5, "detail.sharpenDetail": 12.34567891234567})
                 values.update({control: 12.34567891234567 for control in values if control.startswith('grading.') and not control.endswith('.lum') and control != 'grading.balance' or control.startswith('detail.nr') or control in ('vignette.midpoint', 'vignette.feather', 'vignette.highlights')})
                 for _ in range(10):
                     doc = await patch(http, doc, values)
@@ -941,9 +1001,9 @@ def test_full_history_page_with_repeated_all_reset_deltas_stays_bounded(local, t
                     doc = await edit(http, doc, "allReset", {})
                 response = await http.get(url(doc), headers=headers(doc))
                 assert response.status_code == 200 and len(response.content) <= 256 * 1024
-                print(f'History 20 steps / 60 controls: {len(response.content)} bytes; full-precision ack: {ack_bytes} bytes')
+                print(f'History 20 steps / {len(values)} controls: {len(response.content)} bytes; full-precision ack: {ack_bytes} bytes')
                 steps = response.json()["steps"]
-                assert len(steps) == 20 and all(len(step["changes"]) == 60 for step in steps[1::2])
+                assert len(steps) == 20 and all(len(step["changes"]) == len(values) for step in steps[1::2])
         finally:
             await api.close()
     asyncio.run(run())

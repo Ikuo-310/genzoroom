@@ -1,5 +1,9 @@
 # GenzoRoom 開発ノート
 
+## キャリブレーション統合
+
+Windows DesktopのLightCraft編集パネルに、初期状態で折り畳まれた独立キャリブレーションカテゴリを追加した。シャドウとRGB原色の7項目、独立ON／OFFとResetは既存の数値編集、Preview、History、Recipe、Export経路を使用する。RAWとLightCraftが受け付けるJPEGに対応し、Nativeの色変換とbypassを再利用する。managed patchの追加は不要。調査、P1、P2の検証範囲は[統合記録](research/lightcraft/CALIBRATION_INTEGRATION.md)を参照。Windows Desktop実画面のユーザー受入確認は未実施。
+
 ## Filmstrip P2-5 Frontend回帰・統合検証（2026-11-22）
 
 FilmstripのRAW A→JPEG B→RAW C→A再訪で、同一Workspaceを保ったまま各旧DocumentをCloseし、次DocumentをOpenするFrontend回帰テストを追加した。focused Frontend 6ファイル578件が成功し、TypeScriptを含むFrontend buildと`git diff --check`も成功した。既存テストと合わせ、保存ACK前の切替停止、Close→Open順序、保存失敗、Close再送、route切替、unmount／pagehideのWorkspace Release、遅延Preview／Region／Beforeの旧owner拒否、Windows Native JPEG経路とDocker JPEG rendererを確認した。

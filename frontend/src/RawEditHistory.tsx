@@ -16,6 +16,10 @@ const mixerFormatters = Object.fromEntries(mixerColors.flatMap(color =>
   Pick<Record<RawHistoryControlId, (value: number) => string>, Extract<RawHistoryControlId, `mixer.${string}`>>;
 
 const labels: Record<RawHistoryControlId, string> = {
+  'calibration.shadowsTint': 'rawPreview.calibrationShadowsTint',
+  'calibration.redHue': 'rawPreview.calibrationRedHue', 'calibration.redSat': 'rawPreview.calibrationRedSat',
+  'calibration.greenHue': 'rawPreview.calibrationGreenHue', 'calibration.greenSat': 'rawPreview.calibrationGreenSat',
+  'calibration.blueHue': 'rawPreview.calibrationBlueHue', 'calibration.blueSat': 'rawPreview.calibrationBlueSat',
   'grading.shadows.hue': 'rawPreview.grading.shadows.hue',
   'grading.shadows.sat': 'rawPreview.grading.shadows.sat',
   'grading.shadows.lum': 'rawPreview.grading.shadows.lum',
@@ -52,6 +56,10 @@ const labels: Record<RawHistoryControlId, string> = {
   'optics.defringeGreenHueHi': 'rawPreview.greenHueHi',
   'optics.caRed': 'rawPreview.caRed', 'optics.caBlue': 'rawPreview.caBlue' } as const;
 const formatters: Record<RawHistoryControlId, (value: number) => string> = {
+  'calibration.shadowsTint': value => value.toFixed(0),
+  'calibration.redHue': value => value.toFixed(0), 'calibration.redSat': value => value.toFixed(0),
+  'calibration.greenHue': value => value.toFixed(0), 'calibration.greenSat': value => value.toFixed(0),
+  'calibration.blueHue': value => value.toFixed(0), 'calibration.blueSat': value => value.toFixed(0),
   'grading.shadows.hue': value => value.toFixed(0) + '°',
   'grading.shadows.sat': value => value.toFixed(0),
   'grading.shadows.lum': value => value.toFixed(0),
@@ -96,6 +104,7 @@ const sectionLabels: Record<RawResetSectionId, string> = {
   effects: 'workspace.rawPreview.basicEffects', detail: 'workspace.rawPreview.detailCategory',
   optics: 'workspace.rawPreview.lensCorrections', vignette: 'workspace.rawPreview.vignette',
   mixer: 'workspace.rawPreview.mixer.title',
+  calibration: 'workspace.rawPreview.calibrationCategory',
 };
 
 function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t'], wbScale: string) {

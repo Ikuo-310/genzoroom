@@ -28,6 +28,8 @@ DEFAULT = {"version": 1, "process": 2, "wb": {"mode": "custom", "temp": 6500., "
            "light": {key: 0. for key in ("exposure", "contrast", "highlights", "shadows", "whites", "blacks")},
            "grading": {**{band: {"hue": 0., "sat": 0., "lum": 0.} for band in ("shadows", "midtones", "highlights", "global")}, "blending": 50., "balance": 0.},
            "color": {"vibrance": 0., "saturation": 0.}, "geometry": {"scale": 100.},
+           "calibration": {field: 0. for field in ("shadows_tint", "red_hue", "red_sat",
+               "green_hue", "green_sat", "blue_hue", "blue_sat")},
            "mixer": {color: {field: 0. for field in ("hue", "sat", "lum")}
                      for color in ("red", "orange", "yellow", "green", "aqua", "blue", "purple", "magenta")},
            "effects": {"texture": 0., "clarity": 0., "dehaze": 0.},
@@ -1152,6 +1154,10 @@ class RawProcess(FakeProcess):
                 field, default = NATIVE_DETAIL_CONTROLS[key]
             elif group == 'optics':
                 field, default = NATIVE_OPTICS_CONTROLS.get(key, key), defaults[NATIVE_OPTICS_CONTROLS.get(key, key)]
+            elif group == 'calibration':
+                from raw_controls import CONTROL_PATHS
+                field = CONTROL_PATHS[params["control"]][1]
+                default = defaults[field]
             else:
                 field, default = key, defaults[key]
             target[field] = default
@@ -1237,6 +1243,9 @@ class RawProcess(FakeProcess):
                         target = target.get(parent, {})
                     key = NATIVE_DETAIL_CONTROLS[key][0] if section == 'detail' and key in NATIVE_DETAIL_CONTROLS else key
                     key = NATIVE_OPTICS_CONTROLS.get(key, key) if section == 'optics' else key
+                    if section == 'calibration':
+                        from raw_controls import CONTROL_PATHS
+                        key = CONTROL_PATHS[k][1]
                     if key not in target:
                         return self.tool(message, error=True)
                     target[key] = v

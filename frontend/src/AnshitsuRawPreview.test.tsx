@@ -473,7 +473,7 @@ it('binds engine control specs to shared sliders and commits RAW values without 
   expect(sliders[19].closest('.adjustment-control')?.querySelector<HTMLInputElement>('input[type="number"]')?.value).toBe('1.0');
   expect(sliders[19].disabled).toBe(true); expect(sliders[20].value).toBe('25'); expect(sliders[20].disabled).toBe(true);
   const actions = [...host.querySelectorAll<HTMLButtonElement>('.adjustment-power, .adjustment-reset, .adjustment-category-actions button, .develop-panel .workspace-section-action')];
-  expect(actions).toHaveLength(42);
+  expect(actions).toHaveLength(44);
   expect(host.querySelectorAll('.adjustment-power')).toHaveLength(0);
   expect(actions.filter(button => button.disabled)).toHaveLength(7);
   const number = sliders[0].closest('.adjustment-control')!.querySelector<HTMLInputElement>('input[type="number"]')!;
@@ -743,9 +743,13 @@ it('enters RAW slider focus from the Viewer and follows the displayed row order'
   moveDown(detailTitle); expect(document.activeElement).toBe(sliders[18]);
 });
 it.each(['vignette.amount', 'vignette.midpoint', 'vignette.feather', 'vignette.roundness', 'vignette.highlights', 'effects.texture', 'effects.clarity', 'effects.dehaze', 'detail.sharpenAmount', 'detail.sharpenMasking', 'detail.nrLuminance', 'detail.nrDetail', 'detail.nrColor',
-  'detail.nrColorDetail', 'detail.nrColorSmoothness', 'optics.distortion', 'optics.caRed'] as const)('uses existing pointer, wheel, keyboard, number and Reset gestures for %s', async control => {
+  'detail.nrColorDetail', 'detail.nrColorSmoothness', 'optics.distortion', 'optics.caRed',
+  'calibration.shadowsTint', 'calibration.redHue', 'calibration.redSat', 'calibration.greenHue',
+  'calibration.greenSat', 'calibration.blueHue', 'calibration.blueSat'] as const)('uses existing pointer, wheel, keyboard, number and Reset gestures for %s', async control => {
   if (control.startsWith('vignette.') && control !== 'vignette.amount') vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), values: { ...rawSettings(doc).values, 'vignette.amount': -50 } }));
   await mount();
+  if (control.startsWith('calibration.'))
+    act(() => host.querySelector<HTMLButtonElement>('.raw-adjustment-category.is-calibration .adjustment-category-title')!.click());
   if (control === 'optics.caRed') {
     const fold = [...host.querySelectorAll<HTMLButtonElement>('.raw-optics-fold-header button')].find(button => button.textContent?.includes('Defringe'))!;
     act(() => fold.click());
@@ -793,7 +797,7 @@ it('reuses Detail category collapse, action navigation, toggle and Reset', async
   });
   await mount();
   expect([...host.querySelectorAll('.raw-adjustment-category > .adjustment-category-header .adjustment-category-label')].map(item => item.textContent))
-    .toEqual(['Basic', 'Color', 'Curves', 'Effects', 'Detail']);
+    .toEqual(['Basic', 'Color', 'Curves', 'Effects', 'Detail', 'Calibration']);
   const category = host.querySelectorAll('.raw-adjustment-category')[4];
   expect(category.textContent).toContain('Sharpening');
   const title = category.querySelector<HTMLButtonElement>('.adjustment-category-title')!;
@@ -856,8 +860,8 @@ it.each(['ja', 'en'])('keeps Effects eye in the category and Reset in Basic Effe
   await mount();
   const categories = host.querySelectorAll('.raw-adjustment-category');
   expect([...categories].map(category => category.querySelector('.adjustment-category-label')!.textContent)).toEqual(language === 'ja'
-    ? ['基本補正', 'カラー', 'カーブ', 'エフェクト', 'ディテール']
-    : ['Basic', 'Color', 'Curves', 'Effects', 'Detail']);
+    ? ['基本補正', 'カラー', 'カーブ', 'エフェクト', 'ディテール', 'キャリブレーション']
+    : ['Basic', 'Color', 'Curves', 'Effects', 'Detail', 'Calibration']);
   const category = categories[3];
   const title = category.querySelector<HTMLButtonElement>('.adjustment-category-title')!;
   const subtitle = category.querySelector<HTMLElement>('.raw-adjustment-subsection-title')!;
@@ -909,7 +913,7 @@ it('places display-only Curves between Grading and Effects and keeps channel swi
   await mount();
   const categories = [...host.querySelectorAll<HTMLElement>('.raw-adjustment-category')];
   expect(categories.map(category => category.querySelector('.adjustment-category-label')!.textContent))
-    .toEqual(['Basic', 'Color', 'Curves', 'Effects', 'Detail']);
+    .toEqual(['Basic', 'Color', 'Curves', 'Effects', 'Detail', 'Calibration']);
   const curveCategory = categories[2];
   expect(curveCategory.querySelector('[data-category-switch]')).toBeNull();
   const curveReset = curveCategory.querySelector<HTMLButtonElement>('.adjustment-category-header .adjustment-category-reset')!;
@@ -1600,7 +1604,7 @@ it('retains values across category OFF/ON and permits Reset while OFF on the sam
   });
   await mount();
   const categories = host.querySelectorAll('.raw-adjustment-category');
-  expect(categories).toHaveLength(5);
+  expect(categories).toHaveLength(6);
   expect(categories[0].querySelector('.adjustment-category-label')!.textContent).toBe('Basic');
   const toggle = categories[0].querySelector<HTMLButtonElement>('.adjustment-category-icon')!;
   const reset = categories[0].querySelector<HTMLButtonElement>('.adjustment-category-reset')!;

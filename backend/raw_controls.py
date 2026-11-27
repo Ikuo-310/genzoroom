@@ -19,6 +19,8 @@ CONTROLS = {
     "wb.tint": (-150, 150, 1, 0, 0),
     "color.vibrance": (-100, 100, 1, 0, 0),
     "color.saturation": (-100, 100, 1, 0, 0),
+    **{f"calibration.{name}": (-100, 100, 1, 0, 0)
+       for name in ("shadowsTint", "redHue", "redSat", "greenHue", "greenSat", "blueHue", "blueSat")},
     **{f"mixer.{color}.{field}": (-100, 100, 1, 0, 0)
        for color in ("red", "orange", "yellow", "green", "aqua", "blue", "purple", "magenta")
        for field in ("hue", "sat", "lum")},
@@ -47,7 +49,7 @@ CONTROLS = {
     }.items()},
 }
 
-SECTIONS = ("light", "color", "grading", "effects", "detail", "optics")
+SECTIONS = ("light", "color", "grading", "effects", "detail", "optics", "calibration")
 SETTINGS_SECTIONS = SECTIONS
 HISTORY_CONTROLS = frozenset(CONTROLS)
 HISTORY_FLAG_CONTROLS = frozenset(("optics.remove_ca", "optics.lens_profile", "profile.camera_local_tone"))
@@ -75,6 +77,10 @@ POINT_COLOR_CENTER_FIELDS = ("lum", "chroma", "hue")
 MAX_POINT_COLORS = 8
 # Native command IDs are not JSON field names; every readback and History delta uses this mapping.
 CONTROL_PATHS = {control: tuple(control.split(".")) for control in CONTROLS} | {
+    **{f"calibration.{name}": ("calibration", field) for name, field in {
+        "shadowsTint": "shadows_tint", "redHue": "red_hue", "redSat": "red_sat",
+        "greenHue": "green_hue", "greenSat": "green_sat",
+        "blueHue": "blue_hue", "blueSat": "blue_sat"}.items()},
     "detail.sharpenAmount": ("detail", "sharpen_amount"),
     "detail.sharpenRadius": ("detail", "sharpen_radius"),
     "detail.sharpenDetail": ("detail", "sharpen_detail"),

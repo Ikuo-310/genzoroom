@@ -22,7 +22,7 @@ export function rawSettings(doc: RawDocument): RawSettings {
     process: 2, vignetteStyle: 'highlightPriority', opticsFlags: { remove_ca: false, lens_profile: false }, cameraLocalTone: false,
     lensProfileInfo: { cameraMake: null, cameraModel: null, lensMake: null, lensModel: null, lensId: null,
       profileAvailable: null, profileSource: 'unknown', profileName: null, profileApplied: false },
-    wbAutoAvailable: true, wb: { available: true, mode: 'asShot', scale: 'kelvin' }, sections: { light: true, color: true, grading: true, effects: true, detail: true, optics: true },
+    wbAutoAvailable: true, wb: { available: true, mode: 'asShot', scale: 'kelvin' }, sections: { light: true, color: true, grading: true, effects: true, detail: true, optics: true, calibration: true },
     values: Object.fromEntries(RAW_SETTINGS_CONTROL_IDS.map(id => [id, id === 'wb.temp' ? 6500 : id === 'detail.sharpenAmount' ? 40
       : id === 'detail.sharpenRadius' ? 1 : id === 'detail.sharpenDetail' ? 25
       : id === 'detail.nrColor' ? 25 : controlDefaults[id] ?? 0])) as RawValues,

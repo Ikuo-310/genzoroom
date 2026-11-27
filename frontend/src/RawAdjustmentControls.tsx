@@ -15,7 +15,7 @@ import type { useRawDocument } from './useRawDocument';
 import { displayTemperature, displayTint, nativeTemperature } from './rawWhiteBalance';
 import { updateRawDevelopmentPanelUi, useAppSettings, type RawPanelCategory } from './appSettings';
 
-type RawCategoryId = 'basic' | 'color' | 'curves' | 'effects' | 'detail';
+type RawCategoryId = 'basic' | 'color' | 'curves' | 'effects' | 'detail' | 'calibration';
 const mixerColors = ['red', 'orange', 'yellow', 'green', 'aqua', 'blue', 'purple', 'magenta'] as const;
 const mixerSwatches = ['#d7191c', '#e98200', '#d5c900', '#23a832', '#00aeb0', '#1765dc', '#7626b5', '#c00070'] as const;
 // LightCraft Desktop places the previous band at negative Hue and the next at positive Hue.
@@ -43,7 +43,7 @@ type PointColorDraft = { document: string; revision: number; index: number; fiel
 type PointColorDeleteTarget = AdjustmentMenuPosition & { document: string; revision: number; index: number };
 type PendingPointColorMutation = { kind: 'delete'; document: string; revision: number; count: number; index: number; selectedIndex: number }
   | { kind: 'reset'; document: string; revision: number; count: number };
-const sections: Record<Exclude<RawCategoryId, 'curves'>, RawToggleSectionId> = { basic: 'light', color: 'color', effects: 'effects', detail: 'detail' };
+const sections: Record<Exclude<RawCategoryId, 'curves'>, RawToggleSectionId> = { basic: 'light', color: 'color', effects: 'effects', detail: 'detail', calibration: 'calibration' };
 const wbErrors: Record<string, string> = {
   raw_wb_no_valid_samples: 'awNoSamples', raw_wb_geometry_mismatch: 'wbGeometryMismatch',
   raw_wb_point_outside_source: 'wbPointOutside', raw_wb_source_unavailable: 'wbSourceUnavailable',
@@ -64,7 +64,24 @@ const bindings: { category: RawCategoryId; controls: RawControlId[]; ids: Slider
     'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'],
     ids: ['detail.sharpenAmount', 'detail.sharpenRadius', 'detail.sharpenDetail', 'detail.sharpenMasking', 'detail.nrLuminance', 'detail.nrDetail',
       'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'] },
+  { category: 'calibration', controls: ['calibration.shadowsTint', 'calibration.redHue', 'calibration.redSat',
+    'calibration.greenHue', 'calibration.greenSat', 'calibration.blueHue', 'calibration.blueSat'],
+    ids: ['calibration.shadowsTint', 'calibration.redHue', 'calibration.redSat',
+      'calibration.greenHue', 'calibration.greenSat', 'calibration.blueHue', 'calibration.blueSat'] },
 ];
+const calibrationTracks: Partial<Record<RawControlId, string>> = {
+  'calibration.shadowsTint': 'linear-gradient(to right, #246123, #2c552c, #394739, #4a3d4c, #6b336b, #872c87)',
+  'calibration.redHue': 'linear-gradient(to right, #e0306a, #e08a30)',
+  'calibration.redSat': 'linear-gradient(to right, #7a7a7a, #e03a3a)',
+  'calibration.greenHue': 'linear-gradient(to right, #b0c030, #30c08a)',
+  'calibration.greenSat': 'linear-gradient(to right, #7a7a7a, #40b050)',
+  'calibration.blueHue': 'linear-gradient(to right, #30a0d0, #8040d0)',
+  'calibration.blueSat': 'linear-gradient(to right, #7a7a7a, #3a60e0)',
+};
+const calibrationHeadings: Partial<Record<RawControlId, string>> = {
+  'calibration.shadowsTint': 'calibrationShadows', 'calibration.redHue': 'calibrationRed',
+  'calibration.greenHue': 'calibrationGreen', 'calibration.blueHue': 'calibrationBlue',
+};
 const detailHeadings: Partial<Record<RawControlId, string>> = {
   'detail.sharpenAmount': 'sharpening', 'detail.nrLuminance': 'noiseReduction', 'detail.nrColor': 'colorNoiseReduction',
 };
@@ -335,12 +352,12 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
           : control === 'wb.tint' && relativeWb ? displayTint(nativeValue) : nativeValue;
         const min = relativeWbControl ? -100 : spec.min;
         const max = relativeWbControl ? 100 : spec.max;
-        const trackGradient = control.startsWith('grading.') && control.endsWith('.hue') ? 'linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)' : control === 'wb.temp' ? TEMPERATURE_TRACK_GRADIENT : control === 'wb.tint' ? TINT_TRACK_GRADIENT : undefined;
+        const trackGradient = calibrationTracks[control] ?? (control.startsWith('grading.') && control.endsWith('.hue') ? 'linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)' : control === 'wb.temp' ? TEMPERATURE_TRACK_GRADIENT : control === 'wb.tint' ? TINT_TRACK_GRADIENT : undefined);
         const enabled = category === 'curves' ? true : settings.sections[sections[category]];
         const dependent = control.startsWith('vignette.') && control !== 'vignette.amount'
           && (raw.desired?.['vignette.amount'] ?? settings.values['vignette.amount']) === 0;
         const processDependent = (control === 'detail.sharpenRadius' || control === 'detail.sharpenDetail') && settings.process < 3;
-        const labelKey = category === 'detail' || category === 'effects' ? `rawPreview.${vignetteLabels[control] ?? control.split('.')[1]}` : id;
+        const labelKey = category === 'detail' || category === 'effects' || category === 'calibration' ? `rawPreview.${category === 'calibration' ? 'calibration' + control.split('.')[1][0].toUpperCase() + control.split('.')[1].slice(1) : vignetteLabels[control] ?? control.split('.')[1]}` : id;
         return <Fragment key={`${raw.assetId}:${control}`}>
           {control === 'vignette.amount' && <>
             <div className="raw-adjustment-subcategory-divider" aria-hidden="true" />
@@ -351,6 +368,7 @@ export function RawAdjustmentControls({ raw, disabled = false }: { raw: NonNulla
               onChange={style => operate({ kind: 'vignetteStyle', metadata: { style } })} />
           </>}
           {detailHeadings[control] && <h4 className="adjustment-subsection-title">{t(`workspace.rawPreview.${detailHeadings[control]}`)}</h4>}
+          {calibrationHeadings[control] && <h4 className="adjustment-subsection-title">{t(`workspace.rawPreview.${calibrationHeadings[control]}`)}</h4>}
           <AdjustmentSlider adjustmentId={id} className={dependent ? 'is-dependent-disabled' : undefined}
           commitPolicy="operation-boundary" hideToggle
           trackGradient={trackGradient} valueSuffix={control.endsWith('.hue') ? '°' : control === 'wb.temp' && !relativeWb ? 'K' : undefined}

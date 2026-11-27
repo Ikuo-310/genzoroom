@@ -2747,9 +2747,9 @@ class LightCraftRawSession:
                     if actual != expected:
                         raise LightCraftError("raw_operation_readback_mismatch")
                     return
-                if section in ("effects", "vignette"):
+                if section in ("effects", "vignette", "calibration"):
                     expected = json.loads(before)
-                    # Each subsection resets only its numeric controls; style, seed and the eye survive.
+                    # Native resets these numeric controls while preserving the bypass and other settings.
                     keys = [CONTROL_PATHS[c][1] for c in CONTROLS if c.startswith(f"{section}.")]
                     expected[section].update({CONTROL_PATHS[c][1]: spec[3] for c, spec in CONTROLS.items()
                                               if c.startswith(f"{section}.")})

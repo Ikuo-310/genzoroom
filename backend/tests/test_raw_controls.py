@@ -62,6 +62,30 @@ def test_invalid_control_values(values):
         validate_controls(values, True)
 
 
+@pytest.mark.parametrize("control,field", [
+    ("calibration.shadowsTint", "shadows_tint"), ("calibration.redHue", "red_hue"),
+    ("calibration.redSat", "red_sat"), ("calibration.greenHue", "green_hue"),
+    ("calibration.greenSat", "green_sat"), ("calibration.blueHue", "blue_hue"),
+    ("calibration.blueSat", "blue_sat"),
+])
+def test_calibration_control_contract(control, field):
+    from raw_controls import CONTROL_PATHS
+    from raw_recipe_store import _history_metadata
+
+    assert CONTROLS[control] == (-100, 100, 1, 0, 0)
+    assert CONTROL_PATHS[control] == ("calibration", field)
+    assert validate_controls({control: 12.375}, True) == {control: 12.375}
+    for value in (-100.01, 100.01, True, None, float("nan"), float("inf")):
+        with pytest.raises(LightCraftError, match="raw_invalid_controls"):
+            validate_controls({control: value}, True)
+    settings = copy.deepcopy(DEFAULT)
+    settings["calibration"][field] = 12.375
+    snapshot = DevelopSnapshot(RawHandle("pixel", "token", 1), 0, json.dumps(settings))
+    assert controls_state(snapshot)["values"][control] == 12.375
+    _history_metadata("control", {"control": control})
+    _history_metadata("controlReset", {"control": control})
+
+
 def point_color(**overrides):
     value = {"lum": 0.62, "chroma": 0.14, "hue": 207.5}
     value.update({spec[0]: spec[3] for spec in POINT_COLOR_FIELDS.values()})

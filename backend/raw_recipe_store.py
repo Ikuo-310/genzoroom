@@ -591,11 +591,13 @@ HISTORY_CONTROLS = frozenset(("wb.temp", "wb.tint", "color.vibrance", "color.sat
                             "detail.nrColorSmoothness"))
 HISTORY_CONTROLS |= frozenset(f"grading.{band}.{field}" for band in ("shadows", "midtones", "highlights") for field in ("hue", "sat", "lum")) | {"grading.blending", "grading.balance"}
 HISTORY_CONTROLS |= frozenset(f"mixer.{color}.{field}" for color in ("red", "orange", "yellow", "green", "aqua", "blue", "purple", "magenta") for field in ("hue", "sat", "lum"))
+HISTORY_CONTROLS |= frozenset(f"calibration.{name}" for name in
+    ("shadowsTint", "redHue", "redSat", "greenHue", "greenSat", "blueHue", "blueSat"))
 HISTORY_CONTROLS |= frozenset(f"optics.{control}" for control in ("distortion", "vignetting", "vignettingMidpoint",
     "profileDistortion", "profileVignetting", "defringePurple", "defringePurpleHueLo", "defringePurpleHueHi",
     "defringeGreen", "defringeGreenHueLo", "defringeGreenHueHi", "caRed", "caBlue"))
 HISTORY_FLAG_CONTROLS = frozenset(("optics.remove_ca", "optics.lens_profile", "profile.camera_local_tone"))
-HISTORY_SECTIONS = frozenset(("light", "color", "grading", "effects", "detail", "optics"))
+HISTORY_SECTIONS = frozenset(("light", "color", "grading", "effects", "detail", "optics", "calibration"))
 HISTORY_RESET_SECTIONS = HISTORY_SECTIONS | {"vignette", "mixer"}
 HISTORY_CURVE_CHANNELS = frozenset(("master", "red", "green", "blue", "point"))
 

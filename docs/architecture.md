@@ -1,5 +1,9 @@
 # Provisional Architecture
 
+## Windows LightCraft Calibration
+
+The Calibration category exposes seven Native controls for shadows tint and primary hue and saturation. It has an independent section toggle and reset, with its panel fold stored in the existing application UI settings. Numeric gestures use the shared Draft and Full Preview, History and Recipe paths. Native applies calibration and its bypass in Preview and Export. The same controls are available for Native-supported RAW and non-RAW originals. Docker continues to use its JPEG development engine. No Calibration-specific Native patch is needed.
+
 ## Thumbnail delivery and persistence (Docker v0.4.0 / shared contract)
 
 `ThumbnailImage` resolves normal thumbnails, rendered thumbnails, previews and immersive previews, tracks loading/failure and exposes a per-image manual retry. Gallery, Stack, Export, Filmstrip, Album, Calendar and immersive surfaces use native browser lazy loading by default. The active Filmstrip image is eager with high fetch priority. Retry affects only the failed image and never schedules thumbnail generation.

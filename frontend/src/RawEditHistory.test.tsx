@@ -13,6 +13,24 @@ function rawHistory(steps: RawHistoryStep[], cursor: number) {
 describe('RAW History display', () => {
   beforeEach(async () => { await i18n.changeLanguage('ja'); });
 
+  it.each(['ja', 'en'])('labels calibration edits, reset and toggle in %s', async language => {
+    await i18n.changeLanguage(language);
+    const steps: RawHistoryStep[] = [
+      { stepId: 'edit', kind: 'control', metadata: { control: 'calibration.redHue' },
+        changes: [{ control: 'calibration.redHue', before: 0, after: 25 }], createdAt: '' },
+      { stepId: 'control-reset', kind: 'controlReset', metadata: { control: 'calibration.redHue' },
+        changes: [{ control: 'calibration.redHue', before: 25, after: 0 }], createdAt: '' },
+      { stepId: 'off', kind: 'sectionToggle', metadata: { section: 'calibration', enabled: false }, changes: [], createdAt: '' },
+      { stepId: 'reset', kind: 'sectionReset', metadata: { section: 'calibration' }, changes: [], createdAt: '' },
+    ];
+    const markup = renderToStaticMarkup(<RawEditHistory raw={rawHistory(steps, 4) as never} disabled={false} onReset={() => {}} />);
+    expect(markup).toContain(language === 'ja' ? 'レッドの色相' : 'Red Hue');
+    expect(markup).toContain(language === 'ja' ? 'キャリブレーション OFF' : 'Calibration OFF');
+    expect(markup).toContain('0 → 25');
+    expect(markup).not.toContain('°');
+    expect(markup).not.toContain('workspace.');
+  });
+
   it.each(['ja', 'en'])('labels Vignette modes and its independent Reset in %s', async language => {
     await i18n.changeLanguage(language);
     const steps: RawHistoryStep[] = [

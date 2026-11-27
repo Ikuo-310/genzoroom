@@ -21,6 +21,7 @@ it('persists independent RAW panel folds and selections across remount and asset
   const categoryOpen = (name: string) => category(name).getAttribute('aria-expanded') === 'true';
   draw();
   for (const name of ['basic', 'color', 'curves', 'effects', 'detail']) expect(categoryOpen(name)).toBe(true);
+  expect(categoryOpen('calibration')).toBe(false);
   expect(host.querySelector('.raw-color-mixer-title')?.getAttribute('aria-expanded')).toBe('false');
   expect(host.querySelector('.raw-color-grading-title')?.getAttribute('aria-expanded')).toBe('false');
   expect(host.querySelector('.raw-optics-header .adjustment-category-title')?.getAttribute('aria-expanded')).toBe('true');
@@ -39,7 +40,7 @@ it('persists independent RAW panel folds and selections across remount and asset
   act(() => category('detail').click());
   expect(JSON.parse(localStorage.getItem(RAW_DEVELOPMENT_PANEL_UI_KEY)!)).toEqual({
     version: 1,
-    categories: { basic: false, color: true, curves: false, effects: true, detail: false },
+    categories: { basic: false, color: true, curves: false, effects: true, detail: false, calibration: false },
     subcategories: { mixer: true, grading: true, pointColor: false, lensCorrections: false, defringe: true },
     selection: { mixerColor: 'blue', gradingBand: 'highlights' },
   });
@@ -65,6 +66,50 @@ it('persists independent RAW panel folds and selections across remount and asset
   act(() => host.querySelector('.raw-optics-header .adjustment-category-title')?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
   expect(host.querySelector('.raw-optics-fold-header button')?.getAttribute('aria-expanded')).toBe('true');
   expect(raw.operate).not.toHaveBeenCalled();
+});
+it.each(['ja', 'en'])('shows independent calibration controls and operations in %s', async language => {
+  await i18n.changeLanguage(language);
+  const settings = rawSettings({ workspaceId: 'workspace', assetId: 'asset', handle: 'handle', documentToken: 'token', generation: 1, revision: 1 });
+  const operate = vi.fn();
+  const raw = { assetId: 'asset', status: 'ready', settings, history: {}, operate,
+    pointColorRangeIndex: null, setPointColorRangeIndex: vi.fn(),
+    beginControls: vi.fn(), changeControls: vi.fn(), flushControls: vi.fn(), desired: {} };
+  const draw = () => act(() => root.render(<RawAdjustmentControls raw={raw as never} />));
+  draw();
+  const panel = host.querySelector<HTMLElement>('.raw-adjustment-category.is-calibration')!;
+  expect(panel.previousElementSibling?.classList.contains('is-detail')).toBe(true);
+  const fold = panel.querySelector<HTMLButtonElement>('.adjustment-category-title')!;
+  expect(fold.getAttribute('aria-expanded')).toBe('false');
+  act(() => fold.click());
+  const ranges = [...panel.querySelectorAll<HTMLInputElement>('input[type="range"]')];
+  expect(ranges).toHaveLength(7);
+  expect(ranges.every(range => range.min === '-100' && range.max === '100' && range.step === '1')).toBe(true);
+  expect(ranges.map(range => range.style.getPropertyValue('--adjustment-track-gradient'))).toEqual([
+    'linear-gradient(to right, #246123, #2c552c, #394739, #4a3d4c, #6b336b, #872c87)',
+    'linear-gradient(to right, #e0306a, #e08a30)', 'linear-gradient(to right, #7a7a7a, #e03a3a)',
+    'linear-gradient(to right, #b0c030, #30c08a)', 'linear-gradient(to right, #7a7a7a, #40b050)',
+    'linear-gradient(to right, #30a0d0, #8040d0)', 'linear-gradient(to right, #7a7a7a, #3a60e0)',
+  ]);
+  expect(panel.textContent).toContain(language === 'ja' ? 'レッド原色' : 'Red Primary');
+  expect(panel.textContent).not.toContain('°');
+  expect(panel.textContent).not.toContain('workspace.');
+  const toggle = panel.querySelector<HTMLButtonElement>('[data-category-switch]')!;
+  act(() => toggle.click());
+  expect(operate).toHaveBeenLastCalledWith({ kind: 'sectionToggle', metadata: { section: 'calibration', enabled: false } });
+  act(() => panel.querySelector<HTMLButtonElement>('.adjustment-category-reset')!.click());
+  expect(operate).toHaveBeenLastCalledWith({ kind: 'sectionReset', metadata: { section: 'calibration' } });
+  act(() => panel.querySelector<HTMLButtonElement>('.adjustment-reset')!.click());
+  expect(operate).toHaveBeenLastCalledWith({ kind: 'controlReset', metadata: { control: 'calibration.shadowsTint' } });
+  settings.values['calibration.redHue'] = 23;
+  settings.sections.calibration = false;
+  settings.sections.color = true;
+  draw();
+  expect(ranges.every(range => range.disabled)).toBe(true);
+  expect(settings.values['calibration.redHue']).toBe(23);
+  settings.sections.calibration = true;
+  settings.sections.color = false;
+  draw();
+  expect(ranges.every(range => !range.disabled)).toBe(true);
 });
 it.each(['ja', 'en'])('uses desired amount for dependents and preserves values/mode while inactive in %s', async language => {
   await i18n.changeLanguage(language);

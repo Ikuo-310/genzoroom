@@ -31,6 +31,8 @@ export const RAW_CONTROL_IDS = ['light.exposure', 'light.contrast', 'light.highl
   'grading.midtones.hue', 'grading.midtones.sat', 'grading.midtones.lum',
   'grading.highlights.hue', 'grading.highlights.sat', 'grading.highlights.lum', 'grading.blending', 'grading.balance',
   'wb.temp', 'wb.tint', 'color.vibrance', 'color.saturation',
+  'calibration.shadowsTint', 'calibration.redHue', 'calibration.redSat',
+  'calibration.greenHue', 'calibration.greenSat', 'calibration.blueHue', 'calibration.blueSat',
   ...(['red', 'orange', 'yellow', 'green', 'aqua', 'blue', 'purple', 'magenta'] as const).flatMap(color =>
     (['hue', 'sat', 'lum'] as const).map(field => `mixer.${color}.${field}` as const)),
   'effects.texture', 'effects.clarity', 'effects.dehaze',
@@ -47,7 +49,7 @@ export type RawHistoryControlId = typeof RAW_HISTORY_CONTROL_IDS[number];
 export type RawSettingControlId = RawHistoryControlId;
 export type RawOpticsFlagId = 'optics.remove_ca' | 'optics.lens_profile' | 'profile.camera_local_tone';
 export const RAW_OPTICS_FLAG_IDS: readonly RawOpticsFlagId[] = ['optics.remove_ca', 'optics.lens_profile', 'profile.camera_local_tone'];
-export const RAW_SECTION_IDS = ['light', 'color', 'grading', 'effects', 'detail', 'optics'] as const;
+export const RAW_SECTION_IDS = ['light', 'color', 'grading', 'effects', 'detail', 'optics', 'calibration'] as const;
 export type RawSectionId = typeof RAW_SECTION_IDS[number];
 export type RawToggleSectionId = Exclude<RawSectionId, 'grading'>;
 export const RAW_SETTINGS_SECTION_IDS = RAW_SECTION_IDS;

@@ -29,7 +29,7 @@ export const RECENT_PHOTO_COUNTS = [50, 100, 150, 200, 250, 300, 350, 400, 450, 
 export type RecentPhotoCount = typeof RECENT_PHOTO_COUNTS[number];
 export const ZOOM_NAVIGATOR_POSITIONS = ['off', 'top-left', 'top-right', 'bottom-left', 'bottom-right'] as const;
 export type ZoomNavigatorPosition = typeof ZOOM_NAVIGATOR_POSITIONS[number];
-export const RAW_PANEL_CATEGORIES = ['basic', 'color', 'curves', 'effects', 'detail'] as const;
+export const RAW_PANEL_CATEGORIES = ['basic', 'color', 'curves', 'effects', 'detail', 'calibration'] as const;
 export type RawPanelCategory = typeof RAW_PANEL_CATEGORIES[number];
 export const RAW_PANEL_MIXER_COLORS = ['red', 'orange', 'yellow', 'green', 'aqua', 'blue', 'purple', 'magenta'] as const;
 export type RawPanelMixerColor = typeof RAW_PANEL_MIXER_COLORS[number];
@@ -46,7 +46,7 @@ export type Settings = { dateLocale: DateLocale; weekStart: WeekStart; initialIm
 export function defaultRawDevelopmentPanelUi(): RawDevelopmentPanelUi {
   return {
     version: 1,
-    categories: { basic: true, color: true, curves: true, effects: true, detail: true },
+    categories: { basic: true, color: true, curves: true, effects: true, detail: true, calibration: false },
     subcategories: { mixer: false, grading: false, pointColor: false, lensCorrections: true, defringe: false },
     selection: { mixerColor: 'red', gradingBand: 'shadows' },
   };
