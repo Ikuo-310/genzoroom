@@ -112,6 +112,8 @@ EXE は `target-p1-sharpen/release/lightcraft-cli.exe`。隣接 receipt の固�
 
 ## H. Workspace／Session・Recipe／History統合
 
+コピー元の取得方法は [M節の追加調査](#m-追加調査コピー元の確定済みsnapshot) で更新した。以下の表は初回調査時の設計案を記録している。
+
 | 場面 | 提案 |
 | --- | --- |
 | コピー時 | 現像 owner の通常の編集排出境界で確定し、Backend の現行 handle／revision から設定を取得。 `RawSettings` は UI 用投影なので、完全な Native JSON が必要な範囲は Backend 経由で取得する。コピー専用の読み取り契約に選択 ID を渡し、エンジン識別子・選択 ID・値を detached payload として既存メモリに差し替える。元の Asset ID／ファイル名は表示・履歴メタデータ。失敗・キャンセル・切替後の遅延応答は現在の clipboard を上書きしない |
@@ -154,3 +156,53 @@ EXE は `target-p1-sharpen/release/lightcraft-cli.exe`。隣接 receipt の固�
 
 - **決定が必要。** A/B/C の確定、全設定に含める範囲（公開項目、画像固有項目、未公開の Native 設定）、ON/OFF と Crop／Geometry／Orientation の扱い、前回選択の記憶、RAW↔JPEG の WB 選択・警告の要否、Undo/Redo の Edit メニュー配置。初期提案は C、ペースト先のカテゴリ状態・処理バージョンを維持、Crop・マスク・修復は既定の一括対象から外す。
 - **限定試験の残り。** 実機材・異なるレンズ、外部プロファイル、RAW/JPEG それぞれの既定設定と異なる Orientation／アスペクト、JPEG 2枚間、選択された値の保存・失敗時の復旧、実ブラウザーと Tauri／WebView2 のキー優先順・フォーカス。今回実施したのは Native MCP の限定試験とソース調査で、GenzoRoom の新規 Paste を介した Region／Export Queue の実動作、手動 Desktop／Docker 画面と配布環境は未確認。
+
+## M. 追加調査・コピー元の確定済みsnapshot
+
+GenzoRoom `ddf334333cc44402b4d33dd9c5001534ff45f82a` のソース調査。以下の A／B はコピー元の取得方法を指す。E節の選択粒度とは独立した判断。
+
+**更新した推奨。** コピー操作時は B 案を採用し、Backend が現在の Document に保持する完全な確定済み readback を `LightCraftRawSession.confirmed_settings(handle, expected_revision)` で取得する。通常の編集・保存・復元で既に得た snapshot を使い、コピー固有の `develop.get`、毎回の SQLite 読込、Frontend の完全設定常駐を避ける。History／Recipe が確定済みならこの readback と同じ設定がコピー元となる。DB 行が作成される前は、同じ関数で当該写真の Import または復元済みの readback を取得できる。H節の Backend 経由・選択済み部分の返却・遅延応答ガードは維持し、取得元を Native 再照会から既存 snapshot に変更する。適用は従来案どおり `develop.merge`、Native readback、既存 History／Recipe 保存を使う。
+
+### M.1 現行の三つの設定表現
+
+| 保持場所 | 内容と保証 |
+| --- | --- |
+| **Backend の現在の Native Document** | 通常の Import、編集、復元の `develop.get` を `_read_settings` で読み、`_commit` が完全な `_Photo.settings_json` と `applied_revision` を一緒に確定する。 `confirmed_settings` は Native command を送らず、この JSON を含む `DevelopSnapshot` を返す。active handle、同じ generation、同期状態、期待 revision を確認し、Curve／Mixer／Point Color の未完了 Interaction も拒否する。 [readback と commit](../../../backend/lightcraft_raw.py#L925-L944) · [snapshot](../../../backend/lightcraft_raw.py#L884-L888) · [confirmed_settings](../../../backend/lightcraft_raw.py#L1240-L1260) · [owner と Interaction](../../../backend/lightcraft_raw.py#L804-L868) |
+| **SQLite の History／Recipe** | 現 cursor が 0 の時は `baselineSettings`、それ以外は `steps[cursor-1].settings`。 `_read_history` は選択 snapshot と現在の Recipe 本文の正規 JSON の一致および保存 receipt を検証する。append または cursor move は同一トランザクションで Recipe と History を更新する。両者の一致は保存済みデータの保証で、進行中の Native 編集まで含めた同時一致ではない。 [store の cursor／Recipe 検証](../../../backend/raw_recipe_store.py#L760-L814) · [保存処理](../../../backend/raw_recipe_store.py#L923-L1007) |
+| **Frontend の表示用データ** | `RawSettings` は公開 Control の `values`、カーブ、Point Color、Crop、WB の公開項目などの投影。全 `DevelopSettings` を持たない。History 一覧は `stepId/kind/metadata/createdAt/changes/flagChanges` と cursor 情報のみ。Recipe GET も revision・fingerprint 等のメタデータ。個別の公開 Control は既存値で取得できるが、Native のグループ全体や未公開の値を含むコピーをこれらの型だけで正確に構成できない。 [controls_state](../../../backend/raw_controls.py#L385-L423) · [Recipe GET](../../../backend/windows_raw_api.py#L1317-L1336) · [History 投影](../../../backend/windows_raw_api.py#L1623-L1652) · [Frontend 型](../../../frontend/src/rawApi.ts#L88-L99) · [History の表示項目だけを保持](../../../frontend/src/rawApi.ts#L627-L639) |
+
+確定済み Document と永続 snapshot の一致は、Backend の Document revision／settings fingerprint、Recipe revision、保存結果の照合で成立する。 `_history_public` は同期状態と正規化後の設定 fingerprint を比較する。Frontend の `sendHistory` は現 owner、送信した saveId、現在の Recipe と ACK の revision／fingerprint、cursor、pending の解消を照合してから確定を受け入れる。古い receipt の再取得だけでは現在の一致証明にならない。比較は Native adapter の正規化を踏まえた設定の一致であり、Native の応答バイト列と保存 JSON の完全同一性を要求しない。Recipe がまだ存在しない場合、`nativeMatchesRecipe` の基準は Document 上の初期 fingerprint へフォールバックするので、この bool だけで永続行の存在を判定できない。 [Backend の正規化と照合](../../../backend/windows_raw_api.py#L1309-L1315) · [History 公開状態](../../../backend/windows_raw_api.py#L1430-L1442) · [Frontend の ACK 照合](../../../frontend/src/rawRecipeSave.ts#L1050-L1082)
+
+### M.2 状態別の取得可否
+
+| 状態 | 現行動作とコピーの扱い |
+| --- | --- |
+| **初回、History 行なし** | Import 中の readback を Backend が確定する。既存 Recipe があれば Document 公開前に検証・復元し、History 行がなければ store はその Recipe を暫定 baseline として返す。新規写真では既存の自動初期化が Import 時点を cursor 0 として保存する。コピーは DB 行作成を強制しない。Document が同期済みで保留編集や初期化中の保存がなければ、確定済み Import readback がコピー元になる。互換性のない旧 Recipe の復旧待ちでも、編集開始前の Import を使う仕様なら現在の readback が取得でき、旧 Recipe 本文は候補にしない。 [Import](../../../backend/lightcraft_raw.py#L1128-L1159) · [Document の Recipe 復元](../../../backend/windows_raw_api.py#L2052-L2111) · [暫定 baseline](../../../backend/raw_recipe_store.py#L819-L834) · [Frontend の初期化](../../../frontend/src/useRawDocument.ts#L835-L843) |
+| **スライダーに未確定の入力がある** | `RawControls` の desired／送信待ちと Backend の確定済み readback は別。通常の確定は controls の flush／settle と saver の commit／ACK を経る。現像 owner でその確定を待つか、完了までコピーを無効にする。コピー用の HTTP で UI の送信待ちを確定することはできない。退出用 `prepareSave` は表示停止・freeze／pause を伴うため、コピーでは通常編集の確定境界を再利用する。 [RawControls](../../../frontend/src/rawControls.ts#L63) · [settle/unsettled](../../../frontend/src/rawControls.ts#L137-L154) · [saver の flush と保存](../../../frontend/src/rawRecipeSave.ts#L960-L990) · [退出時の排出](../../../frontend/src/useRawDocument.ts#L1832-L1860) |
+| **Curve／Mixer／Point Color／Crop 等の途中** | Native の一時値や Draft をコピーしない。通常の Finish／Cancel を owner に任せ、確定または取消後だけ取得する。Native の Interaction ガードに加え、Backend の `_history_unsettled` が管理する Crop gesture と未完了 History 保存をコピー境界でも確認する。 [Native Interaction ガード](../../../backend/lightcraft_raw.py#L838-L868) · [Backend の保留判定](../../../backend/windows_raw_api.py#L1399-L1403) · [保存後の Interaction 確定](../../../backend/windows_raw_api.py#L1896-L1914) · [Frontend の dirty／locked](../../../frontend/src/rawRecipeSave.ts#L706-L712) |
+| **Undo／Redo／Jump 直後** | Backend は現在の revision／fingerprint と Recipe revision を照合し、行先の History snapshot が現在値と異なれば Native に復元して readback を照合する。cursor と Recipe を同時に保存し、確定 ACK 後に Frontend が新しい設定と cursor を受理する。同じ値への移動などは Native revision が変わらない場合があるので、保存完了と現行 Recipe revision も見る。コピー元は移動後の readback。 [対象 snapshot の決定](../../../backend/windows_raw_api.py#L1705-L1750) · [復元と保存](../../../backend/windows_raw_api.py#L1823-L1891) · [Native 復元の readback 照合](../../../backend/lightcraft_raw.py#L2190-L2204) |
+| **保存中・失敗・応答不明** | 一時的に readback が保存済み cursor より先行する。同じ snapshot を読めても未完了の値を通常コピーとして公開しない。保存完了を待ち、失敗・応答不明・混在した owner はコピーを無効にして既存 Retry／復旧に任せる。コピーのために Native へ再照会しても SQLite の確定は証明できない。 [History 排他・復旧](../../../backend/windows_raw_api.py#L1399-L1428) · [永続 Recipe からの recover](../../../backend/windows_raw_api.py#L1998-L2026) · [保存結果の検証](../../../frontend/src/rawRecipeSave.ts#L1050-L1082) |
+| **写真切替・Native 再生成** | 開いている Document の handle／generation／token が変わる。再生成では旧 owner の確定状態を保存してから新しい Document を開き、Recipe 復元後の fingerprint／Recipe revision を照合して owner を入れ替える。閉じた／切り替わった owner のコピー応答は捨てる。完了済み clipboard は detached 値なので、Resident の退役や再生成をまたいで使用できる。 [Backend の現行 Document 判定](../../../backend/windows_raw_api.py#L525-L532) · [再生成](../../../frontend/src/useRawDocument.ts#L1004-L1051) · [Frontend の現行 owner](../../../frontend/src/useRawDocument.ts#L1682-L1687) |
+
+### M.3 完全性・精度と省略値
+
+Backend の readback と store は UI Control の一覧へ絞らず、サイズ、型、有限値等を検証した JSON を保持する。保存時はプロパティを正規 JSON に整形するが、UI の表示桁・slider step で値を丸めない。未公開フィールドのうち保存契約を満たすもの、配列の順序・重複・小数は保持される。古い永続 snapshot には収録されていないフィールドがあり、restore は adapter の既定値補完を経て現在の engine view を検証する。この点でも、現行 Document の readback は DB の旧 JSON を直接コピーするより適している。 [Native の設定検証](../../../backend/lightcraft_raw.py#L394-L416) · [Recipe の検証・保存](../../../backend/raw_recipe_store.py#L67-L127) · [旧 Recipe の restore](../../../backend/lightcraft_raw.py#L2834-L2863) · [完全設定の保存回帰](../../../backend/tests/test_raw_recipe_store.py#L109) · [Point Color の精度回帰](../../../backend/tests/test_raw_controls.py#L96)
+
+完全な readback は `DevelopSettings` の保存向け表現であり、省略可能なキーをすべて列挙した JSON ではない。コピー時に Native へ `develop.get` を再送しても同じ省略がある。初回調査では `detail.nr_outliers=false` の省略を実測した。`profile.camera_local_tone=false` やゼロ Mixer バンド等も含め、既知の省略値は、コピー対象に含めると決めた場合だけ、そのフィールドの既定値を明示する。空の Point Color 配列も「選択して空をコピー」と「選択外」の意味を区別する。全量復元用 `complete_snapshot_for_merge` は対象外のグループも補い得るため、部分 payload 全体には適用しない。 [B節の実測](#b-headlessmcp公開契約) · [既存の完全復元補完](../../../backend/raw_controls.py#L108-L143) · [Point Color の旧 snapshot 回帰](../../../backend/tests/test_raw_history_api.py#L760)
+
+### M.4 方式比較と必要なAPI
+
+追加通信は、すでに通常編集の確定が済んでいる状態から、1回のコピーを実行する場合の回数。未確定編集を解消する既存の通信は両案に共通する。
+
+| 比較項目 | A案・コピー時の Native 再取得 | B案・既存の確定済みsnapshotを再利用 |
+| --- | --- | --- |
+| 正確性・整合性 | 現 Native 値を得る。同期済みなら B と同じ正規化・省略のある設定。 `get_settings` は差分や同期異常時に Backend の revision を更新し得るため、コピー元の request revision と一致するか追加確認が要る | 最後に確認した Native 設定と適用 revision を一緒に取得。現 Document が同期済みで保留操作がないことを確認する。保存済みなら cursor／Recipe と照合済みの値。未初期化なら確定した Import／復元値を使える |
+| Native 通信 | 追加の `develop.get` 1回 | 0回。Backend の現行 snapshot を読む |
+| HTTP 通信 | コピー用応答を1往復。既存 `/settings` のままでは返却内容が不足 | コピー用応答を1往復。既存の応答に常時完全設定を載せれば0にできるが、転送量と同期責任が増える |
+| 実装規模・再利用 | 既存 `get_settings` の通信・readback 処理を再利用。コピー応答の投影と owner 照合に加え、再照会後の revision 差分やエラーへの対応が必要 | 既存 `confirmed_settings` と現像 owner／保存ゲートを再利用。コピー応答の投影と owner 照合を追加。DB 直接方式も Native 0回で可能だが、追加の読込と現在設定との照合、Import 状態の取得元が必要 |
+| 切替・Native 再生成 | Native 応答待ちの間に owner が切り替わり得る。完了済みのコピーは持ち越せる | 発行時と応答採用時の owner を確認。Backend 取得が Native 待ちに依存せず、完了済みのコピーは同様に持ち越せる |
+| 追加状態 | コピー済みの値とリクエストの owner を管理 | 同じ。既存 Backend snapshot の再利用により新規キャッシュ、別同期、Frontend での全設定常駐は不要 |
+
+**API 変更は必要。** 現行の `POST /documents/{handle}/settings` は Native 再照会の後に `controls_state` を返し、 `GET /recipe` と `GET /history` もコピー用の設定本文を返さない。四操作を既存の UI に接続する際は、選択 ID と期待 revision／fingerprint を受け、必要な部分 JSON だけを返す明示的な読み取り契約を追加する。既存の認証済み Document API 内の専用ルートまたは明示的なコピー取得分岐のどちらでも成立する。既存の表示用応答の拡張は不要。Backend の現行 Document 排他内で handle／workspace／generation／token、期待 Document revision／settings fingerprint、該当する Recipe revision、同期済み・保存保留なしを照合する。`confirmed_settings` 単体は永続確定や Frontend の未送信入力まで確認しないため、Frontend の確定境界と Backend の既存ガードの両方が必要。選択コピーはダイアログ確定時に1回取得する。 [現行のルーティング](../../../backend/windows_raw_api.py#L104-L130) · [現行 settings 応答](../../../backend/windows_raw_api.py#L832-L866) · [History 応答での既存再利用例](../../../backend/windows_raw_api.py#L1524-L1533)
+
+今回の追加調査はソースと既存回帰ケースの確認。根拠となる回帰ケースには [切替と cursor 復元](../../../backend/tests/test_raw_history_api.py#L45)、[Undo／Redo／Jump と再訪](../../../backend/tests/test_raw_history_api.py#L664)、[保存の応答不明と再試行](../../../backend/tests/test_raw_history_api.py#L1078)、[Native 再生成と旧 owner の拒否](../../../backend/tests/test_raw_history_api.py#L1516)、[Undo 前の readback 不一致検出](../../../backend/tests/test_raw_history_api.py#L1816) がある。新しいコピー取得契約の動作検証は実装時の受入項目とする。
