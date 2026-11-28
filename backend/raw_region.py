@@ -150,10 +150,9 @@ def validate_result(result, target, operation, photo_id):
         data = images[0].get('data')
         if not isinstance(data, str) or not data or len(data) > 4*((MAX_PNG_BYTES+2)//3):
             raise ValueError()
-        # Reuse CRC, exact PNG termination and Pillow validation without widening Whole's contract.
-        from lightcraft_raw import _validate_png
-        shim = {'content':[images[0], {'type':'text','text':json.dumps({'id':photo_id,'width':r['width'],'height':r['height']})}]}
-        raw, _, _ = _validate_png(shim, photo_id, MAX_SIDE)
+        # Region metadata has its own contract; only the encoded image body is shared.
+        from lightcraft_raw import _validate_png_body
+        raw, _, _ = _validate_png_body(data, r['width'], r['height'], MAX_SIDE)
         if len(raw) > MAX_PNG_BYTES:
             raise ValueError()
         return raw, {'response': r}

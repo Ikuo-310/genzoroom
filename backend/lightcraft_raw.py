@@ -529,6 +529,43 @@ def _source_info(value):
         raise LightCraftError("raw_source_unavailable") from None
 
 
+def _validate_png_body(data, width, height, max_side):
+    if not isinstance(data, str) or not data or len(data) > MAX_BASE64_CHARS or \
+            type(width) is not int or type(height) is not int or min(width, height) <= 0 or \
+            max(width, height) > max_side or width * height > MAX_PREVIEW_SIDE * MAX_PREVIEW_SIDE:
+        raise ValueError()
+    raw = base64.b64decode(data, validate=True)
+    if len(raw) > MAX_IMAGE_BYTES or not raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise ValueError()
+    offset, ended = 8, False
+    while offset < len(raw):
+        if len(raw) - offset < 12:
+            raise ValueError()
+        size = struct.unpack_from(">I", raw, offset)[0]
+        end = offset + 12 + size
+        if end > len(raw):
+            raise ValueError()
+        kind = raw[offset + 4:offset + 8]
+        if zlib.crc32(raw[offset + 4:end - 4]) != struct.unpack_from(">I", raw, end - 4)[0]:
+            raise ValueError()
+        if kind == b"IEND":
+            ended = size == 0 and end == len(raw)
+            break
+        offset = end
+    if not ended:
+        raise ValueError()
+    # Verify headers before load: no decompression bomb may allocate its declared pixels.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", Image.DecompressionBombWarning)
+        with Image.open(io.BytesIO(raw)) as opened:
+            if opened.format != "PNG" or opened.size != (width, height) or opened.n_frames != 1:
+                raise ValueError()
+            opened.verify()
+        with Image.open(io.BytesIO(raw)) as opened:
+            opened.load()
+    return raw, width, height
+
+
 def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=None, geometry=None, quality=None, frame_only=False, point_color_range_index=None, sharpen_preview=None):
     try:
         content = result["content"]
@@ -606,38 +643,7 @@ def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=N
             raise ValueError()
         if frame_only and (metadata.get("quality") != "full" or metadata.get("kind", "after") != "after"):
                 raise ValueError()
-        if type(w) is not int or type(h) is not int or min(w, h) <= 0 or \
-                max(w, h) > max_side or w * h > MAX_PREVIEW_SIDE * MAX_PREVIEW_SIDE:
-            raise ValueError()
-        raw = base64.b64decode(data, validate=True)
-        if len(raw) > MAX_IMAGE_BYTES or not raw.startswith(b"\x89PNG\r\n\x1a\n"):
-            raise ValueError()
-        offset, ended = 8, False
-        while offset < len(raw):
-            if len(raw) - offset < 12:
-                raise ValueError()
-            size = struct.unpack_from(">I", raw, offset)[0]
-            end = offset + 12 + size
-            if end > len(raw):
-                raise ValueError()
-            kind = raw[offset + 4:offset + 8]
-            if zlib.crc32(raw[offset + 4:end - 4]) != struct.unpack_from(">I", raw, end - 4)[0]:
-                raise ValueError()
-            if kind == b"IEND":
-                ended = size == 0 and end == len(raw)
-                break
-            offset = end
-        if not ended:
-            raise ValueError()
-        # Verify headers before load: no decompression bomb may allocate its declared pixels.
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", Image.DecompressionBombWarning)
-            with Image.open(io.BytesIO(raw)) as opened:
-                if opened.format != "PNG" or opened.size != (w, h) or opened.n_frames != 1:
-                    raise ValueError()
-                opened.verify()
-            with Image.open(io.BytesIO(raw)) as opened:
-                opened.load()
+        raw, w, h = _validate_png_body(data, w, h, max_side)
         return raw, w, h, metadata, histogram_data
     except Exception:
         # Never retain a Pillow/upstream exception (or its image/path-bearing traceback).

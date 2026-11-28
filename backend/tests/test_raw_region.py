@@ -250,6 +250,10 @@ def test_region_response_png_metadata_and_identity_are_validated(tmp_path):
                 with pytest.raises(LightCraftError):region.validate_result(bad,t,'render',1)
             bad=copy.deepcopy(good);bad['content'][0]['data']='A'*(4*((region.MAX_PNG_BYTES+2)//3)+4)
             with pytest.raises(LightCraftError):region.validate_result(bad,t,'render',1)
+            bad=copy.deepcopy(good);bad['content'][0]['data']=base64.b64encode(png(7,8)).decode()
+            with pytest.raises(LightCraftError):region.validate_result(bad,t,'render',1)
+            bad=copy.deepcopy(good);bad['content'][0]['data']=base64.b64encode(png(8,8)[:-1]+b'x').decode()
+            with pytest.raises(LightCraftError):region.validate_result(bad,t,'render',1)
             bad=copy.deepcopy(good);bad['content'][1]['text']=' '* (region.MAX_METADATA_BYTES+1)
             with pytest.raises(LightCraftError):region.validate_result(bad,t,'render',1)
         finally:
