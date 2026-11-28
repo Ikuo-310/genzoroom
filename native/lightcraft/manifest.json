@@ -2,7 +2,7 @@
   "patches": [
     {
       "file": "patches/0001-v0.20.0-whole-frame.patch",
-      "purpose": "Expose Whole/Region rendering and headless resident release, admission and retirement",
+      "purpose": "Expose Whole/Region rendering, Histogram metadata and headless resident release, admission and retirement",
       "targets": [
         "Cargo.lock",
         "crates/engine/src/cmd/develop.rs",
@@ -23,16 +23,16 @@
         "crates/pipeline/src/lib.rs",
         "crates/ui-egui/src/render.rs"
       ],
-      "sha256": "a72ebfa66ce04b3aea5232b8d5a665ab8a4e0a1e2e169a8deb6286639778f974",
+      "sha256": "4201676eacbd2ffb91ef78da675cad06e36ba38abf3064579f62b666f89864d0",
       "files": 18,
-      "insertions": 1342,
-      "deletions": 38
+      "insertions": 1379,
+      "deletions": 41
     }
   ],
   "commit": "192ff72923c39e6623f2c7ff67ab3a119deb8071",
   "version": "0.20.0",
   "wholeFrameContract": 1,
-  "developmentTargetDir": "target-p1-sharpen",
+  "developmentTargetDir": "target-p1a-histogram",
   "cropEditContract": 1,
   "beforeAfterContract": 1,
   "draftContract": 1,
@@ -41,5 +41,6 @@
   "wbContract": 1,
   "pointColorRangeContract": 1,
   "sharpenPreviewContract": 1,
-  "headlessResidentContract": 1
+  "headlessResidentContract": 1,
+  "histogramContract": 1
 }

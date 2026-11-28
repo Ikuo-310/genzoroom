@@ -795,9 +795,14 @@ def test_point_color_history_dispatch_uses_existing_mutation_recovery(tmp_path, 
 
 
 def image_result(photo=1, data=None, w=16, h=12):
+    samples = w * h
+    histogram = {channel: [0] * 256 for channel in ("r", "g", "b", "luma")}
+    for channel, value in zip(("r", "g", "b", "luma"), (30, 50, 80, 42)):
+        histogram[channel][value] = samples
+    histogram["samples"] = samples
     return {"isError": False, "content": [
         {"type": "image", "data": base64.b64encode(data or png(w, h)).decode(), "mimeType": "image/png"},
-        {"type": "text", "text": json.dumps({"id": photo, "width": w, "height": h})}]}
+        {"type": "text", "text": json.dumps({"id": photo, "width": w, "height": h, "histogram": histogram})}]}
 
 
 def merge(base, patch):
@@ -885,23 +890,25 @@ class RawProcess(FakeProcess):
 
     def respond(self, message):
         if message["method"] == "tools/list":
+            def preview_tool(properties):
+                return {"name": "render_preview", "_meta": {"genzoroom.histogramContract": 1},
+                        "inputSchema": {"properties": properties}}
             if self.sharpen_preview_supported:
-                return reply(self.stdout, message, {"tools": [{"name": "render_preview", "inputSchema": {"properties": {
+                return reply(self.stdout, message, {"tools": [preview_tool({
                     "before": {"type": "boolean"}, "quality": {"type": "string", "enum": ["draft", "full"]},
                     "include_frame": {"type": "boolean"},
-                    "sharpen_preview": {"type": "string", "enum": ["grayscale", "detail", "mask"]}}}}]})
+                    "sharpen_preview": {"type": "string", "enum": ["grayscale", "detail", "mask"]}})]})
             if self.simple_crop_supported:
-                return reply(self.stdout, message, {"tools": [{"name": "render_preview", "inputSchema": {
-                    "properties": {"include_frame": {"type": "boolean"}, "crop_edit": {"type": "boolean"}}}}]})
+                return reply(self.stdout, message, {"tools": [preview_tool(
+                    {"include_frame": {"type": "boolean"}, "crop_edit": {"type": "boolean"}})]})
             if self.frame_supported:
-                return reply(self.stdout, message, {"tools": [{"name": "render_preview", "inputSchema": {
-                    "properties": {"include_frame": {"type": "boolean"}}}}]})
+                return reply(self.stdout, message, {"tools": [preview_tool({"include_frame": {"type": "boolean"}})]})
             if self.adaptive_supported or self.before_supported:
-                return reply(self.stdout, message, {"tools": [{"name": "render_preview", "inputSchema": {"properties": {
+                return reply(self.stdout, message, {"tools": [preview_tool({
                     "before": {"type": "boolean"}, "quality": {"type": "string", "enum": ["draft", "full"]},
-                    "include_frame": {"type": "boolean"}}}}]})
-            return reply(self.stdout, message, {"tools": [{"name": "render_preview", "inputSchema": {
-                "properties": {"before": {"type": "boolean"}} if self.before_supported else {}}}]})
+                    "include_frame": {"type": "boolean"}})]})
+            return reply(self.stdout, message, {"tools": [preview_tool(
+                {"before": {"type": "boolean"}} if self.before_supported else {})]})
         if message["method"] != "tools/call":
             return super().respond(message)
         args = message["params"]["arguments"]
@@ -990,7 +997,8 @@ class RawProcess(FakeProcess):
                             metadata = {"id": args["id"], "width": 16, "height": 12,
                                         "kind": "after" if self.before_wrong_kind else "before",
                                         "quality": args.get("quality", "full"), "beforeFingerprint": "b" * 16,
-                                        "geometry": {name: settings.get(name) for name in ("crop", "orientation")}}
+                                        "geometry": {name: settings.get(name) for name in ("crop", "orientation")},
+                                        "histogram": metadata["histogram"]}
                             result["content"][1]["text"] = json.dumps(metadata)
                         if args.get("include_frame"):
                             metadata = json.loads(result["content"][1]["text"])
@@ -1286,7 +1294,7 @@ async def create(tmp_path, *, timeouts=QUICK, adaptive=False):
     exe.with_suffix('.genzoroom.json').write_text(json.dumps({
         **{key: MANAGED[key] for key in ('version', 'commit', 'patches')},
         'binarySha256': hashlib.sha256(b'fake').hexdigest(),
-        'wholeFrameContract': 1,
+        'wholeFrameContract': 1, 'histogramContract': 1,
         **{key: 1 for key in ('cropEditContract', 'beforeAfterContract', 'draftContract', 'regionContract')
            if MANAGED.get(key) == 1},
         **({'geometryDescriptorContract': MANAGED['geometryDescriptorContract']}
@@ -1337,6 +1345,9 @@ def test_import_edit_readback_restore_preview_and_capacity(tmp_path):
             assert [c for c, _ in child.commands][-3:] == ["develop.reset", "develop.merge", "develop.get"]
             frame = await raw.request_preview(handle, restored.revision)
             assert isinstance(frame, PreviewFrame) and frame.data.startswith(b"\x89PNG")
+            assert frame.histogram_data is not None and len(frame.histogram_data) == module.HISTOGRAM_BYTES
+            assert int.from_bytes(frame.histogram_data[30 * 4:31 * 4], "little") == 192
+            assert int.from_bytes(frame.histogram_data[-4:], "little") == 192
             assert frame.handle == handle and frame.revision == restored.revision
             second, _ = await raw.open_raw("pentax", files[1])
             assert (await raw.select(handle)).handle == handle
@@ -2525,6 +2536,8 @@ def test_image_validation_cancel_is_owned_and_next_preview_waits(tmp_path, monke
 
 
 @pytest.mark.parametrize("invalid", ["base64", "mime", "metadata", "missing", "multiple", "id", "dimensions",
+                                   "histogram_missing", "histogram_bins", "histogram_negative", "histogram_float",
+                                   "histogram_samples", "histogram_overflow",
                                    "truncated", "crc", "trailing", "huge", "structured"])
 def test_png_response_validation(invalid):
     result = image_result()
@@ -2541,8 +2554,31 @@ def test_png_response_validation(invalid):
     elif invalid == "trailing": image["data"] = base64.b64encode(png() + b"junk").decode()
     elif invalid == "huge": image["data"] = "a" * (module.MAX_BASE64_CHARS + 1)
     elif invalid == "structured": result["structuredContent"] = {}
+    elif invalid.startswith("histogram_"):
+        metadata = json.loads(text["text"])
+        if invalid == "histogram_missing": metadata.pop("histogram")
+        elif invalid == "histogram_bins": metadata["histogram"]["r"].pop()
+        elif invalid == "histogram_negative": metadata["histogram"]["r"][30] = -1
+        elif invalid == "histogram_float": metadata["histogram"]["g"][50] = 192.0
+        elif invalid == "histogram_samples": metadata["histogram"]["samples"] = 191
+        elif invalid == "histogram_overflow": metadata["histogram"]["samples"] = 2**32
+        text["text"] = json.dumps(metadata)
     with pytest.raises(LightCraftError, match="^lightcraft_invalid_preview$"):
         _validate_png(result, 1, 1024)
+
+
+def test_max_sample_histogram_fits_existing_preview_metadata_limit():
+    result = image_result(w=1024, h=1024)
+    text = result["content"][1]
+    metadata = json.loads(text["text"])
+    for channel in ("r", "g", "b", "luma"):
+        metadata["histogram"][channel] = [3906] * 256
+        metadata["histogram"][channel][0] += 64
+    metadata["histogram"]["samples"] = 1_000_000
+    text["text"] = json.dumps(metadata, indent=2)
+    assert len(text["text"].encode("utf-8")) < module.MAX_METADATA_BYTES
+    validated = _validate_png(result, 1, 1024)
+    assert len(validated[4]) == module.HISTOGRAM_BYTES
 
 
 def test_png_pixel_bounds_before_load_and_encoded_limit(monkeypatch):

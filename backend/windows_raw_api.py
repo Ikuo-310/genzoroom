@@ -1,6 +1,7 @@
 """Windows-only RAW editing, durable recipes and confirmed History operations."""
 
 import asyncio
+import base64
 import hashlib
 import json
 import math
@@ -15,7 +16,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from lightcraft_mcp import LightCraftError
-from lightcraft_raw import MAX_EDITS, MAX_IMAGE_BYTES, MAX_PREVIEW_SIDE, SUPERSEDED, _settings_json
+from lightcraft_raw import HISTOGRAM_BYTES, MAX_EDITS, MAX_IMAGE_BYTES, MAX_PREVIEW_SIDE, SUPERSEDED, _settings_json
 from lightcraft_runtime import _await_task_resilient, lightcraft_log
 from lightcraft_artifact import ENGINE_VERSION
 from raw_source import RawSourceCache
@@ -1307,12 +1308,16 @@ class RawPreviewApi:
             raise LightCraftError('lightcraft_invalid_preview')
         if getattr(frame, 'sharpen_preview', None) != body.get('sharpenPreview'):
             raise LightCraftError('lightcraft_invalid_preview')
+        if not isinstance(frame.histogram_data, bytes) or len(frame.histogram_data) != HISTOGRAM_BYTES:
+            raise LightCraftError('lightcraft_invalid_preview')
         headers = {"X-Raw-Generation": str(frame.handle.generation), "X-Raw-Token": frame.handle.document_token,
                    "X-Raw-Revision": str(body["revision"]), "X-Raw-Epoch": str(frame.selection_epoch),
                    "X-Raw-Sequence": str(frame.sequence), "X-Raw-Serial": str(body["serial"]),
                    "X-Raw-Width": str(frame.width), "X-Raw-Height": str(frame.height),
                    "Cache-Control": "no-store"}
         headers["X-Raw-Kind"] = frame.kind
+        headers["X-Raw-Histogram-Format"] = "u32le-r256-g256-b256-luma256-samples-v1"
+        headers["X-Raw-Histogram"] = base64.b64encode(frame.histogram_data).decode("ascii")
         if frame.point_color_range_index is not None:
             headers['X-Raw-Point-Color-Range-Index'] = str(frame.point_color_range_index)
         if body.get('sharpenPreview') is not None:

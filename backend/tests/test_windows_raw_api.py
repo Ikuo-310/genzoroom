@@ -365,6 +365,8 @@ def test_native_before_http_identity_cache_and_after_edit_independence(local, tm
                 response = await http.post(url + "/preview", json=preview_body(doc) | {"kind": "before"})
                 assert response.status_code == 200, response.text
                 assert response.headers["x-raw-kind"] == "before"
+                assert response.headers["x-raw-histogram-format"] == "u32le-r256-g256-b256-luma256-samples-v1"
+                assert len(response.headers["x-raw-histogram"]) == 5468
                 assert response.headers["x-raw-before-key"] == key
                 assert response.headers["cache-control"] == "no-store"
                 assert api.document["revision"] == revision and api.document["recipeRevision"] == 0
@@ -380,6 +382,7 @@ def test_native_before_http_identity_cache_and_after_edit_independence(local, tm
                 assert children[0].render_count == 1
                 response = await http.post(url + "/preview", json=preview_body(doc, 3))
                 assert response.status_code == 200 and response.headers["x-raw-kind"] == "after"
+                assert len(response.headers["x-raw-histogram"]) == 5468
                 assert children[0].render_count == 2
         finally:
             await api.close()
@@ -825,14 +828,15 @@ def test_native_release_failure_cannot_start_cache_cleanup_or_reopen(local, tmp_
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("frame_supported", [False, True])
 @pytest.mark.parametrize("quality", ["draft", "full"])
-def test_whole_full_frame_response_and_legacy_fallback(local, tmp_path, monkeypatch, frame_supported, quality):
+def test_whole_full_frame_response_includes_fixed_histogram_header(local, tmp_path, monkeypatch, quality):
     async def run():
+        import base64
         import json
         api, manager, children, _ = await setup(tmp_path, local, monkeypatch)
         child = children[0]
-        child.frame_supported = frame_supported
+        child.frame_supported = True
+        child.sharpen_preview_supported = True
         try:
             async with client(local) as http:
                 await authenticate(http, local)
@@ -843,17 +847,23 @@ def test_whole_full_frame_response_and_legacy_fallback(local, tmp_path, monkeypa
                 result = await http.post(url, json=body)
                 assert result.status_code == 200, result.text
                 assert result.content.startswith(b"\x89PNG\r\n\x1a\n")
-                assert result.headers["x-raw-quality"] == "full"
-                assert result.headers["x-raw-preview-contract"] == ("1" if frame_supported else "0")
-                assert not await manager._raw_preview_supported(doc["generation"])
-                if frame_supported:
-                    frame = json.loads(result.headers["x-raw-frame"])
-                    assert (frame["fullWidth"], frame["fullHeight"], frame["window"]) == (16, 12, None)
-                    assert len(frame["geometryId"]) == 64
-                    assert child.preview_arguments[-1]["include_frame"] is True
-                else:
-                    assert "x-raw-frame" not in result.headers
-                    assert "include_frame" not in child.preview_arguments[-1]
+                assert result.headers["x-raw-quality"] == quality
+                assert result.headers["x-raw-preview-contract"] == "1"
+                assert await manager._raw_preview_supported(doc["generation"])
+                frame = json.loads(result.headers["x-raw-frame"])
+                assert (frame["fullWidth"], frame["fullHeight"], frame["window"]) == (16, 12, None)
+                assert len(frame["geometryId"]) == 64
+                assert child.preview_arguments[-1]["include_frame"] is True
+                assert result.headers["x-raw-histogram-format"] == "u32le-r256-g256-b256-luma256-samples-v1"
+                encoded = result.headers["x-raw-histogram"]
+                assert len(encoded) == 5468
+                payload = base64.b64decode(encoded, validate=True)
+                assert len(payload) == 4100
+                assert int.from_bytes(payload[30 * 4:31 * 4], "little") == 192
+                assert int.from_bytes(payload[(256 + 50) * 4:(256 + 51) * 4], "little") == 192
+                assert int.from_bytes(payload[(512 + 80) * 4:(512 + 81) * 4], "little") == 192
+                assert int.from_bytes(payload[(768 + 42) * 4:(768 + 43) * 4], "little") == 192
+                assert int.from_bytes(payload[-4:], "little") == 192
                 assert (await http.post(url, json=body)).status_code == 204
                 assert (await http.post(url, json=body | {"serial": 2, "revision": doc["revision"] + 1})).status_code == 409
         finally:

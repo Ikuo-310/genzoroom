@@ -21,7 +21,8 @@ def write_receipt(executable, **changes):
              **({'wbContract': 1} if MANAGED.get('wbContract') == 1 else {}),
              **({'pointColorRangeContract': 1} if MANAGED.get('pointColorRangeContract') == 1 else {}),
              **({'sharpenPreviewContract': 1} if MANAGED.get('sharpenPreviewContract') == 1 else {}),
-             **({'headlessResidentContract': 1} if MANAGED.get('headlessResidentContract') == 1 else {}), **changes}
+             **({'headlessResidentContract': 1} if MANAGED.get('headlessResidentContract') == 1 else {}),
+             'histogramContract': 1, **changes}
     executable.with_suffix('.genzoroom.json').write_text(json.dumps(value), encoding='utf-8')
     return digest
 
@@ -37,6 +38,7 @@ def write_receipt(executable, **changes):
     {'pointColorRangeContract': True}, {'pointColorRangeContract': 2}, {'pointColorRangeContract': None},
     {'sharpenPreviewContract': True}, {'sharpenPreviewContract': 2}, {'sharpenPreviewContract': None},
     {'headlessResidentContract': True}, {'headlessResidentContract': 2}, {'headlessResidentContract': None},
+    {'histogramContract': True}, {'histogramContract': 2}, {'histogramContract': None},
 ])
 def test_receipt_mismatch_never_claims_a_managed_version(tmp_path, changes):
     executable = tmp_path / 'engine.exe'
@@ -112,6 +114,17 @@ def test_receipt_without_headless_resident_contract_is_not_managed(tmp_path):
     assert verified_artifact(executable, digest, ENGINE_VERSION) is None
 
 
+def test_receipt_without_histogram_contract_is_not_managed(tmp_path):
+    executable = tmp_path / 'engine.exe'
+    executable.write_bytes(b'actual engine')
+    digest = write_receipt(executable)
+    path = executable.with_suffix('.genzoroom.json')
+    receipt = json.loads(path.read_text(encoding='utf-8'))
+    del receipt['histogramContract']
+    path.write_text(json.dumps(receipt), encoding='utf-8')
+    assert verified_artifact(executable, digest, ENGINE_VERSION) is None
+
+
 @pytest.mark.parametrize('contract', ['beforeAfterContract', 'draftContract'])
 def test_receipt_without_preview_contract_is_not_managed(tmp_path, contract):
     executable = tmp_path / 'engine.exe'
@@ -132,6 +145,7 @@ def test_runtime_attestation_belongs_only_to_the_ready_generation(tmp_path):
         await manager.start()
         await until(lambda: manager.status().state == 'ready')
         assert manager.artifact_info()['version'] == ENGINE_VERSION
+        assert manager.artifact_info()['histogramContract'] == 1
         await manager.close()
         assert manager.artifact_info() is None
         (tmp_path / 'lightcraft-cli.genzoroom.json').write_text('{}', encoding='utf-8')

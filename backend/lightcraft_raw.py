@@ -31,6 +31,8 @@ from lightcraft_artifact import ENGINE_VERSION, ENGINE_COMMIT
 MAX_IMAGE_BYTES = 17 * 1024 * 1024
 MAX_BASE64_CHARS = 4 * ((MAX_IMAGE_BYTES + 2) // 3)
 MAX_METADATA_BYTES = 16 * 1024
+HISTOGRAM_BINS = 256
+HISTOGRAM_BYTES = (4 * HISTOGRAM_BINS + 1) * 4
 MAX_PATCH_BYTES = 64 * 1024
 MAX_SETTINGS_BYTES = 256 * 1024
 MAX_EDITS = 256
@@ -99,6 +101,7 @@ class PreviewFrame:
     interaction_sequence: int | None = None
     point_color_range_index: int | None = None
     sharpen_preview: str | None = None
+    histogram_data: bytes | None = field(default=None, repr=False)
 
     @property
     def crop_display(self):
@@ -543,6 +546,7 @@ def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=N
             raise ValueError()
         metadata = _decode(text.encode("utf-8"))
         allowed = {"id", "width", "height"}
+        allowed.add("histogram")
         if point_color_range_index is not None:
             allowed.add('pointColorRangeIndex')
         if sharpen_preview is not None:
@@ -560,6 +564,22 @@ def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=N
         if not isinstance(metadata, dict) or set(metadata) != allowed or \
                 type(metadata["id"]) is not int or metadata["id"] != photo_id:
             raise ValueError()
+        histogram = metadata["histogram"]
+        channels = ("r", "g", "b", "luma")
+        if not isinstance(histogram, dict) or set(histogram) != {*channels, "samples"}:
+            raise ValueError()
+        samples = histogram["samples"]
+        if type(samples) is not int or not 0 < samples <= 0xffffffff:
+            raise ValueError()
+        bins = []
+        for channel in channels:
+            values = histogram[channel]
+            if not isinstance(values, list) or len(values) != HISTOGRAM_BINS or \
+                    any(type(value) is not int or not 0 <= value <= 0xffffffff for value in values) or \
+                    sum(values) != samples:
+                raise ValueError()
+            bins.extend(values)
+        histogram_data = struct.pack("<1025I", *bins, samples)
         if point_color_range_index is not None and (type(metadata['pointColorRangeIndex']) is not int
                 or metadata['pointColorRangeIndex'] != point_color_range_index):
             raise ValueError()
@@ -619,7 +639,7 @@ def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=N
                 opened.verify()
             with Image.open(io.BytesIO(raw)) as opened:
                 opened.load()
-        return (raw, w, h, metadata) if quality is not None or frame_only else (raw, w, h)
+        return raw, w, h, metadata, histogram_data
     except Exception:
         # Never retain a Pillow/upstream exception (or its image/path-bearing traceback).
         raise LightCraftError("lightcraft_invalid_preview") from None
@@ -643,7 +663,7 @@ def _validate_crop_png(result, photo_id, max_side, quality, expected):
         replacement = {'type':'text','text':json.dumps(normalized)}
         validated = _validate_png({**result,'content':[replacement if c is text else c for c in result['content']]},
                                  photo_id, max_side, quality=quality)
-        return (*validated[:3], meta)
+        return (*validated[:3], meta, validated[4])
     except Exception:
         raise LightCraftError('lightcraft_invalid_preview') from None
 
@@ -660,7 +680,7 @@ def _validate_simple_crop_png(result, photo_id, max_side, expected):
         validated = _validate_png({**result, 'content': [replacement if c is text else c for c in result['content']]},
                                   photo_id, max_side, frame_only=True)
         meta.update(canonicalGeometry=expected['canonicalGeometry'], bitmapSpace='oriented-warped-unstraightened-flipped')
-        return (*validated[:3], meta)
+        return (*validated[:3], meta, validated[4])
     except Exception:
         raise LightCraftError('lightcraft_invalid_preview') from None
 
@@ -818,6 +838,8 @@ class LightCraftRawSession:
             # A version string cannot authorize stamping a saved Recipe with a source commit.
             raise LightCraftError('raw_unverified_artifact')
         if artifact.get("headlessResidentContract") != 1:
+            raise LightCraftError("raw_unverified_artifact")
+        if artifact.get("histogramContract") != 1:
             raise LightCraftError("raw_unverified_artifact")
         if self._desynchronized and not allow_desync:
             raise LightCraftError("raw_session_desynchronized")
@@ -3235,7 +3257,7 @@ class LightCraftRawSession:
                     validation_ms = (monotonic() - validation_started) * 1000
                     del result
                     data, w, h = image[:3]
-                    metadata = image[3] if ticket.adaptive or frame_only else None
+                    metadata, histogram_data = image[3:5]
                     if ticket.kind == "before" and metadata is not None:
                         photo.before_fingerprint = metadata["beforeFingerprint"]
                     actual_quality = "full" if frame_only or simple_crop else ticket.quality
@@ -3257,7 +3279,7 @@ class LightCraftRawSession:
                                              ticket.sequence, w, h, data, kind=ticket.kind, key=ticket.key,
                                              quality=actual_quality,
                                              _crop_json=json.dumps({k:metadata[k] for k in ('canonicalGeometry','bitmapSpace')}) if crop_expected else None,
-                                             _frame_json=json.dumps(metadata["frame"]) if metadata else None,
+                                             _frame_json=json.dumps(metadata["frame"]) if isinstance(metadata.get("frame"), dict) else None,
                                              _metrics_json=json.dumps({"nativeMs": native_ms,
                                                  "validationMs": validation_ms,
                                                  "pngSha256": digest})
@@ -3265,7 +3287,8 @@ class LightCraftRawSession:
                                              interaction_id=ticket.interaction_id,
                                              interaction_sequence=ticket.interaction_sequence,
                                              point_color_range_index=ticket.point_color_range_index,
-                                             sharpen_preview=ticket.sharpen_preview)
+                                             sharpen_preview=ticket.sharpen_preview,
+                                             histogram_data=histogram_data)
                         if ticket.kind == "before":
                             self._before_cache = frame
                         ticket._finish(frame)

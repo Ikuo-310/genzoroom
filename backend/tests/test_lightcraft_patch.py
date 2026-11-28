@@ -17,6 +17,7 @@ def test_manifest_patch_digest_and_targets():
     assert value["version"] == "0.20.0"
     assert value["commit"] == "192ff72923c39e6623f2c7ff67ab3a119deb8071"
     assert value['wholeFrameContract'] == 1
+    assert value['histogramContract'] == 1
     assert len(value["patches"]) == 1
     patch = (build.ROOT / value["patches"][0]["file"]).read_text(encoding="utf-8")
     assert '"include_frame"' in patch
@@ -28,11 +29,13 @@ def test_manifest_patch_digest_and_targets():
     {'wholeFrameContract': True}, {'wholeFrameContract': 2},
     {'developmentTargetDir': None}, {'developmentTargetDir': '../target'},
     {'cropEditContract': True}, {'cropEditContract': 2},
+    {'histogramContract': True}, {'histogramContract': 2},
 ])
 def test_whole_frame_manifest_rejects_invalid_contract_or_target(tmp_path, changes):
     path = tmp_path / 'manifest.json'
     path.write_text(json.dumps({**build.manifest(), **changes}), encoding='utf-8')
-    with pytest.raises(ValueError, match='invalid Whole Frame contract'):
+    expected = 'invalid histogram contract' if 'histogramContract' in changes else 'invalid Whole Frame contract'
+    with pytest.raises(ValueError, match=expected):
         build.manifest(path)
 
 
@@ -49,6 +52,7 @@ def test_whole_frame_receipt_claims_only_managed_preview_contracts(tmp_path):
     assert receipt['wbContract'] == 1
     assert receipt['pointColorRangeContract'] == 1
     assert receipt['sharpenPreviewContract'] == 1
+    assert receipt['histogramContract'] == 1
 
 
 @pytest.mark.parametrize('value', [True, 2, None])

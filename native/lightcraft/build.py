@@ -61,6 +61,8 @@ def manifest(path=None):
             raise ValueError('invalid sharpening preview contract')
         if 'headlessResidentContract' in value and (type(value['headlessResidentContract']) is not int or value['headlessResidentContract'] != 1):
             raise ValueError('invalid headless resident contract')
+        if 'histogramContract' in value and (type(value['histogramContract']) is not int or value['histogramContract'] != 1):
+            raise ValueError('invalid histogram contract')
     if 'geometryDescriptorContract' in value and 'wholeFrameContract' not in value:
         if 'cropEditContract' in value and (type(value['cropEditContract']) is not int or value['cropEditContract'] != 1):
             raise ValueError('unsupported crop editing contract')
@@ -140,6 +142,15 @@ def prepare(source, spec, apply=False):
 
 def probe_whole_frame(binary, spec):
     """Verify the P1 binary's actual MCP schema, settings and Whole response."""
+    def valid_histogram(histogram):
+        if not isinstance(histogram, dict) or set(histogram) != {'r', 'g', 'b', 'luma', 'samples'}:
+            return False
+        samples = histogram['samples']
+        return type(samples) is int and samples > 0 and all(
+            isinstance(histogram[channel], list) and len(histogram[channel]) == 256
+            and all(type(value) is int and 0 <= value <= 0xffffffff for value in histogram[channel])
+            and sum(histogram[channel]) == samples
+            for channel in ('r', 'g', 'b', 'luma'))
     with tempfile.TemporaryDirectory(prefix='genzoroom-whole-') as folder:
         source = Path(folder) / 'probe.png'
         def chunk(kind, data):
@@ -167,6 +178,9 @@ def probe_whole_frame(binary, spec):
             tool(17, 'estimate_white_balance', {'id': '1', 'wb_contract': 1, 'operation': 'pick',
                  'settingsFingerprint': 'a' * 64, 'requestId': 'd' * 32,
                  'frame': {'kind': 'after', 'geometryId': 'c' * 64, 'maxSide': 32, 'quality': 'full', 'x': -0.1, 'y': 0.5}}),
+            tool(18, 'render_preview', {'id': 1, 'max_side': 32, 'before': True, 'quality': 'full'}),
+            tool(19, 'render_preview', {'id': 1, 'max_side': 32, 'before': False, 'quality': 'draft'}),
+            tool(20, 'render_preview', {'id': 1, 'max_side': 32, 'before': True, 'quality': 'draft'}),
         ]
         if spec.get('cropEditContract') == 1:
             messages += [tool(10, 'command_run', {'id': 'crop.set', 'params': {'rect': [0.2, 0.2, 0.8, 0.8]}}),
@@ -184,6 +198,8 @@ def probe_whole_frame(binary, spec):
             raise ValueError('binary version mismatch')
         preview = next(t for t in replies[2]['result']['tools'] if t['name'] == 'render_preview')
         properties = preview['inputSchema']['properties']
+        if spec.get('histogramContract') == 1 and preview.get('_meta', {}).get('genzoroom.histogramContract') != 1:
+            raise ValueError('binary Histogram contract mismatch')
         if properties.get('include_frame', {}).get('type') != 'boolean' or \
                 any(key in properties for key in ('stage_cache', 'stage_cache_budget_bytes', 'preview_contract')):
             raise ValueError('binary Whole schema mismatch')
@@ -217,6 +233,10 @@ def probe_whole_frame(binary, spec):
         png = base64.b64decode(image['data'], validate=True)
         frame = meta['frame']
         expected_meta = {'id', 'width', 'height', 'frame'}
+        if spec.get('histogramContract') == 1:
+            expected_meta.add('histogram')
+            if not valid_histogram(meta.get('histogram')):
+                raise ValueError('binary Whole Histogram shape or sample count mismatch')
         if spec.get('beforeAfterContract') == 1:
             expected_meta |= {'kind', 'quality'}
         if set(meta) != expected_meta or meta['id'] != 1 or image['mimeType'] != 'image/png' \
@@ -227,6 +247,15 @@ def probe_whole_frame(binary, spec):
                 or not re.fullmatch(r'[a-f0-9]{64}', frame['geometryId']) or not math.isfinite(frame['aspect']) or frame['aspect'] <= 0 \
                 or spec.get('beforeAfterContract') == 1 and (meta['kind'] != 'after' or meta['quality'] != 'full'):
             raise ValueError(f"binary Whole image/frame mismatch: image={(meta.get('width'), meta.get('height'))}, frame={(frame.get('fullWidth'), frame.get('fullHeight'), frame.get('nativeWidth'), frame.get('nativeHeight'), frame.get('window'))}")
+        if spec.get('histogramContract') == 1:
+            for index, kind, quality in ((8, 'after', 'full'), (18, 'before', 'full'), (19, 'after', 'draft'), (20, 'before', 'draft')):
+                reply = replies[index]['result']
+                mode_meta = json.loads(next(c['text'] for c in reply['content'] if c['type'] == 'text'))
+                if reply.get('isError') is not False or mode_meta.get('kind') != kind or mode_meta.get('quality') != quality \
+                        or not valid_histogram(mode_meta.get('histogram')):
+                    raise ValueError(f'binary Histogram mode probe failed: {kind}/{quality}')
+            histogram_bytes = len(json.dumps(meta['histogram'], separators=(',', ':')).encode())
+            print(f'Histogram JSON payload: {histogram_bytes} bytes per metadata copy')
         if spec.get('cropEditContract') == 1:
             if any(replies[i]['result'].get('isError') is not False for i in (10, 11)):
                 raise ValueError('binary crop-edit operation failed')
@@ -709,7 +738,8 @@ def receipt(binary, spec):
                 **({'wbContract': 1} if spec.get('wbContract') == 1 else {}),
                 **({'pointColorRangeContract': 1} if spec.get('pointColorRangeContract') == 1 else {}),
                 **({'sharpenPreviewContract': 1} if spec.get('sharpenPreviewContract') == 1 else {}),
-                **({'headlessResidentContract': 1} if spec.get('headlessResidentContract') == 1 else {})}
+                **({'headlessResidentContract': 1} if spec.get('headlessResidentContract') == 1 else {}),
+                **({'histogramContract': 1} if spec.get('histogramContract') == 1 else {})}
     return {"version": spec["version"], "commit": spec["commit"], "patches": spec["patches"],
             "binarySha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "beforeContract": 1, "previewContract": 1, "regionContract": 1,
             "geometryDescriptorContract": spec['geometryDescriptorContract'],
@@ -737,6 +767,9 @@ def main():
             if spec.get('wholeFrameContract') == 1:
                 run(['cargo', 'test', '--release', '--locked', '-p', 'lightcraft-mcp', '--target-dir', str(target),
                      'whole_frame_metadata_matches_png_and_legacy_render', '--', '--test-threads=1'], cwd=args.source)
+                if spec.get('histogramContract') == 1:
+                    run(['cargo', 'test', '--release', '--locked', '-p', 'lightcraft-mcp', '--target-dir', str(target),
+                         'whole_preview_reports_before_after_and_actual_quality', '--', '--test-threads=1'], cwd=args.source)
                 if spec.get('cropEditContract') == 1:
                     run(['cargo', 'test', '--release', '--locked', '-p', 'lightcraft-mcp', '--target-dir', str(target),
                          'crop_edit_returns_uncropped_frame_without_changing_settings', '--', '--test-threads=1'], cwd=args.source)
