@@ -3,7 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useRawDocument } from './useRawDocument';
-import { RawRecipeSave, type RawDraftDiscardDecision } from './rawRecipeSave';
+import { RawRecipeSave } from './rawRecipeSave';
 import { RawControls } from './rawControls';
 import * as api from './rawApi';
 import { rawSettings } from './test/rawSettings';
@@ -63,7 +63,7 @@ afterEach(async () => {
   host.remove(); vi.unstubAllGlobals();
 });
 
-it('preserves an unresolved public Point Color History operation instead of discarding its workspace', async () => {
+it('discards the Workspace after an unresolved History operation without retrying or rolling it back', async () => {
   await act(async () => { root.render(<Harness />); }); await flush();
   expect(current).toMatchObject({ status: 'ready', history: { initialized: true } });
   const unknownSave = new api.RawSaveError('raw_history_save_failed', 'unknown');
@@ -76,26 +76,34 @@ it('preserves an unresolved public Point Color History operation instead of disc
   expect(pendingSave).toMatchObject({ action: 'operate', operation: { kind: 'pointColorDelete', metadata: { index: 0 } } });
   expect(current).toMatchObject({ saving: false, movingHistory: false, saveError: 'raw_history_save_failed' });
 
-  await expect(act(async () => current!.discardChanges())).rejects.toMatchObject({ code: 'raw_save_unconfirmed' });
-  expect(api.discardRawWorkspace).not.toHaveBeenCalled();
-  act(() => current!.operate({ kind: 'pointColorReset', metadata: {} }));
-  await flush();
-  expect(commitHistory).toHaveBeenCalledOnce();
-
-  commitHistory.mockImplementationOnce(async request => rawHistoryResult(request));
-  await act(async () => { await current!.retrySave(); });
-  expect(commitHistory).toHaveBeenCalledTimes(2);
-  expect(commitHistory.mock.calls[1]![0]).toEqual(pendingSave);
   await act(async () => { await current!.discardChanges(); });
   expect(api.discardRawWorkspace).toHaveBeenCalledOnce();
   expect(api.discardRawWorkspace).toHaveBeenCalledWith({ workspaceId: 'workspace-a' });
+  expect(commitHistory).toHaveBeenCalledOnce();
+  expect(commitHistory.mock.calls[0]![0]).toEqual(pendingSave);
+});
+
+it('allows explicit discard after Native Cancel and automatic recovery discard both fail', async () => {
+  vi.mocked(api.cancelRawPointColorInteraction).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'));
+  vi.mocked(api.discardRawWorkspace).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed')).mockResolvedValueOnce();
+  vi.mocked(api.rawWorkspaceEmpty).mockResolvedValue(false);
+  await act(async () => { root.render(<Harness />); }); await flush();
+  act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); }); await flush();
+
+  act(() => current!.cancelPointColorInteraction());
+  await flush();
+  expect(api.cancelRawPointColorInteraction).toHaveBeenCalledOnce();
+  expect(api.discardRawWorkspace).toHaveBeenCalledOnce();
+
+  await act(async () => { await current!.discardChanges(); });
+  expect(api.discardRawWorkspace).toHaveBeenCalledTimes(2);
+  expect(api.discardRawWorkspace).toHaveBeenLastCalledWith({ workspaceId: 'workspace-a' });
 });
 
 it('disposes the explicit discard owner resources after a later open completes its retry', async () => {
   const saverDispose = vi.spyOn(RawRecipeSave.prototype, 'dispose');
   const editorDispose = vi.spyOn(RawControls.prototype, 'dispose');
   const retryDiscard = deferred<void>();
-  vi.mocked(api.cancelRawPointColorInteraction).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'));
   vi.mocked(api.discardRawWorkspace).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'))
     .mockRejectedValueOnce(new api.RawApiError('raw_connection_failed')).mockReturnValueOnce(retryDiscard.promise);
   vi.mocked(api.rawWorkspaceEmpty).mockResolvedValue(false);
@@ -103,13 +111,12 @@ it('disposes the explicit discard owner resources after a later open completes i
   await act(async () => { root.render(<Harness />); }); await flush();
   act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); }); await flush();
   await expect(act(async () => current!.discardChanges())).rejects.toMatchObject({ code: 'raw_connection_failed' });
-  expect(api.discardRawWorkspace).toHaveBeenCalledTimes(2);
-  expect(saverDispose).not.toHaveBeenCalled();
-  expect(editorDispose).not.toHaveBeenCalled();
+  expect(api.discardRawWorkspace).toHaveBeenCalledTimes(1);
+  expect(saverDispose).toHaveBeenCalledWith(true);
+  expect(editorDispose).toHaveBeenCalledOnce();
 
   await act(async () => { root.render(<Harness id="b" />); }); await flush();
-  expect(api.discardRawWorkspace).toHaveBeenCalledTimes(3);
-  expect(saverDispose).not.toHaveBeenCalled();
+  expect(api.discardRawWorkspace).toHaveBeenCalledTimes(2);
   await act(async () => { root.render(<Harness id="c" />); }); await flush();
   await act(async () => { retryDiscard.resolve(); await flush(); });
   expect(api.discardRawWorkspace).toHaveBeenCalledTimes(3);
@@ -139,21 +146,20 @@ it('runs common cleanup after an initial explicit discard succeeds', async () =>
   editorDispose.mockRestore();
 });
 
-it('runs common cleanup when the same explicit discard owner is retried successfully', async () => {
+it('retries the same Workspace discard owner after an uncertain Backend response', async () => {
   const saverDispose = vi.spyOn(RawRecipeSave.prototype, 'dispose');
   const editorDispose = vi.spyOn(RawControls.prototype, 'dispose');
-  vi.mocked(api.discardRawWorkspace).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'))
-    .mockRejectedValueOnce(new api.RawApiError('raw_connection_failed')).mockResolvedValueOnce();
+  vi.mocked(api.discardRawWorkspace).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed')).mockResolvedValueOnce();
   vi.mocked(api.rawWorkspaceEmpty).mockResolvedValue(false);
   await act(async () => { root.render(<Harness />); }); await flush();
   act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); }); await flush();
 
   await expect(act(async () => current!.discardChanges())).rejects.toMatchObject({ code: 'raw_connection_failed' });
-  expect(saverDispose).not.toHaveBeenCalled();
-  expect(editorDispose).not.toHaveBeenCalled();
+  expect(saverDispose).toHaveBeenCalledWith(true);
+  expect(editorDispose).toHaveBeenCalledOnce();
   await act(async () => { await current!.discardChanges(); });
 
-  expect(api.discardRawWorkspace).toHaveBeenCalledTimes(3);
+  expect(api.discardRawWorkspace).toHaveBeenCalledTimes(2);
   expect(saverDispose).toHaveBeenCalledOnce();
   expect(editorDispose).toHaveBeenCalledOnce();
   saverDispose.mockRestore();
@@ -163,19 +169,18 @@ it('runs common cleanup when the same explicit discard owner is retried successf
 it('runs common cleanup when a later open confirms an explicit discard is already empty', async () => {
   const saverDispose = vi.spyOn(RawRecipeSave.prototype, 'dispose');
   const editorDispose = vi.spyOn(RawControls.prototype, 'dispose');
-  vi.mocked(api.cancelRawPointColorInteraction).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'));
   vi.mocked(api.discardRawWorkspace).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'))
     .mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'));
-  vi.mocked(api.rawWorkspaceEmpty).mockResolvedValueOnce(false).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+  vi.mocked(api.rawWorkspaceEmpty).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
   await act(async () => { root.render(<Harness />); }); await flush();
   act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); }); await flush();
 
   await expect(act(async () => current!.discardChanges())).rejects.toMatchObject({ code: 'raw_connection_failed' });
-  expect(saverDispose).not.toHaveBeenCalled();
-  expect(editorDispose).not.toHaveBeenCalled();
+  expect(saverDispose).toHaveBeenCalledWith(true);
+  expect(editorDispose).toHaveBeenCalledOnce();
   await act(async () => { root.render(<Harness id="b" />); }); await flush();
 
-  expect(api.rawWorkspaceEmpty).toHaveBeenCalledTimes(3);
+  expect(api.rawWorkspaceEmpty).toHaveBeenCalledTimes(2);
   expect(api.discardRawWorkspace).toHaveBeenCalledTimes(2);
   expect(saverDispose).toHaveBeenCalledOnce();
   expect(editorDispose).toHaveBeenCalledOnce();
@@ -184,7 +189,7 @@ it('runs common cleanup when a later open confirms an explicit discard is alread
   editorDispose.mockRestore();
 });
 
-it('releases instead of discarding when Finish wins an explicit discard and then confirms History', async () => {
+it('discards without waiting for an in-flight Point Color Finish', async () => {
   const saverDispose = vi.spyOn(RawRecipeSave.prototype, 'dispose');
   const editorDispose = vi.spyOn(RawControls.prototype, 'dispose');
   await act(async () => { root.render(<Harness />); }); await flush();
@@ -200,47 +205,21 @@ it('releases instead of discarding when Finish wins an explicit discard and then
   let discarded!: Promise<void>;
   act(() => { discarded = current!.discardChanges(); void discarded.catch(() => {}); });
   await flush();
-  expect(api.discardRawWorkspace).not.toHaveBeenCalled();
+  expect(api.discardRawWorkspace).toHaveBeenCalledOnce();
   expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
 
-  await act(async () => { root.render(<Harness id="b" />); }); await flush();
+  await act(async () => { await discarded; });
+  expect(api.discardRawWorkspace).toHaveBeenCalledWith({ workspaceId: 'workspace-a' });
+  expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
   expect(api.openRawDocument).toHaveBeenCalledOnce();
-  vi.mocked(api.releaseRawWorkspace).mockRejectedValueOnce(new api.RawApiError('raw_connection_failed'));
-  await act(async () => { history.resolve(rawHistoryResult(finish)); await discarded; await flush(); });
-  expect(api.discardRawWorkspace).not.toHaveBeenCalled();
-  expect(api.releaseRawWorkspace).toHaveBeenCalledTimes(2);
-  expect(vi.mocked(api.releaseRawWorkspace).mock.calls).toEqual([['workspace-a'], ['workspace-a']]);
-  expect(vi.mocked(api.releaseRawWorkspace).mock.invocationCallOrder[1]).toBeLessThan(
-    vi.mocked(api.openRawDocument).mock.invocationCallOrder[1]);
-  expect(api.openRawDocument).toHaveBeenCalledTimes(2);
-  expect(vi.mocked(api.openRawDocument).mock.calls[1]![1]).toBe('b');
+  await act(async () => { history.resolve(rawHistoryResult(finish)); await flush(); });
   expect(saverDispose).toHaveBeenCalledOnce();
   expect(editorDispose).toHaveBeenCalledOnce();
   saverDispose.mockRestore();
   editorDispose.mockRestore();
 });
 
-it('rechecks the same Saver immediately before sending a proven-draft discard', async () => {
-  await act(async () => { root.render(<Harness />); }); await flush();
-  act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); }); await flush();
-  const original = RawRecipeSave.prototype.canDiscardWorkspace;
-  let checks = 0;
-  const safety = vi.spyOn(RawRecipeSave.prototype, 'canDiscardWorkspace').mockImplementation(function (this: RawRecipeSave,
-    decision?: RawDraftDiscardDecision) {
-    checks++;
-    return checks === 4 ? false : original.call(this, decision);
-  });
-
-  await expect(act(async () => current!.discardChanges())).rejects.toMatchObject({ code: 'raw_save_unconfirmed' });
-  expect(checks).toBeGreaterThanOrEqual(4);
-  expect(api.discardRawWorkspace).not.toHaveBeenCalled();
-  safety.mockRestore();
-
-  await act(async () => { await current!.discardChanges(); });
-  expect(api.discardRawWorkspace).toHaveBeenCalledOnce();
-});
-
-it('keeps an unknown Finish save and retries it before releasing the same workspace', async () => {
+it('discards after an unknown Point Color Finish result without retrying it', async () => {
   await act(async () => { root.render(<Harness />); }); await flush();
   act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); }); await flush();
   act(() => current!.updatePointColorInteraction(38));
@@ -250,23 +229,16 @@ it('keeps an unknown Finish save and retries it before releasing the same worksp
   act(() => current!.finishPointColorInteraction()); await flush();
   expect(commitHistory).toHaveBeenCalledOnce();
   const uncertainRequest = commitHistory.mock.calls[0]![0];
-  await expect(act(async () => current!.discardChanges())).rejects.toMatchObject({ code: 'raw_history_save_failed' });
-  expect(api.discardRawWorkspace).not.toHaveBeenCalled();
-  expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
-
-  commitHistory.mockImplementationOnce(async request => rawHistoryResult(request));
-  await act(async () => { await current!.retrySave(); });
-  expect(commitHistory).toHaveBeenCalledTimes(2);
-  expect(commitHistory.mock.calls[1]![0]).toEqual(uncertainRequest);
   await act(async () => { await current!.discardChanges(); });
-  expect(api.discardRawWorkspace).not.toHaveBeenCalled();
-  expect(api.releaseRawWorkspace).toHaveBeenCalledOnce();
-  expect(api.releaseRawWorkspace).toHaveBeenCalledWith('workspace-a');
+  expect(api.discardRawWorkspace).toHaveBeenCalledOnce();
+  expect(api.discardRawWorkspace).toHaveBeenCalledWith({ workspaceId: 'workspace-a' });
+  expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
+  expect(commitHistory).toHaveBeenCalledOnce();
+  expect(commitHistory.mock.calls[0]![0]).toEqual(uncertainRequest);
 });
 
-it('releases after Finish succeeds when P1 cannot prove the interaction is draft-only', async () => {
+it('discards even when a Point Color Finish has not produced a durable result', async () => {
   await act(async () => { root.render(<Harness />); }); await flush();
-  expect(current).toMatchObject({ status: 'ready', locked: false, history: { initialized: true }, frame: expect.any(Object), imageRevision: 1 });
   act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); }); await flush();
   act(() => current!.updatePointColorInteraction(28));
   await new Promise(resolve => setTimeout(resolve, 60)); await flush();
@@ -275,12 +247,8 @@ it('releases after Finish succeeds when P1 cannot prove the interaction is draft
   act(() => current!.finishPointColorInteraction()); await flush();
   expect(commitHistory).toHaveBeenCalledOnce();
 
-  let request!: Promise<void>;
-  act(() => { request = current!.discardChanges(); void request.catch(() => {}); });
-  await flush();
-  expect(api.discardRawWorkspace).not.toHaveBeenCalled();
+  await act(async () => { await current!.discardChanges(); });
+  expect(api.discardRawWorkspace).toHaveBeenCalledOnce();
   await act(async () => { history.resolve(rawHistoryResult(commitHistory.mock.calls[0]![0])); await flush(); });
-  await expect(request).resolves.toBeUndefined();
-  expect(api.discardRawWorkspace).not.toHaveBeenCalled();
-  expect(api.releaseRawWorkspace).toHaveBeenCalledOnce();
+  expect(api.releaseRawWorkspace).not.toHaveBeenCalled();
 });

@@ -8,7 +8,7 @@ import { editClipboardInfo, copyLightcraftEditSettings, isLightcraftEditClipboar
   lightcraftWbCompatibility, lightcraftWbPayloadMode, selectLightcraftEditClipboardItems } from './editClipboard';
 import { frontendLogger } from './frontendLogging';
 import { RawControls } from './rawControls';
-import { RawRecipeSave, type RawDraftDiscardDecision } from './rawRecipeSave';
+import { RawRecipeSave } from './rawRecipeSave';
 import { RawWorkspaceTermination } from './rawWorkspaceTermination';
 import { rawWholeSide, type RawView } from './rawWholePreview';
 import { rawRegionOwner, rawRegion } from './rawApi';
@@ -1211,35 +1211,17 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       }
     };
     enqueue(open);
-    let discarded=false,discardOperation:Promise<void>|undefined;
+    let discarded = false, discardOperation: Promise<void> | undefined;
     let discardTermination: RawWorkspaceTermination | undefined;
-    let discardSaveSafeAtStart: boolean | undefined;
-    let discardDecision: RawDraftDiscardDecision | undefined;
-    let releaseAfterFinish = false;
-    let discardSaver: RawRecipeSave | undefined, discardEditor: RawControls | undefined;
-    let discardProof: { workspaceId: string; saver: RawRecipeSave; handle: string; generation: number; documentToken: string; revision: number } | undefined;
-    let discardIdentity: { workspaceId: string; handle: string; generation: number; documentToken: string; revision: number } | undefined;
-    const ownsDiscardProof = () => {
-      const doc = discardProof?.saver.confirmed;
-      return !!discardDecision?.allowed && !!discardProof && discardProof.workspaceId === workspace.current
-        && discardProof.saver.ownsPointColorDraftDiscard(discardDecision)
-        && doc?.workspaceId === discardProof.workspaceId && doc.handle === discardProof.handle
-        && doc.generation === discardProof.generation && doc.documentToken === discardProof.documentToken
-        && doc.revision === discardProof.revision;
-    };
-    const discardDocumentMatches = () => {
-      const doc = discardEditor?.confirmed;
-      return !!discardIdentity && workspace.current === discardIdentity.workspaceId && doc?.workspaceId === discardIdentity.workspaceId
-        && doc.handle === discardIdentity.handle && doc.generation === discardIdentity.generation
-        && doc.documentToken === discardIdentity.documentToken && doc.revision === discardIdentity.revision;
-    };
     const completeExplicitDiscard = (owner: RawWorkspaceTermination) => {
-      discarded=true;workspace.current=undefined;cropVisualRef.current=null;revoke();
-      discardSaver?.dispose();discardEditor?.dispose();
+      discarded = true;
+      if (workspace.current === owner.workspaceId) workspace.current = undefined;
+      cropVisualRef.current = null;
+      revoke();
       if (pointColorTermination === owner) pointColorTermination = undefined;
       if (identity.current === assetId && serial.current === currentSerial) {
         setCropPresentation(null);
-        setState({assetId,status:'error',code:'raw_document_closed'});
+        setState({ assetId, status: 'error', code: 'raw_document_closed' });
       }
     };
     const runExplicitDiscard = (owner: RawWorkspaceTermination) => {
@@ -1251,107 +1233,40 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       return discardOperation;
     };
     discardRef.current=()=>{
-      if (restarting && restartOperation) return restartOperation.then(async () => {
-        await saver?.save();
-        return discardRef.current();
-      });
-      if(discardOperation)return discardOperation;
-      if (discardTermination) {
-        discardSaveSafeAtStart = discardSaver?.canDiscardWorkspace(discardDecision) ?? true;
-        if (!discardSaveSafeAtStart) return Promise.reject(new RawApiError('raw_save_unconfirmed'));
-        return runExplicitDiscard(discardTermination);
+      if (restarting && restartOperation) return restartOperation.catch(() => {}).then(() => discardRef.current());
+      if (discardOperation) return discardOperation;
+      if (discardTermination) return runExplicitDiscard(discardTermination);
+      if (!active || identity.current !== assetId || serial.current !== currentSerial || !workspace.current)
+        return Promise.reject(new RawApiError('raw_document_closed'));
+      const ownedWorkspace = workspace.current;
+      const existingTermination = pointColorTermination;
+      if (existingTermination?.workspaceId === ownedWorkspace && existingTermination.kind === 'discard') {
+        discardTermination = existingTermination;
+        return runExplicitDiscard(existingTermination);
       }
-      if(!active || identity.current!==assetId || serial.current!==currentSerial || !workspace.current)return Promise.reject(new RawApiError('raw_document_closed'));
-      if (pointColorTermination) return Promise.reject(new RawApiError('raw_busy'));
-      const ownedWorkspace=workspace.current;
-      const ownedSaver=saver, ownedEditor=editor;
-      discardSaver=ownedSaver; discardEditor=ownedEditor;
-      const doc=ownedEditor?.confirmed;
-      const finishOwnedPointColor = !!ownedSaver?.pointColorFinishPending;
-      const pointColorGuard = !!ownedSaver?.pointColorInteracting || !!ownedSaver
-        && !ownedSaver.cropping && !ownedSaver.mixerInteracting && !ownedSaver.curveInteracting
-        && (ownedSaver.saving || ownedSaver.moving);
-      if (doc?.workspaceId === ownedWorkspace) discardIdentity = { workspaceId: ownedWorkspace, handle: doc.handle,
-        generation: doc.generation, documentToken: doc.documentToken, revision: doc.revision };
-      if (ownedSaver?.pointColorInteracting && ownedSaver) {
-        discardDecision = ownedSaver.beginPointColorDraftDiscard();
-        if (discardDecision.allowed && doc?.workspaceId === ownedWorkspace)
-          discardProof = { workspaceId: ownedWorkspace, saver: ownedSaver, handle: doc.handle,
-            generation: doc.generation, documentToken: doc.documentToken, revision: doc.revision };
-      }
-      discardSaveSafeAtStart = ownedSaver?.canDiscardWorkspace(discardDecision) ?? true;
-      retired=true;frozen.current=true;
-      setState(previous=>previous && {...previous,locked:true});
-      let discardSent = false;
-      const identityStillOwned = () => workspace.current === ownedWorkspace && discardDocumentMatches()
-        && (!discardProof || ownsDiscardProof());
+      if (existingTermination && existingTermination.workspaceId !== ownedWorkspace)
+        return Promise.reject(new RawApiError('raw_busy'));
+      const ownedSaver = saver, ownedEditor = editor;
+      retired = true;
+      frozen.current = true;
+      setState(previous => previous && ({ ...previous, locked: true }));
       const settle = async () => {
-        if (discardDecision) {
-          if (!discardDecision.allowed) {
-            await ownedSaver?.preparePointColorForDeparture();
-            const settled = ownedEditor?.confirmed;
-            if (!finishOwnedPointColor || !ownedSaver?.canDiscardWorkspace() || ownedSaver.dirty || ownedSaver.error
-              || ownedEditor?.unsettled || !settled || !discardIdentity
-              || settled.workspaceId !== discardIdentity.workspaceId || settled.handle !== discardIdentity.handle
-              || settled.generation !== discardIdentity.generation || settled.documentToken !== discardIdentity.documentToken)
-              throw new RawApiError('raw_save_unconfirmed');
-            // Finish can advance the Document revision while this owner waits; only its stable identity is retained.
-            discardIdentity = { ...discardIdentity, revision: settled.revision };
-            releaseAfterFinish = true;
-            return;
-          }
-          try { await discardDecision.cancel; } catch { /* A proven draft may be discarded even when Native Cancel is unacknowledged. */ }
-          if (!identityStillOwned() || !ownedSaver?.ownsPointColorDraftDiscard(discardDecision)
-            || !ownedSaver.canDiscardWorkspace(discardDecision))
-            throw new RawApiError('raw_save_unconfirmed');
-          return;
-        }
-        if (!discardSaveSafeAtStart || ownedSaver && !ownedSaver.canDiscardWorkspace())
-          throw new RawApiError('raw_save_unconfirmed');
-        if (pointColorGuard && (ownedSaver?.saving || ownedSaver?.error || ownedEditor?.unsettled))
-          throw new RawApiError('raw_save_unconfirmed');
-        await ownedSaver?.preparePointColorForDeparture();
-      };
-      const terminateOwned = async () => {
-        if (workspace.current !== ownedWorkspace || !identityStillOwned()) throw new RawApiError('raw_stale_handle');
-        if (discardDecision?.allowed && (!ownsDiscardProof() || !ownedSaver?.ownsPointColorDraftDiscard(discardDecision)))
-          throw new RawApiError('raw_save_unconfirmed');
-        if (ownedSaver && !ownedSaver.canDiscardWorkspace(discardDecision)) throw new RawApiError('raw_save_unconfirmed');
-        if (releaseAfterFinish) {
-          await releaseWorkspaceConfirmed(ownedWorkspace);
-          workspace.current = undefined;
-          return;
-        }
+        invalidateDisplay();
+        ownedSaver?.dispose(true);
+        ownedEditor?.dispose();
         abortRawWorkspaceRequests(ownedWorkspace);
-        const confirmEmptyOrThrow = async (failure: unknown) => {
-          if (await rawWorkspaceEmpty(ownedWorkspace)) return;
-          throw failure;
-        };
-        if (discardSent) {
-          if (await rawWorkspaceEmpty(ownedWorkspace)) { workspace.current=undefined; return; }
-          // A retry requires the original P1 proof; without it only an empty Backend can release ownership.
-          if (!ownsDiscardProof()) throw new RawApiError('raw_save_unconfirmed');
-        }
-        if (ownedSaver && !ownedSaver.canDiscardWorkspace(discardDecision)) throw new RawApiError('raw_save_unconfirmed');
-        try {
-          discardSent = true;
-          await discardRawWorkspace({workspaceId:ownedWorkspace});
-        } catch (cause) {
-          if (await rawWorkspaceEmpty(ownedWorkspace)) return;
-          if (!ownsDiscardProof()) throw cause;
-          if (ownedSaver && !ownedSaver.canDiscardWorkspace(discardDecision)) throw new RawApiError('raw_save_unconfirmed');
-          try {
-            await discardRawWorkspace({workspaceId:ownedWorkspace});
-          }
-          catch (retryCause) {
-            if (await rawWorkspaceEmpty(ownedWorkspace)) return;
-            throw retryCause;
-          }
-        }
-        workspace.current=undefined;
       };
-      // Point Color Cancel settles outside ownership; its discard joins the queue, while other tools keep the Backend drain path.
-      const terminate = async () => pointColorGuard ? owned(terminateOwned) : terminateOwned();
+      const terminate = async () => {
+        if (workspace.current !== ownedWorkspace) {
+          if (await rawWorkspaceEmpty(ownedWorkspace)) return;
+          throw new RawApiError('raw_stale_handle');
+        }
+        try { await discardRawWorkspace({ workspaceId: ownedWorkspace }); }
+        catch (cause) {
+          if (!await rawWorkspaceEmpty(ownedWorkspace)) throw cause;
+        }
+        if (workspace.current === ownedWorkspace) workspace.current = undefined;
+      };
       const termination = new RawWorkspaceTermination(ownedWorkspace, 'discard', ownedSaver, settle, terminate,
         () => completeExplicitDiscard(termination));
       discardTermination = termination;
