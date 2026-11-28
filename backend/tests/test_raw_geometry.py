@@ -89,7 +89,7 @@ def test_simple_crop_frame_is_bound_to_verified_request(fault):
         with pytest.raises(LightCraftError, match='lightcraft_invalid_preview'):
             _validate_simple_crop_png(result, 1, 1024, expected)
     else:
-        _, width, height, response = _validate_simple_crop_png(result, 1, 1024, expected)
+        _, width, height, response, _ = _validate_simple_crop_png(result, 1, 1024, expected)
         assert (width, height) == (16, 12)
         assert response['canonicalGeometry'] == expected['canonicalGeometry']
 
