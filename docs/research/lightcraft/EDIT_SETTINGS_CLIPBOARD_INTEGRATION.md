@@ -478,3 +478,27 @@ Frontendのみ変更した。Backend API／Native managed patch／manifest／Nat
 各素材のRecipeに逆方式のWBを含めて `restore_persisted_settings()` を実行した。Native readbackの現在scaleが反対の方式に切り替わった後も、Import時に保存した素材固有方式は両素材とも維持された。`apply_history_operation()` で逆方式のWBをペーストすると両方向とも `raw_wb_incompatible` になり、確定済み設定とrevisionは維持された。この確認は実Nativeを使ったアダプター境界の検証で、HTTP境界はS.3の回帰テストで確認した。
 
 今回の検証範囲で新規Findingはなかった。画素比較、性能、Nativeメニューバーは今回の検証範囲外。
+
+## T. P2 Windows Desktop Native Editメニュー
+
+### T.1 実装仕様
+
+- File／Edit／View／Helpの順に配置した。Editには「全設定をコピー／Copy all settings」「項目を選んでコピー…／Copy selected settings…」「コピー済み設定をペースト／Paste copied settings」「項目を選んでペースト…／Paste selected settings…」を配置する。Viewer menuと同じ文言・操作順で、Ctrl+C／Ctrl+Alt+C／Ctrl+V／Ctrl+Alt+Vを表示する。
+- Native項目にはacceleratorを割り当てない。Windows Desktopの編集ショートカットは既存 `editShortcuts` registryとFrontend keydown処理が引き続き所有し、Native menu clickは `dispatch_main_event()` の4イベントから既存Viewer handlerへ接続する。これによりキーボード操作の二重発火と入力欄の通常copy/paste阻害を避ける。Native側に編集・Clipboard・Selection dialog・History処理は追加していない。
+- AnshitsuPageは既存のエンジン別可否を使い、JPEGでは `clipboardEnabled`／Clipboard payload、LightCraftでは `rawClipboardBaseEnabled`／`sameEngineClipboard`／`canPasteSettings` を4項目の有効状態へ反映する。保存／復旧、写真切替・退出、Document未準備、Clipboard処理中、Settings／selection／History等のmodal/menu表示中は無効化する。DOMの既存modal/menu状態もMutationObserverで同期し、Anshitsu React state外の終了確認dialogを含める。変化のないDOM更新ではNative APIを再呼出ししない。Native click受信時にも現行ページ・state・dialog/menuを再確認して既存関数を呼ぶ。WB非互換の判定は既存hook結果を利用し、他項目が適用可能ならPasteを有効にする。
+- 4項目はNative menu生成時に無効。Frontendから現在状態を同期し、暗室component unmount時とWebView `PageLoadEvent::Started` 時に全項目を無効化する。旧Frontend listenerがない画面ではイベントは処理されない。画面遷移、owner破棄、Frontend再読み込み後に古い有効状態を残さない。
+- 既存 `set_native_menu_language` と `SettingsProvider` の初回言語同期／`languageChanged` subscriptionを拡張し、Edit名・4操作を日英で更新する。File／View／Helpは既存ラベルを維持。Dockerおよび共有Browser UIにはNative menuがない。
+- Undo／Redoは今回追加・変更していない。暗室HistoryとSTACK／Export等のワンショットUndoの各owner・操作契約を調査した上で別案件として扱う。
+
+### T.2 検証結果
+
+| 項目 | 結果 |
+| --- | --- |
+| Frontendイベント接続 | `AnshitsuRawPreview.test.tsx` でLightCraftの有効状態、Native copyイベントから既存copy APIへの配送、modal表示時の無効化とmodal中の拒否を検証。JPEGでは4イベントを既存clipboard操作へ接続し、選択dialogの表示／取消し、同一snapshotを戻す既存no-opを確認。 |
+| Frontend回帰 | `AnshitsuRawPreview.test.tsx`: **157 passed**（LightCraft／旧JPEGのNativeイベント接続、状態同期）。既存JPEG Clipboard／shortcutの `AnshitsuClipboard.test.tsx`: **129 passed**。件数は個別実行値で、P1-Eの831件には合算していない。 |
+| TypeScript／本番build | `npm run build` 成功（`tsc --noEmit`を含む）。既存の大きなbundleとReact Router `use client`警告あり。 |
+| Desktop Rust | `cargo test --locked --manifest-path desktop/Cargo.toml`: **20 passed**。Native menu日英ラベルと既存 lifecycle等を確認。`cargo check --locked --manifest-path desktop/Cargo.toml` 成功。 |
+| 実Desktop menu | 未実施。Windows上で実際のmenu描画、クリック、実行中言語変更を操作する手動確認は今回行っていない。 |
+| Docker／Browser | Docker build・Browser操作の動的確認は未実施。変更はDesktop bridge経由に限定し、共有BrowserにNative menu/event sourceを追加していない。 |
+
+P1-EのBackend 290件・Frontend 831件・実Native WB確認はS節の工程別結果として維持し、本P2の成功件数へ合算していない。実Desktopの実操作、Windows menu shortcut hintの見た目・タブ整列、既存File／View／HelpのOS描画確認が残る。実装上の新規Findingは自動検証範囲では見つからなかった。

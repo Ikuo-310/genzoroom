@@ -1178,6 +1178,8 @@ Copy reads the Backend's last confirmed settings snapshot through the document c
 
 WB is eligible only when the source photo's import mode, the copied WB scale and the destination photo's import mode agree on absolute or relative correction. A Recipe can change the active WB scale while the import mode remains fixed. The UI disables incompatible WB and allows remaining items, and the Backend rejects incompatible WB payloads. Users decide whether otherwise eligible settings suit the destination photo. See [P1-E verification](research/lightcraft/EDIT_SETTINGS_CLIPBOARD_INTEGRATION.md#s-p1-e統合検証と現行仕様).
 
+Windows Desktop adds an Edit submenu between File and View with the same four copy/paste actions as the Viewer menu. It displays Ctrl+C, Ctrl+Alt+C, Ctrl+V and Ctrl+Alt+V as hints, but registers no native accelerators; the existing Frontend shortcut registry remains the sole keyboard owner. Native menu clicks dispatch events to the mounted Anshitsu page, which reuses the existing JPEG or LightCraft operation handlers. The page sends its existing copy/paste availability to the Native menu, disables all four actions outside Anshitsu and during blocked states, and clears them on unmount or WebView reload. Existing DOM modal/menu state is observed so dialogs managed outside Anshitsu also disable the menu; event handlers independently recheck the active owner and modal/transition state before acting. The menu language follows the existing saved/runtime language synchronization. Docker and browser UI do not receive this Native menu. Undo/Redo are intentionally not included; their cross-screen ownership requires a separate design.
+
 ## JPEG editing foundation
 
 ### JPEG Viewer Zoom and Navigator

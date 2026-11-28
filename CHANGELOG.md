@@ -17,7 +17,7 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
-- Windows Desktop can copy and paste LightCraft development settings between photos from the Viewer menu or with Ctrl+C, Ctrl+Alt+C, Ctrl+V and Ctrl+Alt+V. The selection dialog offers 25 items, with Crop and Straighten excluded by default. Paste omits incompatible white balance settings, and History shows the source filename.
+- Windows Desktop can copy and paste development settings between photos from the Viewer or Native Edit menu, or with Ctrl+C, Ctrl+Alt+C, Ctrl+V and Ctrl+Alt+V. The selection dialog offers 25 items, with Crop and Straighten excluded by default. Paste omits incompatible white balance settings, and History shows the source filename.
 
 - Windows Desktop adds a Calibration category for shadows tint and RGB primary hue and saturation, with independent toggle and reset for LightCraft-supported RAW and JPEG originals.
 

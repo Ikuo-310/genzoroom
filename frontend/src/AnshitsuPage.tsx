@@ -467,6 +467,73 @@ export function AnshitsuPage() {
     return true;
   }
 
+  const nativeEditMenuActionsEnabled = !workspaceKeyboardBlocked && !clipboardActionBusy
+    && !switchingRef.current && !exitRef.current;
+  const nativeCopySettingsEnabled = nativeEditMenuActionsEnabled
+    && (usesLightcraft ? rawClipboardBaseEnabled : clipboardEnabled);
+  const nativePasteSettingsEnabled = nativeEditMenuActionsEnabled && (usesLightcraft
+    ? !!rawDocument?.sameEngineClipboard && !!rawDocument.canPasteSettings
+    : clipboardEnabled && hasClipboard && isJpegEditClipboard(readEditClipboard()));
+
+  useEffect(() => {
+    const setEditMenuState = window.__GENZOROOM_DESKTOP__?.setEditMenuState;
+    if (!setEditMenuState) return;
+    let lastModalOrMenuOpen: boolean | null = null;
+    const publish = () => {
+      const modalOrMenuOpen = !!document.querySelector(
+        'dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]');
+      if (modalOrMenuOpen === lastModalOrMenuOpen) return;
+      lastModalOrMenuOpen = modalOrMenuOpen;
+      const enabled = !modalOrMenuOpen;
+      void setEditMenuState({ copyAll: enabled && nativeCopySettingsEnabled,
+        copySelected: enabled && nativeCopySettingsEnabled,
+        paste: enabled && nativePasteSettingsEnabled,
+        pasteSelected: enabled && nativePasteSettingsEnabled }).catch(() => {});
+    };
+    publish();
+    const observer = new MutationObserver(publish);
+    observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true,
+      attributeFilter: ['open', 'role'] });
+    return () => observer.disconnect();
+  }, [nativeCopySettingsEnabled, nativePasteSettingsEnabled]);
+
+  useEffect(() => () => {
+    void window.__GENZOROOM_DESKTOP__?.setEditMenuState?.({
+      copyAll: false, copySelected: false, paste: false, pasteSelected: false,
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const available = () => nativeEditMenuActionsEnabled && !document.querySelector(
+      'dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]')
+      && !switchingRef.current && !exitRef.current;
+    const copyAll = () => {
+      if (!available() || !nativeCopySettingsEnabled) return;
+      if (usesLightcraft) copyRawSettings(); else copySettings();
+    };
+    const copySelected = () => {
+      if (available() && nativeCopySettingsEnabled) openSelection('copy');
+    };
+    const paste = () => {
+      if (!available() || !nativePasteSettingsEnabled) return;
+      if (usesLightcraft) pasteRawSettings(); else pasteSettings();
+    };
+    const pasteSelected = () => {
+      if (available() && nativePasteSettingsEnabled) openSelection('paste');
+    };
+    window.addEventListener('genzoroom:edit-copy-all', copyAll);
+    window.addEventListener('genzoroom:edit-copy-selected', copySelected);
+    window.addEventListener('genzoroom:edit-paste', paste);
+    window.addEventListener('genzoroom:edit-paste-selected', pasteSelected);
+    return () => {
+      window.removeEventListener('genzoroom:edit-copy-all', copyAll);
+      window.removeEventListener('genzoroom:edit-copy-selected', copySelected);
+      window.removeEventListener('genzoroom:edit-paste', paste);
+      window.removeEventListener('genzoroom:edit-paste-selected', pasteSelected);
+    };
+  }, [nativeEditMenuActionsEnabled, nativeCopySettingsEnabled, nativePasteSettingsEnabled, usesLightcraft,
+    copyRawSettings, copySettings, pasteRawSettings, pasteSettings, openSelection]);
+
   function pasteCategorySettings(categoryId: AdjustmentCategoryId) {
     const category = ADJUSTMENT_SELECTION_CATEGORIES.find(({ id }) => id === categoryId);
     return category ? pasteSettings(category.ids) : false;

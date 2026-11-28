@@ -154,7 +154,8 @@ fn run() -> Result<(), &'static str> {
         .manage(state.clone())
         .invoke_handler(tauri::generate_handler![
             lifecycle::desktop_lifecycle,
-            set_native_menu_language
+            set_native_menu_language,
+            set_native_edit_menu_state
         ])
         .menu(|app| {
             let preferences =
@@ -194,13 +195,59 @@ fn run() -> Result<(), &'static str> {
                 true,
                 &[&diagnostics, &help_separator, &about],
             )?;
-            Menu::with_items(app, &[&file, &view, &help])
+            let copy_all = MenuItem::with_id(
+                app,
+                "edit-copy-all",
+                "Copy all settings\tCtrl+C",
+                false,
+                None::<&str>,
+            )?;
+            let copy_selected = MenuItem::with_id(
+                app,
+                "edit-copy-selected",
+                "Copy selected settings…\tCtrl+Alt+C",
+                false,
+                None::<&str>,
+            )?;
+            let edit_separator = PredefinedMenuItem::separator(app)?;
+            let paste = MenuItem::with_id(
+                app,
+                "edit-paste",
+                "Paste copied settings\tCtrl+V",
+                false,
+                None::<&str>,
+            )?;
+            let paste_selected = MenuItem::with_id(
+                app,
+                "edit-paste-selected",
+                "Paste selected settings…\tCtrl+Alt+V",
+                false,
+                None::<&str>,
+            )?;
+            let edit = Submenu::with_id_and_items(
+                app,
+                "edit",
+                "Edit",
+                true,
+                &[
+                    &copy_all,
+                    &copy_selected,
+                    &edit_separator,
+                    &paste,
+                    &paste_selected,
+                ],
+            )?;
+            Menu::with_items(app, &[&file, &edit, &view, &help])
         })
         .on_menu_event(move |app, event| match event.id().as_ref() {
             "diagnostics" => open_diagnostics(app, port),
             "preferences" => dispatch_main_event(app, "genzoroom:open-settings"),
             "lens-database" => dispatch_main_event(app, "genzoroom:open-lens-database"),
             "about" => dispatch_main_event(app, "genzoroom:show-about"),
+            "edit-copy-all" => dispatch_main_event(app, "genzoroom:edit-copy-all"),
+            "edit-copy-selected" => dispatch_main_event(app, "genzoroom:edit-copy-selected"),
+            "edit-paste" => dispatch_main_event(app, "genzoroom:edit-paste"),
+            "edit-paste-selected" => dispatch_main_event(app, "genzoroom:edit-paste-selected"),
             "exit" => {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.close();
@@ -301,9 +348,45 @@ fn dispatch_main_event(app: &tauri::AppHandle, event_name: &str) {
     }
 }
 
+#[tauri::command]
+fn set_native_edit_menu_state(
+    app: tauri::AppHandle,
+    copy_all: bool,
+    copy_selected: bool,
+    paste: bool,
+    paste_selected: bool,
+) -> Result<(), String> {
+    let menu = app
+        .menu()
+        .ok_or_else(|| "native_menu_unavailable".to_owned())?;
+    let edit = menu
+        .get("edit")
+        .and_then(|kind| kind.as_submenu().cloned())
+        .ok_or_else(|| "native_menu_submenu_missing".to_owned())?;
+    for (id, enabled) in [
+        ("edit-copy-all", copy_all),
+        ("edit-copy-selected", copy_selected),
+        ("edit-paste", paste),
+        ("edit-paste-selected", paste_selected),
+    ] {
+        let item = edit
+            .get(id)
+            .and_then(|kind| kind.as_menuitem().cloned())
+            .ok_or_else(|| "native_menu_item_missing".to_owned())?;
+        item.set_enabled(enabled)
+            .map_err(|_| "native_menu_update_failed".to_owned())?;
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct NativeMenuLabels {
     file: &'static str,
+    edit: &'static str,
+    copy_all: &'static str,
+    copy_selected: &'static str,
+    paste: &'static str,
+    paste_selected: &'static str,
     preferences: &'static str,
     lens_database: &'static str,
     exit: &'static str,
@@ -318,6 +401,11 @@ fn native_menu_labels(language: &str) -> Result<NativeMenuLabels, &'static str> 
     match language {
         "ja" => Ok(NativeMenuLabels {
             file: "ファイル",
+            edit: "編集",
+            copy_all: "全設定をコピー\tCtrl+C",
+            copy_selected: "項目を選んでコピー…\tCtrl+Alt+C",
+            paste: "コピー済み設定をペースト\tCtrl+V",
+            paste_selected: "項目を選んでペースト…\tCtrl+Alt+V",
             preferences: "環境設定",
             lens_database: "レンズデータベースを管理…",
             exit: "終了",
@@ -329,6 +417,11 @@ fn native_menu_labels(language: &str) -> Result<NativeMenuLabels, &'static str> 
         }),
         "en" => Ok(NativeMenuLabels {
             file: "File",
+            edit: "Edit",
+            copy_all: "Copy all settings\tCtrl+C",
+            copy_selected: "Copy selected settings…\tCtrl+Alt+C",
+            paste: "Paste copied settings\tCtrl+V",
+            paste_selected: "Paste selected settings…\tCtrl+Alt+V",
             preferences: "Preferences",
             lens_database: "Manage Lens Database…",
             exit: "Exit",
@@ -362,6 +455,7 @@ fn set_native_menu_language(app: tauri::AppHandle, language: String) -> Result<(
         .ok_or_else(|| "native_menu_unavailable".to_owned())?;
     for (submenu_id, title) in [
         ("file", labels.file),
+        ("edit", labels.edit),
         ("view", labels.view),
         ("help", labels.help),
     ] {
@@ -373,7 +467,17 @@ fn set_native_menu_language(app: tauri::AppHandle, language: String) -> Result<(
             .set_text(title)
             .map_err(|_| "native_menu_update_failed".to_owned())?;
         let item_labels: &[(&str, &str)] = match submenu_id {
-            "file" => &[("preferences", labels.preferences), ("lens-database", labels.lens_database), ("exit", labels.exit)],
+            "file" => &[
+                ("preferences", labels.preferences),
+                ("lens-database", labels.lens_database),
+                ("exit", labels.exit),
+            ],
+            "edit" => &[
+                ("edit-copy-all", labels.copy_all),
+                ("edit-copy-selected", labels.copy_selected),
+                ("edit-paste", labels.paste),
+                ("edit-paste-selected", labels.paste_selected),
+            ],
             "view" => &[("fullscreen", labels.fullscreen)],
             _ => &[("diagnostics", labels.diagnostics), ("about", labels.about)],
         };
@@ -386,6 +490,7 @@ fn set_native_menu_language(app: tauri::AppHandle, language: String) -> Result<(
 
 fn observe_page(window: tauri::WebviewWindow, payload: tauri::webview::PageLoadPayload<'_>) {
     if window.label() == "main" && payload.event() == tauri::webview::PageLoadEvent::Started {
+        let _ = set_native_edit_menu_state(window.app_handle().clone(), false, false, false, false);
         // A reloaded document must register its own save guard before accepting Close.
         window
             .state::<std::sync::Arc<lifecycle::Lifecycle>>()
@@ -423,6 +528,11 @@ mod native_menu_tests {
             native_menu_labels("ja"),
             Ok(NativeMenuLabels {
                 file: "ファイル",
+                edit: "編集",
+                copy_all: "全設定をコピー\tCtrl+C",
+                copy_selected: "項目を選んでコピー…\tCtrl+Alt+C",
+                paste: "コピー済み設定をペースト\tCtrl+V",
+                paste_selected: "項目を選んでペースト…\tCtrl+Alt+V",
                 preferences: "環境設定",
                 lens_database: "レンズデータベースを管理…",
                 exit: "終了",
@@ -437,6 +547,11 @@ mod native_menu_tests {
             native_menu_labels("en"),
             Ok(NativeMenuLabels {
                 file: "File",
+                edit: "Edit",
+                copy_all: "Copy all settings\tCtrl+C",
+                copy_selected: "Copy selected settings…\tCtrl+Alt+C",
+                paste: "Paste copied settings\tCtrl+V",
+                paste_selected: "Paste selected settings…\tCtrl+Alt+V",
                 preferences: "Preferences",
                 lens_database: "Manage Lens Database…",
                 exit: "Exit",

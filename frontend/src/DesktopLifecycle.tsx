@@ -10,6 +10,7 @@ declare global {
   interface Window { __GENZOROOM_DESKTOP__?: {
     respond: (message: Message) => Promise<void>;
     setMenuLanguage?: (language: 'en' | 'ja') => Promise<void>;
+    setEditMenuState?: (state: { copyAll: boolean; copySelected: boolean; paste: boolean; pasteSelected: boolean }) => Promise<void>;
   } }
 }
 const Context = createContext<(guard: CloseGuard) => () => void>(() => () => {});

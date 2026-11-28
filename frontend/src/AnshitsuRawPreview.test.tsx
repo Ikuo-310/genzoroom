@@ -16,6 +16,7 @@ import { rawSettings } from './test/rawSettings';
 import { rawHistoryResult, rawHistoryData, fakeRawHistory } from './test/rawHistory';
 import { DesktopLifecycleProvider } from './DesktopLifecycle';
 import { defaultRawDevelopmentPanelUi, RAW_DEVELOPMENT_PANEL_UI_KEY, updateSetting } from './appSettings';
+import { isJpegEditClipboard, readEditClipboard } from './editClipboard';
 
 const base: AssetDetail = { id: '12345678-1234-4234-9234-123456789abc', filename: 'a.DNG',
   date: '2026-10-22', thumbnail_url: '/thumb', preview_url: '/immich-viewing', format: 'DNG', is_raw: true, exif: {} };
@@ -122,6 +123,56 @@ it('routes a non-RAW asset through Native without fetching or rendering the lega
   expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes(`/assets/${jpeg.id}/original`))).toBe(false);
   expect(host.querySelector('[data-jpeg-renderer]')).toBeNull();
   expect(host.querySelector('.viewer-panel img')?.getAttribute('src')).toBe('blob:lightcraft');
+});
+
+it('synchronizes the Native Edit menu from the active LightCraft owner and dispatches through the copy handler', async () => {
+  const setEditMenuState = vi.fn(async () => {});
+  window.__GENZOROOM_DESKTOP__ = { respond: vi.fn(async () => {}), setEditMenuState };
+  const copy = vi.spyOn(rawApi, 'readRawCopySettings').mockRejectedValue(new Error('copy rejected'));
+  await mount();
+  expect(setEditMenuState).toHaveBeenLastCalledWith({ copyAll: true, copySelected: true, paste: false, pasteSelected: false });
+  await act(async () => window.dispatchEvent(new Event('genzoroom:edit-copy-all')));
+  await flush();
+  expect(copy).toHaveBeenCalledOnce();
+  expect(setEditMenuState).toHaveBeenLastCalledWith({ copyAll: true, copySelected: true, paste: false, pasteSelected: false });
+
+  act(() => window.dispatchEvent(new Event('genzoroom:open-settings')));
+  await flush();
+  expect(setEditMenuState).toHaveBeenLastCalledWith({ copyAll: false, copySelected: false, paste: false, pasteSelected: false });
+  await act(async () => window.dispatchEvent(new Event('genzoroom:edit-copy-all')));
+  expect(copy).toHaveBeenCalledOnce();
+  copy.mockRestore();
+});
+
+it('routes all Native Edit menu entries through the existing JPEG clipboard operations', async () => {
+  developmentPolicy.engine = 'jpeg';
+  const setEditMenuState = vi.fn(async () => {});
+  window.__GENZOROOM_DESKTOP__ = { respond: vi.fn(async () => {}), setEditMenuState };
+  await mount(jpeg.id);
+  await act(async () => window.dispatchEvent(new Event('genzoroom:edit-copy-all')));
+  await flush();
+  expect(isJpegEditClipboard(readEditClipboard())).toBe(true);
+  expect(setEditMenuState).toHaveBeenLastCalledWith({ copyAll: true, copySelected: true, paste: true, pasteSelected: true });
+
+  await act(async () => window.dispatchEvent(new Event('genzoroom:edit-copy-selected')));
+  expect(host.querySelector('dialog')).not.toBeNull();
+  await flush();
+  expect(setEditMenuState).toHaveBeenLastCalledWith({ copyAll: false, copySelected: false, paste: false, pasteSelected: false });
+  await act(async () => [...host.querySelectorAll<HTMLButtonElement>('dialog button')]
+    .find(button => button.textContent === 'Cancel')!.click());
+  await flush();
+  await act(async () => window.dispatchEvent(new Event('genzoroom:edit-paste')));
+  await flush();
+  // Pasting a snapshot onto its source is an existing no-op and must not add History.
+  expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(0);
+  await act(async () => window.dispatchEvent(new Event('genzoroom:edit-paste-selected')));
+  expect(host.querySelector('dialog')).not.toBeNull();
+  await flush();
+  expect(setEditMenuState).toHaveBeenLastCalledWith({ copyAll: false, copySelected: false, paste: false, pasteSelected: false });
+  await act(async () => [...host.querySelectorAll<HTMLButtonElement>('dialog button')]
+    .find(button => button.textContent === 'Cancel')!.click());
+  await flush();
+  expect(host.querySelector('dialog')).toBeNull();
 });
 
 it('keeps the Filmstrip switch guard through Document Close and successor initialization', async () => {

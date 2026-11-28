@@ -1,5 +1,13 @@
 # GenzoRoom 開発ノート
 
+## Windows Desktop Native Editメニュー P2
+
+既存のFile／View／Helpメニューの間にEditを追加し、全設定コピー、項目選択コピー、通常ペースト、項目選択ペーストを接続した。日英の保存済み／実行中言語を既存Native menu language commandで反映する。ショートカットはCtrl+C、Ctrl+Alt+C、Ctrl+V、Ctrl+Alt+Vを表示するだけでNative acceleratorは登録せず、既存Frontend `editShortcuts` registryとViewer操作の所有権を維持した。
+
+Nativeクリックはイベントを暗室ページへ送り、既存のJPEGまたはLightCraft操作関数へ接続する。メニュー有効状態はFrontendの既存エンジン別操作可能判定を使い、起動・WebView再読み込み・暗室退出時には無効化する。DOM上のmodal/menu変化も監視し、暗室ページのReact state外で開いた終了確認dialogを含めて状態を同期する。受信時にも現行ページ、owner、写真切替、保存／終了、処理中、ダイアログ／メニュー状態を再確認する。Backend、Clipboard、History／Recipe、WB制限、LightCraft、Undo／Redoは変更していない。Undo／RedoのNative統合は各画面の操作owner調査を伴う別案件とする。
+
+関連Frontendテスト、TypeScriptを含む本番build、Desktop Rust test／checkはP2検証結果を研究記録T節に記載した。Native menuのWindows Desktop上でのクリック・表示確認は実施していない。これはRust menu構築・Frontendイベント接続の自動検証とは別の手動受入項目である。
+
 ## キャリブレーション統合
 
 Windows DesktopのLightCraft編集パネルに、初期状態で折り畳まれた独立キャリブレーションカテゴリを追加した。シャドウとRGB原色の7項目、独立ON／OFFとResetは既存の数値編集、Preview、History、Recipe、Export経路を使用する。RAWとLightCraftが受け付けるJPEGに対応し、Nativeの色変換とbypassを再利用する。managed patchの追加は不要。ユーザーからWindows Desktop実画面の受入確認が完了し、問題は報告されなかったとの連絡を受けた。操作別の確認内容は報告されていないため記載せず、この受入報告をもって統合完了とする。調査、P1、P2の検証範囲は[統合記録](research/lightcraft/CALIBRATION_INTEGRATION.md)を参照。
