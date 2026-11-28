@@ -458,6 +458,32 @@ describe('RAW History transport', () => {
     if (invalid) return expect(readRawHistory(result)).rejects.toMatchObject({ code: 'raw_invalid_response' });
     return expect(readRawHistory(result)).resolves.toMatchObject({ steps: [{ kind, metadata: {} }] });
   });
+  it('reads settings paste display metadata without a settings body', async () => {
+    const request = historyRequest('commit');
+    const result = rawHistoryResult(request, { history: { initialized: true, cursor: 1, length: 1, selectedStepId: request.saveId } });
+    const data = rawHistoryData(result);
+    data.steps[0] = { ...data.steps[0], kind: 'settingsPaste', metadata: {
+      sourceAssetId: '00000000-0000-4000-8000-000000000002', sourceFilename: 'source.jpg', selectedIds: ['basic.exposure', 'chromaticAberration'],
+    }, changes: [{ control: 'light.exposure', before: 0, after: 1 }],
+    flagChanges: [{ control: 'optics.remove_ca', before: false, after: true }] };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })));
+    await expect(readRawHistory(result)).resolves.toMatchObject({ steps: [{ kind: 'settingsPaste', metadata: {
+      sourceAssetId: '00000000-0000-4000-8000-000000000002', sourceFilename: 'source.jpg', selectedIds: ['basic.exposure', 'chromaticAberration'],
+    }, flagChanges: [{ control: 'optics.remove_ca', before: false, after: true }] }] });
+  });
+  it.each([
+    { sourceAssetId: 'bad', sourceFilename: 'source.jpg', selectedIds: ['basic.exposure'] },
+    { sourceAssetId: '00000000-0000-4000-8000-000000000002', sourceFilename: '../source.jpg', selectedIds: ['basic.exposure'] },
+    { sourceAssetId: '00000000-0000-4000-8000-000000000002', sourceFilename: 'source.jpg', selectedIds: [] },
+    { sourceAssetId: '00000000-0000-4000-8000-000000000002', sourceFilename: 'source.jpg', selectedIds: ['basic.exposure', 'basic.exposure'] },
+  ])('rejects invalid settings paste display metadata %j', async metadata => {
+    const request = historyRequest('commit');
+    const result = rawHistoryResult(request, { history: { initialized: true, cursor: 1, length: 1, selectedStepId: request.saveId } });
+    const data = rawHistoryData(result);
+    data.steps[0] = { ...data.steps[0], kind: 'settingsPaste', metadata, changes: [] } as typeof data.steps[number];
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })));
+    await expect(readRawHistory(result)).rejects.toMatchObject({ code: 'raw_invalid_response' });
+  });
   it('reads Point Color pick metadata as exact normalized coordinates without rounding', async () => {
     const request = historyRequest('commit');
     const result = rawHistoryResult(request, { history: { initialized: true, cursor: 1, length: 1, selectedStepId: request.saveId } });

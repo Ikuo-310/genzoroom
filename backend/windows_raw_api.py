@@ -20,10 +20,13 @@ from lightcraft_runtime import _await_task_resilient, lightcraft_log
 from lightcraft_artifact import ENGINE_VERSION
 from raw_source import RawSourceCache
 from raw_controls import CONTROLS, control_location, controls_state, validate_controls, validate_history_operation
+from raw_edit_settings_copy import MAX_COPY_SETTINGS_BYTES
 from thumbnail_lifecycle import mutate_raw_edits
 
 REGENERATE_AFTER_EDITS = 200
 MAX_JSON_BYTES = 4096
+# A bounded partial DevelopSettings payload plus the existing History owner and receipt fields.
+MAX_COPY_REQUEST_BYTES = MAX_JSON_BYTES + MAX_COPY_SETTINGS_BYTES
 # Full-precision values plus 36 control specs and the History receipt exceed 4 KiB.
 MAX_SETTINGS_RESPONSE_BYTES = 16384
 HISTORY_CONFLICTS = {"raw_history_save_pending", "raw_history_commit_required", "raw_history_client_required",
@@ -227,16 +230,21 @@ class RawPreviewApi:
         if request.headers.get("content-type", "").split(";")[0].strip().lower() != "application/json":
             raise LightCraftError("raw_invalid_request")
         data = bytearray()
+        limit = MAX_COPY_REQUEST_BYTES if request.url.path.endswith("/history/operate") else MAX_JSON_BYTES
         async with asyncio.timeout(5):
             async for chunk in request.stream():
-                if len(data) + len(chunk) > MAX_JSON_BYTES:
+                if len(data) + len(chunk) > limit:
                     raise LightCraftError("raw_request_too_large")
                 data.extend(chunk)
         try:
             value = json.loads(data)
             if not isinstance(value, dict):
                 raise ValueError()
+            if len(data) > MAX_JSON_BYTES and value.get("kind") != "settingsPaste":
+                raise LightCraftError("raw_request_too_large")
             return value
+        except LightCraftError:
+            raise
         except (ValueError, UnicodeError, RecursionError):
             raise LightCraftError("raw_invalid_request") from None
 
@@ -1504,6 +1512,9 @@ class RawPreviewApi:
             section = metadata["section"]
             controls = [control for control in CONTROLS if control.startswith(f"{section}.")
                         or section == "color" and control.startswith("wb.")]
+        elif step["kind"] == "settingsPaste":
+            from raw_edit_settings_copy import paste_control_ids
+            controls = sorted(paste_control_ids(metadata["selectedIds"]))
         else:
             controls = list(CONTROLS)
 
@@ -1534,6 +1545,9 @@ class RawPreviewApi:
         kind = step['kind']
         if kind in ('opticsFlag', 'opticsFlagReset'):
             controls = [step['metadata']['control']]
+        elif kind == "settingsPaste":
+            from raw_edit_settings_copy import paste_flag_ids
+            controls = sorted(paste_flag_ids(step["metadata"]["selectedIds"]))
         elif ((kind == 'sectionReset' and step['metadata']['section'] == 'optics') or kind == 'allReset'):
             controls = sorted(HISTORY_FLAG_CONTROLS)
         else:
@@ -1576,6 +1590,8 @@ class RawPreviewApi:
             required.add("saveId")
         if action in ("commit", "operate"):
             required |= {"kind", "metadata"}
+            if action == "operate" and body.get("kind") == "settingsPaste":
+                required.add("copySettings")
             if body.get('kind') == 'geometry':
                 required.add('geometry' if action == 'operate' else 'gestureId')
             if action == 'operate' and body.get('kind') == 'curve':
@@ -1629,7 +1645,11 @@ class RawPreviewApi:
                 raise LightCraftError("raw_invalid_request")
         elif action == "operate":
             from raw_controls import POINT_COLOR_HISTORY_SCHEMAS, validate_point_color_history_operation
-            if type(body["kind"]) is str and body["kind"] in POINT_COLOR_HISTORY_SCHEMAS:
+            if body["kind"] == "settingsPaste":
+                from raw_edit_settings_copy import validate_copy_payload
+                validate_history_operation(body["kind"], body["metadata"])
+                validate_copy_payload(body["metadata"]["selectedIds"], body["copySettings"])
+            elif type(body["kind"]) is str and body["kind"] in POINT_COLOR_HISTORY_SCHEMAS:
                 body["metadata"] = validate_point_color_history_operation(body["kind"], body["metadata"])
             else:
                 validate_history_operation(body["kind"], body["metadata"])
@@ -1680,7 +1700,7 @@ class RawPreviewApi:
                 before = baseline if index == 0 else steps[index - 1]["settings"]
                 public = {key: step[key] for key in ("stepId", "kind", "metadata", "createdAt")}
                 public["changes"] = self._history_changes(step, before, step["settings"])
-                if step['kind'] in ('opticsFlag', 'opticsFlagReset', 'allReset') or (
+                if step['kind'] in ('opticsFlag', 'opticsFlagReset', 'allReset', 'settingsPaste') or (
                         step['kind'] == 'sectionReset' and step['metadata']['section'] == 'optics'):
                     public['flagChanges'] = self._history_flag_changes(step, before, step["settings"])
                 public_steps.append(public)
@@ -1883,7 +1903,8 @@ class RawPreviewApi:
                         mutation_attempts = self.raw.status().edits
                         try:
                             snapshot = await self.raw.apply_history_operation(self._raw_handle, body["kind"],
-                                body["metadata"], snapshot.revision, curve_points=body.get("curvePoints"))
+                                body["metadata"], snapshot.revision, curve_points=body.get("curvePoints"),
+                                settings_patch=body.get("copySettings"))
                         except LightCraftError:
                             status = self.raw.status()
                             if (body["kind"] in ("pointColorPick", "pointColorDelete", "pointColorControl",

@@ -620,7 +620,15 @@ def _history_uuid(value):
 def _history_metadata(kind, metadata):
     if type(kind) is not str or type(metadata) is not dict:
         raise InvalidRawHistory()
-    if kind == 'geometry':
+    if kind == "settingsPaste":
+        from lightcraft_mcp import LightCraftError
+        from raw_edit_settings_copy import validate_paste_metadata
+        try:
+            metadata = validate_paste_metadata(metadata)
+            valid = True
+        except LightCraftError:
+            valid = False
+    elif kind == 'geometry':
         from raw_geometry import valid_metadata
         valid = valid_metadata(metadata)
     elif kind in ("control", "controlReset"):

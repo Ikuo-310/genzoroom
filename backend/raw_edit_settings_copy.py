@@ -1,6 +1,9 @@
 """Selectable copy projection for the currently published GenzoRoom RAW controls."""
 
 import copy
+import json
+import math
+from uuid import UUID
 
 from lightcraft_mcp import LightCraftError
 from raw_controls import (CONTROLS, CONTROL_PATHS, CURVE_CHANNELS, CURVE_SETTING_FIELDS,
@@ -36,6 +39,8 @@ _SELECTORS = {
 }
 COPY_SETTING_IDS = frozenset(_SELECTORS)
 CROP_SETTING_ID = "crop"
+MAX_COPY_SETTINGS_BYTES = 64 * 1024
+MAX_PASTE_METADATA_BYTES = 1024
 
 _NUMERIC_DEFAULTS = {key: value[3] for key, value in CONTROLS.items()}
 _WB_DEFAULTS = {"mode": "asShot", "scale": "legacy", "temp": 6500.0, "tint": 0.0}
@@ -184,3 +189,163 @@ def extract_copy_settings(settings, selected_ids):
                     field = path[1]
                     result["calibration"][field] = copy.deepcopy(source[field]) if present and field in source else _NUMERIC_DEFAULTS[key]
     return result
+
+
+def validate_selected_ids(selected_ids):
+    if (type(selected_ids) is not list or not selected_ids
+            or any(type(item) is not str or item not in COPY_SETTING_IDS for item in selected_ids)
+            or len(set(selected_ids)) != len(selected_ids)):
+        raise LightCraftError("raw_invalid_request")
+    return selected_ids
+
+
+def validate_paste_metadata(metadata):
+    if (type(metadata) is not dict or set(metadata) != {"sourceAssetId", "sourceFilename", "selectedIds"}
+            or type(metadata.get("sourceAssetId")) is not str
+            or type(metadata.get("sourceFilename")) is not str
+            or not 1 <= len(metadata["sourceFilename"]) <= 255
+            or any(char in metadata["sourceFilename"] for char in "/\\:")
+            or any(ord(char) < 32 for char in metadata["sourceFilename"])):
+        raise LightCraftError("raw_invalid_request")
+    try:
+        if str(UUID(metadata["sourceAssetId"])) != metadata["sourceAssetId"]:
+            raise ValueError()
+    except (ValueError, TypeError, AttributeError):
+        raise LightCraftError("raw_invalid_request") from None
+    validate_selected_ids(metadata["selectedIds"])
+    try:
+        if len(json.dumps(metadata, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) > MAX_PASTE_METADATA_BYTES:
+            raise ValueError()
+    except (TypeError, ValueError, UnicodeError, RecursionError):
+        raise LightCraftError("raw_invalid_request") from None
+    return metadata
+
+
+def _assert_payload_shape(expected, actual, path=()):
+    if type(expected) is dict:
+        if type(actual) is not dict or set(actual) != set(expected):
+            raise LightCraftError("raw_invalid_request")
+        for key, value in expected.items():
+            _assert_payload_shape(value, actual[key], (*path, key))
+    elif type(expected) is list:
+        if type(actual) is not list:
+            raise LightCraftError("raw_invalid_request")
+    elif expected is None and path == ("crop", "aspect"):
+        if actual is not None and (type(actual) is not list or len(actual) != 2
+                or any(type(value) is not int or not 1 <= value <= 0xffffffff for value in actual)):
+            raise LightCraftError("raw_invalid_request")
+    elif type(expected) is bool:
+        if type(actual) is not bool:
+            raise LightCraftError("raw_invalid_request")
+    elif type(expected) in (int, float):
+        if type(actual) not in (int, float) or type(actual) is float and not math.isfinite(actual):
+            raise LightCraftError("raw_invalid_request")
+    elif type(expected) is str and type(actual) is not str:
+        raise LightCraftError("raw_invalid_request")
+
+
+def paste_control_ids(selected_ids):
+    validate_selected_ids(selected_ids)
+    controls = set()
+    for selector in selected_ids:
+        if selector in _BASIC:
+            controls.add(next(key for key, path in CONTROL_PATHS.items() if path == _BASIC[selector]))
+        elif selector in CONTROLS:
+            controls.add(selector)
+        elif selector == "whiteBalance":
+            controls.update(("wb.temp", "wb.tint"))
+        elif selector == "colorMixer":
+            controls.update(key for key in CONTROLS if key.startswith("mixer."))
+        elif selector == "colorGrading":
+            controls.update(key for key in CONTROLS if key.startswith("grading."))
+        elif selector == "vignette":
+            controls.update(key for key in CONTROLS if key.startswith("vignette."))
+        elif selector == "sharpening":
+            controls.update(key for key in CONTROLS if key.startswith("detail.sharpen"))
+        elif selector == "luminanceNoiseReduction":
+            controls.update(key for key in CONTROLS if key in ("detail.nrLuminance", "detail.nrDetail"))
+        elif selector == "colorNoiseReduction":
+            controls.update(key for key in CONTROLS if key.startswith("detail.nrColor"))
+        elif selector == "lensCorrection":
+            controls.update(_LENS_CONTROLS)
+        elif selector == "chromaticAberration":
+            controls.update(key for key in CONTROLS if key.startswith(("optics.defringe", "optics.ca")))
+        elif selector == "calibration":
+            controls.update(key for key in CONTROLS if key.startswith("calibration."))
+    return controls
+
+
+def paste_flag_ids(selected_ids):
+    validate_selected_ids(selected_ids)
+    flags = set()
+    if "lensCorrection" in selected_ids:
+        flags.add("optics.lens_profile")
+    if "chromaticAberration" in selected_ids:
+        flags.add("optics.remove_ca")
+    if "localToneMapping" in selected_ids:
+        flags.add("profile.camera_local_tone")
+    return flags
+
+
+def validate_copy_payload(selected_ids, payload):
+    """Translate untrusted partial payload errors into the request boundary's client error."""
+    try:
+        return _validate_copy_payload(selected_ids, payload)
+    except LightCraftError as error:
+        if error.code == "raw_invalid_request":
+            raise
+        raise LightCraftError("raw_invalid_request") from None
+    except (OverflowError, TypeError, ValueError, UnicodeError, RecursionError):
+        raise LightCraftError("raw_invalid_request") from None
+
+
+def _validate_copy_payload(selected_ids, payload):
+    """Validate an exact P1-A projection before passing it to LightCraft's partial merge."""
+    validate_selected_ids(selected_ids)
+    if type(payload) is not dict:
+        raise LightCraftError("raw_invalid_request")
+    try:
+        encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    except (TypeError, ValueError, UnicodeError, RecursionError):
+        raise LightCraftError("raw_invalid_request") from None
+    if len(encoded) > MAX_COPY_SETTINGS_BYTES:
+        raise LightCraftError("raw_invalid_request")
+
+    shape = extract_copy_settings({}, selected_ids)
+    _assert_payload_shape(shape, payload)
+
+    from raw_controls import (CONTROLS, CONTROL_PATHS, validate_controls, validate_curve_settings,
+                              validate_point_colors, VIGNETTE_STYLES)
+    control_ids = paste_control_ids(selected_ids)
+    for selector in selected_ids:
+        if selector == "whiteBalance":
+            if payload["wb"]["mode"] not in ("asShot", "auto", "daylight", "cloudy", "shade", "tungsten",
+                                               "fluorescent", "flash", "custom") or payload["wb"]["scale"] not in ("legacy", "kelvin"):
+                raise LightCraftError("raw_invalid_request")
+        elif selector == "vignette":
+            if payload["vignette"]["style"] not in VIGNETTE_STYLES:
+                raise LightCraftError("raw_invalid_request")
+        elif selector == "pointColor":
+            validate_point_colors(payload)
+        elif selector == "pointCurve":
+            validate_curve_settings(payload)
+        elif selector == "crop":
+            from raw_geometry import geometry_state
+            geometry_state(payload, required=True)
+
+    control_values = {}
+    for control in control_ids:
+        value, present = _get_path(payload, CONTROL_PATHS[control])
+        if not present:
+            raise LightCraftError("raw_invalid_request")
+        control_values[control] = value
+    if control_values:
+        validate_controls(control_values, wb_available=True)
+    flags = {key: _get_path(payload, CONTROL_PATHS[key])[0] if key.startswith("optics.") else
+             payload["profile"]["camera_local_tone"] for key in paste_flag_ids(selected_ids)}
+    optics_flags = {key: value for key, value in flags.items() if key.startswith("optics.")}
+    if optics_flags:
+        validate_controls(optics_flags, wb_available=True)
+    if "profile.camera_local_tone" in flags and type(flags["profile.camera_local_tone"]) is not bool:
+        raise LightCraftError("raw_invalid_request")
+    return payload

@@ -2544,11 +2544,24 @@ class LightCraftRawSession:
         return await self._mutate(handle, 'develop.merge', {'settings': {'wb': expected['wb']}, 'label': 'White Balance'},
                                   expected_revision, verify=verify, check=check)
 
-    async def apply_history_operation(self, handle, kind, metadata, expected_revision, *, curve_points=None):
+    async def apply_history_operation(self, handle, kind, metadata, expected_revision, *, curve_points=None,
+                                     settings_patch=None):
         from raw_controls import (CONTROLS, CONTROL_PATHS, control_location, DETAIL_RESET_DEFAULTS,
                                   HISTORY_FLAG_CONTROLS, with_legacy_profile_defaults,
                                   validate_history_operation, validate_curve_input,
                                   validate_point_color_history_operation, POINT_COLOR_HISTORY_SCHEMAS)
+        if kind == "settingsPaste":
+            if curve_points is not None or settings_patch is None:
+                raise LightCraftError("raw_invalid_request")
+            from raw_edit_settings_copy import extract_copy_settings, validate_copy_payload
+            validate_history_operation(kind, metadata)
+            validate_copy_payload(metadata["selectedIds"], settings_patch)
+            snapshot = self.confirmed_settings(handle, expected_revision)
+            if extract_copy_settings(snapshot.settings, metadata["selectedIds"]) == settings_patch:
+                return snapshot
+            return await self.merge_settings(handle, settings_patch, expected_revision)
+        if settings_patch is not None:
+            raise LightCraftError("raw_invalid_request")
         if type(kind) is str and kind in POINT_COLOR_HISTORY_SCHEMAS:
             if curve_points is not None:
                 raise LightCraftError("raw_invalid_request")

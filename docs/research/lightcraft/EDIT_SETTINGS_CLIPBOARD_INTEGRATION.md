@@ -279,3 +279,53 @@ Backend `tests/test_raw_edit_settings_copy.py` は選択 ID・射影範囲、通
 P1-B はこの `COPY_SETTING_IDS` と field 射影定義をペースト側の許可リストとして再利用する。ペーストは既存 History 操作の Native `develop.merge` 経路へ選択済み partial settings を渡し、LightCraft に適用・正規化を委ねる。貼付け後 readback／Recipe／History は従来境界を使う。コピー API から新しい完全設定 cache、SQLite snapshot reader、Native managed patch、設定変換エンジンを導入しない。
 
 実装根拠: [選択ID・field mapping](../../../backend/raw_edit_settings_copy.py#L13-L49) · [部分抽出と既定値](../../../backend/raw_edit_settings_copy.py#L75-L183) · [Document API route](../../../backend/windows_raw_api.py#L117) · [owner／revision／保存状態と取得](../../../backend/windows_raw_api.py#L831-L869) · [`confirmed_settings`](../../../backend/lightcraft_raw.py#L1240-L1248) · [`_history_unsettled`](../../../backend/windows_raw_api.py#L1436-L1439) · [既存公開Control一覧](../../../backend/raw_controls.py#L9-L59) · [Curveの公開field集合](../../../backend/raw_controls.py#L59-L63) · [Crop／orientation契約](../../../backend/raw_geometry.py#L26-L52) · [P1-A回帰テスト](../../../backend/tests/test_raw_edit_settings_copy.py)
+
+## O. P1-B 実装確定・History 経由の部分設定適用
+
+P1-B は Backend の History 操作へ `settingsPaste` を追加した。コピーpayloadは一回の `develop.merge` に直接渡し、確定した Native readback を既存の History／Recipe 保存境界へ流す。既存Frontendの閉じたHistory応答parserが新stepを拒否することが分かったため、ユーザーの追加許可に基づきHistory step型・validatorとそのテストだけを追加した。Clipboard UI、選択ダイアログ、History専用表示、ショートカット、Desktop menu、Native managed patch／manifest／binary は変更しない。
+
+### O.1 History 操作入力
+
+既存の認証済み `POST /api/raw/documents/{handle}/history/operate` に次を渡す。既存の owner、generation、document token／revision、settings fingerprint、expected Recipe revision、save ID は通常操作と共通である。
+
+```json
+{
+  "kind": "settingsPaste",
+  "metadata": {
+    "sourceAssetId": "<UUID>",
+    "sourceFilename": "source.jpg",
+    "selectedIds": ["basic.exposure", "whiteBalance"]
+  },
+  "copySettings": {
+    "light": {"exposure": 0.25},
+    "wb": {"mode": "custom", "scale": "kelvin", "temp": 5500.0, "tint": 3.0}
+  }
+}
+```
+
+`selectedIds` は P1-A の `COPY_SETTING_IDS`／`extract_copy_settings()` と同じ許可リスト・field 射影に照合し、空、重複、不明 ID を拒否する。`copySettings` は選択IDが生成する部分形と完全一致しなければならず、選択外Native field、欠落field、不正型、非有限値、過大payloadは 400 で拒否する。既存の Control、Curve、Point Color、Crop／geometry、WB scale／mode、Vignette style のvalidatorを再利用する。数値の表示桁丸めはしない。既知の省略既定値は P1-A 抽出器が選択済み部分に補った値をそのまま適用し、選択外の補完や `complete_snapshot_for_merge()` は行わない。false、0、空の Point Color 配列は値として扱う。Crop と orientation は `crop` ID が選択された時だけpayloadに含める。
+
+`copySettings` の上限は64 KiB、表示metadataは1 KiB。表示metadataにはコピー元 Asset UUID、ファイル名、選択IDだけを保存する。部分設定本文は操作入力としてのみ使い、既存 History の確定snapshotを除いて重複保存しない。入力の要求本文上限は既存の4 KiBを他のHistory操作に維持したまま、settingsPasteだけに部分payloadの上限分を加える。
+
+### O.2 Native・History／Recipe 境界
+
+`LightCraftRawSession.apply_history_operation()` が確認済み `confirmed_settings()` を読み、選択部分がすでに一致するときはNative mutationなしでsnapshotを返す。それ以外は既存 `merge_settings()` → `_mutate()` の一回の `develop.merge` を使う。貼付け先全体のReset、`disabled_sections`、Process/schema version、選択外設定への明示変更はしない。LightCraftが適用・正規化し、readbackを確定値とする。Native通信の再試行・応答不明からの復旧は既存 `_mutate()` と History save ID／receipt契約に従う。
+
+操作の確定snapshotと `settingsPaste` metadataは既存 `append_raw_history()` で一つのHistory項目として保存される。Undo／Redo／Jumpは従来のsnapshot復元経路を使う。無変更は既存History save境界でno-op receiptとして確定し、Historyを増やさずRedoを保持する。同じsave IDの再送は既存receipt／pending operationから応答し、mergeを重ねて行わない。保存失敗後の再試行・応答不明も同じpending／receipt経路を使用する。Historyのchanges表示値は選択された数値Controlに限定し、個別ON/OFFはflagChangesに載せる。
+
+### O.3 検証結果
+
+- `test_raw_edit_settings_copy.py` と `test_raw_edit_settings_paste.py`: **13 passed**。payload許可リスト・shape／範囲検証、通常コピーでのCrop除外・明示Crop、false／zero／空配列、選択外と`disabled_sections`保持、Native merge一回、readback、History一件、no-opとRedo維持、Undo／Redo／Jump、Recipe再訪、save ID再送、保存失敗／応答不明後の再試行、stale revisionを検証した。
+- 関連Backend統合群は **551 passed**。一時SQLite作成を伴うrelease smoke assertion 1件はsandbox下で `unable to open database file` となったため、同じテストを通常権限で再実行して **1 passed** を確認した。空／重複選択ID拒否のケースを追加後、P1-Bテスト6件も再実行して **6 passed**。
+- 実Native `test_raw_edit_settings_paste_live.py`: **5 passed**。JPEG→JPEG、Pentax DNG→JPEG、JPEG→Pentax DNG、Pixel DNG→JPEG、JPEG→Pixel DNGの各ケースでWB部分 `develop.merge` とreadbackを確認し、続く既存 `wb.temp` Control操作も成功した。
+- Frontend `rawApi.test.ts` は `settingsPaste` History metadataを受け入れ、malformed metadataを拒否する検証を追加した。History rowは現状汎用の unknown operation 表示であり、コピー元名・対象項目を表示するUIはP1-Eに残す。
+
+実Native検証の再現条件: `GENZOROOM_TEST_LIGHTCRAFT_EXE` に対象Native executableを設定する。RAW/DNGを使う場合は `GENZOROOM_TEST_RESET_PENTAX` に代表素材のpathを設定する。Nativeによるアルゴリズム再検証・画素比較は行っていない。
+
+### O.4 P1-Cへの引継ぎ
+
+- History parser／型はP1-Bで `settingsPaste` とmetadata `{sourceAssetId, sourceFilename, selectedIds}`を受け入れる。P1-EでClipboard操作とHistory rowのコピー元名・対象設定表示を追加する。
+- Clipboard UIはP1-Aのコピー応答にあるowner／revision／fingerprintを束縛し、貼付け開始時に対象Documentとコピー元情報を照合して、本節の `history/operate` 入力を一回送る。History完了後は通常のsettings／history応答を再同期する。
+- RAW／JPEG間のWBはJPEG→JPEGの実Native確認に限る。代表RAW/DNGを用いた両方向のWB適用と既存WB Control継続操作を行い、挙動を確定する。具体的な非互換性があれば独自色温度／Tint変換を加えず制約として扱う。
+
+実装根拠: [P1-A許可リスト・payload validator](../../../backend/raw_edit_settings_copy.py#L13-L42) · [部分payload validation](../../../backend/raw_edit_settings_copy.py#L189-L350) · [History operation validation](../../../backend/raw_controls.py#L482-L492) · [`settingsPaste` merge/readback](../../../backend/lightcraft_raw.py#L2547-L2565) · [認証済みHistory request shape／validation](../../../backend/windows_raw_api.py#L1588-L1668) · [既存History操作からNativeへ渡す箇所](../../../backend/windows_raw_api.py#L1898-L1910) · [metadataを含むHistory保存](../../../backend/raw_recipe_store.py#L620-L675) · [Frontend History型・validator](../../../frontend/src/rawApi.ts#L156-L166) · [Backend paste regression tests](../../../backend/tests/test_raw_edit_settings_paste.py) · [実Native WB check](../../../backend/tests/test_raw_edit_settings_paste_live.py)

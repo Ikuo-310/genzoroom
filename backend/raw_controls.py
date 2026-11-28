@@ -482,6 +482,10 @@ def validate_controls(values, wb_available):
 def validate_history_operation(kind, metadata):
     if type(metadata) is not dict:
         raise LightCraftError("raw_invalid_request")
+    if kind == "settingsPaste":
+        from raw_edit_settings_copy import validate_paste_metadata
+        validate_paste_metadata(metadata)
+        return
     if kind == 'geometry':
         from raw_geometry import valid_metadata
         if not valid_metadata(metadata):

@@ -153,8 +153,9 @@ export type RawHistoryRequest = RawRecipeRequest & { action: 'initialize' | 'com
   mixerInteractionId?: string;
   pointColorInteractionId?: string;
   geometryCommit?: { gestureId: string; operation: 'set' | 'drag' | 'straighten'; action?: RawGeometryAction } };
-export type RawHistoryStep = { stepId: string; kind: 'control' | 'controlReset' | 'opticsFlag' | 'opticsFlagReset' | 'sectionToggle' | 'sectionReset' | 'vignetteStyle' | 'allReset' | 'wbAuto' | 'wbReset' | 'colorReset' | 'wbPick' | 'pointColorPick' | 'pointColorDelete' | 'pointColorReset' | 'pointColorControl' | 'pointColorControlReset' | 'geometry' | 'curve' | 'curveReset' | 'mixerTarget';
-  metadata: { control?: RawHistoryControlId | RawOpticsFlagId | RawPointColorControlId; index?: number; section?: RawResetSectionId; enabled?: boolean; style?: RawVignetteStyle; operation?: RawGeometryOperationId; action?: RawGeometryAction; channel?: RawCurveResetChannel; target?: 'hue' | 'sat' | 'lum'; x?: number; y?: number; value?: number }; createdAt: string;
+export type RawHistoryStep = { stepId: string; kind: 'control' | 'controlReset' | 'opticsFlag' | 'opticsFlagReset' | 'sectionToggle' | 'sectionReset' | 'vignetteStyle' | 'allReset' | 'wbAuto' | 'wbReset' | 'colorReset' | 'wbPick' | 'pointColorPick' | 'pointColorDelete' | 'pointColorReset' | 'pointColorControl' | 'pointColorControlReset' | 'geometry' | 'curve' | 'curveReset' | 'mixerTarget' | 'settingsPaste';
+  metadata: { control?: RawHistoryControlId | RawOpticsFlagId | RawPointColorControlId; index?: number; section?: RawResetSectionId; enabled?: boolean; style?: RawVignetteStyle; operation?: RawGeometryOperationId; action?: RawGeometryAction; channel?: RawCurveResetChannel; target?: 'hue' | 'sat' | 'lum'; x?: number; y?: number; value?: number;
+    sourceAssetId?: string; sourceFilename?: string; selectedIds?: string[] }; createdAt: string;
   changes: { control: RawHistoryControlId; before: number; after: number }[] | null;
   flagChanges?: { control: RawOpticsFlagId; before: boolean; after: boolean }[] | null };
 export type RawHistoryResult = RawSettings & {
@@ -602,6 +603,12 @@ export async function readRawHistory(doc: RawDocument): Promise<RawHistoryData> 
         : step.kind === 'pointColorControl' ? Object.keys(m).length !== 2 || !validRawPointColorControlValue(m.control, m.value)
         : step.kind === 'pointColorControlReset' ? Object.keys(m).length !== 1 || !validRawPointColorControlId(m.control)
         : step.kind === 'pointColorReset' ? Object.keys(m).length !== 0
+        : step.kind === 'settingsPaste' ? Object.keys(m).length !== 3 || !uuid(m.sourceAssetId)
+          || typeof m.sourceFilename !== 'string' || m.sourceFilename.length < 1 || m.sourceFilename.length > 255
+          || /[\\/:\u0000-\u001f]/.test(m.sourceFilename) || !Array.isArray(m.selectedIds)
+          || m.selectedIds.length < 1 || m.selectedIds.length > 64
+          || m.selectedIds.some((id: unknown) => typeof id !== 'string' || id.length === 0)
+          || new Set(m.selectedIds).size !== m.selectedIds.length
         : !['allReset', 'wbAuto', 'wbReset', 'colorReset', 'wbPick'].includes(step.kind) || Object.keys(m).length !== 0)
       || !(step.changes === null || Array.isArray(step.changes) && step.changes.length <= RAW_HISTORY_CONTROL_IDS.length
         && step.changes.every((change: unknown, index: number, changes: unknown[]) => {
@@ -621,7 +628,7 @@ export async function readRawHistory(doc: RawDocument): Promise<RawHistoryData> 
         }))
       || (step.kind === 'opticsFlag' || step.kind === 'opticsFlagReset') && !Array.isArray(step.flagChanges)
       || step.flagChanges !== undefined && step.kind !== 'opticsFlag' && step.kind !== 'opticsFlagReset'
-        && step.kind !== 'allReset' && !(step.kind === 'sectionReset' && step.metadata.section === 'optics'))
+        && step.kind !== 'allReset' && step.kind !== 'settingsPaste' && !(step.kind === 'sectionReset' && step.metadata.section === 'optics'))
       throw new RawApiError('raw_invalid_response');
     ids.add(step.stepId);
   }
