@@ -17,7 +17,7 @@ Internal changes are omitted unless they affect users.
 
 ### Added
 
-- Windows Desktop can copy and paste development settings between photos from the Viewer or Native Edit menu, or with Ctrl+C, Ctrl+Alt+C, Ctrl+V and Ctrl+Alt+V. The selection dialog offers 25 items, with Crop and Straighten excluded by default. Paste omits incompatible white balance settings, and History shows the source filename.
+- Windows Desktop can copy and paste development settings between photos from the Viewer or Native Edit menu. The 25-item selection dialog excludes Crop and Straighten by default; paste omits incompatible white balance settings and History shows the source filename. Shortcut labels come from the shared registry with platform-specific Ctrl/Alt or ⌘/⌥ notation; Native menu accelerators are not registered. Windows Desktop operation was confirmed by the user after integration. Mac Native Desktop is not yet in the validation scope.
 
 - Windows Desktop adds a Calibration category for shadows tint and RGB primary hue and saturation, with independent toggle and reset for LightCraft-supported RAW and JPEG originals.
 

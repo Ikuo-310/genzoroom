@@ -532,3 +532,11 @@ SettingsProviderの起動時同期および `languageChanged` 同期で、日英
 | Viewer／一覧との一致・言語同期 | `shortcutHints.test.tsx` でViewerメニューの4表示がNative向け共通formatter出力と一致することを検証。`SettingsDialog.test.tsx` で初期言語設定時と日英切替時に同じformatter payloadがIPC bridgeへ送られることを検証。 |
 | Native表示・accelerator | Desktop Rust **23件成功**。日英の基礎ラベル、Frontendから受け取るshortcut文字列の連結、camelCase IPC payloadのserde deserializationを検証。Native menu builderの4項目は明示的にaccelerator `None` を維持。P2-F1のcommand ACL／registrationに変更なし。 |
 | 実Desktop | この変更後のWindows Native menu上の表示・言語切替は未実施。 |
+
+### U. 統合完了とWindows Desktop受入確認
+
+P1-A〜P2-F2を編集設定コピー＆ペースト統合の完了範囲とする。P2-F1では不足していた `set_native_edit_menu_state` の限定ACL・command permission registrationを修正し、Frontend同期失敗を診断可能にした。P2-F2では4操作の表記を共通 `shortcutBindings` registry／`formatShortcut()` に集約した。Primary／AlternateはWindows・LinuxでCtrl／Alt、Mac表記で⌘／⌥となり、Native menuにはキー割り当てを持たせず、Frontendが入力イベントを所有する。P2-F2の表記は起動時・WebView再初期化時・アプリ言語変更時に既存Native menu language IPCで反映する。コピー、選択コピー、ペースト、選択ペーストの処理・操作可能状態は既存Frontend ownerとP1のBackend／LightCraft経路を再利用する。
+
+ユーザーからP2-F2適用後のWindows Desktop動作確認が完了し、問題なしとの報告を受領した。この完了記録はユーザーによる実機確認であり、確認されていない個別操作まで受入済みとは扱わない。T.3・T.4の「実Desktop未実施」は各修正工程時点の記録として維持し、本節の後続確認で補完する。P2-F1／F2の工程別自動テスト件数・build結果も各節の値を維持し、工程をまたいで合算しない。
+
+Mac Native Desktopは現時点で検証対象外。FormatterのMac向け表示はplatform指定のFrontendテストで確認したが、Mac上のNative menu表示・操作を確認したものではない。Undo／RedoのNative menu統合は各画面のUndo所有権を別途扱う案件とし、本統合には含めない。今回の作業は文書追随のみで、新しいテスト・製品コード・Native資材の変更は行っていない。

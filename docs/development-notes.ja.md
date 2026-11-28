@@ -2,11 +2,11 @@
 
 ## Windows Desktop Native Editメニュー P2
 
-既存のFile／View／Helpメニューの間にEditを追加し、全設定コピー、項目選択コピー、通常ペースト、項目選択ペーストを接続した。日英の保存済み／実行中言語を既存Native menu language commandで反映する。ショートカットはCtrl+C、Ctrl+Alt+C、Ctrl+V、Ctrl+Alt+Vを表示するだけでNative acceleratorは登録せず、既存Frontend `editShortcuts` registryとViewer操作の所有権を維持した。
+既存のFile／View／Helpメニューの間にEditを追加し、全設定コピー、項目選択コピー、通常ペースト、項目選択ペーストを接続した。日英の保存済み／実行中言語を既存Native menu language commandで反映する。4操作のshortcut表示は共通`shortcutBindings` registryと`formatShortcut()`から生成し、Primary／AlternateによりWindows／LinuxではCtrl／Alt、Mac表記では⌘／⌥となる。Native acceleratorは登録せず、Frontendがキーボードイベントを所有する。
 
 Nativeクリックはイベントを暗室ページへ送り、既存のJPEGまたはLightCraft操作関数へ接続する。メニュー有効状態はFrontendの既存エンジン別操作可能判定を使い、起動・WebView再読み込み・暗室退出時には無効化する。DOM上のmodal/menu変化も監視し、暗室ページのReact state外で開いた終了確認dialogを含めて状態を同期する。受信時にも現行ページ、owner、写真切替、保存／終了、処理中、ダイアログ／メニュー状態を再確認する。Backend、Clipboard、History／Recipe、WB制限、LightCraft、Undo／Redoは変更していない。Undo／RedoのNative統合は各画面の操作owner調査を伴う別案件とする。
 
-関連Frontendテスト、TypeScriptを含む本番build、Desktop Rust test／checkはP2検証結果を研究記録T節に記載した。Native menuのWindows Desktop上でのクリック・表示確認は実施していない。これはRust menu構築・Frontendイベント接続の自動検証とは別の手動受入項目である。
+P2-F1では限定されたMain WebView ACLへmenu state IPCを登録し、同期失敗の診断を追加した。P2-F2では共通registryによるshortcut表記を既存言語同期IPCでNative menuへ反映した。関連Frontend／Desktopテスト、TypeScript込みFrontend build、Desktop buildの工程別結果は研究記録T節に保持している。P2-F2適用後、ユーザーによるWindows Desktop動作確認が完了し、問題なしとの報告を受領した。Mac Native Desktopは現時点で検証対象外である。編集設定コピー＆ペースト統合P1-A〜P2-F2は完了。Undo／RedoのNative menu統合は別案件とする。
 
 ## キャリブレーション統合
 
@@ -1772,7 +1772,7 @@ Viewerの「⋯」から全設定コピー、選択コピー、通常ペース�
 
 適用はLightCraftの部分 `develop.merge` と既存History／Recipe保存経路を使う。Historyには「コピー元ファイル名からペースト」と表示し、適用IDはmetadataに保持する。WBはコピー元の素材固有方式・コピー値のscale・貼り付け先の素材固有方式が絶対値または相対値の同一方式で揃う場合に適用できる。非互換WBは候補から外れ、選択ペースト上は理由とともに無効表示される。設定が写真に合うかはユーザーが判断する。
 
-ユーザーはWindows Desktopで写真間の設定コピー＆ペースト、F2の3列表示と翻訳、切り抜き・水平補正の初期未選択を確認した。F2後の操作上の問題は報告されていない。自動・実Native検証の範囲は[統合検証記録](research/lightcraft/EDIT_SETTINGS_CLIPBOARD_INTEGRATION.md#s-p1-e統合検証と現行仕様)を参照。
+ユーザーはWindows Desktopで写真間の設定コピー＆ペースト、F2の3列表示と翻訳、切り抜き・水平補正の初期未選択を確認した。さらにP2-F2適用後のWindows Desktop動作確認が完了し、問題なしとの報告を受領した。これはユーザー報告の実機確認であり、個別操作すべてを別途確認したという意味ではない。Mac Native Desktopは現時点で検証対象外。P1-A〜P2-F2の統合は完了し、Undo／RedoのNative menu統合は別案件である。工程別の自動・実Native検証記録は[統合検証記録](research/lightcraft/EDIT_SETTINGS_CLIPBOARD_INTEGRATION.md#s-p1-e統合検証と現行仕様)を参照。
 
 ## JPEG版のCopy / Paste（現行仕様）
 
