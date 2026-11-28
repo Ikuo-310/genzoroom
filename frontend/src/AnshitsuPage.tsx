@@ -38,7 +38,9 @@ import { readScopePanelBasis, saveScopePanelBasis } from './scopeSizing';
 import { getRawAssetEditStatuses, EditStateApiError, type EditStateApiErrorKind } from './editStateApi';
 import { useAssetEdits } from './useAssetEdits';
 import { copyEditSettings, isJpegEditClipboard, jpegEditClipboardValues, readEditClipboard, selectEditClipboardItems,
-  type JpegEditClipboard } from './editClipboard';
+  isLightcraftEditClipboard, type JpegEditClipboard, type LightcraftEditClipboard, RAW_COPY_SETTING_CATEGORIES,
+  RAW_COPY_SETTING_LABEL_KEYS } from './editClipboard';
+import { RAW_COPY_SETTING_IDS, RAW_DEFAULT_COPY_SETTING_IDS, type RawCopySettingId } from './rawApi';
 import { GRADING_RANGE_CONTROLS, ADJUSTMENT_IDS, ADJUSTMENT_TOGGLE_IDS, defaultRecipe, recipesEqual, type AdjustmentId } from './editing';
 import { HistoryOrganizationMenu, HistoryConfirmationDialog, type HistoryMenuTarget, type HistoryOperation } from './HistoryOrganizationUI';
 import { AdjustmentSelectionDialog } from './AdjustmentSelectionDialog';
@@ -57,7 +59,23 @@ import { useDevelopmentEngine } from './useDevelopmentEngine';
 
 type DetailState = 'loading' | 'ready' | 'error';
 type SelectionRequest = { mode: 'copy'; assetId: string }
-  | { mode: 'paste'; assetId: string; clipboard: JpegEditClipboard };
+  | { mode: 'paste'; assetId: string; clipboard: JpegEditClipboard }
+  | { mode: 'rawCopy'; assetId: string; owner: string }
+  | { mode: 'rawPaste'; assetId: string; owner: string; clipboard: LightcraftEditClipboard };
+
+function rawClipboardOwnerKey(raw: NonNullable<ReturnType<typeof useRawDocument>>): string {
+  // A modal can stay mounted while the native document is replaced; its choice must not cross that owner boundary.
+  const document = raw.document;
+  const settings = raw.settings;
+  return JSON.stringify([document?.workspaceId, document?.handle, document?.assetId, document?.generation,
+    document?.documentToken, document?.revision, settings?.settingsFingerprint, settings?.recipeRevision]);
+}
+
+const rawSelectionCategoryOrder = ['localToneMapping', 'basic', 'whiteBalance', 'color', 'colorMixer', 'pointColor',
+  'colorGrading', 'pointCurve', 'basicEffects', 'vignette', 'detail', 'calibration', 'lensCorrections', 'crop'];
+const rawSelectionCategories = [...RAW_COPY_SETTING_CATEGORIES]
+  .sort((left, right) => rawSelectionCategoryOrder.indexOf(left.id) - rawSelectionCategoryOrder.indexOf(right.id))
+  .map(category => ({ id: category.id, label: category.labelKey, groups: [{ ids: category.selectedIds }] }));
 
 function logExclusion(event: 'start' | 'complete' | 'failed' | 'undo', context: Record<string, string | number>) {
   try {
@@ -142,6 +160,8 @@ export function AnshitsuPage() {
   const discardBusy=useRef(false);
   const [exitFailure, setExitFailure] = useState<{ assetId: string; error: EditStateApiErrorKind; code?: string; raw?: boolean } | null>(null);
   const [selection, setSelection] = useState<SelectionRequest | null>(null);
+  const [clipboardActionBusy, setClipboardActionBusy] = useState(false);
+  const [clipboardActionFailed, setClipboardActionFailed] = useState(false);
   const [historyMenu, setHistoryMenu] = useState<HistoryMenuTarget | null>(null);
   const [categoryMenu, setCategoryMenu] = useState<AdjustmentCategoryMenuTarget | null>(null);
   const [rangeMenu, setRangeMenu] = useState<GradingRangeMenuTarget | null>(null);
@@ -311,6 +331,9 @@ export function AnshitsuPage() {
   }, [assetId]);
   useEffect(() => { setHistograms(null); }, [assetId, histogramSourceKey]);
   const clipboardEnabled = editable && !switching && !exitSaving && !failedSwitch && !exitFailure;
+  const rawClipboardBaseEnabled = usesLightcraft && !!rawDocument?.canCopySettings && !switching && !exitSaving
+    && !failedSwitch && !exitFailure && !clipboardActionBusy;
+  const rawClipboardEnabled = rawClipboardBaseEnabled && !selection && !historyConfirmation;
   const rawResetEnabled = usesLightcraft && !!rawDocument && !rawDocument.resetting
     && (rawDocument.status === 'error' || !rawDocument.saving && !rawDocument.pending && !rawDocument.regenerating)
     && !switching && !exitSaving && !failedSwitch && !exitFailure;
@@ -424,6 +447,26 @@ export function AnshitsuPage() {
     return true;
   }
 
+  function copyRawSettings(ids: readonly RawCopySettingId[] = RAW_DEFAULT_COPY_SETTING_IDS) {
+    if (!rawClipboardEnabled || !rawDocument || !activeDetail) return false;
+    const raw = rawDocument;
+    setClipboardActionFailed(false);
+    setClipboardActionBusy(true);
+    void raw.copySettings(activeDetail.filename, ids).then(() => setHasClipboard(true))
+      .catch(() => setClipboardActionFailed(true)).finally(() => setClipboardActionBusy(false));
+    return true;
+  }
+
+  function pasteRawSettings(ids?: readonly RawCopySettingId[]) {
+    if (!rawClipboardEnabled || !rawDocument?.sameEngineClipboard || !rawDocument.canPasteSettings) return false;
+    const raw = rawDocument;
+    setClipboardActionFailed(false);
+    setClipboardActionBusy(true);
+    void raw.pasteSettings(ids).catch(() => setClipboardActionFailed(true))
+      .finally(() => setClipboardActionBusy(false));
+    return true;
+  }
+
   function pasteCategorySettings(categoryId: AdjustmentCategoryId) {
     const category = ADJUSTMENT_SELECTION_CATEGORIES.find(({ id }) => id === categoryId);
     return category ? pasteSettings(category.ids) : false;
@@ -451,6 +494,11 @@ export function AnshitsuPage() {
     const keydown = (event: KeyboardEvent) => {
       const shortcut = editClipboardShortcut(event);
       if (!shortcut || isNativeEditingTarget(event.target)) return;
+      if (usesLightcraft) {
+        const handled = shortcut === 'copy' ? copyRawSettings() : pasteRawSettings();
+        if (handled) event.preventDefault();
+        return;
+      }
       // Copy is contextual to the focused category or slider. Paste is
       // contextual to the active photo and must also work after photo changes
       // when no slider or preview has regained focus.
@@ -477,9 +525,19 @@ export function AnshitsuPage() {
     };
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
-  }, [copySettings, pasteSettings]);
+  }, [copySettings, pasteSettings, usesLightcraft, copyRawSettings, pasteRawSettings]);
 
   function openSelection(mode: 'copy' | 'paste') {
+    if (usesLightcraft) {
+      if (!rawClipboardEnabled || switchingRef.current || exitRef.current || historyConfirmation || !rawDocument) return false;
+      if (mode === 'copy') setSelection({ mode: 'rawCopy', assetId, owner: rawClipboardOwnerKey(rawDocument) });
+      else {
+        const clipboard = readEditClipboard();
+        if (!rawDocument.sameEngineClipboard || !rawDocument.canPasteSettings || !isLightcraftEditClipboard(clipboard)) return false;
+        setSelection({ mode: 'rawPaste', assetId, owner: rawClipboardOwnerKey(rawDocument), clipboard });
+      }
+      return true;
+    }
     if (!clipboardEnabled || switchingRef.current || exitRef.current || selection || historyConfirmation) return false;
     if (mode === 'copy') setSelection({ mode, assetId });
     else {
@@ -490,13 +548,45 @@ export function AnshitsuPage() {
     return true;
   }
 
-  function confirmSelection(ids: AdjustmentId[]) {
-    if (!selection || selection.assetId !== assetId || !clipboardEnabled
-      || switchingRef.current || exitRef.current || ids.length === 0 || !activeDetail) return;
+  async function confirmSelection(ids: (AdjustmentId | RawCopySettingId)[]) {
+    if (!selection || selection.assetId !== assetId || switchingRef.current || exitRef.current || ids.length === 0) return;
+    if (selection.mode === 'rawCopy' || selection.mode === 'rawPaste') {
+      if (!rawClipboardBaseEnabled || !rawDocument || rawClipboardOwnerKey(rawDocument) !== selection.owner || !activeDetail
+        || ids.some(id => !(RAW_COPY_SETTING_IDS as readonly string[]).includes(id))) { setSelection(null); return; }
+      const rawIds = ids as RawCopySettingId[];
+      if (selection.mode === 'rawCopy') {
+        setClipboardActionFailed(false);
+        setClipboardActionBusy(true);
+        try {
+          await rawDocument.copySettings(activeDetail.filename, rawIds);
+          setHasClipboard(true);
+          setSelection(null);
+        } catch { setClipboardActionFailed(true); setSelection(null); }
+        finally { setClipboardActionBusy(false); }
+      } else {
+        const currentClipboard = readEditClipboard();
+        // Bind the dialog to the exact payload it displayed; an intervening copy cannot change its meaning.
+        if (!isLightcraftEditClipboard(currentClipboard) || JSON.stringify(currentClipboard) !== JSON.stringify(selection.clipboard)
+          || !rawDocument.sameEngineClipboard || rawIds.some(id => !selection.clipboard.selectedIds.includes(id))) {
+          setSelection(null);
+          return;
+        }
+        setClipboardActionFailed(false);
+        setClipboardActionBusy(true);
+        try {
+          await rawDocument.pasteSettings(rawIds);
+          setSelection(null);
+        } catch { setClipboardActionFailed(true); setSelection(null); }
+        finally { setClipboardActionBusy(false); }
+      }
+      return;
+    }
+    if (!clipboardEnabled || !activeDetail) return;
+    const jpegIds = ids as AdjustmentId[];
     if (selection.mode === 'copy') {
-      copyEditSettings(session.recipe, assetId, activeDetail.filename, ids);
+      copyEditSettings(session.recipe, assetId, activeDetail.filename, jpegIds);
       setHasClipboard(true);
-    } else dispatch({ type: 'paste', ...selectEditClipboardItems(selection.clipboard, ids) });
+    } else dispatch({ type: 'paste', ...selectEditClipboardItems(selection.clipboard, jpegIds) });
     setSelection(null);
   }
 
@@ -927,12 +1017,13 @@ export function AnshitsuPage() {
           onBeforeAdjustmentsDisplayChange={setViewerShowsBefore}
           onToggleLeft={() => setLeftOpen((value) => !value)}
           onToggleRight={() => { if (rightOpen) rawDocument?.cancelPointColorPick(); setRightOpen(value => !value); }}
-          onCopyAdjustments={() => copySettings()}
-          onPasteAdjustments={pasteSettings}
+          onCopyAdjustments={() => usesLightcraft ? copyRawSettings() : copySettings()}
+          onPasteAdjustments={usesLightcraft ? pasteRawSettings : pasteSettings}
           onSelectCopyAdjustments={() => openSelection('copy')}
           onSelectPasteAdjustments={() => openSelection('paste')}
-          editClipboardDisabled={!clipboardEnabled || selection !== null || historyConfirmation !== null}
-          hasEditClipboard={hasClipboard}
+          editClipboardDisabled={usesLightcraft ? !rawClipboardBaseEnabled : !clipboardEnabled || selection !== null || historyConfirmation !== null}
+          hasEditClipboard={usesLightcraft ? !!rawDocument?.sameEngineClipboard && !!rawDocument.canPasteSettings
+            : hasClipboard && isJpegEditClipboard(readEditClipboard())}
           keyboardBlocked={workspaceKeyboardBlocked}
         />
       ) : (
@@ -1076,15 +1167,26 @@ export function AnshitsuPage() {
       onClose={closeCategoryMenu}
     />}
     {selection && selection.assetId === assetId && <AdjustmentSelectionDialog
-      mode={selection.mode}
-      availableIds={selection.mode === 'copy' ? ADJUSTMENT_IDS
-        : ADJUSTMENT_IDS.filter((id) => Object.hasOwn(selection.clipboard.values, id))}
+      mode={selection.mode === 'copy' || selection.mode === 'rawCopy' ? 'copy' : 'paste'}
+      availableIds={selection.mode === 'rawCopy' ? RAW_COPY_SETTING_IDS
+        : selection.mode === 'rawPaste' ? selection.clipboard.selectedIds
+          : selection.mode === 'copy' ? ADJUSTMENT_IDS
+            : ADJUSTMENT_IDS.filter((id) => Object.hasOwn(selection.clipboard.values, id))}
+      categories={selection.mode === 'rawCopy' || selection.mode === 'rawPaste' ? rawSelectionCategories : undefined}
+      labelKeys={selection.mode === 'rawCopy' || selection.mode === 'rawPaste' ? RAW_COPY_SETTING_LABEL_KEYS : undefined}
+      initialSelectedIds={selection.mode === 'rawCopy' ? RAW_DEFAULT_COPY_SETTING_IDS
+        : selection.mode === 'rawPaste' ? rawDocument?.clipboardPasteableSettingIds ?? [] : undefined}
+      disabledIds={selection.mode === 'rawPaste' && rawDocument?.clipboardWbCompatibilityBlocked ? ['whiteBalance'] : []}
+      disabledReasonKeys={selection.mode === 'rawPaste' && rawDocument?.clipboardWbCompatibilityBlocked
+        ? { whiteBalance: rawDocument.clipboardWbCompatibilityReason === 'wbModeUnknown'
+          ? 'workspace.rawClipboard.wbModeUnknown' : 'workspace.rawClipboard.wbModeMismatch' } : undefined}
       onConfirm={confirmSelection} onCancel={() => setSelection(null)} />}
     {historyMenu && historyMenu.assetId === assetId && historyEnabled && <HistoryOrganizationMenu target={historyMenu}
       hasHistory={session.history.length > 0} canReset={canResetHistory} onClose={closeHistoryMenu} onSelect={requestHistoryOperation} />}
     {historyConfirmation && historyConfirmation.assetId === assetId && <HistoryConfirmationDialog
       operation={historyConfirmation.operation} returnFocus={historyConfirmation.trigger} onConfirm={confirmHistoryOperation} onCancel={() => setHistoryConfirmation(null)} />}
     {historyError && <p className="workspace-autosave-warning" role="alert">{t('workspace.historyFailed')}</p>}
+    {clipboardActionFailed && <p className="workspace-autosave-warning" role="alert">{t('workspace.rawPreview.settingsClipboardFailed')}</p>}
     {excludeFailure && <p className="workspace-autosave-warning" role="alert">{t('workspace.excludeFailed')}</p>}
     {excluding && <p className="workspace-save-status" role="status">{t('workspace.editStateSaving')}</p>}
     {switching && <p className="workspace-save-status" role="status">{t('workspace.editStateSaving')}</p>}

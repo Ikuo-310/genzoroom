@@ -5,6 +5,7 @@ import { formatContrast, formatExposure, formatHighlights, formatShadows, format
   formatBlacks, formatTint, formatVibrance, formatSaturation } from './editing';
 import type { RawHistoryControlId, RawOpticsFlagId, RawHistoryStep, RawPointColorControlId, RawResetSectionId } from './rawApi';
 import { displayTemperature, displayTint } from './rawWhiteBalance';
+import { RAW_COPY_SETTING_LABEL_KEYS } from './editClipboard';
 
 const mixerColors = ['red', 'orange', 'yellow', 'green', 'aqua', 'blue', 'purple', 'magenta'] as const;
 const mixerFields = ['hue', 'sat', 'lum'] as const;
@@ -108,6 +109,14 @@ const sectionLabels: Record<RawResetSectionId, string> = {
 };
 
 function describe(step: RawHistoryStep, t: ReturnType<typeof useTranslation>['t'], wbScale: string) {
+  if (step.kind === 'settingsPaste') {
+    const filename = step.metadata.sourceFilename ?? '';
+    const selected = step.metadata.selectedIds;
+    return selected?.length
+      ? t('workspace.settingsPasteHistory', { filename,
+        items: selected.map(id => t(RAW_COPY_SETTING_LABEL_KEYS[id])).join(', ') })
+      : t('workspace.pasteHistory', { filename });
+  }
   if (step.kind === 'geometry') return t(`workspace.rawPreview.cropHistory.${step.metadata.action ?? step.metadata.operation}`);
   if (step.kind === 'curve') return t(`workspace.rawPreview.curveHistory.${step.metadata.channel}`);
   if (step.kind === 'curveReset') {

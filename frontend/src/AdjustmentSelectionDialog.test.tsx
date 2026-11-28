@@ -4,6 +4,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AdjustmentSelectionDialog } from './AdjustmentSelectionDialog';
 import { ADJUSTMENT_IDS, BASIC_ADJUSTMENT_KEYS, COLOR_GRADING_ADJUSTMENT_KEYS, type AdjustmentId } from './editing';
+import { RAW_COPY_SETTING_CATEGORIES, RAW_COPY_SETTING_LABEL_KEYS } from './editClipboard';
+import { RAW_COPY_SETTING_IDS, RAW_DEFAULT_COPY_SETTING_IDS, type RawCopySettingId } from './rawApi';
 import i18n from './i18n';
 
 let host: HTMLDivElement; let root: Root; let opener: HTMLButtonElement;
@@ -30,10 +32,19 @@ afterEach(() => { act(() => root.unmount()); host.remove(); opener.remove(); res
 function mount(mode: 'copy' | 'paste' = 'copy', ids: readonly AdjustmentId[] = ADJUSTMENT_IDS) {
   act(() => root.render(<AdjustmentSelectionDialog mode={mode} availableIds={ids} onConfirm={confirmed} onCancel={cancelled} />));
 }
+function mountRaw({ mode = 'copy', ids = RAW_COPY_SETTING_IDS, initial, disabled = [] }: {
+  mode?: 'copy' | 'paste'; ids?: readonly RawCopySettingId[]; initial?: readonly RawCopySettingId[]; disabled?: readonly RawCopySettingId[];
+} = {}) {
+  const categories = RAW_COPY_SETTING_CATEGORIES.map(category => ({ id: category.id, label: category.labelKey,
+    groups: [{ ids: category.selectedIds }] }));
+  act(() => root.render(<AdjustmentSelectionDialog mode={mode} availableIds={ids} initialSelectedIds={initial}
+    disabledIds={disabled} disabledReasonKeys={{ whiteBalance: 'workspace.rawClipboard.wbModeMismatch' }}
+    categories={categories} labelKeys={RAW_COPY_SETTING_LABEL_KEYS} onConfirm={confirmed} onCancel={cancelled} />));
+}
 function button(text: string) {
   return Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find((item) => item.textContent === text)!;
 }
-const item = (id: AdjustmentId) => host.querySelector<HTMLInputElement>(`input[name="${id}"]`)!;
+const item = (id: string) => host.querySelector<HTMLInputElement>(`input[name="${id}"]`)!;
 const categories = () => Array.from(host.querySelectorAll<HTMLInputElement>('legend input'));
 function click(element: HTMLElement) { act(() => element.click()); }
 function key(target: EventTarget, key: string, shiftKey = false, extra: KeyboardEventInit = {}) {
@@ -152,6 +163,26 @@ describe('adjustment selection dialog', () => {
     expect(confirm.disabled).toBe(true);
     opener.remove();
     expect(() => act(() => root.render(null))).not.toThrow();
+  });
+  it('defaults raw copy to 24 items, adds Crop only after explicit Select all, and keeps blocked WB unselected', () => {
+    mountRaw({ initial: RAW_DEFAULT_COPY_SETTING_IDS });
+    expect(host.querySelectorAll('input[name]')).toHaveLength(25);
+    expect(RAW_DEFAULT_COPY_SETTING_IDS.every(id => item(id).checked)).toBe(true);
+    expect(item('crop').checked).toBe(false);
+    click(button('Select all'));
+    expect(item('crop').checked).toBe(true);
+    click(button('Copy'));
+    expect(confirmed).toHaveBeenLastCalledWith(RAW_COPY_SETTING_IDS);
+
+    act(() => root.render(null));
+    mountRaw({ mode: 'paste', ids: ['whiteBalance', 'basic.exposure'], initial: ['basic.exposure'], disabled: ['whiteBalance'] });
+    expect(item('whiteBalance').disabled).toBe(true);
+    expect(item('whiteBalance').checked).toBe(false);
+    expect(host.textContent).toContain('White balance cannot be applied');
+    click(button('Select all'));
+    expect(item('whiteBalance').checked).toBe(false);
+    click(button('Paste'));
+    expect(confirmed).toHaveBeenLastCalledWith(['basic.exposure']);
   });
   it('wraps Tab and Shift+Tab at modal boundaries, including a disabled confirm button', () => {
     mount(); const first = button('Select all'); const last = button('Copy');

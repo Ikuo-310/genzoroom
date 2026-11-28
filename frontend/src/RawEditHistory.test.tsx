@@ -13,6 +13,23 @@ function rawHistory(steps: RawHistoryStep[], cursor: number) {
 describe('RAW History display', () => {
   beforeEach(async () => { await i18n.changeLanguage('ja'); });
 
+  it.each(['ja', 'en'])('shows settings paste source and actually applied items in %s, with legacy metadata fallback', async language => {
+    await i18n.changeLanguage(language);
+    const step: RawHistoryStep = { stepId: 'paste', kind: 'settingsPaste', metadata: {
+      sourceAssetId: '00000000-0000-4000-8000-000000000001', sourceFilename: 'source.dng',
+      selectedIds: ['basic.exposure', 'color.vibrance'],
+    }, changes: [], createdAt: '' };
+    const markup = renderToStaticMarkup(<RawEditHistory raw={rawHistory([step], 1) as never} disabled={false} onReset={() => {}} />);
+    expect(markup).toContain(language === 'ja' ? 'source.dngからペースト' : 'Pasted from source.dng');
+    expect(markup).toContain(language === 'ja' ? '露光量' : 'Exposure');
+    expect(markup).toContain(language === 'ja' ? '自然な彩度' : 'Vibrance');
+    expect(markup).not.toContain('Crop');
+
+    const legacy = { ...step, metadata: { sourceAssetId: step.metadata.sourceAssetId, sourceFilename: 'old.jpg' } } as RawHistoryStep;
+    const legacyMarkup = renderToStaticMarkup(<RawEditHistory raw={rawHistory([legacy], 1) as never} disabled={false} onReset={() => {}} />);
+    expect(legacyMarkup).toContain(language === 'ja' ? 'old.jpgからペースト' : 'Pasted from old.jpg');
+  });
+
   it.each(['ja', 'en'])('labels calibration edits, reset and toggle in %s', async language => {
     await i18n.changeLanguage(language);
     const steps: RawHistoryStep[] = [

@@ -355,11 +355,9 @@ P1-B は Backend の History 操作へ `settingsPaste` を追加した。コピ�
 - `git diff --check`: 成功。
 - P1-B O.3に記録した実Native WB検証結果はO.4の古い記述を訂正済み。P1-CではNative現像演算や画素差は再検証していない。
 
-### P.4 P1-Dへの引継ぎ
+### P.4 P1-Dへの引継ぎ（完了）
 
-- P1-Dは返却hook interfaceを使い、全設定コピー／選択コピー／通常ペースト／選択ペーストのメニュー・dialogと有効状態表示を接続する。LightCraft copied IDs、`canCopySettings`、`canPasteSettings`、`sameEngineClipboard`を使い、Clipboardの本文やownerの独自管理を追加しない。
-- 選択dialogのID表示名・カテゴリ構造はP1-AのID一覧とP1-Cの既存LightCraft JPEGメニューUI部品を参照して構成する。Cropは全コピー既定値に含めず、選択時のみ許可する。
-- 今回はブラウザ／Desktop UI実動作、メニュー操作、実際の画素への貼付け反映を検証していない。これらはP1-D以降の受入確認とする。
+当時の引継ぎはR節のP1-D実装で完了した。コード上の選択UI・操作接続テストはR.4に記録する。ブラウザ／Desktop UI実動作と画素への貼付け反映はP1-Eの手動統合確認に残す。
 
 ## Q. P1-C-F1: WB補正方式の互換性制限
 
@@ -395,7 +393,41 @@ P1-Bで記録した実NativeのWB merge/readbackおよび後続Control成功は�
 | 静的確認・build | `npx tsc --noEmit`、Frontend production `npm run build`、`git diff --check` 成功。buildは既存chunk sizeとReact Router `use client` warningを出力 |
 | Live Native | `GENZOROOM_TEST_LIGHTCRAFT_EXE` 未設定のため `test_raw_edit_settings_paste_live.py` は実行条件を満たさずskip。RAW素材の場所のみではNative executableを起動できない |
 
-### Q.4 P1-Dへの引継ぎ
+### Q.4 P1-Dへの引継ぎ（完了）
 
-- dialogはClipboardの `selectedIds` をコピー済み一覧、`clipboardPasteableSettingIds` を現在適用可能一覧として使う。WBが除外されたら `clipboardWbCompatibilityBlocked` と `clipboardWbCompatibilityReason` を表示する。全項目不可なら `canPasteSettings` はfalse。
-- reason `wbScaleMismatch` は色温度補正方式の不一致、`wbModeUnknown` は方式情報不足。locale keyを日本語／英語両方追加済み。メニュー、選択dialog、ショートカット、Desktop menuは本作業では追加しない。
+当時の引継ぎはR節のP1-D実装で完了した。WB disabled理由は既存の `wbModeMismatch`／`wbModeUnknown` localeを使う。Nativeメニューバー接続は引き続きP2。
+
+## R. P1-D: 選択ダイアログ・操作UI
+
+### R.1 確定仕様
+
+- 既存の `EditSettingsMenu` をViewer toolbar／Viewer context menuに共用し、`useRawDocument` の `copySettings()`／`pasteSettings()` に分岐接続した。コピー可能状態は `canCopySettings`、貼付け状態は同一エンジンかつ `canPasteSettings` を用いる。JPEG ClipboardとLightCraft Clipboardの間でpayload変換しない。
+- 選択UIは `AdjustmentSelectionDialog` を共用する。任意カテゴリ・表示名・初期選択・disabled IDを受け取る拡張はLightCraft用のみ指定し、従来JPEGの項目構成、初期値、操作を維持する。LightCraftはP1-Cの25 ID、`RAW_COPY_SETTING_CATEGORIES`／`RAW_COPY_SETTING_LABEL_KEYS`を使用する。
+- LightCraftの選択表示順は現像パネルに合わせ、Local Tone Mapping、Basic、WB／ColorとそのMixer・Point Color・Grading、Curve、Effects／Vignette、Detail、Calibration、Lens／CA、Cropとした。カテゴリ内の選択単位はID定義どおりで、一括対象のNative JSONをUIで分割しない。
+- 選択コピーはCrop以外の `RAW_DEFAULT_COPY_SETTING_IDS` 24項目を初期選択し、Cropは「全選択」の明示操作でのみ含まれる。ダイアログ表示だけではAPIを呼ばず、確定時にのみコピー取得を開始する。CancelはClipboardに触れない。
+- 選択ペーストはダイアログを開いた時点のLightCraft Clipboard snapshotとDocument owner identityを保持し、確定時に現行Clipboard全体・ownerが一致することを確認する。表示中のClipboardが入れ替わった場合は古い選択を適用しない。適用IDはClipboardに含まれるものに限定し、処理は既存 `pasteSettings(ids)` に委ねる。
+- WBはUIで互換性を再計算しない。hookの `clipboardSettingIds`／`clipboardPasteableSettingIds`／`clipboardWbCompatibilityBlocked`／`clipboardWbCompatibilityReason`／`canPasteSettings`を使用する。互換性のないWBはコピー済み一覧に表示しつつdisabled・未選択とし、「全選択」でも有効化しない。理由は既存locale `workspace.rawClipboard.wbModeMismatch`／`wbModeUnknown`で表示する。他の項目はペースト可能なままにする。適用可能項目がない場合はメニュー操作を無効にする。
+- ショートカットは `ImageViewer`／既存中央registryを使用する。通常Ctrl/Primary+C・VとCtrl/Primary+Alt+C・V、入力欄保護、dialog中の背景操作抑止を維持する。ペースト処理開始時は既存hookがClipboard／ownerを固定し、owner・保存状態を再検証する。
+- Raw controlsにはJPEG版の設定コピー用slider/category context menuが存在しない。共有 `AdjustmentSlider` のcontext callbackはJPEG adjustment IDだけに対応している。既存LightCraft Point Color swatch menuは削除操作専用で設定コピーと意味が異なるため変更しなかった。新しいcontext menuは追加していない。Windows Native menubarはP2。
+- `settingsPaste` History行は既存History rendererでコピー元ファイル名と実際に適用した `selectedIds` のラベルを日本語／英語で表示する。selectedIdsのない旧metadataは従来のコピー元名表示にfallbackする。
+
+### R.2 実装範囲
+
+Frontendのみ変更した。Backend API／Native managed patch／manifest／Native binary、Clipboard寿命・保存機構、History管理は変更していない。コピー取得／適用はP1-A／P1-BのHTTP・History操作境界を使い、既存LightCraft module-memory Clipboardを利用する。
+
+### R.3 検証
+
+| 項目 | 結果 |
+| --- | --- |
+| 選択ダイアログ・JPEG回帰 | `AdjustmentSelectionDialog.test.tsx` の既存JPEG仕様を含めて成功。RAW 24項目初期選択、Cropの明示選択、互換不可WBのdisabled表示・理由・Select All除外を追加確認 |
+| Viewer menu／shortcut既存経路 | `EditSettingsMenu.test.ts`、`ImageViewer.test.tsx`、`AnshitsuClipboard.test.tsx` を含む関連5ファイル **291 passed**。LightCraft wiringは既存Viewer callbacksとraw hook interfaceへ接続 |
+| History表示 | `RawEditHistory.test.tsx` で日英のコピー元・実適用項目表示、旧metadata fallbackを確認 |
+| TypeScript／production build | `npm run build` 成功（`tsc --noEmit`を含む）。既存chunk-sizeとReact Router `use client` directive warningあり |
+| diff整合性 | `git diff --check` 成功 |
+| Desktop実操作 | 未実施。ユーザーの運用方針どおりP1-Eで確認 |
+
+### R.4 P1-Eへの引継ぎ
+
+- Windows DesktopでViewer menuの4操作、Ctrl+C／Ctrl+Alt+C／Ctrl+V／Ctrl+Alt+V、Crop明示選択、WB disabled表示と理由、写真切替後のowner拒否、Clipboard切替中のdialog拒否、History行を実操作で確認する。
+- 代表JPEG／LightCraft素材間でエンジン不一致の拒否、同一LightCraftでの全／部分コピー・ペースト、適用後History・Undo／Redo／Jumpを統合確認する。画素演算の再検証は不要。
+- LightCraft設定panelに対応する既存copy context menuはないため、コンテキスト操作の拡張は新しい要望がない限り行わない。Windows Native menubarはP2。
