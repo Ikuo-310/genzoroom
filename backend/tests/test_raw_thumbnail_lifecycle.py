@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import httpx
+from tests.raw_recipe_fixtures import seed_recipe_row
 import pytest
 
 import edit_store
@@ -22,7 +23,7 @@ from tests.test_thumbnail_generator import ASSET, snapshot
 from tests.test_thumbnail_scheduler import until
 from tests.test_windows_local import local, client, authenticate
 from tests.test_windows_raw_api import setup as raw_setup, open_document
-from tests.test_raw_recipe_api import change, save_body
+from tests.raw_document_helpers import change
 from tests.test_raw_history_api import operation, commit_body, body
 from tests.test_raw_controls import identity as document_identity
 
@@ -49,7 +50,7 @@ def save(kind="edited", *, asset=ASSET, revision=0, exposure=.7, save_id=None):
     current = deepcopy(baseline)
     if kind != "default":
         current["light"]["exposure"] = exposure
-    return store.put_raw_recipe(identity(assetId=str(asset)), revision, save_id or uuid4(), current,
+    return seed_recipe_row(identity(assetId=str(asset)), revision, save_id or uuid4(), current,
         import_defaults_fingerprint=None if kind == "unknown" else store._digest(store._settings_json(baseline, 1)))
 
 
@@ -85,7 +86,7 @@ def test_raw_history_only_save_advances_consistency_revision_without_publication
                "import_defaults_fingerprint": fingerprint}
 
     async def run():
-        await mutate_raw_edits(scheduler, ASSET, store.put_raw_recipe, key, 0, save_id, current,
+        await mutate_raw_edits(scheduler, ASSET, store.initialize_raw_history, key, 0, save_id, current,
                                import_defaults_fingerprint=fingerprint)
         assert store.get_raw_saved_state(ASSET)["revision"] == 1
         assert hub.position()[1] == 1 and hub.consistency_position()[2] == 1
@@ -134,9 +135,9 @@ def test_default_raw_history_changes_only_internal_sequence_and_replay_is_inert(
                       "import_defaults_fingerprint": fingerprint}
 
     async def run():
-        initial = await mutate_raw_edits(scheduler, ASSET, store.put_raw_recipe, key, 0, recipe_id, baseline,
+        initial = await mutate_raw_edits(scheduler, ASSET, store.initialize_raw_history, key, 0, recipe_id, baseline,
                                          import_defaults_fingerprint=fingerprint)
-        assert initial["revision"] == 1
+        assert initial["ack"]["revision"] == 1
         assert store.get_raw_saved_state(ASSET)["exportEligible"] is False
         assert hub.consistency_position()[2] == 1 and hub.position()[1] == 1
         assert scheduler._deadlines == {} and resets == [ASSET]
@@ -185,9 +186,9 @@ def test_recipe_save_result_tracks_commit_when_followup_state_read_fails(lifecyc
 
     async def run():
         # The pre-save state is readable; only the optional post-commit read fails.
-        result = await mutate_raw_edits(scheduler, ASSET, store.put_raw_recipe, key, 0, save_id, current,
+        result = await mutate_raw_edits(scheduler, ASSET, store.initialize_raw_history, key, 0, save_id, current,
                                         import_defaults_fingerprint=fingerprint)
-        assert result["revision"] == 1
+        assert result["ack"]["revision"] == 1
         assert calls[0] == 1
         assert saved_state(ASSET)["revision"] == 1
         assert hub.consistency_position()[2] == 1
@@ -196,9 +197,9 @@ def test_recipe_save_result_tracks_commit_when_followup_state_read_fails(lifecyc
 
         # The same receipt is known to be a replay and must not double-count the mutation.
         monkeypatch.setattr(store, "get_raw_saved_state", saved_state)
-        replay = await mutate_raw_edits(scheduler, ASSET, store.put_raw_recipe, key, 0, save_id, current,
+        replay = await mutate_raw_edits(scheduler, ASSET, store.initialize_raw_history, key, 0, save_id, current,
                                         import_defaults_fingerprint=fingerprint)
-        assert replay["revision"] == 1
+        assert replay["ack"]["revision"] == 1
         assert hub.consistency_position()[2] == 1
         assert hub.position()[1] == 1
         assert scheduler._deadlines == {ASSET: 60}
@@ -216,7 +217,7 @@ def test_history_recipe_change_uses_committed_state_when_followup_read_fails(lif
     initial["light"]["exposure"] = .7
     fingerprint = store._digest(store._settings_json(baseline, 1))
     key = identity(assetId=str(ASSET))
-    asyncio.run(mutate_raw_edits(scheduler, ASSET, store.put_raw_recipe, key, 0, uuid4(), initial,
+    asyncio.run(mutate_raw_edits(scheduler, ASSET, store.initialize_raw_history, key, 0, uuid4(), initial,
                                  import_defaults_fingerprint=fingerprint))
     before_revision = store.get_raw_saved_state(ASSET)["revision"]
     current = deepcopy(initial)
@@ -284,8 +285,8 @@ def test_raw_save_mutation_invalidates_a_concurrent_publication_status_snapshot(
             await asyncio.wait_for(entered.wait(), 3)
             current = deepcopy(settings())
             current["light"]["exposure"] = 1.2
-            await mutate_raw_edits(scheduler, ASSET, store.put_raw_recipe, identity(assetId=str(ASSET)), 1,
-                                   uuid4(), current)
+            await mutate_raw_edits(scheduler, ASSET, store.append_raw_history, identity(assetId=str(ASSET)), 1,
+                                   uuid4(), current, kind="control", metadata={"control": "light.exposure"})
             assert state_calls[0] == 1
             release_loop.set()
             response = await pending
@@ -327,7 +328,7 @@ def test_default_edited_history_and_undo_transitions_have_targeted_notifications
     edited_step_id, edited_history_id = uuid4(), uuid4()
 
     async def run():
-        await mutate_raw_edits(scheduler, ASSET, store.put_raw_recipe, key, 0, default_recipe_id, baseline,
+        await mutate_raw_edits(scheduler, ASSET, store.initialize_raw_history, key, 0, default_recipe_id, baseline,
                                import_defaults_fingerprint=fingerprint)
         assert store.get_raw_saved_state(ASSET)["exportEligible"] is False
         assert hub.consistency_position()[2] == 1 and hub.position()[1] == 1
@@ -445,7 +446,7 @@ def test_raw_thumbnail_state_uses_zero_only_for_an_incompatible_engine_recipe(li
     monkeypatch.setattr(lightcraft_artifact, "ENGINE_VERSION", "9.9.9")
     monkeypatch.setattr(lightcraft_artifact, "ENGINE_COMMIT", "f" * 40)
     old_identity = identity(assetId=str(ASSET), engineVersion="0.9.1", engineCommit="a" * 40)
-    store.put_raw_recipe(old_identity, 0, uuid4(), settings())
+    seed_recipe_row(old_identity, 0, uuid4(), settings())
 
     result = store.get_raw_thumbnail_recipe_states([ASSET])
 
@@ -523,20 +524,31 @@ def test_mutation_commit_debounce_replay_failure_default_unknown_delete(lifecycl
     cache, scheduler, now, _ = lifecycle
     async def run():
         save_id = uuid4()
-        await mutate_raw_edits(scheduler, ASSET, save, save_id=save_id)
+        key = identity(assetId=str(ASSET))
+        baseline = settings()
+        edited = deepcopy(baseline)
+        edited["light"]["exposure"] = 1.
+        options = {"kind": "control", "metadata": {"control": "light.exposure"},
+                   "import_defaults_fingerprint": store._digest(store._settings_json(baseline, 1))}
+        first = (key, 0, save_id, edited)
+        await mutate_raw_edits(scheduler, ASSET, store.append_raw_history, *first,
+                               baseline_settings=baseline, **options)
         assert scheduler._deadlines == {ASSET: 60}
         assert store.get_raw_saved_state(ASSET)["exportEligible"] is True
         now[0] = 10
-        await mutate_raw_edits(scheduler, ASSET, save, save_id=save_id)
+        await mutate_raw_edits(scheduler, ASSET, store.append_raw_history, *first,
+                               baseline_settings=baseline, **options)
         assert scheduler._deadlines == {ASSET: 60}
-        await mutate_raw_edits(scheduler, ASSET, save, revision=1, exposure=1.2)
+        newer = deepcopy(edited)
+        newer["light"]["exposure"] = 1.2
+        await mutate_raw_edits(scheduler, ASSET, store.append_raw_history, key, 1, uuid4(), newer, **options)
         assert scheduler._deadlines == {ASSET: 70}
         def fail(): raise store.StoreUnavailable()
         with pytest.raises(store.StoreUnavailable):
             await mutate_raw_edits(scheduler, ASSET, fail)
         assert scheduler._deadlines == {ASSET: 70}
         cache.store(ASSET, b"old")
-        await mutate_raw_edits(scheduler, ASSET, save, "default", revision=2)
+        await mutate_raw_edits(scheduler, ASSET, store.append_raw_history, key, 2, uuid4(), baseline, **options)
         assert not scheduler._deadlines and cache.read(ASSET) is None
         await mutate_raw_edits(scheduler, ASSET, store.delete_raw_edits, str(ASSET))
         await mutate_raw_edits(scheduler, ASSET, save, "unknown")
@@ -683,7 +695,7 @@ def test_mixed_queue_dispatch_failure_continuation_and_shutdown(lifecycle, monke
     asyncio.run(run())
 
 
-def test_real_raw_recipe_api_notifies_only_after_success(local, tmp_path, monkeypatch):
+def test_real_raw_history_api_notifies_only_after_success(local, tmp_path, monkeypatch):
     async def run():
         api, _, _, _ = await raw_setup(tmp_path, local, monkeypatch)
         scheduler = ThumbnailScheduler(ThumbnailCache(tmp_path / "thumbs"), AsyncMock())
@@ -693,15 +705,17 @@ def test_real_raw_recipe_api_notifies_only_after_success(local, tmp_path, monkey
                 await authenticate(http, local)
                 _, doc = await open_document(http)
                 asset = UUID(doc["assetId"])
+                doc = await operation(http, doc, "initialize")
                 doc = await change(http, doc, 1.)
                 assert not scheduler._deadlines
-                url = f'/api/raw/documents/{doc["handle"]}/recipe'
+                url = f'/api/raw/documents/{doc["handle"]}/history/commit'
+                commit = commit_body(doc)
                 with monkeypatch.context() as patch:
                     def fail(*args, **kwargs): raise store.StoreUnavailable()
-                    patch.setattr(store, "put_raw_recipe", fail)
-                    assert (await http.put(url, json=save_body(doc))).status_code == 503
+                    patch.setattr(store, "append_raw_history", fail)
+                    assert (await http.post(url, json=commit)).status_code == 503
                 assert not scheduler._deadlines
-                assert (await http.put(url, json=save_body(doc))).status_code == 200
+                doc = await operation(http, doc, "commit", commit)
                 assert asset in scheduler._deadlines
                 scheduler.cache.store(asset, b"old")
                 request = document_identity(doc) | {"documentRevision": doc["revision"], "handle": doc["handle"]}
@@ -748,7 +762,7 @@ def test_grading_only_saved_state_controls_thumbnail_eligibility(lifecycle, cont
     parent, key = control_location(current, control)
     # Native numeric readback uses f64 even for integer-step controls.
     parent[key] = float(value)
-    store.put_raw_recipe(identity(assetId=str(ASSET)), 0, uuid4(), current,
+    seed_recipe_row(identity(assetId=str(ASSET)), 0, uuid4(), current,
         import_defaults_fingerprint=store._digest(store._settings_json(baseline, 1)))
     assert store.get_raw_edit_statuses([ASSET]) == {str(ASSET): edited}
     cache.store(ASSET, b'old')

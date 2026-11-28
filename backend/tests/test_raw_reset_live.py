@@ -14,7 +14,7 @@ from tests.test_raw_source import Original
 from tests.test_windows_local import local, client
 from tests.test_raw_category_operations import open_history, patch, edit
 from tests.test_raw_history_api import operation, body, url
-from tests.test_raw_recipe_api import headers
+from tests.raw_document_helpers import headers
 from tests.test_raw_recipe_restore import open_asset
 
 

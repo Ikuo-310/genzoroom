@@ -9,7 +9,7 @@ from tests.test_windows_local import client, local
 from tests.test_windows_raw_api import setup
 from tests.test_raw_category_operations import edit, open_history, patch
 from tests.test_raw_history_api import body, operation, url
-from tests.test_raw_recipe_api import headers
+from tests.raw_document_helpers import headers
 from tests.test_raw_recipe_restore import open_asset
 
 

@@ -195,22 +195,6 @@ def _read_row(connection, identity):
         raise StoreUnavailable() from None
 
 
-def get_raw_recipe(identity: dict) -> dict:
-    """Read an exact source/engine identity; no fallback, application or migration of settings."""
-    identity = normalize_identity(identity)
-    with _connection() as connection:
-        # The recipe and its receipt must come from one SQLite read snapshot.
-        connection.execute("BEGIN")
-        try:
-            result = _read_row(connection, identity)
-            _read_history(connection, identity, result)
-            connection.commit()
-            return {"recipe": None} if result is None else result
-        except Exception:
-            connection.rollback()
-            raise
-
-
 RAW_EXPORT_PROCESSING_VERSION = "raw-lightcraft-v1"
 
 
@@ -499,57 +483,6 @@ def delete_raw_edits(asset_id: str, *, _return_lifecycle_state: bool = False) ->
                       "historyReceipts": history_saves}
             return (result, any((recipes, histories, steps, history_saves)), None) \
                 if _return_lifecycle_state else result
-        except Exception:
-            connection.rollback()
-            raise
-
-
-def put_raw_recipe(identity: dict, expected_revision: int, save_id: UUID | str, settings: dict,
-                   *, import_defaults_fingerprint: str | None = None,
-                   _return_state_changed: bool = False) -> dict | tuple[dict, bool]:
-    """Atomically save readback with immutable saveId receipts and an optional lifecycle outcome."""
-    identity = normalize_identity(identity)
-    if type(expected_revision) is not int or not 0 <= expected_revision < MAX_REVISION:
-        raise InvalidRawRecipe()
-    save_id = _uuid(save_id)
-    import_defaults_fingerprint = _import_defaults_fingerprint(import_defaults_fingerprint)
-    encoded = _settings_json(settings, identity["settingsSchemaVersion"])
-    digest = _request_hash(identity, encoded, expected_revision)
-    with _connection() as connection:
-        connection.execute("BEGIN IMMEDIATE")
-        try:
-            current = _read_row(connection, identity)
-            history = _read_history(connection, identity, current)
-            receipt = connection.execute("SELECT * FROM raw_recipe_saves WHERE save_id=?", (save_id,)).fetchone()
-            if receipt is not None:
-                if connection.execute("SELECT 1 FROM raw_history_saves WHERE save_id=?", (save_id,)).fetchone():
-                    raise StoreConflict("save_id_reused")
-                try:
-                    revision, updated = _metadata(receipt)
-                    if re.fullmatch(r"[0-9a-f]{64}", receipt["request_hash"]) is None:
-                        raise InvalidRawRecipe()
-                except (TypeError, ValueError):
-                    raise StoreUnavailable() from None
-                if receipt["request_hash"] != digest:
-                    raise StoreConflict("save_id_reused")
-                if revision != expected_revision + 1 or current is None or current["revision"] < revision:
-                    raise StoreUnavailable()
-                connection.commit()
-                # Return the original ack even after newer saves, without rolling the current row back.
-                result = _result(identity, encoded, revision, save_id, updated) | {
-                    "importDefaultsFingerprint": current.get("importDefaultsFingerprint")}
-                return (result, False, _lifecycle_state(connection, identity)) if _return_state_changed else result
-            if (0 if current is None else current["revision"]) != expected_revision:
-                raise StoreConflict()
-            # A checkpoint may advance the receipt, but cannot rewrite an immutable History step.
-            if history is not None and encoded != _settings_json(current["recipe"]["settings"], identity["settingsSchemaVersion"]):
-                raise StoreConflict("raw_history_requires_operation")
-            _write_recipe(connection, identity, current, expected_revision, save_id, encoded, digest,
-                          import_defaults_fingerprint)
-            result = _read_row(connection, identity)
-            lifecycle_state = _lifecycle_state(connection, identity)
-            connection.commit()
-            return (result, True, lifecycle_state) if _return_state_changed else result
         except Exception:
             connection.rollback()
             raise

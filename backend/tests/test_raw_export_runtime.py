@@ -2,6 +2,7 @@ import asyncio
 import copy
 from uuid import uuid4
 
+from tests.raw_recipe_fixtures import read_saved_recipe, seed_recipe_row
 import pytest
 
 import edit_store
@@ -33,7 +34,7 @@ def save_raw(asset=A, exposure=.7, revision=0, engine=None):
         for band in ('shadows', 'midtones', 'highlights'):
             value['grading'][band].update(hue=240, sat=25, lum=-4)
         value['grading'].update(blending=67, balance=-23)
-    return raw.put_raw_recipe(key, revision, uuid4(), value,
+    return seed_recipe_row(key, revision, uuid4(), value,
         import_defaults_fingerprint=raw._digest(raw._settings_json(defaults, 1)))
 
 
@@ -60,7 +61,7 @@ def test_optics_frozen_recipe_reaches_export_and_registrar(db):
         distortion=-35., vignetting=-40., remove_ca=True, ca_red=12., ca_blue=-15.,
         defringe_purple_amount=8., defringe_green_amount=6.)
     saved['crop']['geometry']['angle'] = 5.
-    raw.put_raw_recipe(identity(), 0, uuid4(), saved,
+    seed_recipe_row(identity(), 0, uuid4(), saved,
         import_defaults_fingerprint=raw._digest(raw._settings_json(settings(), 1)))
     enqueue_export_assets([A])
     calls, registrar = [], Recorder()
@@ -93,7 +94,7 @@ def test_queue_worker_passes_frozen_raw_recipe_to_adapter_and_completes(db):
     saved['color']['vibrance'] = 17.
     saved['grading']['shadows'].update(hue=215., sat=22., lum=-5.)
     saved['detail']['nr_luminance'] = 19.
-    recipe = raw.put_raw_recipe(identity(), 0, uuid4(), saved,
+    recipe = seed_recipe_row(identity(), 0, uuid4(), saved,
         import_defaults_fingerprint=raw._digest(raw._settings_json(settings(), 1)))
     enqueue_export_assets([A])
     seen, registrar = [], Recorder()
@@ -124,7 +125,7 @@ def test_queue_worker_passes_frozen_raw_recipe_to_adapter_and_completes(db):
     with Image.open(BytesIO(registrar.calls[0][1].jpeg)) as image:
         image.load()
         assert image.format == 'JPEG' and image.size == (32, 24)
-    assert raw.get_raw_recipe(identity())['recipe']['settings']['light']['exposure'] == 2.
+    assert read_saved_recipe(identity())['recipe']['settings']['light']['exposure'] == 2.
 
 
 def test_windows_native_export_accepts_non_raw_immich_asset(db, monkeypatch):
@@ -334,7 +335,7 @@ def test_old_recipe_engine_does_not_pin_export_engine(db):
 
 
 def test_raw_unknown_baseline_is_not_eligible(db):
-    raw.put_raw_recipe(identity(),0,uuid4(),settings())
+    seed_recipe_row(identity(),0,uuid4(),settings())
     with pytest.raises(edit_store.QueueRejected):enqueue_export_assets([A])
 
 
@@ -364,7 +365,7 @@ def test_raw_saved_recipe_keeps_frozen_settings_and_receipt_unchanged(db, tmp_pa
     else:
         saved.pop('point_colors', None)
     defaults = settings()
-    saved_result = raw.put_raw_recipe(
+    saved_result = seed_recipe_row(
         identity(), 0, uuid4(), saved,
         import_defaults_fingerprint=raw._digest(raw._settings_json(defaults, 1)),
     )
@@ -474,7 +475,7 @@ def test_queue_export_registers_jpeg_and_promotes_it_as_stack_cover(db):
     from tests.test_export_runtime import jpg
 
     recipe_result = save_raw()
-    saved_recipe = raw.get_raw_recipe(identity())
+    saved_recipe = read_saved_recipe(identity())
     enqueue_export_assets([A])
     album = uuid4()
 
@@ -534,7 +535,7 @@ def test_queue_export_registers_jpeg_and_promotes_it_as_stack_cover(db):
     assert source.started == [A] and len(source.originals) == 1
     assert source.originals[0].closed == 1 and source.originals[0].content == jpg()
     assert rows() == rows_before
-    assert raw.get_raw_recipe(identity()) == saved_recipe
+    assert read_saved_recipe(identity()) == saved_recipe
     assert not list_export_queue()
 
 

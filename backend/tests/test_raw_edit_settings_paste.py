@@ -12,7 +12,7 @@ from raw_edit_settings_copy import (COPY_SETTING_IDS, CROP_SETTING_ID, extract_c
                                     validate_copy_payload)
 from tests.test_lightcraft_raw import DEFAULT
 from tests.test_raw_controls import identity, point_color
-from tests.test_raw_recipe_api import change, headers
+from tests.raw_document_helpers import change, headers
 from tests.test_windows_local import authenticate, client, local
 from tests.test_windows_raw_api import close_headers, open_document, setup
 

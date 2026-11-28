@@ -9,6 +9,7 @@ import shutil
 from types import SimpleNamespace
 from uuid import uuid4
 
+from tests.raw_recipe_fixtures import read_saved_recipe, seed_recipe_row
 import pytest
 from PIL import Image
 
@@ -95,13 +96,13 @@ def test_real_native_saved_recipe_thumbnail(tmp_path, monkeypatch, isolated_db, 
             saved["detail"].pop("nr_outliers", None)
         await editor.set_controls(handle, {"light.exposure": .5}, revision)
         saved["light"]["exposure"] = .5
-        recipe_store.put_raw_recipe(identity, 0, uuid4(), saved,
+        seed_recipe_row(identity, 0, uuid4(), saved,
             import_defaults_fingerprint=recipe_store._digest(recipe_store._settings_json(initial.settings, 1)))
-        stored = recipe_store.get_raw_recipe(identity)
+        stored = read_saved_recipe(identity)
         database_before = edit_store.DB_PATH.read_bytes()
         image_bytes = await thumbnail.generate_raw_thumbnail(asset_id, immich_url=None, api_key=None,
             manager=manager)
-        assert recipe_store.get_raw_recipe(identity) == stored
+        assert read_saved_recipe(identity) == stored
         assert edit_store.DB_PATH.read_bytes() == database_before
         assert source.read_bytes() == original.read_bytes()
         assert source_stream.closed
@@ -165,9 +166,9 @@ def test_real_native_saved_recipe_export(tmp_path, monkeypatch, isolated_db, mat
             saved["light"]["exposure"] = .5
             saved["color"]["vibrance"] = 12.
             saved["grading"]["shadows"].update(hue=210., sat=18., lum=-3.)
-            recipe_store.put_raw_recipe(identity, 0, uuid4(), saved,
+            seed_recipe_row(identity, 0, uuid4(), saved,
                 import_defaults_fingerprint=recipe_store._digest(recipe_store._settings_json(initial.settings, 1)))
-            stored = recipe_store.get_raw_recipe(identity)
+            stored = read_saved_recipe(identity)
             with edit_store._connection() as connection:
                 recipe_rows_before = tuple(connection.execute(
                     f"SELECT * FROM {table}").fetchall()
@@ -184,7 +185,7 @@ def test_real_native_saved_recipe_export(tmp_path, monkeypatch, isolated_db, mat
                 assert merge_payloads[-1]["detail"]["nr_outliers"] is False
             assert recipe_store._settings_json(merge_payloads[-1], 1) == recipe_store._settings_json(
                 merge_snapshot(stored["recipe"]["settings"]), 1)
-            assert recipe_store.get_raw_recipe(identity) == stored
+            assert read_saved_recipe(identity) == stored
             with edit_store._connection() as connection:
                 recipe_rows_after = tuple(connection.execute(
                     f"SELECT * FROM {table}").fetchall()

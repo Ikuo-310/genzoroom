@@ -11,7 +11,7 @@ from tests.test_lightcraft_mcp import until
 from tests.test_windows_local import local, client, authenticate
 from tests.test_windows_raw_api import setup, open_document, preview_body
 from tests.test_raw_history_api import operation, commit_body
-from tests.test_raw_recipe_api import change
+from tests.raw_document_helpers import change
 import raw_recipe_store as store
 import windows_raw_api as http_api
 

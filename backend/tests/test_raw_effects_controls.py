@@ -12,7 +12,7 @@ from tests.test_windows_raw_api import setup
 from tests.test_raw_category_operations import open_history, patch, edit
 from tests.test_raw_history_api import operation, body, url
 from tests.test_raw_controls import identity
-from tests.test_raw_recipe_api import headers
+from tests.raw_document_helpers import headers
 from tests.test_raw_recipe_restore import open_asset
 
 

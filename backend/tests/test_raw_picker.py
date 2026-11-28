@@ -8,7 +8,7 @@ from raw_white_balance import validate_candidate, validate_pick_frame
 from tests.test_raw_white_balance import start, initialize
 from tests.test_windows_local import local, client, authenticate
 from tests.test_raw_history_api import operation, body, url
-from tests.test_raw_recipe_api import headers
+from tests.raw_document_helpers import headers
 from tests.test_raw_recipe_restore import open_asset
 from tests.test_windows_raw_api import preview_body
 from tests.test_lightcraft_mcp import until

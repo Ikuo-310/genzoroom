@@ -11,7 +11,7 @@ from tests.test_windows_raw_api import setup
 from tests.test_raw_category_operations import open_history, patch, edit
 from tests.test_raw_history_api import operation, body, url
 from tests.test_raw_controls import identity
-from tests.test_raw_recipe_api import headers
+from tests.raw_document_helpers import headers
 from tests.test_raw_recipe_restore import open_asset
 
 SPECS = [(f"grading.{band}.{field}", lo, hi, 0) for band in ("shadows", "midtones", "highlights") for field, lo, hi in (("hue", 0, 360), ("sat", 0, 100), ("lum", -100, 100))] + [("grading.blending", 0, 100, 50), ("grading.balance", -100, 100, 0)]

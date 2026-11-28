@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from uuid import uuid4
 
+from tests.raw_recipe_fixtures import read_saved_recipe, seed_recipe_row
 import pytest
 
 from lightcraft_mcp import LightCraftError
@@ -377,7 +378,7 @@ def test_parallel_duplicate_and_http_reply_loss_do_not_repeat_rotate(local, tmp_
 
 def test_legacy_crop_omission_restores_without_rewriting_saved_row(local, tmp_path, monkeypatch):
     from tests.test_raw_recipe_restore import seed, open_asset
-    from tests.test_raw_recipe_api import headers
+    from tests.raw_document_helpers import headers
     async def run():
         async with client(local) as http:
             monkeypatch.setattr(native, 'RawProcess', GeometryProcess)
@@ -388,8 +389,8 @@ def test_legacy_crop_omission_restores_without_rewriting_saved_row(local, tmp_pa
             recipe = saved['recipe']
             recipe['settings'].pop('crop'); recipe['settings'].pop('orientation')
             key = {k:v for k,v in recipe.items() if k != 'settings'}
-            store.put_raw_recipe(key, 1, uuid4(), recipe['settings'])
-            prior = store.get_raw_recipe(key)
+            seed_recipe_row(key, 1, uuid4(), recipe['settings'])
+            prior = read_saved_recipe(key)
             try:
                 _, response = await open_asset(http, asset)
                 assert response.status_code == 200, response.text
@@ -397,14 +398,14 @@ def test_legacy_crop_omission_restores_without_rewriting_saved_row(local, tmp_pa
                 assert doc['crop'] == DEFAULT_CROP
                 result = await operate(http, doc, op('reset'))
                 assert result['history']['length'] == 0
-                assert 'crop' not in store.get_raw_recipe(key)['recipe']['settings']
-                assert prior['recipe']['settings'] == store.get_raw_recipe(key)['recipe']['settings']
+                assert 'crop' not in read_saved_recipe(key)['recipe']['settings']
+                assert prior['recipe']['settings'] == read_saved_recipe(key)['recipe']['settings']
             finally: await api.close()
     asyncio.run(run())
 
 
 def test_geometry_noop_keeps_redo_and_jump_uses_snapshots(local, tmp_path, monkeypatch):
-    from tests.test_raw_recipe_api import headers
+    from tests.raw_document_helpers import headers
     async def run():
         async with client(local) as http:
             api, child, doc = await opened(tmp_path, local, monkeypatch, http)

@@ -7,6 +7,7 @@ import threading
 from contextlib import closing
 from uuid import UUID, uuid4
 
+from tests.raw_recipe_fixtures import read_saved_recipe, seed_recipe_row
 import pytest
 from PIL import Image
 
@@ -18,7 +19,7 @@ from lightcraft_mcp import LightCraftError
 from tests.test_windows_local import local, client, authenticate
 from tests.test_windows_raw_api import setup, open_document, close_headers
 from tests.test_raw_source import Original
-from tests.test_raw_recipe_api import change, save_body, headers
+from tests.raw_document_helpers import change, headers
 from tests.test_raw_recipe_restore import open_asset
 from tests.test_raw_recipe_restore import hold_merge, seed
 from tests.test_raw_controls import identity, point_color
@@ -118,13 +119,13 @@ def test_native_residency_continues_and_hard_budget_recovers_by_workspace_releas
                         await http.delete(f'/api/raw/documents/{doc["handle"]}', headers=close_headers(doc))
                 assert api.raw.status().resident_count == 5 and children[0].returncode is None
                 assert doc["regenerationThreshold"] == 200 and doc["mutationLimit"] == 256
+                doc = await operation(http, doc, "initialize")
                 for attempt in range(200 - doc["mutationAttempts"]):
                     doc = await change(http, doc, (attempt % 30) / 10)
                 assert doc["mutationAttempts"] == doc["regenerationThreshold"] == 200
                 doc = await change(http, doc, 1.25)
                 assert doc["mutationAttempts"] == 201
-                saved = await http.put(f'/api/raw/documents/{doc["handle"]}/recipe', json=save_body(doc))
-                assert saved.status_code == 200
+                doc = await operation(http, doc, "commit", commit_body(doc))
                 assert (await http.delete(f'/api/raw/workspaces/{workspace}')).status_code == 204
                 workspace_response = await http.post("/api/raw/workspaces", json={})
                 assert workspace_response.status_code == 200
@@ -137,7 +138,7 @@ def test_native_residency_continues_and_hard_budget_recovers_by_workspace_releas
                 assert next_doc["generation"] > doc["generation"]
                 assert next_doc["mutationAttempts"] == 1 and next_doc["regenerationThreshold"] == 200
                 assert next_doc["settingsFingerprint"] == doc["settingsFingerprint"]
-                doc = next_doc
+                doc = await operation(http, next_doc, "initialize")
                 api.raw._edits = 256
                 denied = await http.post(f'/api/raw/documents/{doc["handle"]}/controls',
                     json=identity(doc) | {"expectedRevision": doc["revision"], "values": {"light.exposure": 1.}})
@@ -251,8 +252,7 @@ def test_metadata_is_lazy_bounded_and_does_not_expose_settings(local, tmp_path, 
                 serialized = json.dumps(result)
                 for forbidden in ("sourceContentHash", "photo_id", "settings_json", "baselineSettings", "C:/", "geometry"):
                     assert forbidden not in serialized
-                doc = await change(http, doc, 1.)
-                assert (await http.put(f'/api/raw/documents/{doc["handle"]}/recipe', json=save_body(doc))).status_code == 200
+                seed_recipe_row(api._history_identity, 0, uuid4(), children[0].photos[1]["settings"])
                 response = await http.get(url(doc), headers=headers(doc))
                 assert response.json()["recipeRevision"] == 1 and not response.json()["history"]["initialized"]
                 assert not rows()["asset_raw_histories"]
@@ -272,7 +272,7 @@ def test_document_close_recovers_only_after_reaped_native_and_verified_recipe_hi
                 doc = await change(http, doc, 1.25)
                 doc = await operation(http, doc, "commit", commit_body(doc))
                 identity = dict(api._history_identity)
-                persisted = store.get_raw_recipe(identity)
+                persisted = read_saved_recipe(identity)
                 history = store.get_raw_history(identity)
                 assert persisted["revision"] == doc["recipeRevision"] == history["revision"]
                 assert store._digest(store._settings_json(persisted["recipe"]["settings"], identity["settingsSchemaVersion"])) == doc["settingsFingerprint"]
@@ -325,13 +325,6 @@ def test_document_close_does_not_recover_native_loss_with_unsettled_or_mismatche
                 assert api.workspace == workspace and api.document["handle"] == doc["handle"]
 
                 api._history_save = None
-                api._recipe_save = {"settled": False}
-                pending = await http.delete(f'/api/raw/documents/{doc["handle"]}', headers=close_headers(doc))
-                assert pending.status_code == 409 and pending.json()["code"] == "raw_recipe_save_pending"
-                assert api.workspace == workspace and api.document["handle"] == doc["handle"]
-                assert api._document_close_receipt is None
-
-                api._recipe_save = None
                 api.document["settingsFingerprint"] = "0" * 64
                 mismatch_doc = dict(doc, settingsFingerprint="0" * 64)
                 mismatch = await http.delete(f'/api/raw/documents/{doc["handle"]}', headers=close_headers(mismatch_doc))
@@ -520,7 +513,7 @@ def test_incompatible_recipe_stays_untouched_until_first_changed_history_append(
             old = seed(asset_id, engineVersion="0.18.1", engineCommit="a" * 40)
             old_identity = {key: old["recipe"][key] for key in store.IDENTITY_FIELDS}
             store.initialize_raw_history(old_identity, old["revision"], uuid4(), old["recipe"]["settings"])
-            old_recipe = store.get_raw_recipe(old_identity)["recipe"]
+            old_recipe = read_saved_recipe(old_identity)["recipe"]
             old_history = store.get_raw_history(old_identity)["history"]
             before = rows()
             async with client(local) as http:
@@ -531,17 +524,12 @@ def test_incompatible_recipe_stays_untouched_until_first_changed_history_append(
                 assert doc["recipeRecoveryPending"] is True and doc["recipeStatus"] == "incompatible"
                 assert doc["recipeRevision"] == 0
                 assert not any(name == "develop.merge" for name, _ in children[0].commands)
-                assert store.get_raw_recipe(api.raw.recipe_identity(api._raw_handle))["recipe"] is None
+                assert read_saved_recipe(api.raw.recipe_identity(api._raw_handle))["recipe"] is None
                 assert (await http.get(url(doc), headers=headers(doc))).json()["history"]["initialized"] is False
                 assert rows() == before
                 blocked_initialize = await http.post(url(doc, "initialize"), json=body(doc))
                 assert blocked_initialize.status_code == 409
                 assert blocked_initialize.json()["code"] == "raw_history_requires_operation"
-                blocked_recipe = await http.put(f'/api/raw/documents/{doc["handle"]}/recipe', json={
-                    **{key: doc[key] for key in ("workspaceId", "generation", "documentToken")},
-                    "documentRevision": doc["revision"], "expectedRecipeRevision": 0, "saveId": str(uuid4())})
-                assert blocked_recipe.status_code == 409
-                assert blocked_recipe.json()["code"] == "raw_history_requires_operation"
                 assert rows() == before
 
                 noop = await operation(http, doc, "commit", body(doc) | {
@@ -587,9 +575,9 @@ def test_incompatible_recipe_stays_untouched_until_first_changed_history_append(
                 current_identity = api.raw.recipe_identity(api._raw_handle)
                 assert current["recipeRecoveryPending"] is False and current["recipeRevision"] == 1
                 assert current["history"]["length"] == current["history"]["cursor"] == 1
-                current_recipe = store.get_raw_recipe(current_identity)["recipe"]["settings"]
+                current_recipe = read_saved_recipe(current_identity)["recipe"]["settings"]
                 assert current_recipe["light"]["exposure"] == .75
-                assert store.get_raw_recipe(old_identity)["recipe"] == old_recipe
+                assert read_saved_recipe(old_identity)["recipe"] == old_recipe
                 assert rows()["asset_raw_recipes"] != before["asset_raw_recipes"]
                 assert rows()["raw_history_saves"] != before["raw_history_saves"]
                 assert {row[0] for row in before["raw_recipe_saves"]} <= {row[0] for row in rows()["raw_recipe_saves"]}
@@ -679,7 +667,7 @@ def test_point_color_history_snapshots_undo_redo_jump_and_reopen(local, tmp_path
                     request = body(doc) | {"kind": kind, "metadata": metadata}
                     doc = await operation(http, doc, "operate", request)
                     native = await api.raw.get_settings(api._raw_handle)
-                    recipe = store.get_raw_recipe(api._history_identity)["recipe"]["settings"]
+                    recipe = read_saved_recipe(api._history_identity)["recipe"]["settings"]
                     assert native.settings == recipe
                     assert native.settings["point_colors"] == recipe["point_colors"]
                     assert {key: value for key, value in native.settings.items() if key != "point_colors"} == \
@@ -726,7 +714,7 @@ def test_point_color_history_snapshots_undo_redo_jump_and_reopen(local, tmp_path
                 assert history_response.json()["history"]["length"] == len(saved_history["steps"]) == 5
                 restored = await api.raw.get_settings(api._raw_handle)
                 assert restored.settings["point_colors"] == jumped
-                assert restored.settings == store.get_raw_recipe(api._history_identity)["recipe"]["settings"]
+                assert restored.settings == read_saved_recipe(api._history_identity)["recipe"]["settings"]
                 assert rows() == rows_before_reopen
                 assert sum(name == "pointColor.pick" for name, _ in children[0].commands) == pick_commands
                 assert sum(name == "pointColor.delete" for name, _ in children[0].commands) == delete_commands
@@ -747,7 +735,7 @@ def test_point_color_history_snapshots_undo_redo_jump_and_reopen(local, tmp_path
                 assert history_response.json()["history"]["length"] == len(final_history["steps"]) == 5
                 restored_empty = await api.raw.get_settings(api._raw_handle)
                 assert restored_empty.settings["point_colors"] == []
-                assert restored_empty.settings == store.get_raw_recipe(api._history_identity)["recipe"]["settings"]
+                assert restored_empty.settings == read_saved_recipe(api._history_identity)["recipe"]["settings"]
                 assert rows() == final_rows
                 assert sum(name == "pointColor.pick" for name, _ in children[0].commands) == pick_commands
                 assert sum(name == "pointColor.delete" for name, _ in children[0].commands) == delete_commands
@@ -766,7 +754,7 @@ def test_legacy_history_snapshot_missing_point_colors_clears_and_replays_array(l
             identity_data = {key: seeded["recipe"][key] for key in store.IDENTITY_FIELDS}
             legacy = copy.deepcopy(seeded["recipe"]["settings"])
             legacy.pop("point_colors", None)
-            legacy_recipe = store.put_raw_recipe(identity_data, seeded["revision"], uuid4(), legacy)
+            legacy_recipe = seed_recipe_row(identity_data, seeded["revision"], uuid4(), legacy)
             initialized = store.initialize_raw_history(identity_data, legacy_recipe["revision"], uuid4(), legacy)
             point_snapshot = copy.deepcopy(legacy)
             point_snapshot["point_colors"] = [point_color(hue_shift=19.25)]
@@ -776,7 +764,7 @@ def test_legacy_history_snapshot_missing_point_colors_clears_and_replays_array(l
             point_step_id = old_history["steps"][0]["stepId"]
             old_baseline = copy.deepcopy(old_history["baselineSettings"])
             assert "point_colors" not in old_baseline
-            assert store.get_raw_recipe(identity_data)["recipe"]["settings"]["point_colors"] == [point_color(hue_shift=19.25)]
+            assert read_saved_recipe(identity_data)["recipe"]["settings"]["point_colors"] == [point_color(hue_shift=19.25)]
 
             async with client(local) as http:
                 await authenticate(http, local)
@@ -791,13 +779,13 @@ def test_legacy_history_snapshot_missing_point_colors_clears_and_replays_array(l
                 native = await api.raw.get_settings(api._raw_handle)
                 assert native.settings["point_colors"] == []
                 assert settings_snapshot_for_comparison(native.settings) == settings_snapshot_for_comparison(old_baseline)
-                assert "point_colors" not in store.get_raw_recipe(identity_data)["recipe"]["settings"]
+                assert "point_colors" not in read_saved_recipe(identity_data)["recipe"]["settings"]
                 assert store.get_raw_history(identity_data)["history"]["baselineSettings"] == old_baseline
                 assert sum(name == "pointColor.pick" for name, _ in children[0].commands) == pick_count
                 doc = await operation(http, doc, "redo")
                 native = await api.raw.get_settings(api._raw_handle)
                 assert native.settings["point_colors"] == [point_color(hue_shift=19.25)]
-                assert native.settings == store.get_raw_recipe(identity_data)["recipe"]["settings"]
+                assert native.settings == read_saved_recipe(identity_data)["recipe"]["settings"]
                 doc = await operation(http, doc, "jump", body(doc) | {"targetStepId": None})
                 assert (await api.raw.get_settings(api._raw_handle)).settings["point_colors"] == []
                 doc = await operation(http, doc, "jump", body(doc) | {"targetStepId": point_step_id})
@@ -991,7 +979,7 @@ def test_point_color_slider_interaction_previews_then_commits_one_history_step(l
                 listing = (await http.get(url(doc), headers=headers(doc))).json()
                 assert listing["steps"][-1]["kind"] == "pointColorControl"
                 assert listing["steps"][-1]["metadata"] == {"control": "pointColor.0.hueShift", "value": 27.25}
-                recipe = store.get_raw_recipe(api._history_identity)["recipe"]["settings"]
+                recipe = read_saved_recipe(api._history_identity)["recipe"]["settings"]
                 assert recipe["point_colors"][0]["hue_shift"] == 27.25
                 doc = await operation(http, doc, "undo")
                 assert doc["point_colors"][0]["hue_shift"] == 0
@@ -1046,7 +1034,7 @@ def test_point_color_pre_native_end_conflict_is_409_and_releases_history_owner(l
                 assert rejected.json() == {"code": "raw_point_color_interaction_conflict"}
                 assert api._history_save is None
                 assert len(store.get_raw_history(api._history_identity)["history"]["steps"]) == 1
-                assert store.get_raw_recipe(api._history_identity)["recipe"]["settings"]["point_colors"][0]["hue_shift"] == 0
+                assert read_saved_recipe(api._history_identity)["recipe"]["settings"]["point_colors"][0]["hue_shift"] == 0
                 assert not any(command == "develop.endInteraction" for command, _ in children[0].commands)
 
                 retry = await http.post(url(doc, "operate"), json=end_request)
@@ -1170,7 +1158,7 @@ def test_point_color_sqlite_save_retries_without_resending_native_end(local, tmp
                 retried = await http.post(url(doc, "operate"), json=request)
                 assert retried.status_code == 200 and retried.json()["replayed"] is commit_unknown
                 assert sum(command == "develop.endInteraction" for command, _ in children[0].commands) == 1
-                saved = store.get_raw_recipe(api._history_identity)["recipe"]["settings"]
+                saved = read_saved_recipe(api._history_identity)["recipe"]["settings"]
                 assert saved["point_colors"][0]["hue_shift"] == 25
                 history = store.get_raw_history(api._history_identity)["history"]
                 assert len(history["steps"]) == 2 and history["steps"][-1]["metadata"] == request["metadata"]
@@ -1209,7 +1197,7 @@ def test_point_color_workspace_release_discards_draft_before_opening_another_doc
                 released = await http.delete(f"/api/raw/workspaces/{workspace}")
                 assert released.status_code == 204
                 assert api.raw._point_color_interaction is None
-                saved = store.get_raw_recipe(recipe_identity)["recipe"]["settings"]
+                saved = read_saved_recipe(recipe_identity)["recipe"]["settings"]
                 history = store.get_raw_history(recipe_identity)["history"]
                 assert saved["point_colors"][0]["hue_shift"] == 0
                 assert history["cursor"] == len(history["steps"]) == 1
@@ -1252,18 +1240,18 @@ def test_invalid_operation_never_changes_native_or_database(local, tmp_path, mon
 
 def test_uninitialized_commit_and_legacy_dirty_optin_are_safe(local, tmp_path, monkeypatch):
     async def run():
-        api, _, _, _ = await setup(tmp_path, local, monkeypatch)
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
         try:
             async with client(local) as http:
                 await authenticate(http, local)
                 _, doc = await open_document(http)
                 assert (await http.post(url(doc, "commit"), json=commit_body(doc))).json()["code"] == "raw_history_not_initialized"
-                assert (await http.put(f'/api/raw/documents/{doc["handle"]}/recipe', json=save_body(doc))).status_code == 200
+                seed_recipe_row(api._history_identity, 0, uuid4(), children[0].photos[1]["settings"])
                 doc = await change(http, doc, 1.)
                 doc["recipeRevision"] = 1
                 refused = await http.post(url(doc, "initialize"), json=body(doc))
                 assert refused.json()["code"] == "raw_history_commit_required" and not api._history_save
-                assert (await http.put(f'/api/raw/documents/{doc["handle"]}/recipe', json=save_body(doc, 1))).status_code == 200
+                seed_recipe_row(api._history_identity, 1, uuid4(), children[0].photos[1]["settings"])
                 doc["recipeRevision"] = 2
                 doc = await operation(http, doc, "initialize")
                 assert doc["history"]["length"] == 0 and doc["values"]["light.exposure"] == 1.
@@ -1419,7 +1407,6 @@ def test_native_move_then_db_failure_is_locked_and_retry_does_not_mutate_again(l
                 attempt, commands = api.raw.status().edits, list(children[0].commands)
                 assert (await http.post(f'/api/raw/documents/{doc["handle"]}/controls', json=identity(doc) |
                     {"expectedRevision": api.document["revision"], "values": {"light.exposure": 2}})).json()["code"] == "raw_history_save_pending"
-                assert (await http.put(f'/api/raw/documents/{doc["handle"]}/recipe', json=save_body(doc))).json()["code"] == "raw_history_save_pending"
                 assert (await http.delete(f'/api/raw/workspaces/{doc["workspaceId"]}')).json()["code"] == "raw_history_save_pending"
                 with pytest.raises(LightCraftError, match="raw_history_save_pending"):
                     await api.close()
@@ -1533,8 +1520,6 @@ def test_session_renewal_at_200_preserves_history_and_rejects_stale_owner(local,
                     if first_id is None:
                         first_id = doc["ack"]["stepId"]
                     assert doc["history"]["length"] == cycle + 1
-                    checkpoint = await http.put(f'/api/raw/documents/{doc["handle"]}/recipe', json=save_body(doc, doc["recipeRevision"]))
-                    assert checkpoint.status_code == 200
                     assert (await http.delete(f'/api/raw/workspaces/{workspace}')).status_code == 204
                     workspace, response = await open_asset(http, doc["assetId"])
                     reopened = response.json()
@@ -1560,7 +1545,7 @@ def test_session_renewal_at_200_preserves_history_and_rejects_stale_owner(local,
     asyncio.run(asyncio.wait_for(run(), 30))
 
 
-def test_equal_settings_cursor_move_and_recipe_checkpoint(local, tmp_path, monkeypatch):
+def test_equal_settings_cursor_move_then_commit(local, tmp_path, monkeypatch):
     async def run():
         api, _, _, _ = await setup(tmp_path, local, monkeypatch)
         try:
@@ -1576,9 +1561,6 @@ def test_equal_settings_cursor_move_and_recipe_checkpoint(local, tmp_path, monke
                 assert doc["ack"]["changed"] and doc["history"]["cursor"] == 0
                 assert doc["mutationAttempts"] == mutation
                 doc = await change(http, doc, 2.)
-                rejected = await http.put(f'/api/raw/documents/{doc["handle"]}/recipe', json=save_body(doc, doc["recipeRevision"]))
-                assert rejected.json()["code"] == "raw_history_requires_operation"
-                # A known rejected checkpoint must not permanently prevent the correct History commit.
                 assert rows()["asset_raw_history_steps"]
                 doc = await operation(http, doc, "commit", commit_body(doc))
                 assert doc["history"]["length"] == 1
@@ -1595,7 +1577,7 @@ def test_same_save_id_cannot_identify_another_request_or_recipe_only_save(local,
                 await authenticate(http, local)
                 _, doc = await open_document(http)
                 legacy_id = uuid4()
-                assert (await http.put(f'/api/raw/documents/{doc["handle"]}/recipe', json=save_body(doc, 0, legacy_id))).status_code == 200
+                seed_recipe_row(api._history_identity, 0, legacy_id, children[0].photos[1]["settings"])
                 doc["recipeRevision"] = 1
                 assert (await http.post(url(doc, "initialize"), json=body(doc, 0, legacy_id))).json()["code"] == "raw_history_save_id_reused"
                 request = body(doc)
@@ -1655,7 +1637,7 @@ def test_legacy_wb_scale_omission_keeps_saved_baseline_and_verified_restore(loca
             seeded = seed(asset_id)
             saved = seeded["recipe"]["settings"]
             saved["wb"].pop("scale")
-            store.put_raw_recipe({key: seeded["recipe"][key] for key in store.IDENTITY_FIELDS}, 1, uuid4(), saved)
+            seed_recipe_row({key: seeded["recipe"][key] for key in store.IDENTITY_FIELDS}, 1, uuid4(), saved)
             async with client(local) as http:
                 await authenticate(http, local)
                 _, response = await open_asset(http, asset_id)
@@ -1757,29 +1739,6 @@ def test_postcommit_ownership_loss_is_unknown_and_never_advances_old_ack(local, 
                     assert api.document["recipeRevision"] == doc["recipeRevision"]
                 doc = await operation(http, doc, "commit", request)
                 assert doc["replayed"] and doc["history"]["length"] == 1 and not doc["historyPending"]
-        finally:
-            await api.close()
-    asyncio.run(run())
-
-
-def test_uncertain_c3_save_resolves_before_history_optin(local, tmp_path, monkeypatch):
-    async def run():
-        api, _, _, _ = await setup(tmp_path, local, monkeypatch)
-        try:
-            async with client(local) as http:
-                await authenticate(http, local)
-                _, doc = await open_document(http)
-                request = save_body(doc)
-                with monkeypatch.context() as patch:
-                    def fail(*args, **kwargs):
-                        raise store.StoreUnavailable()
-                    patch.setattr(store, "put_raw_recipe", fail)
-                    assert (await http.put(f'/api/raw/documents/{doc["handle"]}/recipe', json=request)).status_code == 503
-                assert (await http.post(url(doc, "initialize"), json=body(doc))).json()["code"] == "raw_recipe_save_pending"
-                assert (await http.put(f'/api/raw/documents/{doc["handle"]}/recipe', json=request)).status_code == 200
-                doc["recipeRevision"] = 1
-                doc = await operation(http, doc, "initialize")
-                assert doc["history"]["initialized"] and doc["history"]["length"] == 0
         finally:
             await api.close()
     asyncio.run(run())

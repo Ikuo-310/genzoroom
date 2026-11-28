@@ -5,18 +5,23 @@ from contextlib import closing
 from threading import Barrier
 from uuid import uuid4
 
+from tests.raw_recipe_fixtures import read_saved_recipe, seed_recipe_row
 import pytest
 
 import edit_store
 import raw_recipe_store as raw
 import storage
 from tests.test_export_queue import A, db, snapshot
-from tests.test_raw_recipe_store import identity, old_database, rows, save, settings
+from tests.test_raw_recipe_store import identity, old_database, rows, settings
 
 
 TABLES = ("asset_raw_recipes", "raw_recipe_saves", "asset_raw_histories",
           "asset_raw_history_steps", "raw_history_saves")
 
+
+
+def seed_legacy(key=None, value=None, revision=0, save_id=None):
+    return seed_recipe_row(key or identity(), revision, save_id or uuid4(), value or settings())
 
 def value(exposure=0):
     return settings(light={"exposure": exposure}, extra={"preserved": [1, {"x": True}]})
@@ -118,13 +123,13 @@ def test_read_absent_and_legacy_recipe_is_lazy(db):
                       "history": {"baselineSettings": value(), "cursor": 0, "steps": []}}
     assert history()["history"] is None
     assert dump(db) == before
-    legacy = save(value=value())
+    legacy = seed_legacy(value=value())
     before = dump(db)
     loaded = history()
     assert loaded["recipe"] == legacy["recipe"]
     assert loaded["history"] == {"baselineSettings": value(), "cursor": 0, "steps": []}
     assert not loaded["initialized"] and dump(db) == before
-    assert save(value=value(1), revision=1)["revision"] == 2
+    assert seed_legacy(value=value(1), revision=1)["revision"] == 2
 
 
 def test_delete_raw_edits_removes_recipe_history_for_one_asset_and_preserves_jpeg(db):
@@ -136,31 +141,31 @@ def test_delete_raw_edits_removes_recipe_history_for_one_asset_and_preserves_jpe
     other = identity(assetId=str(other_asset))
     jpeg = edit_store.put_edit_state(A, 0, uuid4(), snapshot())
     edit_store.enqueue_export_assets([A])
-    save(identity())
+    seed_legacy(identity())
     append(1, revision=1, baseline=settings())
-    save(other)
+    seed_legacy(other)
     raw.initialize_raw_history(other, 1, uuid4(), settings())
 
     before_jpeg = {table: rows(db, table) for table in ("asset_edit_states", "export_queue")}
     result = raw.delete_raw_edits(str(A))
     assert result["recipes"] == 1 and result["histories"] == 1
-    assert raw.get_raw_recipe(identity()) == {"recipe": None}
+    assert read_saved_recipe(identity()) == {"recipe": None}
     assert raw.get_raw_history(identity())["history"] is None
-    assert raw.get_raw_recipe(other)["recipe"] is not None
+    assert read_saved_recipe(other)["recipe"] is not None
     assert raw.get_raw_history(other)["initialized"] is True
     assert {table: rows(db, table) for table in before_jpeg} == before_jpeg
     assert edit_store.get_edit_state(A) == jpeg
 
 
 def test_delete_raw_edits_without_history_is_idempotent(db):
-    save()
+    seed_legacy()
     result = raw.delete_raw_edits(str(A))
     assert result["recipes"] == 1 and result["histories"] == 0
     assert raw.delete_raw_edits(str(A))["recipes"] == 0
 
 
 def test_delete_raw_edits_with_initialized_empty_history(db):
-    save()
+    seed_legacy()
     raw.initialize_raw_history(identity(), 1, uuid4(), settings())
     assert raw.get_raw_history(identity())["initialized"] is True
     assert raw.delete_raw_edits(str(A))["histories"] == 1
@@ -168,7 +173,7 @@ def test_delete_raw_edits_with_initialized_empty_history(db):
 
 
 def test_delete_raw_edits_rolls_back_on_database_failure(db):
-    save()
+    seed_legacy()
     append(1, revision=1, baseline=settings())
     before = dump(db)
     with closing(sqlite3.connect(db)) as connection:
@@ -183,7 +188,7 @@ def test_delete_raw_edits_rolls_back_on_database_failure(db):
 @pytest.mark.parametrize("legacy", [False, True])
 def test_first_step_and_explicit_initialization(db, legacy):
     if legacy:
-        save(value=value())
+        seed_legacy(value=value())
     first = append(1, int(legacy), baseline=value())
     loaded = history()
     assert loaded["initialized"]
@@ -267,19 +272,12 @@ def test_retention_policy_not_fixed_in_schema_and_branch_prune_order(db, monkeyp
     assert b not in {step["stepId"] for step in history()["history"]["steps"]}
 
 
-def test_recipe_checkpoint_and_save_id_domains(db):
+def test_history_save_ids_do_not_reuse_legacy_receipts(db):
     old_id = uuid4()
-    old = save(value=value(), save_id=old_id)
+    seed_legacy(value=value(), save_id=old_id)
     step_id = uuid4()
     first = append(1, 1, save_id=step_id)
-    assert save(value=value(), save_id=old_id) == old
-    checkpoint = save(value=value(1), revision=2)
-    assert checkpoint["revision"] == 3 and history()["history"]["cursor"] == 1
     before = dump(db)
-    with pytest.raises(edit_store.StoreConflict, match="raw_history_requires_operation"):
-        save(value=value(2), revision=3)
-    with pytest.raises(edit_store.StoreConflict, match="save_id_reused"):
-        save(value=value(1), revision=1, save_id=step_id)
     with pytest.raises(edit_store.StoreConflict, match="save_id_reused"):
         append(0, save_id=old_id, baseline=value())
     with pytest.raises(edit_store.StoreConflict, match="save_id_reused"):
@@ -425,8 +423,7 @@ def test_corruption_is_fail_closed_and_not_repaired(db, mutation):
         connection.execute(mutation)
         connection.commit()
     corrupted = dump(db)
-    for read in (lambda: history(), lambda: raw.get_raw_recipe(identity()), lambda: raw.lookup_raw_recipe(identity()),
-                 lambda: append(2, 1), lambda: save(value=value(1), revision=1)):
+    for read in (history, lambda: raw.lookup_raw_recipe(identity()), lambda: append(2, 1)):
         with pytest.raises(edit_store.StoreUnavailable):
             read()
         assert dump(db) == corrupted
@@ -638,7 +635,7 @@ def test_transport_receipt_fingerprint_replays_without_historical_snapshot(db):
 
 def test_transport_receipt_cannot_reuse_a_legacy_or_other_identity_save(db):
     request_id = uuid4()
-    save(save_id=request_id)
+    seed_legacy(save_id=request_id)
     with pytest.raises(edit_store.StoreConflict, match="save_id_reused"):
         raw.get_raw_history_save(identity(), request_id, request_fingerprint="a" * 64)
     result = raw.initialize_raw_history(identity(), 1, uuid4(), settings(), request_fingerprint="a" * 64)

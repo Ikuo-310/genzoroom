@@ -11,6 +11,7 @@ import sys
 import threading
 from uuid import uuid4
 
+from tests.raw_recipe_fixtures import read_saved_recipe, seed_recipe_row
 import pytest
 
 import edit_store
@@ -90,13 +91,13 @@ def test_legacy_and_full_curve_recipes_restore_without_rewriting_persisted_rows(
             identity = raw.recipe_identity(handle)
             old_settings = changed_settings()
             old_settings.pop("curve")
-            old_saved = store.put_raw_recipe(identity, 0, uuid4(), old_settings)
+            old_saved = seed_recipe_row(identity, 0, uuid4(), old_settings)
             before = database_rows()
             restored = await raw.restore_persisted_settings(handle, old_saved["recipe"], initial.revision)
             expected_old = json.loads(_settings_json(old_settings))
             assert restored.settings == expected_old
             assert children[0].photos[1]["settings"] == expected_old
-            assert store.get_raw_recipe(identity)["recipe"]["settings"] == old_settings
+            assert read_saved_recipe(identity)["recipe"]["settings"] == old_settings
             assert database_rows() == before
             frame = await raw.request_preview(handle, restored.revision)
             assert frame.revision == restored.revision and frame.data.startswith(b"\x89PNG")
@@ -109,12 +110,12 @@ def test_legacy_and_full_curve_recipes_restore_without_rewriting_persisted_rows(
                 "split_shadows": 22.0, "split_mid": 53.0, "split_highlights": 81.0,
                 "refine_saturation": 87.0,
             }
-            new_saved = store.put_raw_recipe(identity, old_saved["revision"], uuid4(), new_settings)
+            new_saved = seed_recipe_row(identity, old_saved["revision"], uuid4(), new_settings)
             before_new_restore = database_rows()
             restored_new = await raw.restore_persisted_settings(handle, new_saved["recipe"], restored.revision)
             assert restored_new.settings == new_settings
             assert children[0].photos[1]["settings"] == new_settings
-            assert store.get_raw_recipe(identity)["recipe"]["settings"] == new_settings
+            assert read_saved_recipe(identity)["recipe"]["settings"] == new_settings
             assert database_rows() == before_new_restore
         finally:
             await raw.close()
@@ -129,7 +130,7 @@ def test_legacy_recipe_missing_point_colors_clears_native_without_rewriting_stor
             handle, initial = await raw.open_raw(str(uuid4()), files[0])
             old_settings = changed_settings()
             old_settings.pop("point_colors", None)
-            saved = store.put_raw_recipe(raw.recipe_identity(handle), 0, uuid4(), old_settings)
+            saved = seed_recipe_row(raw.recipe_identity(handle), 0, uuid4(), old_settings)
             before = database_rows()
 
             current = await raw._pick_point_color(handle, .25, .75, initial.revision)
@@ -141,7 +142,7 @@ def test_legacy_recipe_missing_point_colors_clears_native_without_rewriting_stor
             assert children[0].photos[1]["settings"]["point_colors"] == []
             assert any(command == "develop.merge" and params["settings"]["point_colors"] == []
                        for command, params in children[0].commands[restore_start:])
-            assert store.get_raw_recipe(raw.recipe_identity(handle))["recipe"]["settings"] == old_settings
+            assert read_saved_recipe(raw.recipe_identity(handle))["recipe"]["settings"] == old_settings
             assert database_rows() == before
         finally:
             await raw.close()
@@ -176,7 +177,7 @@ def seed(asset_id, *, include_curve=True, **identity_changes):
     settings["version"] = identity["settingsSchemaVersion"]
     if not include_curve:
         settings.pop("curve")
-    return store.put_raw_recipe(identity, 0, uuid4(), settings)
+    return seed_recipe_row(identity, 0, uuid4(), settings)
 
 
 async def open_asset(http, asset_id):
@@ -215,7 +216,7 @@ def test_persisted_restore_follows_content_not_local_fingerprint(tmp_path, monke
             asset_id = str(uuid4())
             handle, initial = await raw.open_raw(asset_id, files[0])
             changed = await raw.merge_settings(handle, changed_settings(), initial.revision)
-            saved = store.put_raw_recipe(raw.recipe_identity(handle), 0, uuid4(), changed.settings)
+            saved = seed_recipe_row(raw.recipe_identity(handle), 0, uuid4(), changed.settings)
             before = database_rows()
             await raw.reset_session(restore_active=False)
             files[1].write_bytes(files[0].read_bytes())
@@ -255,7 +256,7 @@ def test_content_hash_case_uses_c3a_normalization(tmp_path, monkeypatch):
             handle, initial = await raw.open_raw(str(uuid4()), files[0])
             identity = raw.recipe_identity(handle)
             assert identity["sourceContentHash"] == hashlib.sha256(files[0].read_bytes()).hexdigest()
-            saved = store.put_raw_recipe(identity | {"sourceContentHash": identity["sourceContentHash"].upper()},
+            saved = seed_recipe_row(identity | {"sourceContentHash": identity["sourceContentHash"].upper()},
                                          0, uuid4(), changed_settings())
             restored = await raw.restore_persisted_settings(handle, saved["recipe"], initial.revision)
             assert restored.settings == changed_settings()
@@ -277,7 +278,7 @@ def test_older_recipe_is_classified_incompatible_and_never_applied_by_restore(tm
             handle, initial = await raw.open_raw(asset_id, files[0])
             current = raw.recipe_identity(handle)
             old = {**current, "engineVersion": saved_version, "engineCommit": saved_commit}
-            old_saved = store.put_raw_recipe(old, 0, uuid4(), changed_settings())
+            old_saved = seed_recipe_row(old, 0, uuid4(), changed_settings())
 
             matched = store.lookup_raw_recipe(current)
             assert matched == {"status": "engine_incompatible"}
@@ -286,7 +287,7 @@ def test_older_recipe_is_classified_incompatible_and_never_applied_by_restore(tm
                 await raw.restore_persisted_settings(handle, old_saved["recipe"], initial.revision)
             assert children[0].commands == commands
             assert (await raw.get_settings(handle)).settings == initial.settings
-            assert store.get_raw_recipe(old)["recipe"] == old_saved["recipe"]
+            assert read_saved_recipe(old)["recipe"] == old_saved["recipe"]
         finally:
             await raw.close()
     asyncio.run(run())
@@ -334,7 +335,7 @@ def test_native_restore_rechecks_identity_before_sending(tmp_path, monkeypatch, 
             identity = raw.recipe_identity(handle) | change
             settings = changed_settings()
             settings["version"] = identity["settingsSchemaVersion"]
-            recipe = store.put_raw_recipe(identity, 0, uuid4(), settings)["recipe"]
+            recipe = seed_recipe_row(identity, 0, uuid4(), settings)["recipe"]
             before, commands = database_rows(), list(children[0].commands)
             with pytest.raises(LightCraftError, match=f"^{code}$"):
                 await raw.restore_persisted_settings(handle, recipe, initial.revision)
@@ -355,7 +356,7 @@ def test_native_restore_failure_never_confirms_settings(tmp_path, monkeypatch, f
         raw, manager, children, files = await create(tmp_path)
         try:
             handle, initial = await raw.open_raw(str(uuid4()), files[0])
-            saved = store.put_raw_recipe(raw.recipe_identity(handle), 0, uuid4(), changed_settings())
+            saved = seed_recipe_row(raw.recipe_identity(handle), 0, uuid4(), changed_settings())
             before = database_rows()
             child = children[0]
             command = manager._raw_command
@@ -393,7 +394,7 @@ def test_v010_settings_are_rejected_before_native_restore(tmp_path, monkeypatch)
             handle, initial = await raw.open_raw(str(uuid4()), files[0])
             old_identity = raw.recipe_identity(handle) | {
                 "engineVersion": "0.10.0", "engineCommit": "a2a41383c4fd62fa85a46ccd00998639221f2d3c"}
-            saved = store.put_raw_recipe(old_identity, 0, uuid4(), changed_settings())
+            saved = seed_recipe_row(old_identity, 0, uuid4(), changed_settings())
             commands = list(children[0].commands)
             with pytest.raises(LightCraftError, match="^raw_recipe_engine_incompatible$"):
                 await raw.restore_persisted_settings(handle, saved["recipe"], initial.revision)
@@ -413,7 +414,7 @@ def test_selection_change_during_restore_prevents_old_commit(tmp_path, monkeypat
             handle, _ = await raw.open_raw(str(uuid4()), files[0])
             other, _ = await raw.open_raw(str(uuid4()), files[1])
             initial = await raw.select(handle)
-            saved = store.put_raw_recipe(raw.recipe_identity(handle), 0, uuid4(), changed_settings())
+            saved = seed_recipe_row(raw.recipe_identity(handle), 0, uuid4(), changed_settings())
             entered, gate = hold_merge(children[0], monkeypatch)
             restoring = asyncio.create_task(raw.restore_persisted_settings(handle, saved["recipe"], initial.revision))
             await entered.wait()
@@ -439,7 +440,7 @@ def test_old_generation_recipe_restore_is_rejected(tmp_path, monkeypatch):
         raw, _, children, files = await create(tmp_path)
         try:
             handle, initial = await raw.open_raw(str(uuid4()), files[0])
-            saved = store.put_raw_recipe(raw.recipe_identity(handle), 0, uuid4(), changed_settings())
+            saved = seed_recipe_row(raw.recipe_identity(handle), 0, uuid4(), changed_settings())
             await raw.reset_session(restore_active=False)
             await raw.open_raw(str(uuid4()), files[1])
             commands = list(children[-1].commands)
@@ -581,16 +582,16 @@ def test_windows_skips_v010_recipe_and_first_history_save_uses_current_tuple(loc
                 assert settings.status_code == 200 and settings.json()["values"]["light.exposure"] == 0
                 assert children[0].photos[1]["settings"] != old_saved["recipe"]["settings"]
                 from tests.test_raw_history_api import body as history_body, operation
-                from tests.test_raw_recipe_api import change
+                from tests.raw_document_helpers import change
                 doc = await change(http, doc, 1.25)
                 save_body = history_body(doc) | {"kind": "control", "metadata": {"control": "light.exposure"}}
                 saved = await operation(http, doc, "commit", save_body)
                 assert saved["recipeRecoveryPending"] is False and saved["recipeRevision"] == 1
-                current_saved = store.get_raw_recipe(current_identity)["recipe"]
+                current_saved = read_saved_recipe(current_identity)["recipe"]
                 assert current_saved["engineVersion"] == ENGINE_VERSION
                 assert current_saved["engineCommit"] == ENGINE_COMMIT
                 assert current_saved["settings"]["light"]["exposure"] == 1.25
-                assert store.get_raw_recipe(old_identity)["recipe"] == old_saved["recipe"]
+                assert read_saved_recipe(old_identity)["recipe"] == old_saved["recipe"]
                 assert (await http.delete(f"/api/raw/workspaces/{workspace}")).status_code == 204
         finally:
             await api.close()
@@ -606,7 +607,7 @@ def test_legacy_scale_omission_is_not_converted_to_kelvin(local, tmp_path, monke
             identity = {key: saved["recipe"][key] for key in store.IDENTITY_FIELDS}
             settings = copy.deepcopy(saved["recipe"]["settings"])
             del settings["wb"]["scale"]
-            store.put_raw_recipe(identity, 1, uuid4(), settings)
+            seed_recipe_row(identity, 1, uuid4(), settings)
             before = database_rows()
             async with client(local) as http:
                 await authenticate(http, local)
@@ -693,7 +694,7 @@ def test_windows_opens_legacy_recipe_without_curve_and_keeps_persisted_recipe(lo
             saved = seed(asset_id, include_curve=False)
             legacy_default_curve = json.loads(_settings_json({key: value for key, value in DEFAULT.items() if key != "curve"}))["curve"]
             identity = {field: saved["recipe"][field] for field in store.IDENTITY_FIELDS}
-            persisted = store.get_raw_recipe(identity)
+            persisted = read_saved_recipe(identity)
             assert "curve" not in persisted["recipe"]["settings"]
             before = database_rows()
             async with client(local) as http:
@@ -710,7 +711,7 @@ def test_windows_opens_legacy_recipe_without_curve_and_keeps_persisted_recipe(lo
                 preview = await http.post(f'/api/raw/documents/{doc["handle"]}/preview', json=preview_body(doc))
                 assert preview.status_code == 200
                 assert database_rows() == before
-                assert "curve" not in store.get_raw_recipe(identity)["recipe"]["settings"]
+                assert "curve" not in read_saved_recipe(identity)["recipe"]["settings"]
         finally:
             await api.close()
     asyncio.run(run())
@@ -764,7 +765,7 @@ def test_raw_reset_clears_recipe_history_reopens_defaults_and_saves_current_tupl
                 await authenticate(http, local)
                 workspace, doc = await open_asset(http, asset_id)
                 assert doc.status_code == 200
-                assert store.get_raw_recipe(old_identity)["recipe"]
+                assert read_saved_recipe(old_identity)["recipe"]
                 store.initialize_raw_history(api._history_identity, doc.json()["recipeRevision"], uuid4(),
                                              seeded["recipe"]["settings"])
                 with closing(sqlite3.connect(edit_store.DB_PATH)) as connection:
@@ -775,7 +776,7 @@ def test_raw_reset_clears_recipe_history_reopens_defaults_and_saves_current_tupl
                     "documentRevision": doc.json()["revision"]})
                 assert reset.status_code == 204, reset.text
                 assert api.document is None and api.workspace is None
-                assert store.get_raw_recipe(old_identity)["recipe"] is None
+                assert read_saved_recipe(old_identity)["recipe"] is None
                 with closing(sqlite3.connect(edit_store.DB_PATH)) as connection:
                     for table in ("asset_raw_recipes", "raw_history_saves", "asset_raw_histories", "asset_raw_history_steps"):
                         assert connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0] == 0
@@ -787,15 +788,13 @@ def test_raw_reset_clears_recipe_history_reopens_defaults_and_saves_current_tupl
                 assert settings.status_code == 200 and settings.json()["values"]["light.exposure"] == 0
                 preview = await http.post(f'/api/raw/documents/{doc["handle"]}/preview', json=preview_body(doc))
                 assert preview.status_code == 200
+                from tests.test_raw_history_api import operation, commit_body
+                doc = await operation(http, doc, "initialize")
                 changed = await http.post(f'/api/raw/documents/{doc["handle"]}/controls', json=document_identity(doc) | {
                     "expectedRevision": doc["revision"], "values": {"light.exposure": 1.25}})
                 assert changed.status_code == 200
-                current = changed.json()
-                save_request = document_identity(current) | {"documentRevision": current["revision"],
-                    "expectedRecipeRevision": 0, "saveId": str(uuid4())}
-                saved = await http.put(f'/api/raw/documents/{current["handle"]}/recipe', json=save_request)
-                assert saved.status_code == 200
-                current_identity = api._recipe_save["identity"]
+                await operation(http, changed.json(), "commit", commit_body(changed.json()))
+                current_identity = api._history_identity
                 assert current_identity["engineVersion"] == ENGINE_VERSION == "0.20.0"
                 assert current_identity["engineCommit"] == ENGINE_COMMIT
                 assert children[-1].photos[1]["settings"]["light"]["exposure"] == 1.25
@@ -819,7 +818,7 @@ def test_failed_restore_can_be_reset_and_reopened_with_defaults(local, tmp_path,
                 assert api.document is None and api.workspace is None
                 reset = await http.post(f'/api/raw/assets/{asset_id}/edits/reset', json={})
                 assert reset.status_code == 204, reset.text
-                assert store.get_raw_recipe(old_identity)["recipe"] is None
+                assert read_saved_recipe(old_identity)["recipe"] is None
                 _, reopened = await open_asset(http, asset_id)
                 assert reopened.status_code == 200 and reopened.json()["recipeStatus"] == "none"
                 doc = reopened.json()
@@ -857,10 +856,10 @@ def test_raw_reset_failure_boundary_preserves_persisted_recipe(local, tmp_path, 
                         patch.setattr(api.raw, "reset_session", fail)
                         response = await http.post(f'/api/raw/assets/{asset_id}/edits/reset', json=body)
                 assert response.status_code == status and response.json() == {"code": code}
-                assert store.get_raw_recipe(identity)["recipe"] is not None
+                assert read_saved_recipe(identity)["recipe"] is not None
                 retried = await http.post(f'/api/raw/assets/{asset_id}/edits/reset', json=body)
                 assert retried.status_code == 204, retried.text
-                assert store.get_raw_recipe(identity)["recipe"] is None
+                assert read_saved_recipe(identity)["recipe"] is None
         finally:
             await api.close()
     asyncio.run(run())
@@ -957,20 +956,20 @@ def test_saved_recipe_without_grading_opens_with_native_defaults(local, tmp_path
                    "settingsSchemaVersion": 1}
             legacy = copy.deepcopy(DEFAULT)
             legacy.pop('grading')
-            saved = store.put_raw_recipe(key, 0, uuid4(), legacy)
+            saved = seed_recipe_row(key, 0, uuid4(), legacy)
             before = database_rows()
             async with client(local) as http:
                 await authenticate(http, local)
                 _, response = await open_asset(http, asset_id)
                 assert response.status_code == 200, response.text
                 assert children[0].photos[1]['settings']['grading'] == DEFAULT['grading']
-                assert store.get_raw_recipe(key) == saved
+                assert read_saved_recipe(key) == saved
                 assert database_rows() == before
                 from tests.test_raw_history_api import operation, body
                 from tests.test_raw_category_operations import patch
                 doc = await operation(http, response.json(), 'initialize')
                 assert doc['nativeMatchesRecipe'] is True
-                assert 'grading' not in store.get_raw_recipe(key)['recipe']['settings']
+                assert 'grading' not in read_saved_recipe(key)['recipe']['settings']
                 doc = await patch(http, doc, {'grading.shadows.sat': 1})
                 doc = await operation(http, doc, 'commit', body(doc) | {'kind': 'control', 'metadata': {'control': 'grading.shadows.sat'}})
                 doc = await operation(http, doc, 'undo')

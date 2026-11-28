@@ -2,6 +2,7 @@ import asyncio
 import json
 import copy
 
+from tests.raw_recipe_fixtures import read_saved_recipe
 import pytest
 
 import raw_recipe_store as store
@@ -9,7 +10,7 @@ from raw_controls import CONTROLS, control_location
 from edit_store import StoreUnavailable
 from tests.test_windows_local import local, client, authenticate
 from tests.test_windows_raw_api import setup, open_document, preview_body
-from tests.test_raw_recipe_api import headers
+from tests.raw_document_helpers import headers
 from tests.test_raw_controls import identity
 from tests.test_raw_history_api import url, body, operation, recover, rows
 from tests.test_raw_recipe_restore import open_asset
@@ -617,7 +618,7 @@ def test_point_color_history_api_persists_all_five_operations_and_noops(local, t
                 doc = await operation(http, doc, "operate", first_request)
                 duplicate_request = body(doc) | {"kind": "pointColorPick", "metadata": {"y": .625, "x": .125}}
                 doc = await operation(http, doc, "operate", duplicate_request)
-                expected_duplicate = point_colors(store.get_raw_recipe(recipe_identity)["recipe"]["settings"])
+                expected_duplicate = point_colors(read_saved_recipe(recipe_identity)["recipe"]["settings"])
                 assert len(expected_duplicate) == 2 and expected_duplicate[0] == expected_duplicate[1]
                 assert doc["history"]["length"] == 2
 
@@ -631,10 +632,10 @@ def test_point_color_history_api_persists_all_five_operations_and_noops(local, t
                 assert children[0].commands == command_snapshot and rows() == saved_rows
 
                 doc = await edit(http, doc, "pointColorDelete", {"index": 0})
-                assert len(point_colors(store.get_raw_recipe(recipe_identity)["recipe"]["settings"])) == 1
+                assert len(point_colors(read_saved_recipe(recipe_identity)["recipe"]["settings"])) == 1
                 doc = await edit(http, doc, "pointColorControl",
                     {"control": "pointColor.0.hueShift", "value": -12.375})
-                settings = store.get_raw_recipe(recipe_identity)["recipe"]["settings"]
+                settings = read_saved_recipe(recipe_identity)["recipe"]["settings"]
                 assert point_colors(settings)[0]["hue_shift"] == -12.375
                 before_noop = len(rows()["asset_raw_history_steps"])
                 before_revision, before_cursor = doc["recipeRevision"], doc["history"]["cursor"]
@@ -653,7 +654,7 @@ def test_point_color_history_api_persists_all_five_operations_and_noops(local, t
                 doc = replay
 
                 doc = await edit(http, doc, "pointColorControlReset", {"control": "pointColor.0.hueShift"})
-                assert point_colors(store.get_raw_recipe(recipe_identity)["recipe"]["settings"])[0]["hue_shift"] == 0.
+                assert point_colors(read_saved_recipe(recipe_identity)["recipe"]["settings"])[0]["hue_shift"] == 0.
                 before_noop = len(rows()["asset_raw_history_steps"])
                 native_commands = list(children[0].commands)
                 doc = await edit(http, doc, "pointColorControlReset", {"control": "pointColor.0.hueShift"})
@@ -662,7 +663,7 @@ def test_point_color_history_api_persists_all_five_operations_and_noops(local, t
                 assert point_color_mutations(children[0].commands) == point_color_mutations(native_commands)
 
                 doc = await edit(http, doc, "pointColorReset", {})
-                assert point_colors(store.get_raw_recipe(recipe_identity)["recipe"]["settings"]) == []
+                assert point_colors(read_saved_recipe(recipe_identity)["recipe"]["settings"]) == []
                 before_noop = len(rows()["asset_raw_history_steps"])
                 native_commands = list(children[0].commands)
                 doc = await edit(http, doc, "pointColorReset", {})
@@ -671,7 +672,7 @@ def test_point_color_history_api_persists_all_five_operations_and_noops(local, t
                 assert point_color_mutations(children[0].commands) == point_color_mutations(native_commands)
 
                 history = store.get_raw_history(recipe_identity)["history"]
-                recipe = store.get_raw_recipe(recipe_identity)["recipe"]["settings"]
+                recipe = read_saved_recipe(recipe_identity)["recipe"]["settings"]
                 assert history["steps"][-1]["settings"] == recipe
                 assert [step["kind"] for step in history["steps"]] == ["pointColorPick", "pointColorPick",
                     "pointColorDelete", "pointColorControl", "pointColorControlReset", "pointColorReset"]
@@ -732,7 +733,7 @@ def test_point_color_save_failure_retries_without_repeating_native_mutation(
                 assert result["history"]["length"] == (2 if kind == "pointColorDelete" else 1)
                 assert result["nativeMatchesRecipe"]
                 assert sum(command == native_command for command, _ in children[0].commands) == 1
-                recipe = store.get_raw_recipe(api._history_identity)["recipe"]["settings"]
+                recipe = read_saved_recipe(api._history_identity)["recipe"]["settings"]
                 history = store.get_raw_history(api._history_identity)["history"]
                 assert recipe["point_colors"] == history["steps"][-1]["settings"]["point_colors"]
                 assert history["steps"][-1]["kind"] == kind
@@ -791,7 +792,7 @@ def test_point_color_uncertain_native_result_retains_history_owner_without_retry
                 assert recovered["nativeMatchesRecipe"] and not recovered["historyPending"]
                 assert api._history_save is None
                 expected_count = 0 if kind == "pointColorPick" else 2
-                assert len(store.get_raw_recipe(api._history_identity)["recipe"]["settings"]["point_colors"]) == expected_count
+                assert len(read_saved_recipe(api._history_identity)["recipe"]["settings"]["point_colors"]) == expected_count
                 assert sum(command == native_command for command, _ in child.commands) == 1
         finally:
             api._history_save = None
@@ -839,7 +840,7 @@ def test_point_color_eight_entry_limit_is_enforced_through_history_api(local, tm
                 assert response.status_code == 400 and response.json()["code"] == "raw_point_color_limit"
                 assert sum(command == "pointColor.pick" for command, _ in children[0].commands) == 8
                 assert api._history_save is None
-                assert len(store.get_raw_recipe(api._history_identity)["recipe"]["settings"]["point_colors"]) == 8
+                assert len(read_saved_recipe(api._history_identity)["recipe"]["settings"]["point_colors"]) == 8
         finally:
             await api.close()
     asyncio.run(run())

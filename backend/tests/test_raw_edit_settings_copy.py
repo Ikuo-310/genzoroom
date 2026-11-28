@@ -184,10 +184,6 @@ def test_copy_settings_http_validates_owner_revision_ids_and_pending_saves(local
                 recovering = await http.post(url, json=body)
                 assert recovering.status_code == 409 and recovering.json()["code"] == "raw_history_requires_operation"
                 api.document["recipeRecoveryPending"] = False
-                api._recipe_save = {"settled": False}
-                pending = await http.post(url, json=body)
-                assert pending.status_code == 409 and pending.json()["code"] == "raw_recipe_save_pending"
-                api._recipe_save = None
                 api._history_save = {"stage": "writing"}
                 history_pending = await http.post(url, json=body)
                 assert history_pending.status_code == 409 and history_pending.json()["code"] == "raw_history_save_pending"

@@ -4,6 +4,7 @@ from io import BytesIO
 from types import SimpleNamespace
 from uuid import uuid4
 
+from tests.raw_recipe_fixtures import read_saved_recipe, seed_recipe_row
 import pytest
 from PIL import Image
 
@@ -29,7 +30,7 @@ def save(kind="edited"):
     current = deepcopy(baseline)
     if kind != "default":
         current["light"]["exposure"] = .7
-    return raw.put_raw_recipe(identity(assetId=str(ASSET)), 0, uuid4(), current,
+    return seed_recipe_row(identity(assetId=str(ASSET)), 0, uuid4(), current,
         import_defaults_fingerprint=None if kind == "unknown" else raw._digest(raw._settings_json(baseline, 1)))
 
 
@@ -62,7 +63,7 @@ def test_saved_state_source_history_and_cache(db, tmp_path, monkeypatch, failure
     raw.append_raw_history(key, 0, uuid4(), current, kind="control",
         metadata={"control": "light.exposure"}, baseline_settings=baseline,
         import_defaults_fingerprint=raw._digest(raw._settings_json(baseline, 1)))
-    saved = raw.get_raw_recipe(key)
+    saved = read_saved_recipe(key)
     before = edit_store.DB_PATH.read_bytes()
     paths = []
     class Original:
@@ -104,7 +105,7 @@ def test_saved_state_source_history_and_cache(db, tmp_path, monkeypatch, failure
         assert cache.read(ASSET) == result
     assert original.closed and not paths[0].parent.exists()
     assert edit_store.DB_PATH.read_bytes() == before
-    assert raw.get_raw_recipe(identity(assetId=str(ASSET))) == saved
+    assert read_saved_recipe(identity(assetId=str(ASSET))) == saved
 
 
 @pytest.mark.parametrize("failure", [None, "restore", "preview", "cancel"])

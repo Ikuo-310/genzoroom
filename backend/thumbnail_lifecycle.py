@@ -8,7 +8,7 @@ from starlette.concurrency import run_in_threadpool
 async def mutate_raw_edits(scheduler, asset_id, operation, *args, **kwargs):
     # Windows chooses its storage profile after importing the RAW API module.
     from raw_recipe_store import (append_raw_history, delete_raw_edits, get_raw_saved_state,
-                                  initialize_raw_history, move_raw_history_cursor, put_raw_recipe)
+                                  initialize_raw_history, move_raw_history_cursor)
     from edit_store import StoreUnavailable
     from thumbnail_cache import thumbnail_log
 
@@ -30,20 +30,15 @@ async def mutate_raw_edits(scheduler, asset_id, operation, *args, **kwargs):
                 await run_in_threadpool(scheduler.cache.fence_reset, asset_id)
             except OSError as error:
                 raise StoreUnavailable() from error
-        tracks_recipe_commit = operation is put_raw_recipe
         tracks_history = operation in {initialize_raw_history, append_raw_history, move_raw_history_cursor}
         tracks_delete = operation is delete_raw_edits
-        if tracks_recipe_commit:
-            operation_kwargs = {**kwargs, "_return_state_changed": True}
-        elif tracks_history or tracks_delete:
+        if tracks_history or tracks_delete:
             option = {"_return_lifecycle_state": True}
             operation_kwargs = {**kwargs, **option} if not tracks_delete else option
         else:
             operation_kwargs = kwargs
         operation_result = await run_in_threadpool(operation, *args, **operation_kwargs)
-        if tracks_recipe_commit:
-            result, state_changed, after = operation_result
-        elif tracks_history or tracks_delete:
+        if tracks_history or tracks_delete:
             result, state_changed, after = operation_result
         else:
             result = operation_result
@@ -60,7 +55,7 @@ async def mutate_raw_edits(scheduler, asset_id, operation, *args, **kwargs):
             scheduler.publication_hub.record_mutation()
             mutation_recorded = True
         try:
-            if not (tracks_recipe_commit or tracks_history or tracks_delete):
+            if not (tracks_history or tracks_delete):
                 after = await run_in_threadpool(get_raw_saved_state, asset_id)
             after_revision = after.get("revision") if isinstance(after, dict) else None
             if state_changed is None:

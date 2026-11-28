@@ -80,7 +80,7 @@ def test_isolated_quality_cold_warm_and_no_persistence(local, tmp_path, monkeypa
                 assert len(downloads) == 1
                 assert manager.status().generation == normal_generation
                 assert children[0].photos == {} and editing.workspace is None
-                assert editing._history_save is None and editing._recipe_save is None
+                assert editing._history_save is None
                 # Each cold sample gets its own process; warm samples share a process after one warmup.
                 assert len(children) == 1 + 2 * 3
                 assert sum(child.render_count for child in children[1:]) == 8 + 2

@@ -7,6 +7,7 @@ import sqlite3
 from threading import Barrier
 from uuid import UUID, uuid4
 
+from tests.raw_recipe_fixtures import read_saved_recipe, seed_recipe_row
 import pytest
 
 import edit_store
@@ -29,8 +30,12 @@ def settings(**changes):
 
 
 def save(key=None, value=None, revision=0, save_id=None, import_defaults_fingerprint=None):
-    return raw.put_raw_recipe(key or identity(), revision, save_id or uuid4(), value or settings(),
+    key, value, save_id = key or identity(), settings() if value is None else value, save_id or uuid4()
+    append_options = {"baseline_settings": value} if revision == 0 else {}
+    raw.append_raw_history(key, revision, save_id, value, kind="control", metadata={"control": "light.exposure"},
+                           **append_options,
                               import_defaults_fingerprint=import_defaults_fingerprint)
+    return read_saved_recipe(key)
 
 
 def rows(path, table):
@@ -113,17 +118,17 @@ def test_roundtrip_full_settings_and_jpeg_queue_are_independent(db):
     value = settings(profile={"id": "lc.color", "amount": 100.0},
                      detail={"sharpen_amount": 17.5}, disabled_sections=["effects"])
     result = save(value=value)
-    assert result == raw.get_raw_recipe(identity())
+    assert result == read_saved_recipe(identity())
     assert result["recipe"] == {**identity(), "settings": value}
     value["detail"]["sharpen_amount"] = 99
-    assert raw.get_raw_recipe(identity())["recipe"]["settings"]["detail"]["sharpen_amount"] == 17.5
+    assert read_saved_recipe(identity())["recipe"]["settings"]["detail"]["sharpen_amount"] == 17.5
     assert edit_store.get_edit_state(A) == jpeg
     assert edit_store.get_edit_statuses([A]) == {str(A): True}
     assert {table: rows(db, table) for table in before} == before
 
 
 def test_raw_only_does_not_create_jpeg_edit_status_or_queue(db):
-    assert raw.get_raw_recipe(identity()) == {"recipe": None}
+    assert read_saved_recipe(identity()) == {"recipe": None}
     save()
     assert edit_store.get_edit_statuses([A]) == {str(A): False}
     assert rows(db, "export_queue") == rows(db, "asset_edit_states") == []
@@ -148,41 +153,24 @@ def test_different_identity_is_preserved_in_separate_rows(db, change):
     original = save()
     key = identity(**change)
     second = save(key, settings(version=key["settingsSchemaVersion"], process=1))
-    assert raw.get_raw_recipe(identity()) == original
-    assert raw.get_raw_recipe(key) == second
+    assert read_saved_recipe(identity()) == original
+    assert read_saved_recipe(key) == second
     assert len(rows(db, "asset_raw_recipes")) == 2
 
 
-def test_identifiers_are_canonical_and_canonical_replay_is_inert(db):
+def test_history_save_canonicalizes_recipe_identity_and_receipt(db):
     key = identity(assetId="ABCDEFAB-1234-1234-1234-123456789ABC", sourceContentHash="A" * 16,
                    engineName="LightCraft", engineCommit="B" * 40)
     save_id = str(uuid4()).upper()
-    first = save(key, save_id=save_id)
+    first = raw.initialize_raw_history(key, 0, save_id, settings())
     canonical = raw.normalize_identity(key)
     assert canonical["engineName"] == "lightcraft"
     assert canonical["sourceContentHash"] == "a" * 16
     assert canonical["engineCommit"] == "b" * 40
-    assert first["lastSaveId"] == save_id.lower()
-    assert first == save(canonical, dict(reversed(list(settings().items()))), save_id=save_id.lower())
+    assert read_saved_recipe(canonical)["lastSaveId"] == save_id.lower()
+    replay = raw.initialize_raw_history(canonical, 0, save_id.lower(), dict(reversed(list(settings().items()))))
+    assert replay["replayed"] and replay["ack"] == first["ack"]
     assert len(rows(db, "asset_raw_recipes")) == len(rows(db, "raw_recipe_saves")) == 1
-
-
-def test_revision_conflict_and_save_id_replay_after_later_saves(db):
-    save_id = uuid4()
-    first = save(save_id=save_id)
-    second = save(value=settings(process=1), revision=1)
-    assert second["revision"] == 2
-    assert save(save_id=save_id) == first
-    assert raw.get_raw_recipe(identity()) == second
-    with pytest.raises(edit_store.StoreConflict, match="revision_conflict"):
-        save()
-    for key, value, revision in ((identity(), settings(process=1), 0),
-                                  (identity(), settings(), 2),
-                                  (identity(sourceContentHash="c" * 16), settings(), 0)):
-        with pytest.raises(edit_store.StoreConflict, match="save_id_reused"):
-            save(key, value, revision, save_id)
-    assert raw.get_raw_recipe(identity()) == second
-    assert len(rows(db, "raw_recipe_saves")) == 2
 
 
 def test_concurrent_expected_revision_has_one_winner(db):
@@ -217,7 +205,7 @@ def test_invalid_identity_does_not_create_database(db, change):
                                              (0.0, None), (0, "bad"), (0, True)])
 def test_invalid_save_metadata(db, revision, save_id):
     with pytest.raises(raw.InvalidRawRecipe):
-        raw.put_raw_recipe(identity(), revision, save_id, settings())
+        save(revision=revision, save_id=save_id)
     assert not db.exists()
 
 
@@ -236,8 +224,8 @@ def test_invalid_save_metadata(db, revision, save_id):
 def test_invalid_settings_leave_existing_recipe_unchanged(db, value):
     original = save()
     with pytest.raises(raw.InvalidRawRecipe, match="^invalid_raw_recipe$"):
-        raw.put_raw_recipe(identity(), 1, uuid4(), value)
-    assert raw.get_raw_recipe(identity()) == original
+        save(value=value, revision=1)
+    assert read_saved_recipe(identity()) == original
     assert len(rows(db, "raw_recipe_saves")) == 1
 
 
@@ -256,11 +244,11 @@ def test_depth_cycle_and_exact_utf8_size_boundary(db):
     overhead = len(edit_store._json(value).encode("utf-8"))
     value["profile"]["id"] = "x" * (raw.MAX_SETTINGS_BYTES - overhead)
     assert len(edit_store._json(value).encode("utf-8")) == raw.MAX_SETTINGS_BYTES
-    original = save(value=value)
+    original = seed_recipe_row(identity(), 0, uuid4(), value)
     value["profile"]["id"] += "x"
     with pytest.raises(raw.InvalidRawRecipe):
         save(value=value, revision=1)
-    assert raw.get_raw_recipe(identity()) == original
+    assert read_saved_recipe(identity()) == original
 
 
 @pytest.mark.parametrize("column,value", [
@@ -280,7 +268,7 @@ def test_corrupt_persisted_recipe_is_rejected_without_repair(db, column, value):
         connection.commit()
     corrupted = rows(db, "asset_raw_recipes")
     with pytest.raises(edit_store.StoreUnavailable, match="^$"):
-        raw.get_raw_recipe(identity())
+        read_saved_recipe(identity())
     with pytest.raises(edit_store.StoreUnavailable):
         save(revision=1)
     assert rows(db, "asset_raw_recipes") == corrupted
@@ -294,7 +282,7 @@ def test_corrupt_receipt_is_not_certified(db, column, value):
         connection.execute(f"UPDATE raw_recipe_saves SET {column}=?", (value,))
         connection.commit()
     with pytest.raises(edit_store.StoreUnavailable):
-        raw.get_raw_recipe(identity())
+        read_saved_recipe(identity())
 
 
 @pytest.mark.parametrize("phase", ["receipt", "recipe", "commit", "busy"])
@@ -323,7 +311,7 @@ def test_write_failure_rolls_back_recipe_and_receipt(db, monkeypatch, phase):
                 save(value=settings(process=1), revision=1)
             assert str(caught.value) == ""
         locker.rollback()
-    assert raw.get_raw_recipe(identity()) == original
+    assert read_saved_recipe(identity()) == original
     assert rows(db, "raw_recipe_saves") == before
 
 
@@ -353,7 +341,7 @@ def test_real_sqlite_full_rolls_back_without_losing_original(db, monkeypatch):
         with pytest.raises(edit_store.StoreUnavailable) as caught:
             save(value=settings(profile={"id": "x" * 200000}), revision=1)
         assert caught.value.__cause__.sqlite_errorcode == sqlite3.SQLITE_FULL
-    assert raw.get_raw_recipe(identity()) == original
+    assert read_saved_recipe(identity()) == original
     assert rows(db, "raw_recipe_saves") == before
 
 
@@ -385,7 +373,7 @@ def test_raw_edit_status_uses_import_baseline_and_current_complete_settings(db):
     assert initial["wb"]["mode"] == "asShot"
     assert initial["detail"]["sharpen_amount"] != 0
     assert raw.get_raw_edit_statuses([asset_id]) == {str(asset_id): False}
-    saved = save(value=initial)
+    saved = seed_recipe_row(identity(), 0, uuid4(), initial)
     assert raw.get_raw_edit_statuses([asset_id]) == {str(asset_id): None}
     fingerprint = raw._digest(raw._settings_json(initial, 1))
     initialized = raw.initialize_raw_history(identity(), saved["revision"], uuid4(), initial,
@@ -416,11 +404,11 @@ def test_raw_edit_status_uses_import_baseline_and_current_complete_settings(db):
 def test_incompatible_tuple_is_not_exposed_as_current_export_or_edit_state(db):
     asset_id = UUID(identity()["assetId"])
     old = identity(engineVersion="0.18.1", engineCommit="a" * 40)
-    old_saved = raw.put_raw_recipe(old, 0, uuid4(), settings())
+    old_saved = seed_recipe_row(old, 0, uuid4(), settings())
     state = raw.get_raw_saved_state(asset_id)
     assert state["currentRecipe"] is None and state["exportEligible"] is False
     assert raw.get_raw_edit_statuses([asset_id]) == {str(asset_id): False}
-    assert raw.get_raw_recipe(old)["recipe"] == old_saved["recipe"]
+    assert read_saved_recipe(old)["recipe"] == old_saved["recipe"]
 
 
 def test_legacy_import_fingerprint_without_optics_does_not_make_neutral_recipe_exportable(db):
@@ -444,14 +432,14 @@ def test_raw_edit_status_keeps_native_baseline_for_legacy_recipe_only_row(db):
     changed["detail"]["nr_color"] = 33
     fingerprint = raw._digest(raw._settings_json(initial, 1))
 
-    saved = save(value=changed, import_defaults_fingerprint=fingerprint)
+    saved = seed_recipe_row(identity(), 0, uuid4(), changed, import_defaults_fingerprint=fingerprint)
     assert raw.get_raw_edit_statuses([asset_id]) == {str(asset_id): True}
     # Old Recipe-only rows initialize History from the saved settings; the native baseline remains authoritative.
     initialized = raw.initialize_raw_history(identity(), saved["revision"], uuid4(), changed,
                                              import_defaults_fingerprint=fingerprint)
     assert initialized["current"]["historyLength"] == 0
     assert raw.get_raw_edit_statuses([asset_id]) == {str(asset_id): True}
-    assert raw.get_raw_recipe(identity())["importDefaultsFingerprint"] == fingerprint
+    assert read_saved_recipe(identity())["importDefaultsFingerprint"] == fingerprint
 
 
 @pytest.mark.parametrize('control,value', [('grading.shadows.sat', 1), ('grading.balance', 1), ('grading.blending', 51)])
