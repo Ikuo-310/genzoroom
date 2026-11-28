@@ -519,3 +519,16 @@ FrontendはIPC失敗を無視せず、権限拒否・command未登録・その�
 | 実Desktop | ユーザーは既存のキーボードショートカットが正常動作することを確認済み。これはNative menuのIPC経路とは別の確認。今回修正後のNative menu項目が実Tauri IPCを通過し、OS menu stateを変える実Desktop操作は未実施。 |
 
 このFindingは権限境界の不整合として修正済み。Frontend mockのみではなく、Rust側のTauri command registration、build生成ACLと手書きcapability permissionの整合を検証した。実Desktopでの修正後確認はユーザー受入に残る。
+
+### T.4 P2-F2 Native編集メニューのshortcut表記共通化
+
+Native編集メニューにRust側で `Ctrl+C` 等を直書きしていた表記を廃止した。Frontendの `shortcutDisplay.ts` に4項目とShortcut IDの対応を集約し、各IDの表示は既存registry (`editShortcuts.ts` の `shortcutBindings`) と `formatShortcut()` から生成する。Windows／Linuxは `Ctrl`／`Alt`、Macは `⌘`／`⌥`となり、Viewerメニューと同じformatterを使う。
+
+SettingsProviderの起動時同期および `languageChanged` 同期で、日英ラベルと4件のformatter出力を既存 `set_native_menu_language` IPCへ同時に渡す。従って初回起動およびWebView再読み込み後もFrontend初期化時にNative表示を再設定し、実行中の言語変更でもshortcut表示を維持する。Rustは受信した4文字列をラベルへ付加するだけで、キー割り当て・プラットフォーム判定・修飾キー表記の定義を持たない。Native menu itemのaccelerator引数は引き続き `None` で、キーイベントの所有者はFrontendである。IPC command、登録、ACLは既存の `set_native_menu_language` とP2-F1のMain WebView限定permissionを再利用し、command／permission追加はない。
+
+| 検証 | 結果 |
+| --- | --- |
+| ID対応・プラットフォーム表記 | `shortcutDisplay.test.ts` で4 Native項目と `copySettings`／`copySelection`／`pasteSettings`／`pasteSelection` の対応を確認し、`formatShortcut()` 経由のWindows／Linux表記とMac表記を検証。実Mac実機は未確認。 |
+| Viewer／一覧との一致・言語同期 | `shortcutHints.test.tsx` でViewerメニューの4表示がNative向け共通formatter出力と一致することを検証。`SettingsDialog.test.tsx` で初期言語設定時と日英切替時に同じformatter payloadがIPC bridgeへ送られることを検証。 |
+| Native表示・accelerator | Desktop Rust **23件成功**。日英の基礎ラベル、Frontendから受け取るshortcut文字列の連結、camelCase IPC payloadのserde deserializationを検証。Native menu builderの4項目は明示的にaccelerator `None` を維持。P2-F1のcommand ACL／registrationに変更なし。 |
+| 実Desktop | この変更後のWindows Native menu上の表示・言語切替は未実施。 |

@@ -28,3 +28,17 @@ export function formatShortcut(id: ShortcutId, platform: ShortcutPlatform = shor
     return [...modifiers, displayKey(binding)].join('+');
   }).join(' / ');
 }
+
+export const nativeEditMenuShortcutIds = {
+  copyAll: 'copySettings',
+  copySelected: 'copySelection',
+  paste: 'pasteSettings',
+  pasteSelected: 'pasteSelection',
+} as const satisfies Record<string, ShortcutId>;
+
+export type NativeEditMenuShortcuts = { [K in keyof typeof nativeEditMenuShortcutIds]: string };
+
+export function formatNativeEditMenuShortcuts(platform: ShortcutPlatform = shortcutPlatform()): NativeEditMenuShortcuts {
+  return Object.fromEntries(Object.entries(nativeEditMenuShortcutIds)
+    .map(([menuItem, shortcutId]) => [menuItem, formatShortcut(shortcutId, platform)])) as NativeEditMenuShortcuts;
+}

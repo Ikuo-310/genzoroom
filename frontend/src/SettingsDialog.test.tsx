@@ -112,9 +112,13 @@ describe('shared Settings modal', () => {
       root = createRoot(host);
       root.render(<SettingsProvider><SettingsButton /></SettingsProvider>);
     });
-    expect(setMenuLanguage).toHaveBeenLastCalledWith('en');
+    expect(setMenuLanguage).toHaveBeenLastCalledWith('en', {
+      copyAll: 'Ctrl+C', copySelected: 'Ctrl+Alt+C', paste: 'Ctrl+V', pasteSelected: 'Ctrl+Alt+V',
+    });
     await act(async () => changeAppLanguage('ja'));
-    expect(setMenuLanguage).toHaveBeenLastCalledWith('ja');
+    expect(setMenuLanguage).toHaveBeenLastCalledWith('ja', {
+      copyAll: 'Ctrl+C', copySelected: 'Ctrl+Alt+C', paste: 'Ctrl+V', pasteSelected: 'Ctrl+Alt+V',
+    });
   });
   it('opens the existing Settings dialog from the native menu event without duplicating it', async () => {
     act(() => window.dispatchEvent(new Event('genzoroom:open-settings')));

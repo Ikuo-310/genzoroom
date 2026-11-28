@@ -16,6 +16,7 @@ mod smoke;
 mod titlebar;
 
 use connection::{allowed_navigation, user_root, Connection};
+use serde::Deserialize;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
     webview::NewWindowResponse,
@@ -198,14 +199,14 @@ fn run() -> Result<(), &'static str> {
             let copy_all = MenuItem::with_id(
                 app,
                 "edit-copy-all",
-                "Copy all settings\tCtrl+C",
+                "Copy all settings",
                 false,
                 None::<&str>,
             )?;
             let copy_selected = MenuItem::with_id(
                 app,
                 "edit-copy-selected",
-                "Copy selected settings…\tCtrl+Alt+C",
+                "Copy selected settings…",
                 false,
                 None::<&str>,
             )?;
@@ -213,14 +214,14 @@ fn run() -> Result<(), &'static str> {
             let paste = MenuItem::with_id(
                 app,
                 "edit-paste",
-                "Paste copied settings\tCtrl+V",
+                "Paste copied settings",
                 false,
                 None::<&str>,
             )?;
             let paste_selected = MenuItem::with_id(
                 app,
                 "edit-paste-selected",
-                "Paste selected settings…\tCtrl+Alt+V",
+                "Paste selected settings…",
                 false,
                 None::<&str>,
             )?;
@@ -397,15 +398,28 @@ struct NativeMenuLabels {
     about: &'static str,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeEditMenuShortcuts {
+    copy_all: String,
+    copy_selected: String,
+    paste: String,
+    paste_selected: String,
+}
+
+fn native_edit_menu_item_text(label: &str, shortcut: &str) -> String {
+    format!("{label}\t{shortcut}")
+}
+
 fn native_menu_labels(language: &str) -> Result<NativeMenuLabels, &'static str> {
     match language {
         "ja" => Ok(NativeMenuLabels {
             file: "ファイル",
             edit: "編集",
-            copy_all: "全設定をコピー\tCtrl+C",
-            copy_selected: "項目を選んでコピー…\tCtrl+Alt+C",
-            paste: "コピー済み設定をペースト\tCtrl+V",
-            paste_selected: "項目を選んでペースト…\tCtrl+Alt+V",
+            copy_all: "全設定をコピー",
+            copy_selected: "項目を選んでコピー…",
+            paste: "コピー済み設定をペースト",
+            paste_selected: "項目を選んでペースト…",
             preferences: "環境設定",
             lens_database: "レンズデータベースを管理…",
             exit: "終了",
@@ -418,10 +432,10 @@ fn native_menu_labels(language: &str) -> Result<NativeMenuLabels, &'static str> 
         "en" => Ok(NativeMenuLabels {
             file: "File",
             edit: "Edit",
-            copy_all: "Copy all settings\tCtrl+C",
-            copy_selected: "Copy selected settings…\tCtrl+Alt+C",
-            paste: "Paste copied settings\tCtrl+V",
-            paste_selected: "Paste selected settings…\tCtrl+Alt+V",
+            copy_all: "Copy all settings",
+            copy_selected: "Copy selected settings…",
+            paste: "Paste copied settings",
+            paste_selected: "Paste selected settings…",
             preferences: "Preferences",
             lens_database: "Manage Lens Database…",
             exit: "Exit",
@@ -448,7 +462,11 @@ fn set_menu_item_text(
 }
 
 #[tauri::command]
-fn set_native_menu_language(app: tauri::AppHandle, language: String) -> Result<(), String> {
+fn set_native_menu_language(
+    app: tauri::AppHandle,
+    language: String,
+    shortcuts: NativeEditMenuShortcuts,
+) -> Result<(), String> {
     let labels = native_menu_labels(&language).map_err(str::to_owned)?;
     let menu = app
         .menu()
@@ -482,7 +500,18 @@ fn set_native_menu_language(app: tauri::AppHandle, language: String) -> Result<(
             _ => &[("diagnostics", labels.diagnostics), ("about", labels.about)],
         };
         for (item_id, item_text) in item_labels {
-            set_menu_item_text(&submenu, item_id, item_text).map_err(str::to_owned)?;
+            let text = match *item_id {
+                "edit-copy-all" => native_edit_menu_item_text(item_text, &shortcuts.copy_all),
+                "edit-copy-selected" => {
+                    native_edit_menu_item_text(item_text, &shortcuts.copy_selected)
+                }
+                "edit-paste" => native_edit_menu_item_text(item_text, &shortcuts.paste),
+                "edit-paste-selected" => {
+                    native_edit_menu_item_text(item_text, &shortcuts.paste_selected)
+                }
+                _ => item_text.to_string(),
+            };
+            set_menu_item_text(&submenu, item_id, &text).map_err(str::to_owned)?;
         }
     }
     Ok(())
@@ -520,7 +549,7 @@ fn main() {
 
 #[cfg(test)]
 mod native_menu_tests {
-    use super::{native_menu_labels, NativeMenuLabels};
+    use super::{native_edit_menu_item_text, native_menu_labels, NativeMenuLabels};
 
     #[test]
     fn native_edit_menu_state_is_in_the_limited_main_webview_permission() {
@@ -547,10 +576,10 @@ mod native_menu_tests {
             Ok(NativeMenuLabels {
                 file: "ファイル",
                 edit: "編集",
-                copy_all: "全設定をコピー\tCtrl+C",
-                copy_selected: "項目を選んでコピー…\tCtrl+Alt+C",
-                paste: "コピー済み設定をペースト\tCtrl+V",
-                paste_selected: "項目を選んでペースト…\tCtrl+Alt+V",
+                copy_all: "全設定をコピー",
+                copy_selected: "項目を選んでコピー…",
+                paste: "コピー済み設定をペースト",
+                paste_selected: "項目を選んでペースト…",
                 preferences: "環境設定",
                 lens_database: "レンズデータベースを管理…",
                 exit: "終了",
@@ -566,10 +595,10 @@ mod native_menu_tests {
             Ok(NativeMenuLabels {
                 file: "File",
                 edit: "Edit",
-                copy_all: "Copy all settings\tCtrl+C",
-                copy_selected: "Copy selected settings…\tCtrl+Alt+C",
-                paste: "Paste copied settings\tCtrl+V",
-                paste_selected: "Paste selected settings…\tCtrl+Alt+V",
+                copy_all: "Copy all settings",
+                copy_selected: "Copy selected settings…",
+                paste: "Paste copied settings",
+                paste_selected: "Paste selected settings…",
                 preferences: "Preferences",
                 lens_database: "Manage Lens Database…",
                 exit: "Exit",
@@ -581,5 +610,41 @@ mod native_menu_tests {
             })
         );
         assert_eq!(native_menu_labels("fr"), Err("unsupported_language"));
+    }
+
+    #[test]
+    fn native_edit_menu_appends_the_shortcut_strings_supplied_by_frontend() {
+        assert_eq!(
+            native_edit_menu_item_text("Copy all settings", "⌘+C"),
+            "Copy all settings\t⌘+C"
+        );
+        assert_eq!(
+            native_edit_menu_item_text("項目を選んでペースト…", "Ctrl+Alt+V"),
+            "項目を選んでペースト…\tCtrl+Alt+V"
+        );
+    }
+
+    #[test]
+    fn native_menu_language_ipc_accepts_frontend_camel_case_shortcut_fields() {
+        let shortcuts: super::NativeEditMenuShortcuts = serde_json::from_str(
+            r#"{"copyAll":"⌘+C","copySelected":"⌘+⌥+C","paste":"⌘+V","pasteSelected":"⌘+⌥+V"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            native_edit_menu_item_text("Copy all settings", &shortcuts.copy_all),
+            "Copy all settings\t⌘+C"
+        );
+        assert_eq!(
+            native_edit_menu_item_text("Copy selected settings…", &shortcuts.copy_selected),
+            "Copy selected settings…\t⌘+⌥+C"
+        );
+        assert_eq!(
+            native_edit_menu_item_text("Paste copied settings", &shortcuts.paste),
+            "Paste copied settings\t⌘+V"
+        );
+        assert_eq!(
+            native_edit_menu_item_text("Paste selected settings…", &shortcuts.paste_selected),
+            "Paste selected settings…\t⌘+⌥+V"
+        );
     }
 }

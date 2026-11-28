@@ -12,7 +12,7 @@ Object.defineProperty(window, '__GENZOROOM_DESKTOP__', {
     const response = window.__TAURI_INTERNALS__.invoke('desktop_lifecycle', { message });
     if (message.kind === 'ready') return response.then(value => { genzoroomFrontendReady = true; return value; });
     return response;
-  }, setMenuLanguage: language => window.__TAURI_INTERNALS__.invoke('set_native_menu_language', { language }),
+  }, setMenuLanguage: (language, shortcuts) => window.__TAURI_INTERNALS__.invoke('set_native_menu_language', { language, shortcuts }),
   setEditMenuState: state => window.__TAURI_INTERNALS__.invoke('set_native_edit_menu_state', state) })
 });
 const showGenzoRoomStartupError = () => {

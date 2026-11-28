@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatShortcut } from './shortcutDisplay';
+import { formatNativeEditMenuShortcuts, formatShortcut, nativeEditMenuShortcutIds } from './shortcutDisplay';
 
 describe('shortcut binding display', () => {
   it('formats Home command labels from the registry on both platforms', () => {
@@ -38,6 +38,16 @@ describe('shortcut binding display', () => {
     expect(formatShortcut('pasteSettings', 'mac')).toBe('⌘+V');
     expect(formatShortcut('copySelection', 'mac')).toBe('⌘+⌥+C');
     expect(formatShortcut('pasteSelection', 'mac')).toBe('⌘+⌥+V');
+    expect(formatNativeEditMenuShortcuts('other')).toEqual({
+      copyAll: formatShortcut('copySettings', 'other'),
+      copySelected: formatShortcut('copySelection', 'other'),
+      paste: formatShortcut('pasteSettings', 'other'),
+      pasteSelected: formatShortcut('pasteSelection', 'other'),
+    });
+    expect(formatNativeEditMenuShortcuts('mac')).toEqual({
+      copyAll: '⌘+C', copySelected: '⌘+⌥+C', paste: '⌘+V', pasteSelected: '⌘+⌥+V',
+    });
+    expect(Object.values(nativeEditMenuShortcutIds)).toEqual(['copySettings', 'copySelection', 'pasteSettings', 'pasteSelection']);
     expect(formatShortcut('filmstripPrevious', 'mac')).toBe('⌘+⇧+←');
     expect(formatShortcut('filmstripNext', 'mac')).toBe('⌘+⇧+→');
   });

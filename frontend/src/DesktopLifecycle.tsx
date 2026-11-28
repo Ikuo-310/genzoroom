@@ -3,13 +3,14 @@ import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { closeThumbnailPublicationStream, resumeThumbnailPublicationStream } from './thumbnailPublication';
+import type { NativeEditMenuShortcuts } from './shortcutDisplay';
 
 type CloseGuard = { prepare: (retry?:boolean) => Promise<boolean>; resume: () => void; discard?:()=>Promise<void>; failureCode?:()=>string|undefined };
 type Message = { kind: 'ready' | 'restart' | 'close' } | { kind: 'closeResult'; requestId: string; saved: boolean; discarded?:true };
 declare global {
   interface Window { __GENZOROOM_DESKTOP__?: {
     respond: (message: Message) => Promise<void>;
-    setMenuLanguage?: (language: 'en' | 'ja') => Promise<void>;
+    setMenuLanguage?: (language: 'en' | 'ja', shortcuts: NativeEditMenuShortcuts) => Promise<void>;
     setEditMenuState?: (state: { copyAll: boolean; copySelected: boolean; paste: boolean; pasteSelected: boolean }) => Promise<void>;
   } }
 }

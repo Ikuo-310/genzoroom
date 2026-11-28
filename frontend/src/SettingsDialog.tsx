@@ -7,6 +7,7 @@ import { useWorkspaceGpu, type GpuAvailability } from './useWorkspaceGpu';
 import { WebGpuControl } from './WebGpuControl';
 import { BinaryRadioChoice } from './BinaryRadioChoice';
 import { isPrimaryModifier } from './shortcutModifiers';
+import { formatNativeEditMenuShortcuts } from './shortcutDisplay';
 import { BUILD_INFO } from './buildInfo';
 import { WindowsConnectionSettings } from './WindowsConnectionSettings';
 import { LensDatabaseDialog } from './LensDatabaseDialog';
@@ -58,7 +59,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     if (!setMenuLanguage) return;
     const synchronize = (language = i18n.resolvedLanguage ?? i18n.language) => {
       const resolved = language.toLowerCase().split('-')[0];
-      if (resolved === 'en' || resolved === 'ja') void setMenuLanguage(resolved).catch(() => {});
+      if (resolved === 'en' || resolved === 'ja') {
+        void setMenuLanguage(resolved, formatNativeEditMenuShortcuts()).catch(() => {});
+      }
     };
     synchronize();
     i18n.on('languageChanged', synchronize);

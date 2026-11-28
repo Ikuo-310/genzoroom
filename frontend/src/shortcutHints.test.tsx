@@ -7,7 +7,7 @@ import { ImageViewer } from './ImageViewer';
 import { ScopePanel } from './ScopePanel';
 import { EditSettingsMenu } from './EditSettingsMenu';
 import { updateSetting } from './appSettings';
-import { formatShortcut } from './shortcutDisplay';
+import { formatNativeEditMenuShortcuts, formatShortcut } from './shortcutDisplay';
 import i18n from './i18n';
 
 let host: HTMLDivElement, root: Root;
@@ -74,7 +74,7 @@ describe('visual shortcut hints', () => {
     await act(async () => root.render(<EditSettingsMenu disabled={false} hasClipboard={false}
       onCopy={action} onPaste={action} onSelectCopy={action} onSelectPaste={action}
       contextPosition={{ x: 0, y: 0 }} />));
-    const expected = (['copySettings', 'copySelection', 'pasteSettings', 'pasteSelection'] as const).map(id => formatShortcut(id));
+    const expected = Object.values(formatNativeEditMenuShortcuts());
     for (const selector of ['.edit-settings-menu-actions', '.edit-settings-context-menu']) {
       const menu = document.querySelector(selector)!;
       expect([...menu.querySelectorAll('.shortcut-label')].map(label => label.textContent)).toEqual(expected);
