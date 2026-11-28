@@ -832,6 +832,11 @@
     "selectCopy": "Copy selected settings",
     "pasteCopied": "Paste copied settings",
     "selectPaste": "Paste selected settings",
+    "copySettingNames": {
+      "pointCurve": "Point Curve (all channels)",
+      "vignette": "Vignette correction settings",
+      "crop": "Crop and straighten"
+    },
     "selectAllAdjustments": "Select all",
     "clearAllAdjustments": "Clear all",
     "selectAdjustmentCategory": "Select {{category}} items",

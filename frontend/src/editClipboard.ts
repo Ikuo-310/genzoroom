@@ -42,11 +42,11 @@ export const RAW_COPY_SETTING_LABEL_KEYS: Record<RawCopySettingId, string> = {
   'basic.shadows': 'workspace.shadows', 'basic.whites': 'workspace.whites', 'basic.blacks': 'workspace.blacks',
   whiteBalance: 'workspace.whiteBalance', 'color.vibrance': 'workspace.vibrance', 'color.saturation': 'workspace.saturation',
   colorMixer: 'workspace.mixer.title', pointColor: 'workspace.pointColor.title', colorGrading: 'workspace.colorGrading',
-  pointCurve: 'workspace.curveHistory.master', 'effects.texture': 'workspace.texture', 'effects.clarity': 'workspace.clarity',
-  'effects.dehaze': 'workspace.dehaze', vignette: 'workspace.vignetteAmount', sharpening: 'workspace.sharpening',
+  pointCurve: 'workspace.copySettingNames.pointCurve', 'effects.texture': 'workspace.texture', 'effects.clarity': 'workspace.clarity',
+  'effects.dehaze': 'workspace.dehaze', vignette: 'workspace.copySettingNames.vignette', sharpening: 'workspace.sharpening',
   luminanceNoiseReduction: 'workspace.noiseReduction', colorNoiseReduction: 'workspace.colorNoiseReduction',
   lensCorrection: 'workspace.lensCorrections', chromaticAberration: 'workspace.removeChromaticAberration',
-  localToneMapping: 'workspace.cameraLocalTone', calibration: 'workspace.calibrationCategory', crop: 'workspace.rawCrop.crop',
+  localToneMapping: 'workspace.cameraLocalTone', calibration: 'workspace.calibrationCategory', crop: 'workspace.copySettingNames.crop',
 };
 
 // Selection projection only: Native defaults and validation remain owned by the P1-A/B Backend contract.

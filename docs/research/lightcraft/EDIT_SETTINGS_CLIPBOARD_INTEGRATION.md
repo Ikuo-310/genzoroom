@@ -431,3 +431,11 @@ Frontendのみ変更した。Backend API／Native managed patch／manifest／Nat
 - Windows DesktopでViewer menuの4操作、Ctrl+C／Ctrl+Alt+C／Ctrl+V／Ctrl+Alt+V、Crop明示選択、WB disabled表示と理由、写真切替後のowner拒否、Clipboard切替中のdialog拒否、History行を実操作で確認する。
 - 代表JPEG／LightCraft素材間でエンジン不一致の拒否、同一LightCraftでの全／部分コピー・ペースト、適用後History・Undo／Redo／Jumpを統合確認する。画素演算の再検証は不要。
 - LightCraft設定panelに対応する既存copy context menuはないため、コンテキスト操作の拡張は新しい要望がない限り行わない。Windows Native menubarはP2。
+
+### R.5 P1-D-F1: 選択ダイアログ表示調整
+
+- LightCraftの定義カテゴリが単一選択IDだけを持つ場合、カテゴリ名の親チェックボックスと同名の子チェックボックスを重複表示せず、設定名のチェックボックス1個で選択する。複数IDカテゴリは親子checkboxと中間選択状態を維持する。この判定はLightCraftカテゴリ設定時のみ有効で、既存JPEGダイアログには適用しない。ペースト時に複数IDカテゴリのうち1 IDだけがClipboardにある場合も、元カテゴリの複数選択単位を維持する。
+- 単一選択IDカテゴリでのWB disabled状態と理由、通常copyの24 ID初期選択、Crop初期未選択、「全選択」によるCrop選択は維持する。
+- 表示名は対象範囲に合わせて `pointCurve` を「ポイントカーブ全体」／“Point Curve (all channels)”、`vignette` を「周辺光量補正一式」／“Vignette correction settings”、`crop` を「切り抜き・水平補正」／“Crop and straighten” に変更した。新しいlocale keyはselection dialogと同じID-label mapを使うHistory行にも適用される。
+- Frontend関連5テストファイル **293 passed**。単一カテゴリの直接checkbox、複数カテゴリの中間状態、24項目とCrop、WB disabled理由、Select All／Clear All、3名称の日英表示、History表示とJPEG回帰を確認した。`npx tsc --noEmit` と `git diff --check` も成功。
+- P1-D-F1は表示構造・名称のみの変更。25 ID、selection scope、Clipboard／WB互換性、API、History保存契約、Backend／Native資材は変更していない。P1-E・P2の作業はこの変更に含めない。

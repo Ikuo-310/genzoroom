@@ -167,8 +167,15 @@ describe('adjustment selection dialog', () => {
   it('defaults raw copy to 24 items, adds Crop only after explicit Select all, and keeps blocked WB unselected', () => {
     mountRaw({ initial: RAW_DEFAULT_COPY_SETTING_IDS });
     expect(host.querySelectorAll('input[name]')).toHaveLength(25);
+    expect(host.querySelectorAll('fieldset')).toHaveLength(5);
     expect(RAW_DEFAULT_COPY_SETTING_IDS.every(id => item(id).checked)).toBe(true);
     expect(item('crop').checked).toBe(false);
+    expect(item('whiteBalance').closest('fieldset')).toBeNull();
+    expect(item('colorMixer').closest('fieldset')).toBeNull();
+    click(item('basic.exposure'));
+    expect(categories()[0].indeterminate).toBe(true);
+    click(button('Clear all'));
+    expect(button('Copy').disabled).toBe(true);
     click(button('Select all'));
     expect(item('crop').checked).toBe(true);
     click(button('Copy'));
@@ -178,11 +185,20 @@ describe('adjustment selection dialog', () => {
     mountRaw({ mode: 'paste', ids: ['whiteBalance', 'basic.exposure'], initial: ['basic.exposure'], disabled: ['whiteBalance'] });
     expect(item('whiteBalance').disabled).toBe(true);
     expect(item('whiteBalance').checked).toBe(false);
+    expect(item('whiteBalance').closest('fieldset')).toBeNull();
     expect(host.textContent).toContain('White balance cannot be applied');
     click(button('Select all'));
     expect(item('whiteBalance').checked).toBe(false);
     click(button('Paste'));
     expect(confirmed).toHaveBeenLastCalledWith(['basic.exposure']);
+  });
+  it.each(['ja', 'en'])('uses whole-setting labels for Point Curve, Vignette and Crop in %s', async language => {
+    await i18n.changeLanguage(language);
+    mountRaw();
+    for (const label of language === 'ja'
+      ? ['ポイントカーブ全体', '周辺光量補正一式', '切り抜き・水平補正']
+      : ['Point Curve (all channels)', 'Vignette correction settings', 'Crop and straighten']) expect(host.textContent).toContain(label);
+    expect(host.textContent).not.toContain(language === 'ja' ? 'RGB全体' : 'RGB master');
   });
   it('wraps Tab and Shift+Tab at modal boundaries, including a disabled confirm button', () => {
     mount(); const first = button('Select all'); const last = button('Copy');

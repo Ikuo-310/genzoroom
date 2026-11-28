@@ -75,6 +75,19 @@ export function AdjustmentSelectionDialog({ mode, availableIds, onConfirm, onCan
     });
   }
 
+  function renderItem(id: SelectionId, groupLabel?: string) {
+    const labelKey = labelKeys?.[id as RawCopySettingId] ?? (ADJUSTMENT_IDS.includes(id as AdjustmentId)
+      ? adjustmentSelectionLabel(id as AdjustmentId) : id);
+    const reasonKey = disabledReasonKeys[id as RawCopySettingId];
+    return <label key={id} title={reasonKey ? t(reasonKey) : undefined}>
+      <input type="checkbox" name={id} checked={selected.has(id)} disabled={disabledIds.includes(id)}
+        aria-label={groupLabel ? `${t(groupLabel)} ${t(labelKey)}` : t(labelKey)}
+        aria-describedby={reasonKey ? `${titleId}-${id}-reason` : undefined}
+        onChange={(event) => select([id], event.target.checked)} />
+      {t(labelKey)}{reasonKey && <span id={`${titleId}-${id}-reason`} className="selection-item-reason"> {t(reasonKey)}</span>}
+    </label>;
+  }
+
   return <dialog ref={dialog} className="adjustment-selection-dialog" aria-labelledby={titleId}
     onCancel={(event) => { event.preventDefault(); onCancel(); }}
     onKeyUp={(event) => event.stopPropagation()}
@@ -104,8 +117,11 @@ export function AdjustmentSelectionDialog({ mode, availableIds, onConfirm, onCan
     </div>
     <div className="adjustment-selection-categories">
       {visibleCategories.map((category) => {
-        const ids = category.groups.flatMap(group => group.ids).filter(id => availableIds.includes(id));
+        const categoryIds = category.groups.flatMap(group => group.ids);
+        const singleItemCategory = !!categories && categoryIds.length === 1;
+        const ids = categoryIds.filter(id => availableIds.includes(id));
         if (ids.length === 0) return null;
+        if (singleItemCategory) return <div key={category.id} className="adjustment-selection-single">{renderItem(ids[0])}</div>;
         const selectable = ids.filter(id => !disabledIds.includes(id));
         const count = selectable.filter((id) => selected.has(id)).length;
         return <fieldset key={category.id}>
@@ -121,18 +137,7 @@ export function AdjustmentSelectionDialog({ mode, availableIds, onConfirm, onCan
             if (groupIds.length === 0) return null;
             return <div key={index} className="adjustment-selection-group">
               {group.label && <h3>{t(group.label)}</h3>}
-              {groupIds.map((id) => {
-                const labelKey = labelKeys?.[id as RawCopySettingId] ?? (ADJUSTMENT_IDS.includes(id as AdjustmentId)
-                  ? adjustmentSelectionLabel(id as AdjustmentId) : id);
-                const reasonKey = disabledReasonKeys[id as RawCopySettingId];
-                return <label key={id} title={reasonKey ? t(reasonKey) : undefined}>
-                <input type="checkbox" name={id} checked={selected.has(id)} disabled={disabledIds.includes(id)}
-                  aria-label={group.label ? `${t(group.label)} ${t(labelKey)}` : t(labelKey)}
-                  aria-describedby={reasonKey ? `${titleId}-${id}-reason` : undefined}
-                  onChange={(event) => select([id], event.target.checked)} />
-                {t(labelKey)}{reasonKey && <span id={`${titleId}-${id}-reason`} className="selection-item-reason"> {t(reasonKey)}</span>}
-              </label>;
-              })}
+              {groupIds.map(id => renderItem(id, group.label))}
             </div>;
           })}
         </fieldset>;

@@ -17,13 +17,14 @@ describe('RAW History display', () => {
     await i18n.changeLanguage(language);
     const step: RawHistoryStep = { stepId: 'paste', kind: 'settingsPaste', metadata: {
       sourceAssetId: '00000000-0000-4000-8000-000000000001', sourceFilename: 'source.dng',
-      selectedIds: ['basic.exposure', 'color.vibrance'],
+      selectedIds: ['basic.exposure', 'pointCurve', 'vignette', 'crop'],
     }, changes: [], createdAt: '' };
     const markup = renderToStaticMarkup(<RawEditHistory raw={rawHistory([step], 1) as never} disabled={false} onReset={() => {}} />);
     expect(markup).toContain(language === 'ja' ? 'source.dngからペースト' : 'Pasted from source.dng');
     expect(markup).toContain(language === 'ja' ? '露光量' : 'Exposure');
-    expect(markup).toContain(language === 'ja' ? '自然な彩度' : 'Vibrance');
-    expect(markup).not.toContain('Crop');
+    for (const label of language === 'ja'
+      ? ['ポイントカーブ全体', '周辺光量補正一式', '切り抜き・水平補正']
+      : ['Point Curve (all channels)', 'Vignette correction settings', 'Crop and straighten']) expect(markup).toContain(label);
 
     const legacy = { ...step, metadata: { sourceAssetId: step.metadata.sourceAssetId, sourceFilename: 'old.jpg' } } as RawHistoryStep;
     const legacyMarkup = renderToStaticMarkup(<RawEditHistory raw={rawHistory([legacy], 1) as never} disabled={false} onReset={() => {}} />);
