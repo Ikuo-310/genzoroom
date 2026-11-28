@@ -447,3 +447,34 @@ Frontendのみ変更した。Backend API／Native managed patch／manifest／Nat
 - LightCraft選択dialogだけに `raw-adjustment-selection-dialog` classを付け、幅を最大1040pxへ拡張した。カテゴリ領域を均等高さのGrid行から、カテゴリを分割しない `column-count: 3` のbalanced flowに変更し、各カードは内容の高さを保つ。幅900px以下で2列、600px以下で1列へ縮退する。連続順序は現像panel順を保つ。JPEG dialogのclass・2列Grid・寸法は維持する。
 - Frontend関連5テストファイル **293 passed**。日英のfull／partial Historyが同一の短い文になること、metadataのselectedIds保持、JPEG History回帰、25 IDとカテゴリの翻訳解決、LightCraft専用レイアウトclass、既存JPEGダイアログの分離を確認した。`npx tsc --noEmit` 成功。
 - P1-D-F2はFrontend表示・locale参照・選択dialog layoutと研究文書のみ変更し、Clipboard、copy／paste処理、Backend API、History保存契約、Native資材は変更していない。実Desktopでの新レイアウト確認は未実施。P1-E／P2には着手していない。
+
+## S. P1-E統合検証と現行仕様
+
+検証対象はP1-A〜P1-D-F2を含む `7c66e854cecf1158a3e027421f86e00d4694ad9c`。N〜R節は各工程の記録で、以下に現行仕様と今回の結果を記す。
+
+### S.1 現行仕様
+
+- コピー取得APIはBackendの確定済みsnapshotを読み、追加Native通信とSQLite読み込みは0回。ペーストは選択対象の部分 `develop.merge` を行い、既存のHistory／Recipe保存とUndo／Redo経路を使う。Historyの表示は日英ともコピー元ファイル名を含むペースト操作名で、適用項目IDはmetadataに保持する。
+- Clipboardは1タブ内のメモリに独立したコピーとして保持し、写真切替、Homeへの移動、Nativeセッション再生成をまたぐ。reload・タブ終了で消える。ペーストは同じエンジンのデータを受け付け、選択操作はDocument ownerと開始時のコピー内容を照合する。
+- WBは素材固有のコピー元方式・コピー値のscale・ペースト先方式が同じ既知の方式の場合に適用できる。非互換WBは適用対象から外れ、選択画面では理由とともに無効表示する。設定が写真に合うかはユーザーが判断する。
+- Viewerの4操作は全コピー、選択コピー、通常ペースト、選択ペースト。Windowsのショートカットは順にCtrl+C、Ctrl+Alt+C、Ctrl+V、Ctrl+Alt+V。対象は25項目で、切り抜き・水平補正は通常コピーから除外し、選択コピーでも初期未選択。単一項目カテゴリはチェックボックス1個で表示する。LightCraftのダイアログは最大1040px幅で、3列から画面幅に応じて2列・1列に切り替わる。
+
+### S.2 ユーザーによるWindows Desktop確認
+
+写真間の編集設定コピー＆ペースト、F2の3列レイアウトと翻訳表示、切り抜き・水平補正の初期未選択を確認済み。F2後の操作上の問題は報告されていない。個別のショートカット、狭幅時の列切替、WB非互換表示、owner変更時の操作やUndo／Redoなどは、今回受領した個別Desktop確認には含めない。
+
+### S.3 P1-E回帰結果
+
+| 区分 | 結果と対象 |
+| --- | --- |
+| Backend | **290件成功**。コピー取得・ペースト適用、WB拒否、部分merge、History API／Store、Recipe復元／API。 |
+| Frontend | **11ファイル、831件成功**。コピー／ペーストのAPIとClipboard、owner境界、全体・部分選択とCrop、WB制限、History表示・保存、操作UI・日英翻訳、JPEG回帰。 |
+| 静的確認 | `npm run build` 成功（`tsc --noEmit`を含む）。既存のバンドルサイズとReact Routerの `use client` 警告あり。`git diff --check` 成功。 |
+
+### S.4 実Native WB確認
+
+既存のmanaged LightCraft CLI v0.20.0をCPU設定で起動した。起動時のSHA-256は `2e04fea8da7d84018baf7384043656af482a23986a1c63361f8200923e77eef7`。Pentax DNG（IMGP5033.DNG）はImport時に絶対値（`kelvin`）、リポジトリのJPEG（Anshitsu_Sakura.jpg）は相対値（`legacy`）だった。
+
+各素材のRecipeに逆方式のWBを含めて `restore_persisted_settings()` を実行した。Native readbackの現在scaleが反対の方式に切り替わった後も、Import時に保存した素材固有方式は両素材とも維持された。`apply_history_operation()` で逆方式のWBをペーストすると両方向とも `raw_wb_incompatible` になり、確定済み設定とrevisionは維持された。この確認は実Nativeを使ったアダプター境界の検証で、HTTP境界はS.3の回帰テストで確認した。
+
+今回の検証範囲で新規Findingはなかった。画素比較、性能、Nativeメニューバーは今回の検証範囲外。

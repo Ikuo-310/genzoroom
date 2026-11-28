@@ -1756,7 +1756,17 @@ AdjustmentSliderにあった共有スライダーMap、現在の操作対象、�
 
 JPEG写真を暗室でactiveにすると通常はedit-state APIから保存状態を取得し、成功後にrecipe、History、Undo/Redo cursorを復元して編集を許可する。退出保存失敗後に暗室に留まり、assetにdirtyなlocal stateまたは未確認saveが残っている場合は、再activation時にそのstateを保持してGETで上書きしない。明示的にdiscardしたassetは記録を破棄し、再訪時にDBから取得する。GET失敗時は空の編集状態として扱わず、再試行するまで編集できない。recipe / History snapshotが変化した編集操作の最後から5秒間変更がなければ、pendingをコピー側でcommitした非圧縮snapshotをrevisionとsaveId付きでautosaveする。autosave失敗は編集を保持したまま非ブロッキング警告を表示し、直後の自動retryを行わない。失敗後に最新snapshotまで保存できたら警告を解除する。通信結果が不明な保存（HTTP 408／5xx、成功応答の解析・検証失敗等）はDBで成功済みの可能性があるため、元のsnapshot・expectedRevision・saveIdを変更せず先に再送する。確認後に追加編集を保存する。別タブ等による真正なrevision conflict（409）は自動mergeしない。Filmstrip遷移時はautosave timerを停止し、dirtyな写真を最新の非圧縮snapshotで保存する。遷移保存失敗時はその写真に留まるか、未確認のローカル編集を破棄して移動するかを選べる。discard後も保存済み状態が確定済みなら編集済み表示を維持し、不明なら古い一括取得結果を使わずunknownとして扱う。Home controlで暗室を退出すると、そのAnshitsu session中に永続化対象の編集を行った全assetを順次処理する。最新snapshotをcopy上で作り、`COMPACT_HISTORY_ON_EXIT`が有効ならapplied / redoを分離したpure compactionとvalidation後に保存する。圧縮失敗時は非圧縮snapshotへfallbackする。成功済みassetはlive sessionも保存済みHistoryへ同期し、後続assetの失敗で詳細Historyが再autosaveされないようにする。最終保存失敗時は暗室に留まるか、rollback / DELETEなしで退出するかを選ぶ。Browser Back、reload、tab close時の同期保存・interceptは未実装。
 
-## Copy / Paste（現行仕様）
+## LightCraftの編集設定コピー／ペースト（現行仕様）
+
+Viewerの「⋯」から全設定コピー、選択コピー、通常ペースト、選択ペーストを実行できる。Windowsのショートカットは順に `Ctrl+C`、`Ctrl+Alt+C`、`Ctrl+V`、`Ctrl+Alt+V`。25項目のうち切り抜き・水平補正は通常コピーの対象外で、選択コピーでも初期未選択。単一項目カテゴリはチェックボックス1個で表示する。LightCraftの選択ダイアログは最大1040px幅で、カテゴリを分割せず3列に並べる。画面幅900px以下では2列、600px以下では1列になる。
+
+コピー取得はBackendの確定済みsnapshotを使用し、追加のNative通信とSQLite読み込みは0回。コピー内容は同一タブ内のメモリに保持され、写真切替、Homeへの移動、Nativeセッションの再生成をまたいで使える。reload・タブ終了で消え、別の現像エンジンにはペーストできない。選択操作は開始時のDocument ownerに結び付け、選択ペーストでは開始時のClipboardとの一致も確認する。
+
+適用はLightCraftの部分 `develop.merge` と既存History／Recipe保存経路を使う。Historyには「コピー元ファイル名からペースト」と表示し、適用IDはmetadataに保持する。WBはコピー元の素材固有方式・コピー値のscale・貼り付け先の素材固有方式が絶対値または相対値の同一方式で揃う場合に適用できる。非互換WBは候補から外れ、選択ペースト上は理由とともに無効表示される。設定が写真に合うかはユーザーが判断する。
+
+ユーザーはWindows Desktopで写真間の設定コピー＆ペースト、F2の3列表示と翻訳、切り抜き・水平補正の初期未選択を確認した。F2後の操作上の問題は報告されていない。自動・実Native検証の範囲は[統合検証記録](research/lightcraft/EDIT_SETTINGS_CLIPBOARD_INTEGRATION.md#s-p1-e統合検証と現行仕様)を参照。
+
+## JPEG版のCopy / Paste（現行仕様）
 
 Recipe v18の16数値項目を、`frontend/src/editClipboard.ts`の同一タブ内メモリ上のクリップボードで共有する。通常コピーは16項目、選択コピーは選んだ項目、単一スライダーコピーは対象の1項目を保存し、いずれも以前のコピーを置き換える。値は`effectiveAdjustments()`ではなくrecipeからコピー時点で複製し、source asset IDとfilenameも保持する。ON/OFFはコピーせず、個別項目がOFFでも保持されている数値を対象とする。Homeへ戻るなどのroute変更後も同じタブ内では保持するが、reload・タブ終了後は残さない。OS clipboard APIは使わない。
 

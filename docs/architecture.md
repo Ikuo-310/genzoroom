@@ -1168,6 +1168,16 @@ The development files support builds on a Docker host with Docker Compose. A dev
 
 See the [deployment guide](deployment.md) for startup, verification, troubleshooting, and removal commands. Removing the Compose deployment removes its containers and networks; copied deployment files and built images remain until explicitly removed.
 
+## LightCraft edit clipboard and Paste
+
+LightCraft and the JPEG editor use one in-memory clipboard per tab. Each copy replaces the previous entry. A LightCraft entry holds a detached snapshot of the selected settings, source asset ID and filename, and the source photo's white balance (WB) mode. It survives photo changes, Home navigation and Native session recreation. Reloading or closing the tab clears it. Each editor accepts only entries from its own engine.
+
+The Viewer menu offers Copy all (Ctrl+C), Copy selected (Ctrl+Alt+C), Paste copied (Ctrl+V) and Paste selected (Ctrl+Alt+V). There are 25 selection items. Copy all and the initial selection in Copy selected cover 24 items. Crop and Straighten is opt-in. Paste selected lists copied items and initially selects those that can be applied. Single-item categories use one checkbox. The LightCraft dialog is up to 1040px wide, with three columns above 900px, two through 900px and one through 600px. Categories stay intact in panel order.
+
+Copy reads the Backend's last confirmed settings snapshot through the document copy endpoint without an additional Native request or SQLite read. The frontend binds the request to the active document owner and checks the reply before replacing the clipboard. A selection dialog also checks its owning document and, for Paste, the clipboard it opened with. Paste projects the selected fields and uses the existing LightCraft partial `develop.merge` and History/Recipe save path. Undo and Redo restore the existing History snapshots. The `settingsPaste` entry retains the applied IDs, and the visible label shows the source filename in the localized Paste message.
+
+WB is eligible only when the source photo's import mode, the copied WB scale and the destination photo's import mode agree on absolute or relative correction. A Recipe can change the active WB scale while the import mode remains fixed. The UI disables incompatible WB and allows remaining items, and the Backend rejects incompatible WB payloads. Users decide whether otherwise eligible settings suit the destination photo. See [P1-E verification](research/lightcraft/EDIT_SETTINGS_CLIPBOARD_INTEGRATION.md#s-p1-e統合検証と現行仕様).
+
 ## JPEG editing foundation
 
 ### JPEG Viewer Zoom and Navigator
@@ -1188,7 +1198,7 @@ Anshitsu keeps active edit sessions in an in-memory map keyed by Immich asset ID
 
 Each adjustment retains its `adjustmentEnabled.<id>` legacy field for Recipe v18 compatibility. Only category and Color Grading range switches affect processing. New individual toggle actions are ignored; historical individual toggle snapshots remain readable.
 
-### Edit clipboard and Paste
+### JPEG edit clipboard and Paste
 
 `frontend/src/editClipboard.ts` owns one module-memory clipboard per browser tab. It stores a detached copy of selected adjustment values plus the source asset ID and filename; it neither references the live recipe nor reads or writes the OS clipboard. Normal Copy stores all sixteen Recipe v18 adjustment values, selected Copy stores the chosen values, and slider Copy stores one value. All three replace the same clipboard. Copy reads the saved recipe values rather than `effectiveAdjustments`, so disabled categories and ranges still copy their retained numbers. None of the 23 enabled flags is copied. The clipboard survives route changes, Home, and reopening Anshitsu within the tab, but not a page reload or tab close.
 
