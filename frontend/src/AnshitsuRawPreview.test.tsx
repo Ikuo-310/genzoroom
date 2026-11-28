@@ -18,6 +18,7 @@ import { DesktopLifecycleProvider } from './DesktopLifecycle';
 import { defaultRawDevelopmentPanelUi, RAW_DEVELOPMENT_PANEL_UI_KEY, updateSetting } from './appSettings';
 import { isJpegEditClipboard, readEditClipboard } from './editClipboard';
 import { frontendLogger } from './frontendLogging';
+import './style.css';
 
 const base: AssetDetail = { id: '12345678-1234-4234-9234-123456789abc', filename: 'a.DNG',
   date: '2026-10-22', thumbnail_url: '/thumb', preview_url: '/immich-viewing', format: 'DNG', is_raw: true, exif: {} };
@@ -2928,9 +2929,16 @@ it('exposes RAW-only categories, switches display contracts without mutation and
  await mount();expect(host.querySelectorAll('.raw-edit-categories input')).toHaveLength(2);
  expect(host.querySelectorAll<HTMLInputElement>('.raw-edit-categories input')[0].checked).toBe(true);
  expect(host.querySelector('.raw-edit-categories input:checked + span')?.textContent).toBe('Develop');
+ const developTab=host.querySelector<HTMLElement>('.raw-edit-categories input:checked + span')!;
+ const cropTab=host.querySelector<HTMLElement>('.raw-edit-categories input:not(:checked) + span')!;
+ expect(getComputedStyle(developTab).backgroundColor).toBe('rgb(48, 48, 51)');
+ expect(getComputedStyle(developTab).boxShadow).toContain('#c8c8ca');
+ expect(getComputedStyle(cropTab).color).toBe('rgb(165, 165, 168)');
  const saves=vi.mocked(rawApi.saveRawHistory).mock.calls.length;
  await act(async()=>host.querySelectorAll<HTMLInputElement>('.raw-edit-categories input')[1].click());await flush();
  expect(host.querySelector('.raw-edit-categories input:checked + span')?.textContent).toBe('Crop');
+ expect(getComputedStyle(cropTab).backgroundColor).toBe('rgb(48, 48, 51)');
+ expect(getComputedStyle(developTab).color).toBe('rgb(165, 165, 168)');
  expect(host.querySelector('.raw-crop-controls')).not.toBeNull();expect(host.querySelector('.raw-adjustment-controls')).toBeNull();
  expect(host.querySelector('.raw-crop-reset')?.textContent).toBe('Reset Crop');
  expect(vi.mocked(rawApi.rawPreview).mock.calls.at(-1)![4]?.mode).toBe('crop-edit');expect(rawApi.saveRawHistory).toHaveBeenCalledTimes(saves);
