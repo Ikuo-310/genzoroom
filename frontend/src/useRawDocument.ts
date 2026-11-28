@@ -2,7 +2,10 @@ import { provisionalCrop, reusableCropBitmap, sameCropOwner, type CropSnapshot, 
 import { useEffect, useRef, useState } from 'react';
 import { createRawWorkspace, openRawDocument, rawCapability, rawPreview, cancelRawPreview, RawSuperseded, readRawDocument, readRawSettings,
   abortRawWorkspaceRequests, closeRawDocument, discardRawWorkspace, releaseRawWorkspace, resetRawEdits as resetRawEditsApi, rawWorkspaceEmpty, RawApiError, type RawDocument, type RawSettings, type RawValues, type RawHistoryControlId, type RawDisplayTarget,
-  type RawPickTarget, type RawPickFrame, type RawHistoryResult, type RawHistoryStep, type RawHistoryOperation, type RawFrame, type RawGeometry, type RawCropDisplay, type RawGeometryOperation } from './rawApi';
+  type RawPickTarget, type RawPickFrame, type RawHistoryResult, type RawHistoryStep, type RawHistoryOperation, type RawFrame, type RawGeometry, type RawCropDisplay, type RawGeometryOperation,
+  RAW_DEFAULT_COPY_SETTING_IDS, readRawCopySettings, validRawCopySettingIds, type RawCopySettingId } from './rawApi';
+import { editClipboardInfo, copyLightcraftEditSettings, isLightcraftEditClipboard, readEditClipboard,
+  selectLightcraftEditClipboardItems } from './editClipboard';
 import { frontendLogger } from './frontendLogging';
 import { RawControls } from './rawControls';
 import { RawRecipeSave, type RawDraftDiscardDecision } from './rawRecipeSave';
@@ -112,6 +115,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   const identity = useRef(assetId);
   const editorRef = useRef<RawControls | null>(null);
   const saverRef = useRef<RawRecipeSave | null>(null);
+  const clipboardOperation = useRef(0);
   // The Workspace outlives an Asset effect; each operation still checks the ID it captured.
   const workspaceOwnerRef = useRef<{ workspaceId?: string; effectSerial?: number; documentState?: 'opening' | 'open' | 'closing' | 'closed' }>({});
   const darkroomActiveRef = useRef(true);
@@ -1858,6 +1862,65 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       // Drain it through the same queue before certifying departure.
     } while (saver.dirty || editor.unsettled);
   };
+  const settleClipboardOwner = async (editor: RawControls, saver: RawRecipeSave, initializeHistory = false) => {
+    if (saver.mixerInteracting) await saver.cancelMixerInteraction();
+    if (saver.curveInteracting) await saver.cancelCurveInteraction();
+    if (saver.pointColorInteracting) await saver.preparePointColorForDeparture();
+    if (saver.cropping) await saver.cancelGeometry();
+    const needsSave = initializeHistory && !saver.initialized || saver.gesturing || editor.unsettled
+      || saver.saving || saver.moving || saver.initialized && saver.dirty;
+    if (needsSave) {
+      saver.end();
+      await saver.save();
+    }
+    await editor.settle();
+    await saver.waitHistory();
+    if (callbackEditor() !== editor || saverRef.current !== saver) throw new RawApiError('raw_stale_handle');
+    if (saver.initialized && (saver.dirty || saver.locked) || saver.error || saver.operationError || saver.historyError || saver.historyLoading
+      || editor.unsettled || editor.error || visible?.saveError || visible?.regenerationError)
+      throw new RawApiError('raw_save_unconfirmed');
+  };
+  const copySettings = async (sourceFilename: string, selectedIds: readonly RawCopySettingId[] = RAW_DEFAULT_COPY_SETTING_IDS) => {
+    const selected = [...selectedIds];
+    if (!validRawCopySettingIds(selected)) throw new RawApiError('raw_invalid_request');
+    const editor = callbackEditor(), saver = saverRef.current, ticket = ++clipboardOperation.current;
+    if (!editor || !saver || frozen.current || visible?.status !== 'ready' || visible.pending || visible.regenerating
+      || visible.resetting || visible.historyError || visible.historyLoading || visible.settings?.recipeRecoveryPending)
+      throw new RawApiError('raw_busy');
+    await settleClipboardOwner(editor, saver);
+    const confirmed = structuredClone(editor.confirmed);
+    const response = await readRawCopySettings(confirmed, selected);
+    if (ticket !== clipboardOperation.current || callbackEditor() !== editor || saverRef.current !== saver || frozen.current
+      || editor.confirmed.workspaceId !== confirmed.workspaceId || editor.confirmed.assetId !== confirmed.assetId
+      || editor.confirmed.handle !== confirmed.handle || editor.confirmed.generation !== confirmed.generation
+      || editor.confirmed.documentToken !== confirmed.documentToken || editor.confirmed.revision !== confirmed.revision
+      || editor.confirmed.settingsFingerprint !== confirmed.settingsFingerprint
+      || editor.confirmed.recipeRevision !== confirmed.recipeRevision)
+      throw new RawApiError('raw_stale_handle');
+    const copied = copyLightcraftEditSettings(response, sourceFilename);
+    notifyRef.current();
+    return copied;
+  };
+  const pasteSettings = async (selectedIds?: readonly RawCopySettingId[]) => {
+    const copy = readEditClipboard(), editor = callbackEditor(), saver = saverRef.current;
+    if (!isLightcraftEditClipboard(copy)) throw new RawApiError('raw_invalid_request');
+    if (!editor || !saver || frozen.current || visible?.status !== 'ready' || visible.pending || visible.regenerating
+      || visible.resetting || visible.historyError || visible.historyLoading || visible.settings?.recipeRecoveryPending)
+      throw new RawApiError('raw_busy');
+    const selected = selectedIds ? selectLightcraftEditClipboardItems(copy, selectedIds) : copy;
+    const operation: RawHistoryOperation = { kind: 'settingsPaste', metadata: { sourceAssetId: copy.sourceAssetId,
+      sourceFilename: copy.sourceFilename, selectedIds: [...selected.selectedIds] }, copySettings: structuredClone(selected.settings) };
+    await settleClipboardOwner(editor, saver, true);
+    const confirmed = editor.confirmed;
+    if (callbackEditor() !== editor || saverRef.current !== saver || frozen.current
+      || editor.confirmed.workspaceId !== confirmed.workspaceId || editor.confirmed.assetId !== confirmed.assetId
+      || editor.confirmed.generation !== confirmed.generation || editor.confirmed.documentToken !== confirmed.documentToken
+      || editor.confirmed.revision !== confirmed.revision || editor.confirmed.settingsFingerprint !== confirmed.settingsFingerprint
+      || editor.confirmed.recipeRevision !== confirmed.recipeRevision)
+      throw new RawApiError('raw_stale_handle');
+    await saver.operate(operation);
+    if (callbackEditor() !== editor || saverRef.current !== saver) throw new RawApiError('raw_stale_handle');
+  };
   const moveHistory = (action: 'undo' | 'redo' | 'jump', targetStepId?: string | null) => {
     cancelPick();
     if (!callbackEditor() || frozen.current) return;
@@ -1911,7 +1974,18 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       }
     });
   };
+  const clipboardInfo = editClipboardInfo();
+  const clipboardOwnerReady = visible?.status === 'ready' && !visible.pending && !visible.regenerating && !visible.resetting
+    && !visible.editError && !visible.saveError && !visible.historyError && !visible.historyLoading
+    && !visible.settings?.recipeRecoveryPending && !!callbackEditor() && !frozen.current
+    && !saverRef.current?.saving && !saverRef.current?.moving && !saverRef.current?.error
+    && !saverRef.current?.operationError && !saverRef.current?.historyError;
   return visible && { ...visible, pointColorRangeIndex: pointColorRange?.assetId === assetId ? pointColorRange.index : null,
+    copySettings, pasteSettings,
+    clipboardSettingIds: clipboardInfo?.engine === 'lightcraft' ? clipboardInfo.selectedIds : [],
+    sameEngineClipboard: clipboardInfo?.engine === 'lightcraft',
+    canCopySettings: !!clipboardOwnerReady,
+    canPasteSettings: !!clipboardOwnerReady && clipboardInfo?.engine === 'lightcraft',
     setSharpenPreview,
     setPointColorRangeIndex,
     crop: { operation: cropSaver?.cropOperation, overlay,setOverlay, straightenTool, setStraightenTool:(value:boolean)=>setStraightenTool(value),

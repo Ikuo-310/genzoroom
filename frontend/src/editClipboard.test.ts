@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { copyEditSettings, readEditClipboard } from './editClipboard';
+import { copyEditSettings, copyLightcraftEditSettings, readEditClipboard, selectLightcraftEditClipboardItems,
+  RAW_COPY_SETTING_CATEGORIES, RAW_COPY_SETTING_LABEL_KEYS } from './editClipboard';
 import { ADJUSTMENT_IDS, defaultRecipe, editSession, newSession, type EditAction, type EditRecipe, type EditSession } from './editing';
 import { compactEditStateSnapshot, createEditStateSnapshot, restoreEditSession, validateEditStateSnapshot } from './editState';
+import type { RawCopySettingsResponse } from './rawApi';
 
 const source = { provider: 'immich' as const, assetId: 'destination', inputKind: 'immich-preview' as const };
 const paste = (values: Partial<EditRecipe['adjustments']>): EditAction => ({
@@ -19,6 +21,34 @@ function allValues() {
 }
 
 describe('tab edit clipboard and compound Paste', () => {
+  it('provides complete category and display-label definitions for the Backend IDs', () => {
+    const grouped = RAW_COPY_SETTING_CATEGORIES.flatMap(category => category.selectedIds);
+    expect(grouped).toHaveLength(25);
+    expect(new Set(grouped).size).toBe(25);
+    expect(grouped.sort()).toEqual(Object.keys(RAW_COPY_SETTING_LABEL_KEYS).sort());
+  });
+
+  it('projects every selectable ID to its complete Native JSON field set', () => {
+    const settings = { light: { exposure: 1, contrast: 2, highlights: 3, shadows: 4, whites: 5, blacks: 6 },
+      wb: { mode: 'custom', temp: 5151.25, tint: -4.75 }, color: { vibrance: 7, saturation: 8 },
+      mixer: { red: { hue: 9, sat: 10, lum: 11 } }, point_colors: [{ hue: 12 }], grading: { shadows: { hue: 13 } },
+      curve: { master: [{ x: 0, y: 0 }, { x: 1, y: 1 }], red: [], green: [], blue: [] },
+      effects: { texture: 14, clarity: 15, dehaze: 16 }, vignette: { amount: 17 },
+      detail: { sharpen_amount: 18, sharpen_radius: 1.25, sharpen_detail: 19, sharpen_masking: 20,
+        nr_luminance: 21, nr_detail: 22, nr_color: 23, nr_color_detail: 24, nr_color_smoothness: 25 },
+      optics: { distortion: 26, vignetting: 27, vignetting_midpoint: 28, profile_distortion: 29,
+        profile_vignetting: 30, lens_profile: false, remove_ca: true, defringe_purple_amount: 31,
+        defringe_purple_hue_lo: 32, defringe_purple_hue_hi: 33, defringe_green_amount: 34,
+        defringe_green_hue_lo: 35, defringe_green_hue_hi: 36, ca_red: 37, ca_blue: 38 },
+      profile: { camera_local_tone: false }, calibration: { red: { hue: 39 } }, crop: { left: 0, right: 1 }, orientation: 'Normal' };
+    const confirmed = { workspaceId: 'workspace', handle: 'handle', assetId: 'source', generation: 1,
+      documentToken: 'token', documentRevision: 2, settingsFingerprint: 'a'.repeat(64), recipeRevision: 3,
+      selectedIds: RAW_COPY_SETTING_CATEGORIES.flatMap(category => category.selectedIds), settings } as unknown as RawCopySettingsResponse;
+    const copied = copyLightcraftEditSettings(confirmed, 'source.dng');
+    const selected = selectLightcraftEditClipboardItems(copied, confirmed.selectedIds);
+    expect(selected.settings).toEqual(settings);
+  });
+
   it('has no copy initially and keeps an independent read-only-by-copy snapshot of all stored values', async () => {
     // A fresh module represents a newly loaded tab, without resetting production state.
     vi.resetModules();
@@ -31,10 +61,49 @@ describe('tab edit clipboard and compound Paste', () => {
     fresh.copyEditSettings(recipe, 'original', 'original.jpg');
     recipe.adjustments.temperature = 99;
     const copied = fresh.readEditClipboard()!;
-    expect(copied).toEqual({ values: expected, sourceAssetId: 'original', sourceFilename: 'original.jpg' });
+    expect(copied).toEqual({ engine: 'jpeg', values: expected, sourceAssetId: 'original', sourceFilename: 'original.jpg' });
+    if (copied.engine !== 'jpeg') throw new Error('Expected JPEG clipboard');
     expect(Object.keys(copied.values)).toHaveLength(16);
     copied.values.tint = 88;
-    expect(fresh.readEditClipboard()!.values).toEqual(expected);
+    expect(fresh.jpegEditClipboardValues(fresh.readEditClipboard())).toEqual(expected);
+  });
+
+  it('keeps an independent LightCraft snapshot and projects selected fields without default completion', () => {
+    const settings = { light: { exposure: 1.23456789012345, contrast: 0.25 },
+      wb: { mode: 'custom', scale: 'kelvin', temp: 5432.1, tint: -2.25 },
+      point_colors: [{ hue: 1.25, range: .75 }], crop: { aspect: null }, orientation: 'Rotate90' };
+    const response: RawCopySettingsResponse = { workspaceId: 'w', handle: 'h', assetId: 'source', generation: 2, documentToken: 't',
+      documentRevision: 7, settingsFingerprint: 'a'.repeat(64), recipeRevision: 4,
+      selectedIds: ['basic.exposure', 'whiteBalance', 'pointColor', 'crop'], settings };
+    const clipboard = copyLightcraftEditSettings(response, 'portrait.dng');
+    settings.light.exposure = 99;
+    const returned = readEditClipboard();
+    expect(returned).toMatchObject({ engine: 'lightcraft', sourceAssetId: 'source', sourceFilename: 'portrait.dng',
+      selectedIds: response.selectedIds });
+    if (returned?.engine !== 'lightcraft') throw new Error('Expected LightCraft clipboard');
+    returned.settings.wb = { temp: -1 };
+    expect(readEditClipboard()).toMatchObject({ settings: { light: { exposure: 1.23456789012345 } } });
+
+    const partial = selectLightcraftEditClipboardItems(clipboard, ['whiteBalance', 'crop']);
+    expect(partial.selectedIds).toEqual(['whiteBalance', 'crop']);
+    expect(partial.settings).toEqual({ wb: { mode: 'custom', scale: 'kelvin', temp: 5432.1, tint: -2.25 },
+      crop: { aspect: null }, orientation: 'Rotate90' });
+    expect(selectLightcraftEditClipboardItems(clipboard, ['basic.exposure']).settings).toEqual({
+      light: { exposure: 1.23456789012345 },
+    });
+    expect(readEditClipboard()).toMatchObject({ selectedIds: response.selectedIds, settings: { point_colors: [{ hue: 1.25, range: .75 }] } });
+  });
+
+  it('rejects LightCraft selection outside the copied IDs and keeps the single clipboard slot unchanged', () => {
+    const response: RawCopySettingsResponse = { workspaceId: 'w', handle: 'h', assetId: 'source', generation: 1, documentToken: 't',
+      documentRevision: 1, settingsFingerprint: 'a'.repeat(64), recipeRevision: 0,
+      selectedIds: ['basic.exposure'], settings: { light: { exposure: 2 } } };
+    const copied = copyLightcraftEditSettings(response, 'source.dng');
+    const before = readEditClipboard();
+    expect(() => selectLightcraftEditClipboardItems(copied, ['crop'])).toThrow('raw_invalid_request');
+    expect(readEditClipboard()).toEqual(before);
+    copyEditSettings(defaultRecipe(), 'jpeg-source', 'source.jpg');
+    expect(readEditClipboard()).toMatchObject({ engine: 'jpeg', sourceAssetId: 'jpeg-source' });
   });
 
   it('pastes all values in one operation, preserves every flag, and undoes/redoes together', () => {
@@ -45,6 +114,7 @@ describe('tab edit clipboard and compound Paste', () => {
     const copied = allValues();
     copyEditSettings(copied, 'original', 'original.jpg');
     const clipboard = readEditClipboard()!;
+    if (clipboard.engine !== 'jpeg') throw new Error('Expected JPEG clipboard');
     const result = editSession(target, { type: 'paste', ...clipboard });
     clipboard.values.temperature = 80;
     expect(result.recipe).toEqual({ ...original.recipe, adjustments: copied.adjustments });

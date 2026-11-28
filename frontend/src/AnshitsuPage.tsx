@@ -37,7 +37,8 @@ import { ScopeResizeHandle } from './ScopeResizeHandle';
 import { readScopePanelBasis, saveScopePanelBasis } from './scopeSizing';
 import { getRawAssetEditStatuses, EditStateApiError, type EditStateApiErrorKind } from './editStateApi';
 import { useAssetEdits } from './useAssetEdits';
-import { copyEditSettings, readEditClipboard, selectEditClipboardItems, type EditClipboard } from './editClipboard';
+import { copyEditSettings, isJpegEditClipboard, jpegEditClipboardValues, readEditClipboard, selectEditClipboardItems,
+  type JpegEditClipboard } from './editClipboard';
 import { GRADING_RANGE_CONTROLS, ADJUSTMENT_IDS, ADJUSTMENT_TOGGLE_IDS, defaultRecipe, recipesEqual, type AdjustmentId } from './editing';
 import { HistoryOrganizationMenu, HistoryConfirmationDialog, type HistoryMenuTarget, type HistoryOperation } from './HistoryOrganizationUI';
 import { AdjustmentSelectionDialog } from './AdjustmentSelectionDialog';
@@ -56,7 +57,7 @@ import { useDevelopmentEngine } from './useDevelopmentEngine';
 
 type DetailState = 'loading' | 'ready' | 'error';
 type SelectionRequest = { mode: 'copy'; assetId: string }
-  | { mode: 'paste'; assetId: string; clipboard: EditClipboard };
+  | { mode: 'paste'; assetId: string; clipboard: JpegEditClipboard };
 
 function logExclusion(event: 'start' | 'complete' | 'failed' | 'undo', context: Record<string, string | number>) {
   try {
@@ -416,7 +417,7 @@ export function AnshitsuPage() {
   function pasteSettings(ids?: readonly AdjustmentId[]) {
     if (!clipboardEnabled || switchingRef.current || exitRef.current || selection || historyConfirmation) return false;
     const clipboard = readEditClipboard();
-    if (!clipboard) return false;
+    if (!isJpegEditClipboard(clipboard)) return false;
     const selected = ids ? selectEditClipboardItems(clipboard, ids) : clipboard;
     if (ids && !ids.some((id) => Object.hasOwn(selected.values, id))) return false;
     dispatch({ type: 'paste', ...selected });
@@ -483,7 +484,7 @@ export function AnshitsuPage() {
     if (mode === 'copy') setSelection({ mode, assetId });
     else {
       const clipboard = readEditClipboard();
-      if (!clipboard || !ADJUSTMENT_IDS.some((id) => Object.hasOwn(clipboard.values, id))) return false;
+      if (!isJpegEditClipboard(clipboard) || !ADJUSTMENT_IDS.some((id) => Object.hasOwn(clipboard.values, id))) return false;
       setSelection({ mode, assetId, clipboard });
     }
     return true;
@@ -774,7 +775,8 @@ export function AnshitsuPage() {
 
   const categoryMenuDefinition = categoryMenu
     ? ADJUSTMENT_SELECTION_CATEGORIES.find(({ id }) => id === categoryMenu.categoryId) : undefined;
-  const categoryMenuClipboard = categoryMenuDefinition ? readEditClipboard() : null;
+  const categoryMenuValue = categoryMenuDefinition ? readEditClipboard() : null;
+  const categoryMenuClipboard = isJpegEditClipboard(categoryMenuValue) ? categoryMenuValue : null;
   const categoryMenuPasteDisabled = !categoryMenuDefinition || !categoryMenuClipboard
     || !categoryMenuDefinition.ids.some((id) => Object.hasOwn(categoryMenuClipboard.values, id));
   const categoryMenuState = categoryMenu ? {
@@ -1038,7 +1040,7 @@ export function AnshitsuPage() {
       className="grading-range-context-menu" menuLabel={t('workspace.gradingRangeMenu', { name: t(rangeDefinition.label) })}
       enabled={session.recipe[rangeDefinition.enabled]}
       resetDisabled={rangeDefinition.ids.every(id => session.recipe.adjustments[id] === 0)}
-      pasteDisabled={!rangeDefinition.ids.some(id => Object.hasOwn(readEditClipboard()?.values ?? {}, id))}
+      pasteDisabled={!rangeDefinition.ids.some(id => Object.hasOwn(jpegEditClipboardValues(readEditClipboard()), id))}
       enableLabel={t('workspace.enableAdjustment', { name: t(rangeDefinition.label) })}
       disableLabel={t('workspace.disableAdjustment', { name: t(rangeDefinition.label) })}
       resetLabel={t('workspace.resetGradingRange', { name: t(rangeDefinition.label) })}
@@ -1051,7 +1053,7 @@ export function AnshitsuPage() {
       hideToggle
       enabled={session.recipe.adjustmentEnabled[sliderMenu.adjustmentId]}
       resetDisabled={session.recipe.adjustments[sliderMenu.adjustmentId] === defaultRecipe().adjustments[sliderMenu.adjustmentId]}
-      pasteDisabled={!Object.hasOwn(readEditClipboard()?.values ?? {}, sliderMenu.adjustmentId)}
+      pasteDisabled={!Object.hasOwn(jpegEditClipboardValues(readEditClipboard()), sliderMenu.adjustmentId)}
       enableLabel={t('workspace.enableAdjustmentMenu')} disableLabel={t('workspace.disableAdjustmentMenu')}
       resetLabel={t('workspace.resetAdjustment')} copyLabel={t('workspace.copyAdjustment')} pasteLabel={t('workspace.pasteAdjustment')}
       onReset={() => dispatch({ type: `${sliderMenu.adjustmentId}Reset` })}

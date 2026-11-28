@@ -9,13 +9,15 @@ import { rawSettings } from './test/rawSettings';
 import { rawHistoryResult, rawHistoryData, fakeRawHistory } from './test/rawHistory';
 import { regionRequest, regionResponse } from './test/rawRegion';
 import { ImageViewer } from './ImageViewer';
+import { copyEditSettings, copyLightcraftEditSettings, readEditClipboard } from './editClipboard';
+import { defaultRecipe } from './editing';
 import './i18n';
 
 vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(),
   closeRawDocument: vi.fn(), discardRawWorkspace:vi.fn(), beginRawGeometry: vi.fn(),updateRawGeometry: vi.fn(),recoverRawGeometry: vi.fn(), beginRawCurveInteraction: vi.fn(), cancelRawCurveInteraction: vi.fn(), updateRawTargetedCurve: vi.fn(), beginRawMixerInteraction: vi.fn(), updateRawMixerInteraction: vi.fn(), cancelRawMixerInteraction: vi.fn(), endRawMixerInteraction: vi.fn(), rawCapability: vi.fn(), createRawWorkspace: vi.fn(), openRawDocument: vi.fn(),
   rawRegionOwner: vi.fn(), rawRegion: vi.fn(), cancelRawRegion: vi.fn(async () => {}), abortRawWorkspaceRequests: vi.fn(),
   rawPreview: vi.fn(), cancelRawPreview: vi.fn(async () => {}), readRawDocument: vi.fn(), readRawSettings: vi.fn(), setRawControls: vi.fn(), releaseRawWorkspace: vi.fn(), rawWorkspaceEmpty: vi.fn(),
-  readRawHistory: vi.fn(), saveRawHistory: vi.fn(), saveRawRecipe: vi.fn(), readRawRecipe: vi.fn(),
+  readRawHistory: vi.fn(), readRawCopySettings: vi.fn(), saveRawHistory: vi.fn(), saveRawRecipe: vi.fn(), readRawRecipe: vi.fn(),
   beginRawPointColorInteraction: vi.fn(), updateRawPointColorInteraction: vi.fn(), cancelRawPointColorInteraction: vi.fn() }));
 const commitHistory = vi.fn(async (request: api.RawHistoryRequest): Promise<api.RawHistoryResult> => rawHistoryResult(request));
 let root: Root, host: HTMLDivElement;
@@ -51,7 +53,7 @@ beforeEach(() => {
   vi.mocked(api.readRawHistory).mockReset().mockImplementation(async doc => rawHistoryData(doc));
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   host = document.createElement('div'); root = createRoot(host);
-  vi.clearAllMocks(); decode = async () => {};
+  vi.clearAllMocks(); vi.mocked(api.readRawCopySettings).mockReset(); decode = async () => {};
   vi.stubGlobal('Image', class { src = ''; naturalWidth = 16; naturalHeight = 12; decode() { return decode(); } removeAttribute() {} });
   vi.stubGlobal('URL', { createObjectURL: createURL, revokeObjectURL: revokeURL });
   createURL.mockImplementation(() => `blob:raw-${createURL.mock.calls.length}`);
@@ -410,6 +412,55 @@ it('gates Point Color picking at capacity and Color OFF and recomputes availabil
   expect(current!.pointColorPickAvailable).toBe(true);
 });
 afterEach(async () => { act(() => root.unmount()); await flush(); host.remove(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+it('copies selected confirmed settings through one owner-bound request and keeps Crop explicit', async () => {
+  const asset = regionRequest().identity.assetId;
+  await render(asset); await flush();
+  vi.mocked(api.readRawCopySettings).mockImplementation(async (doc, selectedIds) => ({ ...doc,
+    documentRevision: doc.revision, recipeRevision: doc.recipeRevision!, selectedIds: [...selectedIds],
+    settings: { light: { exposure: 1.23456789 } } }));
+  const historyWrites = vi.mocked(api.saveRawHistory).mock.calls.length;
+  await act(async () => { await current!.copySettings('source.dng'); });
+  expect(api.readRawCopySettings).toHaveBeenCalledOnce();
+  expect(api.saveRawHistory).toHaveBeenCalledTimes(historyWrites);
+  expect(vi.mocked(api.readRawCopySettings).mock.calls[0][1]).not.toContain('crop');
+  expect(readEditClipboard()).toMatchObject({ engine: 'lightcraft', sourceAssetId: asset, sourceFilename: 'source.dng',
+    settings: { light: { exposure: 1.23456789 } } });
+  await act(async () => { await current!.copySettings('source.dng', ['crop']); });
+  expect(vi.mocked(api.readRawCopySettings).mock.calls[1][1]).toEqual(['crop']);
+});
+
+it('does not replace the shared clipboard when a copy reply belongs to a departed owner', async () => {
+  const asset = regionRequest().identity.assetId, pending = deferred<api.RawCopySettingsResponse>();
+  await render(asset); await flush();
+  copyEditSettings(defaultRecipe(), 'jpeg-source', 'source.jpg');
+  vi.mocked(api.readRawCopySettings).mockReturnValue(pending.promise);
+  const copy = current!.copySettings('stale.dng').then(() => undefined, error => error);
+  await flush();
+  const source = current!.settings!;
+  await render('next-photo'); await flush();
+  await act(async () => pending.resolve({ ...source, documentRevision: source.revision,
+    recipeRevision: source.recipeRevision!, selectedIds: ['basic.exposure'], settings: { light: { exposure: 1 } } }));
+  await expect(copy).resolves.toMatchObject({ code: 'raw_stale_handle' });
+  expect(readEditClipboard()).toMatchObject({ engine: 'jpeg', sourceAssetId: 'jpeg-source' });
+});
+
+it('projects selected copied settings into one settingsPaste History operation', async () => {
+  const asset = regionRequest().identity.assetId;
+  const confirmed = rawSettings({ workspaceId: 'source-workspace', handle: 'source-handle', assetId: 'source-asset', generation: 1,
+    documentToken: 'source-token', revision: 4, recipeRevision: 7 });
+  copyLightcraftEditSettings({ ...confirmed, documentRevision: confirmed.revision, selectedIds: ['basic.exposure', 'whiteBalance'],
+    settings: { light: { exposure: 1.25 }, wb: { mode: 'custom', temp: 5200, tint: 7 } } }, 'source.dng');
+  await render(asset); await flush();
+  commitHistory.mockImplementationOnce(async request => rawHistoryResult(request, { history: { initialized: true, cursor: 1,
+    length: 1, selectedStepId: request.saveId } }));
+  await act(async () => { await current!.pasteSettings(['basic.exposure']); });
+  const request = vi.mocked(api.saveRawHistory).mock.calls.map(([value]) => value).find(value => value.action === 'operate');
+  expect(request).toMatchObject({ action: 'operate', operation: { kind: 'settingsPaste',
+    metadata: { sourceAssetId: 'source-asset', sourceFilename: 'source.dng', selectedIds: ['basic.exposure'] },
+    copySettings: { light: { exposure: 1.25 } } } });
+  expect(current?.history?.length).toBe(1);
+});
 
 it('RAW Viewer smoke representative lifecycle', async () => {
   vi.useFakeTimers(); enableAutomaticNative();

@@ -1,5 +1,7 @@
 import asyncio
 import copy
+import re
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -11,6 +13,15 @@ from tests.test_lightcraft_raw import DEFAULT
 from tests.test_raw_controls import identity
 from tests.test_windows_local import authenticate, client, local
 from tests.test_windows_raw_api import open_document, setup
+
+
+def test_frontend_copy_setting_ids_match_backend_contract():
+    source = (Path(__file__).resolve().parents[2] / "frontend/src/rawApi.ts").read_text(encoding="utf-8")
+    match = re.search(r"RAW_COPY_SETTING_IDS = \[(.*?)\] as const", source, re.S)
+    assert match is not None
+    frontend_ids = re.findall(r"'([^']+)'", match.group(1))
+    assert len(frontend_ids) == 25
+    assert set(frontend_ids) == COPY_SETTING_IDS
 
 
 def test_copy_selection_projects_only_published_fields_and_excludes_crop_from_all():

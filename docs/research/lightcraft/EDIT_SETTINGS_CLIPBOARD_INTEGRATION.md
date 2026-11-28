@@ -322,10 +322,41 @@ P1-B は Backend の History 操作へ `settingsPaste` を追加した。コピ�
 
 実Native検証の再現条件: `GENZOROOM_TEST_LIGHTCRAFT_EXE` に対象Native executableを設定する。RAW/DNGを使う場合は `GENZOROOM_TEST_RESET_PENTAX` に代表素材のpathを設定する。Nativeによるアルゴリズム再検証・画素比較は行っていない。
 
-### O.4 P1-Cへの引継ぎ
+### O.4 P1-C開始時の引継ぎ（完了）
 
-- History parser／型はP1-Bで `settingsPaste` とmetadata `{sourceAssetId, sourceFilename, selectedIds}`を受け入れる。P1-EでClipboard操作とHistory rowのコピー元名・対象設定表示を追加する。
-- Clipboard UIはP1-Aのコピー応答にあるowner／revision／fingerprintを束縛し、貼付け開始時に対象Documentとコピー元情報を照合して、本節の `history/operate` 入力を一回送る。History完了後は通常のsettings／history応答を再同期する。
-- RAW／JPEG間のWBはJPEG→JPEGの実Native確認に限る。代表RAW/DNGを用いた両方向のWB適用と既存WB Control継続操作を行い、挙動を確定する。具体的な非互換性があれば独自色温度／Tint変換を加えず制約として扱う。
+- History parser／型はP1-Bで `settingsPaste` とmetadata `{sourceAssetId, sourceFilename, selectedIds}` を受け入れる。P1-Cではこれを既存History operation APIへ接続し、History rowの表示UIは後続のP1-Dに残す。
+- P1-CではP1-Aのcopy-settings応答をClipboardに保持し、貼付け開始時に既存Document ownerを再確認して `history/operate` を呼ぶ。History完了後は既存のsettings／history更新経路を使う。
+- **WBの実Native検証は完了済み。** O.3の5ケース（JPEG→JPEG、Pentax DNG→JPEG、JPEG→Pentax DNG、Pixel DNG→JPEG、JPEG→Pixel DNG）すべてでWB部分merge/readbackの後に既存 `wb.temp` Control操作が成功した。RAW／JPEG間の値・色の画素等価性は検証対象外であり、GenzoRoom独自変換は行わない。
 
 実装根拠: [P1-A許可リスト・payload validator](../../../backend/raw_edit_settings_copy.py#L13-L42) · [部分payload validation](../../../backend/raw_edit_settings_copy.py#L189-L350) · [History operation validation](../../../backend/raw_controls.py#L482-L492) · [`settingsPaste` merge/readback](../../../backend/lightcraft_raw.py#L2547-L2565) · [認証済みHistory request shape／validation](../../../backend/windows_raw_api.py#L1588-L1668) · [既存History操作からNativeへ渡す箇所](../../../backend/windows_raw_api.py#L1898-L1910) · [metadataを含むHistory保存](../../../backend/raw_recipe_store.py#L620-L675) · [Frontend History型・validator](../../../frontend/src/rawApi.ts#L156-L166) · [Backend paste regression tests](../../../backend/tests/test_raw_edit_settings_paste.py) · [実Native WB check](../../../backend/tests/test_raw_edit_settings_paste_live.py)
+
+## P. P1-C: Frontend／Clipboard 接続
+
+### P.1 実装仕様
+
+- FrontendはLightCraftの完全設定を常駐保持せず、`POST /api/raw/documents/{handle}/copy-settings` の選択済み `settings` だけを、既存 `editClipboard.ts` の単一モジュールメモリslotへ独立snapshotとして格納する。payloadは `engine: "lightcraft"`、source Asset ID／filename、選択ID、部分設定を持つ。既存JPEG clipboardは `engine: "jpeg"` を明示し、JPEG側の既存コピー・貼付けをそのまま維持する。異なるengineのpayloadは相互適用しない。
+- clipboardの存続期間は既存モジュールメモリと同じで、写真切替・現像画面の退出／再入場・owner／Native Session再生成をまたぐが、reload／アプリ終了では消える。copy結果、read、selected-paste用projectionはそれぞれcloneし、コピー後にsourceを再編集しても内容は変わらない。
+- P1-Aの25選択IDは `rawApi.ts` の `RAW_COPY_SETTING_IDS` と型から公開し、通常コピー既定値は `crop` を除く24個とする。Frontend選択UI向けに `editClipboard.ts` はカテゴリ群と既存locale label keyをIDへ対応づける。BackendとのID完全一致は `backend/tests/test_raw_edit_settings_copy.py` からFrontend定義を読み、契約テストする。FrontendはNative settings inventoryを再定義せず、選択pasteで必要な部分projection pathだけを持つ。
+- 選択pasteはコピー済み選択IDの部分集合に限定する。選ばれたIDに対応するJSON fieldのみを新しいobjectへcloneしてHistory本文に渡す。default補完・数値丸め・Native validatorの再実装は行わず、malformed／欠落値の拒否はP1-B Backend契約へ委譲する。配列フィールドは選択済みのJSON値全体をcloneするため置換として渡る。
+
+### P.2 API契約と処理経路
+
+- `readRawCopySettings()` は確定snapshotからowner identity（workspace／handle／asset／generation／document token）、revision、settings fingerprint、Recipe revision、selected IDsを送る。応答はこれらのechoと選択ID順序、plain settings object、payload sizeを厳密に検証する。 mismatchや失敗時は既存clipboardを更新しない。
+- `useRawDocument.copySettings(filename, ids?)` は現行Document ownerをcaptureし、保留中の通常Controlを既存 `RawControls.settle()`／`RawRecipeSave` 境界で確定する。Mixer／Curve／Cropの一時interactionは各既存cancel経路、Point Colorは既存departure finish/cancel ownerに委ねる。確定後に一度だけcopy APIを呼び、応答後にowner、revision、fingerprint、Recipe revisionを照合してからClipboardを更新する。copyは専用保存を追加しないため、編集のない初回ImportではHistory initialize／保存行を作らない。確定済み状態の通信はcopy HTTP 1往復、追加Native取得0回、SQLite read 0回。
+- `useRawDocument.pasteSettings(ids?)` は呼出時にClipboard snapshotと貼付け先ownerを固定する。通常pasteは全コピーID、selection pasteはコピー済みIDの部分集合だけを渡す。History未初期化の初回Importでpasteする場合は、既存 `RawRecipeSave` のinitialize境界を先に通してHistory operationを可能にする。続いて既存 `RawRecipeSave.operate()` に `{kind:"settingsPaste", metadata:{sourceAssetId,sourceFilename,selectedIds}, copySettings}` を渡し、既存save ID／retry／unknown outcome／recovery経路に載せる。
+- `saveRawHistory()` は `settingsPaste` でのみ `copySettings` を既存 `history/operate` request top-levelに含める。既存のstep metadata validator／応答validatorを維持し、設定本文をmetadataへ重複させない。適用後のreadback、Preview、History更新は既存operation経路を使う。History metadataにJSON本文は入らない。
+- P1-D向けにhookはcopy／paste関数、操作可否、engine一致、LightCraft copied IDsを公開する。今回メニュー、選択dialog、shortcut registry、Desktop menuは追加していない。
+
+### P.3 検証結果
+
+- Frontend `rawApi.test.ts`、`editClipboard.test.ts`、`AnshitsuClipboard.test.tsx`、`useRawDocument.test.tsx`: **593 passed**。選択ID／copy requestと応答identity、Crop除外／明示指定、全ID field projection、Clipboard clone／engine分離、旧owner応答拒否、初回copyでHistory save requestを増やさないこと、selection pasteの `settingsPaste` History本文／metadata、既存JPEG clipboardを検証。
+- `backend/tests/test_raw_edit_settings_copy.py`: **8 passed**。Backend／Frontend 25 ID一致契約を含む。
+- `npx tsc --noEmit` とFrontend production `npm run build`: 成功。Viteは既存chunk-size／React Router `use client` directive warningsを出力した。
+- `git diff --check`: 成功。
+- P1-B O.3に記録した実Native WB検証結果はO.4の古い記述を訂正済み。P1-CではNative現像演算や画素差は再検証していない。
+
+### P.4 P1-Dへの引継ぎ
+
+- P1-Dは返却hook interfaceを使い、全設定コピー／選択コピー／通常ペースト／選択ペーストのメニュー・dialogと有効状態表示を接続する。LightCraft copied IDs、`canCopySettings`、`canPasteSettings`、`sameEngineClipboard`を使い、Clipboardの本文やownerの独自管理を追加しない。
+- 選択dialogのID表示名・カテゴリ構造はP1-AのID一覧とP1-Cの既存LightCraft JPEGメニューUI部品を参照して構成する。Cropは全コピー既定値に含めず、選択時のみ許可する。
+- 今回はブラウザ／Desktop UI実動作、メニュー操作、実際の画素への貼付け反映を検証していない。これらはP1-D以降の受入確認とする。

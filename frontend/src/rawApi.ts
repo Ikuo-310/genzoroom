@@ -40,6 +40,26 @@ export const RAW_CONTROL_IDS = ['light.exposure', 'light.contrast', 'light.highl
   'detail.sharpenAmount', 'detail.sharpenRadius', 'detail.sharpenDetail', 'detail.sharpenMasking',
   'detail.nrLuminance', 'detail.nrDetail', 'detail.nrColor', 'detail.nrColorDetail', 'detail.nrColorSmoothness'] as const;
 export type RawControlId = typeof RAW_CONTROL_IDS[number];
+export const RAW_COPY_SETTING_IDS = [
+  'basic.exposure', 'basic.contrast', 'basic.highlights', 'basic.shadows', 'basic.whites', 'basic.blacks',
+  'whiteBalance', 'color.vibrance', 'color.saturation', 'colorMixer', 'pointColor', 'colorGrading', 'pointCurve',
+  'effects.texture', 'effects.clarity', 'effects.dehaze', 'vignette', 'sharpening', 'luminanceNoiseReduction',
+  'colorNoiseReduction', 'lensCorrection', 'chromaticAberration', 'localToneMapping', 'calibration', 'crop',
+] as const;
+export type RawCopySettingId = typeof RAW_COPY_SETTING_IDS[number];
+export const RAW_DEFAULT_COPY_SETTING_IDS = RAW_COPY_SETTING_IDS.filter((id): id is Exclude<RawCopySettingId, 'crop'> => id !== 'crop');
+export type RawCopySettings = Record<string, unknown>;
+export type RawCopySettingsResponse = Pick<RawSettings, 'workspaceId' | 'handle' | 'assetId' | 'generation' | 'documentToken'
+  | 'settingsFingerprint' | 'recipeRevision'> & { documentRevision: number; selectedIds: RawCopySettingId[]; settings: RawCopySettings };
+export function validRawCopySettingIds(value: unknown): value is RawCopySettingId[] {
+  return Array.isArray(value) && value.length > 0 && value.length <= RAW_COPY_SETTING_IDS.length
+    && value.every((id: unknown) => typeof id === 'string' && (RAW_COPY_SETTING_IDS as readonly string[]).includes(id))
+    && new Set(value).size === value.length;
+}
+export function sameRawCopySettingIds(left: readonly RawCopySettingId[], right: readonly RawCopySettingId[]) {
+  return left.length === right.length && left.every((id, index) => id === right[index]);
+}
+const RAW_COPY_SETTINGS_MAX_BYTES = 64 * 1024;
 export const RAW_SETTINGS_CONTROL_IDS = [...RAW_CONTROL_IDS,
   'optics.distortion', 'optics.vignetting', 'optics.vignettingMidpoint', 'optics.profileDistortion', 'optics.profileVignetting',
   'optics.defringePurple', 'optics.defringePurpleHueLo', 'optics.defringePurpleHueHi', 'optics.defringeGreen',
@@ -131,6 +151,8 @@ export function validGeometryMetadata(m: { operation?: RawGeometryOperationId; a
     && (m.action === undefined || (m.operation === 'drag' ? ['move','resize'] : m.operation === 'aspect' ? ['lock','unlock'] : []).includes(m.action));
 }
 export type RawHistoryOperation = { kind: 'controlReset'; metadata: { control: RawHistoryControlId } }
+  | { kind: 'settingsPaste'; metadata: { sourceAssetId: string; sourceFilename: string; selectedIds: RawCopySettingId[] };
+      copySettings: RawCopySettings }
   | { kind: 'mixerTarget'; metadata: { target: 'hue' | 'sat' | 'lum' } }
   | { kind: 'curve'; metadata: { channel: RawCurveChannel }; points: RawCurveCommandPoint[] }
   | { kind: 'curveReset'; metadata: { channel: RawCurveResetChannel } }
@@ -155,7 +177,7 @@ export type RawHistoryRequest = RawRecipeRequest & { action: 'initialize' | 'com
   geometryCommit?: { gestureId: string; operation: 'set' | 'drag' | 'straighten'; action?: RawGeometryAction } };
 export type RawHistoryStep = { stepId: string; kind: 'control' | 'controlReset' | 'opticsFlag' | 'opticsFlagReset' | 'sectionToggle' | 'sectionReset' | 'vignetteStyle' | 'allReset' | 'wbAuto' | 'wbReset' | 'colorReset' | 'wbPick' | 'pointColorPick' | 'pointColorDelete' | 'pointColorReset' | 'pointColorControl' | 'pointColorControlReset' | 'geometry' | 'curve' | 'curveReset' | 'mixerTarget' | 'settingsPaste';
   metadata: { control?: RawHistoryControlId | RawOpticsFlagId | RawPointColorControlId; index?: number; section?: RawResetSectionId; enabled?: boolean; style?: RawVignetteStyle; operation?: RawGeometryOperationId; action?: RawGeometryAction; channel?: RawCurveResetChannel; target?: 'hue' | 'sat' | 'lum'; x?: number; y?: number; value?: number;
-    sourceAssetId?: string; sourceFilename?: string; selectedIds?: string[] }; createdAt: string;
+    sourceAssetId?: string; sourceFilename?: string; selectedIds?: RawCopySettingId[] }; createdAt: string;
   changes: { control: RawHistoryControlId; before: number; after: number }[] | null;
   flagChanges?: { control: RawOpticsFlagId; before: boolean; after: boolean }[] | null };
 export type RawHistoryResult = RawSettings & {
@@ -465,6 +487,31 @@ const identityBody = (doc: RawDocument) => ({ workspaceId: doc.workspaceId, gene
 export async function readRawSettings(doc: RawDocument): Promise<RawSettings> {
   return settings(await json(`/documents/${doc.handle}/settings`, post(identityBody(doc)), RAW_SETTINGS_RESPONSE_BYTES), doc);
 }
+export async function readRawCopySettings(doc: RawSettings, selectedIds: readonly RawCopySettingId[]): Promise<RawCopySettingsResponse> {
+  if (!validRawCopySettingIds(selectedIds) || !Number.isSafeInteger(doc.recipeRevision) || !fingerprint(doc.settingsFingerprint))
+    throw new RawApiError('raw_invalid_request');
+  const value = await json(`/documents/${doc.handle}/copy-settings`, post({ ...identityBody(doc),
+    documentRevision: doc.revision, settingsFingerprint: doc.settingsFingerprint, recipeRevision: doc.recipeRevision, selectedIds }),
+  RAW_COPY_SETTINGS_MAX_BYTES + 4096);
+  const fields = ['workspaceId', 'handle', 'assetId', 'generation', 'documentToken', 'documentRevision',
+    'settingsFingerprint', 'recipeRevision', 'selectedIds', 'settings'];
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== fields.length || fields.some(key => !Object.hasOwn(value, key)))
+    throw new RawApiError('raw_invalid_response');
+  document({ ...value, revision: value.documentRevision }, doc.workspaceId, doc.assetId);
+  if (value.handle !== doc.handle || value.generation !== doc.generation || value.documentToken !== doc.documentToken
+    || value.documentRevision !== doc.revision || value.settingsFingerprint !== doc.settingsFingerprint
+    || value.recipeRevision !== doc.recipeRevision)
+    throw new RawApiError('raw_revision_conflict');
+  if (!validRawCopySettingIds(value.selectedIds) || !sameRawCopySettingIds(value.selectedIds, selectedIds)
+    || !value.settings || typeof value.settings !== 'object' || Array.isArray(value.settings))
+    throw new RawApiError('raw_invalid_response');
+  let settingsBytes: number;
+  try { settingsBytes = new TextEncoder().encode(JSON.stringify(value.settings)).byteLength; }
+  catch { throw new RawApiError('raw_invalid_response'); }
+  if (settingsBytes > RAW_COPY_SETTINGS_MAX_BYTES) throw new RawApiError('raw_response_too_large');
+  return value as RawCopySettingsResponse;
+}
 export async function setRawControls(doc: RawDocument, values: RawControlValues): Promise<RawSettings> {
   const result = settings(await json(`/documents/${doc.handle}/controls`, post({ ...identityBody(doc), expectedRevision: doc.revision, values }), RAW_SETTINGS_RESPONSE_BYTES), doc);
   if (result.revision <= doc.revision) throw new RawApiError('raw_invalid_response');
@@ -538,6 +585,7 @@ export async function saveRawHistory(request: RawHistoryRequest): Promise<RawHis
       ...(action === 'commit' ? request.geometryCommit ? { kind: 'geometry', metadata: { operation: request.geometryCommit.operation, ...(request.geometryCommit.action ? { action: request.geometryCommit.action } : {}) },
         gestureId: request.geometryCommit.gestureId } : { kind: 'control', metadata: { control } } : {}),
       ...(action === 'operate' && operation ? { kind: operation.kind, metadata: operation.metadata,
+        ...(operation.kind === 'settingsPaste' ? { copySettings: operation.copySettings } : {}),
         ...(operation.kind === 'geometry' ? { geometry: operation.geometry } : {}),
         ...(operation.kind === 'curve' ? { curvePoints: operation.points, ...(curveInteractionId ? { curveInteractionId } : {}) } : {}),
         ...(operation.kind === 'mixerTarget' && mixerInteractionId ? { mixerInteractionId } : {}),

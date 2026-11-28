@@ -9,7 +9,7 @@ import { GRADING_RANGE_CONTROLS, ADJUSTMENT_IDS, defaultRecipe, editSession, new
 import * as editStateModule from './editState';
 import { createEditStateSnapshot, type EditStateSnapshot } from './editState';
 import i18n from './i18n';
-import { copyEditSettings, readEditClipboard } from './editClipboard';
+import { copyEditSettings, jpegEditClipboardValues, readEditClipboard } from './editClipboard';
 import { ADJUSTMENT_SELECTION_CATEGORIES } from './adjustmentSelection';
 
 const api = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn(), detail: vi.fn() }));
@@ -451,17 +451,17 @@ describe('workspace full-settings clipboard', () => {
     act(() => hovered.dispatchEvent(new MouseEvent('pointerover', { bubbles: true })));
     expect(document.activeElement).toBe(viewport);
     expect(key(viewport, 'c').defaultPrevented).toBe(true);
-    expect(readEditClipboard()?.values).toEqual({ shadowsTemperature: 42 });
+    expect(jpegEditClipboardValues(readEditClipboard())).toEqual({ shadowsTemperature: 42 });
 
     act(() => hovered.dispatchEvent(new MouseEvent('pointerout', { bubbles: true, relatedTarget: document.body })));
     expect(key(viewport, 'c').defaultPrevented).toBe(true);
-    expect(Object.keys(readEditClipboard()!.values)).toEqual([...ADJUSTMENT_IDS]);
+    expect(Object.keys(jpegEditClipboardValues(readEditClipboard()))).toEqual([...ADJUSTMENT_IDS]);
 
     act(() => hovered.dispatchEvent(new MouseEvent('pointerover', { bubbles: true })));
     await click('button[aria-label="destination.jpg"]');
     const targetViewport = activatePreview();
     expect(key(targetViewport, 'c').defaultPrevented).toBe(true);
-    expect(Object.keys(readEditClipboard()!.values)).toEqual([...ADJUSTMENT_IDS]);
+    expect(Object.keys(jpegEditClipboardValues(readEditClipboard()))).toEqual([...ADJUSTMENT_IDS]);
     expect(readEditClipboard()?.sourceAssetId).toBe(second.id);
   });
 
@@ -474,11 +474,11 @@ describe('workspace full-settings clipboard', () => {
     const tint = host.querySelector<HTMLInputElement>('[data-adjustment-id="tint"]')!;
     act(() => temperature.focus());
     expect(key(temperature, 'c').defaultPrevented).toBe(true);
-    expect(readEditClipboard()?.values).toEqual({ temperature: 12 });
+    expect(jpegEditClipboardValues(readEditClipboard())).toEqual({ temperature: 12 });
     key(temperature, 'ArrowDown', { ctrlKey: false, shiftKey: true });
     expect(document.activeElement).toBe(tint);
     expect(key(tint, 'c').defaultPrevented).toBe(true);
-    expect(readEditClipboard()?.values).toEqual({ tint: -8 });
+    expect(jpegEditClipboardValues(readEditClipboard())).toEqual({ tint: -8 });
   });
 
   it('keeps copy independent after the source is edited and uses Filmstrip save and autosave for Paste', async () => {
@@ -576,7 +576,7 @@ describe('single-slider clipboard', () => {
     const sourceSlider = host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')!;
     act(() => sourceSlider.focus());
     expect(key(sourceSlider, 'c').defaultPrevented).toBe(true);
-    expect(readEditClipboard()).toEqual({ values: { exposure: 1.25 }, sourceAssetId: first.id, sourceFilename: first.filename });
+    expect(readEditClipboard()).toEqual({ engine: 'jpeg', values: { exposure: 1.25 }, sourceAssetId: first.id, sourceFilename: first.filename });
 
     await click('button[aria-label="destination.jpg"]');
     const otherSlider = host.querySelector<HTMLInputElement>('[data-adjustment-id="tint"]')!;
@@ -595,7 +595,7 @@ describe('single-slider clipboard', () => {
     key(otherSlider, 'z'); expect(rendered.recipe).toEqual(destination);
     key(otherSlider, 'y'); expect(rendered.recipe!.adjustments.exposure).toBe(1.25);
     expect(rendered.recipe!.adjustments.tint).toBe(35);
-    expect(readEditClipboard()?.values).toEqual({ exposure: 1.25 });
+    expect(jpegEditClipboardValues(readEditClipboard())).toEqual({ exposure: 1.25 });
     await click('.workspace-actions button');
     const saved = rows.get(second.id)!.state;
     expect(saved.currentRecipe.adjustments.exposure).toBe(1.25);
@@ -610,7 +610,7 @@ describe('single-slider clipboard', () => {
     await mount();
     const slider = host.querySelector<HTMLInputElement>('[data-adjustment-id="shadowsTemperature"]')!;
     act(() => slider.focus()); key(slider, 'c');
-    expect(readEditClipboard()?.values).toEqual({ shadowsTemperature: 24 });
+    expect(jpegEditClipboardValues(readEditClipboard())).toEqual({ shadowsTemperature: 24 });
     await click('button[aria-label="destination.jpg"]');
     const viewport = activatePreview();
     expect(key(viewport, 'v').defaultPrevented).toBe(true);
@@ -661,6 +661,7 @@ describe('selected settings clipboard', () => {
       expect(document.activeElement).toBe(viewport);
     }
     const copied = readEditClipboard()!;
+    if (copied.engine !== 'jpeg') throw new Error('Expected JPEG clipboard');
     expect(Object.keys(copied.values).sort()).toEqual([...copiedIds].sort());
     expect(copied.sourceAssetId).toBe(first.id);
     expect(copied.values.exposure).toBe(1.25);
@@ -819,9 +820,9 @@ describe('selected settings clipboard', () => {
     expect(host.querySelector('dialog')).not.toBeNull();
     choose(['exposure']); confirm('Copy');
     expect(document.activeElement).toBe(trigger);
-    expect(Object.keys(readEditClipboard()!.values)).toEqual(['exposure']);
+    expect(Object.keys(jpegEditClipboardValues(readEditClipboard()))).toEqual(['exposure']);
     menuAction('Copy all settings');
-    expect(Object.keys(readEditClipboard()!.values)).toHaveLength(16);
+    expect(Object.keys(jpegEditClipboardValues(readEditClipboard()))).toHaveLength(16);
     const source = defaultRecipe(); source.adjustments.exposure = 2; source.adjustments.tint = 10;
     copyEditSettings(source, 'other', 'other.jpg', ['tint', 'exposure']);
     menuAction('Paste selected settings'); choose(['tint']);
@@ -861,6 +862,7 @@ describe('selected settings clipboard', () => {
     expect(host.querySelector('dialog')).toBeNull();
     categoryMenuAction('Copy category settings');
     const copied = readEditClipboard()!;
+    if (copied.engine !== 'jpeg') throw new Error('Expected JPEG clipboard');
     expect(Object.keys(copied.values)).toEqual([...category.ids]);
     expect(copied.values[category.ids[0]]).toBe(recipe.adjustments[category.ids[0]]);
     expect(Object.keys(copied.values).some((id) => id.endsWith('Enabled'))).toBe(false);
@@ -1008,8 +1010,8 @@ describe('selected settings clipboard', () => {
     const title = categoryTitle('color');
     act(() => title.focus());
     expect(key(title, 'c').defaultPrevented).toBe(true);
-    expect(Object.keys(readEditClipboard()!.values)).toEqual(['temperature', 'tint', 'vibrance', 'saturation']);
-    expect(readEditClipboard()!.values.temperature).toBe(17);
+    expect(Object.keys(jpegEditClipboardValues(readEditClipboard()))).toEqual(['temperature', 'tint', 'vibrance', 'saturation']);
+    expect(jpegEditClipboardValues(readEditClipboard()).temperature).toBe(17);
     const crossCategoryClipboard = defaultRecipe();
     crossCategoryClipboard.adjustments.exposure = 4;
     crossCategoryClipboard.adjustments.vibrance = 60;
@@ -1167,7 +1169,7 @@ describe('individual adjustment UI removal', () => {
     const recipe = defaultRecipe(); recipe.adjustments.exposure = 2; recipe.adjustmentEnabled.exposure = false;
     rows.set(first.id, stored(first.id, recipe)); await mount();
     open('exposure'); act(() => buttons()[0].click());
-    expect(readEditClipboard()!.values).toEqual({ exposure: 2 });
+    expect(jpegEditClipboardValues(readEditClipboard())).toEqual({ exposure: 2 });
     open('contrast'); expect(buttons()[1].disabled).toBe(true);
     key(document.activeElement!, 'Escape', { ctrlKey: false });
     const copied = defaultRecipe(); copied.adjustments.exposure = 3; copied.adjustments.contrast = 25;
@@ -1176,7 +1178,7 @@ describe('individual adjustment UI removal', () => {
     expect(rendered.recipe!.adjustments.exposure).toBe(3);
     expect(rendered.recipe!.adjustments.contrast).toBe(0);
     expect(rendered.recipe!.adjustmentEnabled.exposure).toBe(false);
-    expect(readEditClipboard()!.values).toEqual({ exposure: 3, contrast: 25 });
+    expect(jpegEditClipboardValues(readEditClipboard())).toEqual({ exposure: 3, contrast: 25 });
     key(window, 'z'); expect(rendered.recipe!.adjustments.exposure).toBe(2);
     key(window, 'z', { shiftKey: true }); expect(rendered.recipe!.adjustments.exposure).toBe(3);
     expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(1);
@@ -1196,7 +1198,7 @@ describe('3WAY range actions', () => {
     expect(rendered.recipe!.adjustments.exposure).toBe(0.01);
     expect(rendered.recipe!.adjustments.shadowsTemperature).toBe(0);
     key(document.activeElement!, 'c');
-    expect(readEditClipboard()!.values).toEqual({ exposure: 0.01 });
+    expect(jpegEditClipboardValues(readEditClipboard())).toEqual({ exposure: 0.01 });
     key(document.activeElement!, 'ArrowRight', { ctrlKey: false, shiftKey: true });
     expect(document.activeElement).toBe(target.closest('.adjustment-control')!.querySelector('.adjustment-number'));
     key(document.activeElement!, 'ArrowDown', { ctrlKey: false, shiftKey: true });
@@ -1221,14 +1223,14 @@ describe('3WAY range actions', () => {
     });
     expect(document.activeElement).toBe(heading);
     key(heading, 'c');
-    expect(readEditClipboard()!.values).toEqual({ shadowsTemperature: 0, shadowsTint: 0 });
+    expect(jpegEditClipboardValues(readEditClipboard())).toEqual({ shadowsTemperature: 0, shadowsTint: 0 });
     key(heading, 'ArrowDown', { ctrlKey: false, shiftKey: true });
     expect(document.activeElement).toBe(host.querySelector('[data-adjustment-id="shadowsTemperature"]'));
     act(() => heading.focus());
     act(() => other.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 20, clientY: 20 })));
     expect(document.activeElement).toBe(document.body);
     key(document.activeElement!, 'c');
-    expect(readEditClipboard()!.values).toEqual({ exposure: 0 });
+    expect(jpegEditClipboardValues(readEditClipboard())).toEqual({ exposure: 0 });
   });
   function open(id: string, x = 120, y = 90) {
     const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: x, clientY: y });
@@ -1241,17 +1243,17 @@ describe('3WAY range actions', () => {
     rows.set(first.id, stored(first.id, recipe)); await mount();
     act(() => title(range.id).focus());
     expect(key(title(range.id), 'c').defaultPrevented).toBe(true);
-    expect(readEditClipboard()!.values).toEqual(Object.fromEntries(range.ids.map(id => [id, 20])));
+    expect(jpegEditClipboardValues(readEditClipboard())).toEqual(Object.fromEntries(range.ids.map(id => [id, 20])));
     expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(0);
     expect(open(range.id).defaultPrevented).toBe(true); act(() => buttons()[0].click());
-    expect(Object.keys(readEditClipboard()!.values)).toEqual(range.ids);
+    expect(Object.keys(jpegEditClipboardValues(readEditClipboard()))).toEqual(range.ids);
     const copy = defaultRecipe(); copy.adjustments[range.ids[0]] = 30; copy.adjustments.exposure = 3;
     copyEditSettings(copy, 'source', 'source.jpg', [range.ids[0], 'exposure']);
     open(range.id); expect(buttons()[1].disabled).toBe(false); act(() => buttons()[1].click());
     const expected = structuredClone(recipe); expected.adjustments[range.ids[0]] = 30;
     expect(rendered.recipe).toEqual(expected);
     expect(host.querySelectorAll('.edit-history li:not(.initial-state)')).toHaveLength(1);
-    expect(readEditClipboard()!.values).toEqual({ [range.ids[0]]: 30, exposure: 3 });
+    expect(jpegEditClipboardValues(readEditClipboard())).toEqual({ [range.ids[0]]: 30, exposure: 3 });
     key(window, 'z'); expect(rendered.recipe).toEqual(recipe);
     key(window, 'z', { shiftKey: true }); expect(rendered.recipe).toEqual(expected);
     act(() => title(range.id).focus()); key(title(range.id), 'v');

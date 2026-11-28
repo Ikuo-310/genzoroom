@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { LIGHTCRAFT_ENGINE } from './lightcraftEngine';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createRawWorkspace,closeRawDocument,abortRawWorkspaceRequests,discardRawWorkspace, rawCapability, rawPreview, beginRawCurveInteraction, cancelRawCurveInteraction, updateRawTargetedCurve, beginRawMixerInteraction, updateRawMixerInteraction, cancelRawMixerInteraction, endRawMixerInteraction, readRawDocument, readRawSettings, setRawControls, saveRawRecipe, saveRawHistory, readRawHistory, readRawRecipe, rawWorkspaceEmpty,
-  RAW_CONTROL_IDS, RAW_HISTORY_CONTROL_IDS, RawSaveError, type RawDocument, type RawHistoryRequest, type RawHistoryOperation, validRawCurve, validRawCurveInput } from './rawApi';
+import { createRawWorkspace,closeRawDocument,abortRawWorkspaceRequests,discardRawWorkspace, rawCapability, rawPreview, beginRawCurveInteraction, cancelRawCurveInteraction, updateRawTargetedCurve, beginRawMixerInteraction, updateRawMixerInteraction, cancelRawMixerInteraction, endRawMixerInteraction, readRawDocument, readRawSettings, readRawCopySettings, setRawControls, saveRawRecipe, saveRawHistory, readRawHistory, readRawRecipe, rawWorkspaceEmpty,
+  RAW_CONTROL_IDS, RAW_HISTORY_CONTROL_IDS, RAW_COPY_SETTING_IDS, RAW_DEFAULT_COPY_SETTING_IDS, RawSaveError, type RawDocument, type RawHistoryRequest, type RawHistoryOperation, validRawCurve, validRawCurveInput } from './rawApi';
 import { downloadRawLensDatabase, readRawLensDatabaseStatus } from './rawApi';
 import { rawSettings } from './test/rawSettings';
 import { RawSuperseded } from './rawApi';
@@ -17,6 +17,40 @@ function response(patch: Record<string, string> = {}, bytes = png) {
     'X-Raw-Epoch': '1', 'X-Raw-Sequence': '1', 'X-Raw-Width': '16', 'X-Raw-Height': '12', ...patch } });
 }
 afterEach(() => vi.unstubAllGlobals());
+
+describe('RAW edit settings copy transport', () => {
+  it('sends the confirmed owner and selected IDs and validates the echoed identity and payload', async () => {
+    const confirmed = rawSettings({ ...doc, recipeRevision: 4, recipeFingerprint: 'a'.repeat(64) });
+    const settings = { light: { exposure: 1.23456789012345 }, crop: { flip_h: false } };
+    const value = { workspaceId: doc.workspaceId, handle: doc.handle, assetId: doc.assetId, generation: doc.generation,
+      documentToken: doc.documentToken, documentRevision: doc.revision, settingsFingerprint: confirmed.settingsFingerprint,
+      recipeRevision: 4, selectedIds: ['basic.exposure', 'crop'], settings };
+    const fetch = vi.fn(async () => new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetch);
+    await expect(readRawCopySettings(confirmed, ['basic.exposure', 'crop'])).resolves.toEqual(value);
+    const [path, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(path).toBe(`/api/raw/documents/${doc.handle}/copy-settings`);
+    expect(JSON.parse(init.body as string)).toEqual({ workspaceId: doc.workspaceId, generation: doc.generation,
+      documentToken: doc.documentToken, documentRevision: doc.revision, settingsFingerprint: confirmed.settingsFingerprint,
+      recipeRevision: 4, selectedIds: ['basic.exposure', 'crop'] });
+  });
+  it.each([
+    { assetId: 'other' }, { generation: 2 }, { documentToken: 'd'.repeat(32) }, { documentRevision: 3 },
+    { settingsFingerprint: 'f'.repeat(64) }, { recipeRevision: 5 }, { selectedIds: ['crop', 'basic.exposure'] },
+  ])('rejects copy responses with mismatched owner or selection %j', async patch => {
+    const confirmed = rawSettings({ ...doc, recipeRevision: 4, recipeFingerprint: 'a'.repeat(64) });
+    const value = { workspaceId: doc.workspaceId, handle: doc.handle, assetId: doc.assetId, generation: doc.generation,
+      documentToken: doc.documentToken, documentRevision: doc.revision, settingsFingerprint: confirmed.settingsFingerprint,
+      recipeRevision: 4, selectedIds: ['basic.exposure'], settings: { light: { exposure: .5 } }, ...patch };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } })));
+    await expect(readRawCopySettings(confirmed, ['basic.exposure'])).rejects.toThrow();
+  });
+  it('defines the 25 selectable IDs and excludes crop from the default copy set', () => {
+    expect(RAW_COPY_SETTING_IDS).toHaveLength(25);
+    expect(RAW_DEFAULT_COPY_SETTING_IDS).toHaveLength(24);
+    expect(RAW_DEFAULT_COPY_SETTING_IDS).not.toContain('crop');
+  });
+});
 
 it('closes a document with its complete confirmed owner identity', async () => {
   const fetch = vi.fn(async () => new Response(null, { status: 204 }));
@@ -274,6 +308,8 @@ describe('RAW History transport', () => {
     expect((await readRawHistory(doc)).steps).toHaveLength(200);
   });
   it.each<RawHistoryOperation>([
+    { kind: 'settingsPaste', metadata: { sourceAssetId: '00000000-0000-4000-8000-000000000001', sourceFilename: 'source.jpg',
+      selectedIds: ['basic.exposure'] }, copySettings: { light: { exposure: 1.23456789012345 } } },
     { kind: 'controlReset', metadata: { control: 'wb.tint' } },
     { kind: 'sectionToggle', metadata: { section: 'color', enabled: false } },
     { kind: 'sectionReset', metadata: { section: 'light' } },
