@@ -1,6 +1,6 @@
 # Windows版スコープ統合調査（P0）
 
-調査日：2026-11-28（Asia/Tokyo）。GenzoRoom `main`、調査基準HEAD `340ce55a5778704c5fed9166b5f3bd87817962ae`。この文書はP0事前調査を記録する。P1／P2の実装結果、仕様確定、監査結果は後続節へ追記し、当時の調査結論と区別する。
+調査日：2026-11-28（Asia/Tokyo）。GenzoRoom `main`、調査基準HEAD `340ce55a5778704c5fed9166b5f3bd87817962ae`。§1〜§12はP0事前調査時点の記録であり、当時の未接続・未確定という記述を現行仕様として扱わない。現行仕様と完了結果は§13.1に記録する。P2は未実装である。
 
 ## 証拠区分
 
@@ -242,13 +242,23 @@ P0では実施していない。実装時には変更境界に絞る。
 
 この節以降へP1／P2の実装、仕様決定、監査を時系列で追記する。P0本文・commit境界・調査対象SHAは履歴資料として維持する。
 
-### 13.1 P1 — 記録欄
+### 13.1 P1 — 実装・完了記録（2026-11-28）
 
-- 実装commit／日付：未記入。
-- 確定したNative応答・Histogram意味：未記入。
-- 変更ファイルと設計判断：未記入。
-- テスト・build／artifact結果：未記入。
-- 実機確認・残件：未記入。
+**現行仕様・確認済みの事実。** LightCraft v0.20.0 / `192ff72923c39e6623f2c7ff67ab3a119deb8071`の通常Whole Previewが生成する`Rendered.histogram`を再利用する。RAW／非RAW、Before／After、Draft／Fullの応答にRGB／Luma各256 binsとサンプル数を含める。Nativeは`histogramContract: 1`で公開し、Backendはbin合計とsamplesの一致を再検証せず、転送形式の基本検証を行う。
+
+Backendは4,100 bytes（little-endian u32 × 1,025、R/G/B/Luma各256値とsamples 1値）へpackし、PNG Preview応答の`X-Raw-Histogram-Format: u32le-r256-g256-b256-luma256-samples-v1`と標準Base64の`X-Raw-Histogram`で送る。Frontend `rawApi.ts`が既存Preview応答で復号し、Lumaを既存Histogram型の`y`へ対応させる。画像と同じ採用判定・WholeSurface・RawState経路を利用し、別のHistogram要求・集計・再デコード・追加現像はない。
+
+Draft／Full、Before／After、Backslash中のBefore表示に対応し、通常Curve／Mixer／Point Color Draftは採用PreviewのHistogramに同期する。Region表示では表示中のWhole画像に対応するHistogramを選択し、Regionタイル単体は集計しない。Crop編集中、シャープネスAltドラッグ中、Point Color範囲表示中は更新を止め、同じ画像の直前の有効値を保持する。画像切替では旧画像の値を残さない。
+
+既存`ScopePanel`、`HistogramGraph`、Histogramプルダウン、RGB／Y Only／Normal／Expanded操作、サイズ変更・高さ保存、テンキー1／2／3／0／Decimalショートカットを再利用する。Docker版JPEGのHistogram処理・表示は維持する。Waveform、RGB Parade、VectorscopeはP2以降の未実装機能である。
+
+Whole固有のmetadata／Histogram検証、Region固有metadata検証、共通PNG本体検証を分離した。共通本体検証はPNG signature／CRC／終端／寸法／サイズ上限／Pillow decodeを維持する。Regionは`image/png` MIMEを確認し、失敗を`raw_invalid_region_response`へ変換する。Whole用Histogram shimはない。
+
+managed patchは`native/lightcraft/patches/0001-v0.20.0-whole-frame.patch`。18対象ファイルを維持し、累積差分は追加1,379行・削除41行（P1-A前は1,342／38、今回純増34行）。SHA-256は`4201676eacbd2ffb91ef78da675cad06e36ba38abf3064579f62b666f89864d0`。manifest、`build.py`契約確認、artifact receiptに`histogramContract: 1`を含む。upstream、LightCraft version、既存patch構成は変更していない。詳細な移植差分は[LightCraft v0.20 upgrade plan](LIGHTCRAFT_V020_UPGRADE_PLAN.md#histogram-contract-managed-patch-addition-2026-11-28)を参照。
+
+実装工程はP1-A／B `52e30c8`、P1-C `254160f`、同期修正`d932df9`、Mixer競合`1bf084f`、破棄簡素化`361c43e`、Begin契約修正`e29ad76`、Region検証分離`f91bb31`、既存検証契約維持`7858c9b`、旧Recipe単体保存撤去`a153403`／`61a016c`、Cropテスト追随`acd8990`。Histogramと操作の回帰原因はHistogramではなく、`1fdaa3e`で加わったBegin応答への`sourceWbMode`必須判定だった。F6のMixer送信時判定は独立した予約済みPreviewの競合経路があるため維持した。
+
+工程ごとのテスト件数は各実装報告に従い、異なるコード状態の件数を合算しない。実Native Region試験成功、Histogram関連focused test／Backend・Frontend focused test成功、manifestとpatch digest整合を確認済み。Windows Desktop実機はユーザー確認済み。Docker関連回帰テスト成功、Dockerコンテナ上の実行確認は未実施。SQLite Smoke Testの既存失敗はP1対象外。旧Recipe単体保存廃止に伴う旧エラーコードの残存表示分岐は今回の修正対象外。
 
 ### 13.2 P2 — 記録欄
 

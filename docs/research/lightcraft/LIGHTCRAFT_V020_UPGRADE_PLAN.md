@@ -888,3 +888,11 @@ P4-A1ではStagePoolの対象slot・budget・applied整合と、Session::accept_
 decoder／database lens変更時、実RAWのWB学習、実際の再選択とSettings／History／選択不変性のfixture実証は未完了。今回のEngine testは同一photoのjob再作成・Loaded再利用・stale identity拒否を確認した範囲であり、これら未実証条件を保証したとは扱わない。Before追加実装、MCP Whole接続、実EXE／DX12受入は後続へ残す。
 
 累積patch SHA-256: `d8e7dbcceed4e7088f0fbc9d09c7c727bfc03e1ee70e5a916b566e9f2e14ccb6`。checkpoint: `.tmp/lightcraft-v020-state/P4-A1/CHECKPOINT.md`。
+
+## Histogram contract managed patch addition (2026-11-28)
+
+P1-A extended the existing managed patch `native/lightcraft/patches/0001-v0.20.0-whole-frame.patch` for pinned upstream LightCraft v0.20.0 commit `192ff72923c39e6623f2c7ff67ab3a119deb8071`. Version, upstream and 18 target files are unchanged. The cumulative patch grew from +1,342/-38 to +1,379/-41, a net addition of 34 lines. SHA-256 is `4201676eacbd2ffb91ef78da675cad06e36ba38abf3064579f62b666f89864d0`, matching `native/lightcraft/manifest.json`.
+
+The patch reuses `Rendered.histogram` from the existing Whole Preview render and adds its R/G/B/Luma bins and sample total to preview metadata. It defines the Native metadata contract marker `genzoroom.histogramContract: 1`, adds response assertions and an SDR histogram shape validator, and describes the contract in the `render_preview` tool definition. The implementation does not add a second render or histogram calculation. On future upstream updates, inspect the `render_preview` result construction and tool metadata in `crates/mcp/src/tools.rs`, verify that Whole Before/After and Draft/Full still carry the existing render result's histogram, and run the manifest patch application and actual binary contract probes. Keep the marker synchronized across manifest, build validation and artifact receipt.
+
+`native/lightcraft/build.py` validates the manifest contract and verifies the emitted binary metadata marker. The generated artifact receipt carries `histogramContract: 1`; `backend/lightcraft_artifact.py` checks the receipt contract before accepting the binary. Patch digest, target list, actual binary schema/response and binary SHA-256 remain required by the update procedure. No upstream algorithm, CPU/GPU selection or cache ownership was changed.

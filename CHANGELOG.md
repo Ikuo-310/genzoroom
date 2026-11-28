@@ -6,6 +6,19 @@ Internal changes are omitted unless they affect users.
 
 ## [Unreleased]
 
+### Added
+
+- Windows Desktop displays a LightCraft Histogram for RAW and supported non-RAW photos, synchronized with development Previews and Before/After viewing.
+
+### Fixed
+
+- Windows Desktop keeps Histogram display aligned during Curve, Color Mixer and Point Color edits, and preserves Region Preview behavior.
+- Windows Desktop allows users to discard unconfirmed edits and leave the darkroom when an edit operation cannot be confirmed.
+
+### Changed
+
+- Windows Desktop RAW edits now use History as the single save path.
+
 ### Fixed
 
 - Windows Desktop Color Mixer target adjustments no longer make the edit History unavailable when the valid `mixerTarget` step is reloaded.

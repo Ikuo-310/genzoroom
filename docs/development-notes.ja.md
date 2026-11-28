@@ -2548,3 +2548,13 @@ LightCraft v0.20.0（upstream `192ff72923c39e6623f2c7ff67ab3a119deb8071`）の�
 ## 写真切り替え効率化 P1〜P2-6 総合監査完了（2026-11-22）
 
 総合監査Finding FS-01、FS-01-R1、FS-02、FS-03はそれぞれ`a493752`、`408d8aa`、`e82ec713`、`1ec4a333`で対応完了。FS-03-R1はsymlink参照先変更に関するLowの既知制約として受容し、実Native再現はWindows権限制約により未実施。P1〜P2-6の完了記録、工程別テスト件数、アーキテクチャ評価、制約は[写真切り替え効率化の研究記録](research/lightcraft/FILMSTRIP_SESSION_OPTIMIZATION.md)を参照。実Nativeプロセス強制終了のWindows Desktop検証と高解像度RAW多数巡回時の詳細メモリ測定も未実施だが、完了判定を妨げるFindingではない。将来のLightCraft更新ではResident管理、cache-pressure退役、重複path照合を管理patchの移植判断対象として扱う。
+
+## P1：Windows Desktop Histogram完了（2026-11-28）
+
+P1-A／B（`52e30c8`）はLightCraft v0.20.0の既存`Rendered.histogram`を`histogramContract: 1`でWhole Preview metadataへ公開し、Backendから固定4,100-byte little-endian形式でHTTP Preview headerへ転送した。manifest、build validator、receiptも同契約に追随した。P1-C（`254160f`）はFrontend既存Histogram型・Scope UI・Preview採用経路に接続した。Draft／Full、Before／After、Curve／Mixer／Point Color Draft、Region表示でのWhole Histogram、Crop／Sharpen／Point Color一時表示中の更新停止を含む。Docker JPEG Scopeは維持した。
+
+後続修正ではHistogram同期（`d932df9`）、Mixer Preview競合（`1bf084f`）、明示的破棄の簡素化（`361c43e`）、Interaction Begin応答契約（`e29ad76`）を対応した。Curve／Mixer／Point Colorが失敗した回帰の原因はHistogramではなく、`1fdaa3e`でBegin応答にも`sourceWbMode`を必須とした契約不一致だった。Whole／RegionのPNG検証分離は`f91bb31`、RegionのMIMEと例外変換維持は`7858c9b`で確認した。
+
+旧Recipe単体保存経路をFrontend（`a153403`）とBackend（`61a016c`）から撤去し、History経由を唯一のRAW編集保存経路とした。製品コードは260行純減、テストコードは461行純減、合計721行純減。MixerのPreview送信時`mixerInteracting`判定は、Mixer所有開始直後の予約済み通常Previewを抑止する独立した経路があるため維持した。CropテストはHistogram応答を含む5要素戻り値に追随（`acd8990`）。
+
+検証結果は工程別記録を参照し、別コード状態の件数は合算しない。Windows Desktop実機確認はユーザー実施済み。実Native Region試験とDocker関連回帰テストは成功。Dockerコンテナ上の実行確認は未実施。SQLite Smoke Testの既存失敗はP1対象外。旧Recipe保存エラーコードの表示分岐は今回範囲外として残る。
