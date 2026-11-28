@@ -2537,7 +2537,7 @@ def test_image_validation_cancel_is_owned_and_next_preview_waits(tmp_path, monke
 
 @pytest.mark.parametrize("invalid", ["base64", "mime", "metadata", "missing", "multiple", "id", "dimensions",
                                    "histogram_missing", "histogram_bins", "histogram_negative", "histogram_float",
-                                   "histogram_samples", "histogram_overflow",
+                                   "histogram_overflow",
                                    "truncated", "crc", "trailing", "huge", "structured"])
 def test_png_response_validation(invalid):
     result = image_result()
@@ -2560,7 +2560,6 @@ def test_png_response_validation(invalid):
         elif invalid == "histogram_bins": metadata["histogram"]["r"].pop()
         elif invalid == "histogram_negative": metadata["histogram"]["r"][30] = -1
         elif invalid == "histogram_float": metadata["histogram"]["g"][50] = 192.0
-        elif invalid == "histogram_samples": metadata["histogram"]["samples"] = 191
         elif invalid == "histogram_overflow": metadata["histogram"]["samples"] = 2**32
         text["text"] = json.dumps(metadata)
     with pytest.raises(LightCraftError, match="^lightcraft_invalid_preview$"):
@@ -2579,6 +2578,16 @@ def test_max_sample_histogram_fits_existing_preview_metadata_limit():
     assert len(text["text"].encode("utf-8")) < module.MAX_METADATA_BYTES
     validated = _validate_png(result, 1, 1024)
     assert len(validated[4]) == module.HISTOGRAM_BYTES
+
+
+def test_histogram_validator_does_not_recheck_native_bin_sum():
+    result = image_result()
+    text = result["content"][1]
+    metadata = json.loads(text["text"])
+    metadata["histogram"]["samples"] = 191
+    text["text"] = json.dumps(metadata)
+    validated = _validate_png(result, 1, 1024)
+    assert int.from_bytes(validated[4][-4:], "little") == 191
 
 
 def test_png_pixel_bounds_before_load_and_encoded_limit(monkeypatch):

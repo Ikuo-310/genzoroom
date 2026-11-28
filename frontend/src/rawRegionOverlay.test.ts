@@ -172,17 +172,21 @@ it('keeps both latest pair candidates while a superseded decode settles', async 
 it('decodes an explicit Whole descriptor through the same bounded display queue before adopting its Region', async () => {
   const h = harness(), region = h.candidate('after', 'draft', { fullWidth: 2000, fullHeight: 1500,
     window: { x: 100, y: 100, w: 500, h: 400 }, validRegion: { x: 116, y: 116, w: 468, h: 368 } });
+  const histogram = { r: new Uint32Array(256), g: new Uint32Array(256), b: new Uint32Array(256), y: new Uint32Array(256) };
+  histogram.r[73] = 5;
   const request = region.item as RegionRequest;
   h.overlay.offer({ planGeneration: 1, item: { mode: 'whole', quality: 'draft', identity: request.identity,
     documentRevision: request.documentRevision, viewGeneration: request.viewGeneration, requestId: 'f'.repeat(32), maxSide: 2000 },
     result: { operation: 'whole', frame: { blob: new Blob(['whole']), width: 2000, height: 1500, epoch: 1, sequence: 1,
-      kind: 'after', quality: 'draft', frame: { ...h.getOwner().geometry, fullWidth: 2000, fullHeight: 1500, aspect: 4/3, window: null } } } });
+      kind: 'after', quality: 'draft', histogram,
+      frame: { ...h.getOwner().geometry, fullWidth: 2000, fullHeight: 1500, aspect: 4/3, window: null } } } });
   h.overlay.offer(region);
   expect(h.decode).toHaveBeenCalledTimes(1); h.decodes[0].resolve(); await tick();
   expect(h.overlay.display).toBeUndefined(); h.decodes[1].resolve(); await tick();
   expect(h.overlay.display!.wholeAfter.quality).toBe('draft');
   expect(h.overlay.display!.wholeAfter.maxSide).toBe(2000);
   expect(h.overlay.display!.wholeAfter.frame.fullWidth).toBe(2000);
+  expect(h.overlay.display!.wholeAfter.histogram?.r[73]).toBe(5);
   expect(h.overlay.display!.wholeAfter.url).not.toBe(h.bases().after.url);
   h.overlay.clear(); expect(h.urls.size).toBe(1);
 });

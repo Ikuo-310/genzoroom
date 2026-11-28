@@ -1132,8 +1132,11 @@ export function AnshitsuPage() {
           headerAction={<select className="scope-type-select" aria-label={t('workspace.scopeType')} defaultValue="histogram">
             <option value="histogram">{t('workspace.histogram')}</option>
           </select>}>
-          <ScopePanel histogram={activeHistograms?.[viewerShowsBefore ? 'before' : 'after'] ?? null}
-            keyboardBlocked={!editable || workspaceKeyboardBlocked} />
+          <ScopePanel histogram={usesLightcraft
+            ? (viewerShowsBefore ? rawDocument?.regionDisplay?.wholeBefore?.histogram : rawDocument?.regionDisplay?.wholeAfter?.histogram)
+              ?? rawDocument?.scopeHistogram ?? null
+            : activeHistograms?.[viewerShowsBefore ? 'before' : 'after'] ?? null}
+            keyboardBlocked={(!editable && !usesLightcraft) || workspaceKeyboardBlocked} />
         </WorkspaceSection>
         <ScopeResizeHandle value={scopePanelBasis} onChange={setScopePanelBasis} onCommit={saveScopePanelBasis} label={t('workspace.resizeScope')} />
         {rawDocument && <RawEditCategories key={assetId} raw={rawDocument} disabled={workspaceKeyboardBlocked}

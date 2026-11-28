@@ -92,14 +92,18 @@ beforeEach(() => {
 
 it('connects Region only explicitly and clears document-owned candidates on photo departure', async () => {
   const asset = regionRequest().identity.assetId;
+  const histogram = { r: new Uint32Array(256), g: new Uint32Array(256), b: new Uint32Array(256), y: new Uint32Array(256) };
+  histogram.r[73] = 5;
   vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => ({ workspaceId, assetId,
     handle: '2'.repeat(32), generation: 1, documentToken: 'c'.repeat(32), revision: 1 }));
   vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence: 1,
+    histogram,
     frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000, aspect: 4/3,
       fullWidth: 16, fullHeight: 12, window: null } });
   vi.mocked(api.rawRegion).mockImplementation(async (_doc, target) => ({ operation: 'render',
     metadata: regionResponse(target as ReturnType<typeof regionRequest>), blob: new Blob(['region']) }));
   await render(asset); await flush();
+  expect(current!.scopeHistogram?.r[73]).toBe(5);
   expect(api.rawRegionOwner).not.toHaveBeenCalled(); expect(api.rawRegion).not.toHaveBeenCalled();
   await act(async () => { expect(await current!.connectRegion()).toBe(true); });
   const delivery = current!.regionDelivery!;

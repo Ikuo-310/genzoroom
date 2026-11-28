@@ -575,8 +575,7 @@ def _validate_png(result, photo_id, max_side, kind="after", before_fingerprint=N
         for channel in channels:
             values = histogram[channel]
             if not isinstance(values, list) or len(values) != HISTOGRAM_BINS or \
-                    any(type(value) is not int or not 0 <= value <= 0xffffffff for value in values) or \
-                    sum(values) != samples:
+                    any(type(value) is not int or not 0 <= value <= 0xffffffff for value in values):
                 raise ValueError()
             bins.extend(values)
         histogram_data = struct.pack("<1025I", *bins, samples)

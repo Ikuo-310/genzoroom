@@ -1,4 +1,5 @@
 import type { RawDocument, RawGeometry } from './rawApi';
+import type { Histogram } from './histogram';
 import type { RegionCandidate, RegionDeliveryOwner } from './rawRegionDelivery';
 import { canReuseRegion, checkRegionResponse, regionPairMatches, type RegionRequest, type RegionResponse } from './rawRegionContract';
 import { regionNativeRect, type RegionGeometry, type RegionRect, type RegionFullFrame } from './rawRegionPlanner';
@@ -18,7 +19,7 @@ export class RawPreviewUrls {
   owns(url: string) { return this.refs.has(url); }
 }
 export type RawWholeSurface = { url: string; doc: RawDocument; frame: RawGeometry; quality: 'draft' | 'full'; maxSide?: number;
-  pointColorRangeIndex?: number };
+  pointColorRangeIndex?: number; histogram?: Histogram };
 export type RawRegionLayer = { url: string; metadata: RegionResponse; planGeneration: number;
   nativePlacement: RegionRect; validNativeRect: RegionRect };
 export type RawRegionDisplay = { after: RawRegionLayer; before?: RawRegionLayer;
@@ -193,7 +194,8 @@ export class RawRegionOverlay {
     if (candidate.result.operation === 'whole') {
       const frame = candidate.result.frame;
       if (!frame.frame || !frame.quality || candidate.item.mode !== 'whole') return;
-      const whole: RawWholeSurface = { url: this.options.urls.create(frame.blob), doc: { ...c.owner.doc }, frame: frame.frame, quality: frame.quality, maxSide: candidate.item.maxSide };
+      const whole: RawWholeSurface = { url: this.options.urls.create(frame.blob), doc: { ...c.owner.doc }, frame: frame.frame,
+        quality: frame.quality, maxSide: candidate.item.maxSide, histogram: frame.histogram };
       const controller = new AbortController(), epoch = this.epoch; this.running = controller;
       void (this.options.decode ?? decode)(whole.url, frame, controller.signal).then(() => {
         if (controller.signal.aborted || epoch !== this.epoch || !this.options.current(candidate)) { this.options.urls.release(whole.url); return; }

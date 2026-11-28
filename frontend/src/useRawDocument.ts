@@ -22,6 +22,7 @@ import { createRawRegionDiagnosticsChannel, diagnosticVisibleRect, type RawRegio
 declare global { interface Window { genzoroomCrop?: { enter: () => Promise<void>; exit: () => Promise<void>; straighten: (angle: number) => Promise<void>; recover: () => Promise<void> }; } }
 
 type RawState = { cropSnapshot?: CropSnapshot; cropMode?: boolean; cropDisplay?: RawCropDisplay; imageToken?: string; assetId: string; status: 'loading' | 'ready' | 'unavailable' | 'error';
+  histogram?: import('./histogram').Histogram;
   url?: string; width?: number; height?: number; document?: RawDocument; code?: string; settings?: RawSettings;
   requestSide?: number; frame?: RawGeometry; quality?: 'draft' | 'full'; displayError?: string; imageRevision?: number;
   desired?: Partial<RawValues>; pending?: boolean; editError?: string; dirty?: boolean;
@@ -108,7 +109,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
   const [regionOutline, setRegionOutline] = useState(false);
   const [state, setState] = useState<RawState | null>(null);
   const [before, setBefore] = useState<{ owner: string; key: string; status: 'loading' | 'ready' | 'error'; url?: string; width?: number; height?: number;
-    quality?: 'draft' | 'full'; frame?: RawGeometry } | null>(null);
+    quality?: 'draft' | 'full'; frame?: RawGeometry; histogram?: import('./histogram').Histogram } | null>(null);
   const requestBeforeRef = useRef<(retry?: boolean) => void>(() => {});
   const beforeSerial = useRef(0);
   const serial = useRef(0);
@@ -455,6 +456,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         // Recheck engine identity after decode, before publishing a native result.
         await readRawDocument(doc, controller.signal);
         if (!valid()) return;
+        const retainedHistogram = wholeSurfaces.current.after?.histogram;
         revoke();
         if (curvePresentation.current.url) urls.release(curvePresentation.current.url);
         curvePresentation.current.url = undefined;
@@ -462,9 +464,12 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         displayedRevision = doc.revision;
         url = candidate;
         candidate = undefined;
+        const isScopePreview = mode === 'whole' && pointColorRangeIndex === undefined && sharpenPreview === undefined;
+        const histogram = isScopePreview ? frame.histogram : retainedHistogram;
         if (frame.frame) publishedFrame = { revision: doc.revision, quality: frame.quality ?? quality, frame: frame.frame };
         wholeSurfaces.current.after = mode === 'whole' && frame.frame ? { url, doc: { ...doc }, frame: frame.frame,
-          quality: frame.quality ?? quality, maxSide, ...(pointColorRangeIndex === undefined ? {} : { pointColorRangeIndex }) } : undefined;
+          quality: frame.quality ?? quality, maxSide, histogram,
+          ...(pointColorRangeIndex === undefined ? {} : { pointColorRangeIndex }) } : undefined;
         const baseline = wholeSurfaces.current.before;
         if (baseline && frame.frame && baseline.doc.assetId === doc.assetId && baseline.doc.handle === doc.handle
           && baseline.doc.generation === doc.generation && baseline.doc.documentToken === doc.documentToken
@@ -480,7 +485,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
           ? {url,frame:frame.frame,display:frame.cropDisplay,doc:structuredClone(doc as RawSettings),mode:'crop-edit'} : undefined;
         cropSnapshotRef.current=snapshot ?? null;
         setState(previous => ({ ...previous, assetId, status: 'ready', cropSnapshot:snapshot, url, width: frame.width, height: frame.height,
-          requestSide: maxSide, frame: frame.frame, cropDisplay: frame.cropDisplay, imageToken: doc.documentToken, cropMode, quality: frame.quality ?? quality, imageRevision: doc.revision, displayError: undefined }));
+          requestSide: maxSide, frame: frame.frame, cropDisplay: frame.cropDisplay, imageToken: doc.documentToken, cropMode,
+          histogram: isScopePreview ? frame.histogram : previous?.histogram, quality: frame.quality ?? quality, imageRevision: doc.revision, displayError: undefined }));
         adopted = true;
         if (metrics) {
           if (quality === 'draft') {
@@ -748,7 +754,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
             if (frame.frame) {
               publishedFrame = { revision: doc.revision, quality: frame.quality ?? 'draft', frame: frame.frame };
               wholeSurfaces.current.after = { url: candidate, doc: { ...doc }, frame: frame.frame,
-                quality: frame.quality ?? 'draft', maxSide: target.maxSide };
+                quality: frame.quality ?? 'draft', maxSide: target.maxSide, histogram: wholeSurfaces.current.after?.histogram };
             }
             setState(previous => previous && previous.assetId === assetId ? { ...previous, url: candidate,
               width: frame.width, height: frame.height, frame: frame.frame, quality: frame.quality ?? 'draft',
@@ -796,6 +802,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
               publishedFrame = { revision: doc.revision, quality: frame.quality ?? 'draft', frame: frame.frame };
               wholeSurfaces.current.after = { url: candidate, doc: { ...doc }, frame: frame.frame,
                 quality: frame.quality ?? 'draft', maxSide: target.maxSide,
+                histogram: wholeSurfaces.current.after?.histogram,
                 ...(target.pointColorRangeIndex === undefined ? {} : { pointColorRangeIndex: target.pointColorRangeIndex }) };
             }
             setState(previous => previous && previous.assetId === assetId ? { ...previous, url: candidate,
@@ -823,7 +830,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
             if (frame.frame) {
               publishedFrame = { revision: doc.revision, quality: frame.quality ?? 'draft', frame: frame.frame };
               wholeSurfaces.current.after = { url: candidate, doc: { ...doc }, frame: frame.frame,
-                quality: frame.quality ?? 'draft', maxSide: target.maxSide };
+                quality: frame.quality ?? 'draft', maxSide: target.maxSide, histogram: wholeSurfaces.current.after?.histogram };
             }
             setState(previous => previous && previous.assetId === assetId ? { ...previous, url: candidate,
               width: frame.width, height: frame.height, frame: frame.frame, quality: frame.quality ?? 'draft',
@@ -1629,12 +1636,12 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
           if (!currentIntent()) return;
           url = candidate; candidate = undefined;
           wholeSurfaces.current.before = frame.frame ? { url, doc: { ...transmitted!.doc }, frame: frame.frame,
-            quality: frame.quality ?? afterQuality, maxSide: afterSide } : undefined;
+            quality: frame.quality ?? afterQuality, maxSide: afterSide, histogram: frame.histogram } : undefined;
           overlayRef.current?.refresh();
           publishDiagnosticRef.current();
           evaluateAutoRef.current();
           setBefore({ owner: beforeOwner, key: beforeKey, status: 'ready', url, width: frame.width, height: frame.height,
-            frame: frame.frame, quality: frame.quality ?? afterQuality });
+            frame: frame.frame, quality: frame.quality ?? afterQuality, histogram: frame.histogram });
         } catch (cause) {
           if (!currentIntent()) return;
           if (cause instanceof RawSuperseded) {
@@ -1993,7 +2000,9 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     && !visible.settings?.recipeRecoveryPending && !!callbackEditor() && !frozen.current
     && !saverRef.current?.saving && !saverRef.current?.moving && !saverRef.current?.error
     && !saverRef.current?.operationError && !saverRef.current?.historyError;
-  return visible && { ...visible, pointColorRangeIndex: pointColorRange?.assetId === assetId ? pointColorRange.index : null,
+  return visible && { ...visible,
+    scopeHistogram: beforeRequested ? beforeMatches && before?.status === 'ready' ? before.histogram : undefined : visible.histogram,
+    pointColorRangeIndex: pointColorRange?.assetId === assetId ? pointColorRange.index : null,
     copySettings, pasteSettings,
     clipboardSettingIds: clipboardInfo?.engine === 'lightcraft' ? clipboardInfo.selectedIds : [],
     sameEngineClipboard: clipboardInfo?.engine === 'lightcraft',

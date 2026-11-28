@@ -4,6 +4,7 @@ import { frontendLogger } from './frontendLogging';
 import { checkRegionResponse, confirmRegionFullFrame, validateRegionFrameRequest, validateRegionRequest,
   type RegionRequest, type RegionResponse, type RegionFrameRequest, type RegionFrameResponse } from './rawRegionContract';
 import { C1_REGION_BUDGET, validRegionGeometry, type RegionGeometry } from './rawRegionPlanner';
+import type { Histogram } from './histogram';
 
 export type RawDocument = {
   workspaceId: string; handle: string; assetId: string; generation: number; documentToken: string; revision: number;
@@ -20,7 +21,7 @@ export type RawDisplayTarget = { quality: 'draft' | 'full'; mode: 'whole' | 'cro
 export type RawCropDisplay = { canonicalGeometry: { crop: RawCrop; orientation: string }; bitmapSpace: 'oriented-warped-unstraightened-flipped'; settingsFingerprint: string };
 export type RawFrame = { blob: Blob; width: number; height: number; epoch: number; sequence: number; kind?: 'before' | 'after'; key?: string;
   quality?: 'draft' | 'full'; frame?: RawGeometry; cropDisplay?: RawCropDisplay; interactionId?: string; interactionSequence?: number;
-  curvePoints?: RawCurvePoint[]; pointColorRangeIndex?: number };
+  curvePoints?: RawCurvePoint[]; pointColorRangeIndex?: number; histogram?: Histogram };
 export class RawSuperseded extends Error {
   constructor(public readonly reason: 'revision' | 'replaced' | 'cancelled') { super(reason); }
 }
@@ -947,10 +948,21 @@ export async function rawPreview(doc: RawDocument, serial: number, signal: Abort
       bodyReadMs: performance.now() - responseStarted } }); } catch { /* Optional diagnostics. */ }
     check();
     if (![137, 80, 78, 71, 13, 10, 26, 10].every((byte, index) => bytes[index] === byte)) throw new RawApiError('raw_invalid_response');
+    const histogramFormat = response.headers.get('x-raw-histogram-format');
+    const histogramText = response.headers.get('x-raw-histogram');
+    if (histogramFormat !== 'u32le-r256-g256-b256-luma256-samples-v1' || !histogramText
+      || histogramText.length !== 5468 || !/^(?:[A-Za-z0-9+/]{4}){1366}[A-Za-z0-9+/]{3}=$/.test(histogramText))
+      throw new RawApiError('raw_invalid_response');
+    let histogramBytes: string;
+    try { histogramBytes = atob(histogramText); } catch { throw new RawApiError('raw_invalid_response'); }
+    if (histogramBytes.length !== 4100) throw new RawApiError('raw_invalid_response');
+    const view = new DataView(Uint8Array.from(histogramBytes, character => character.charCodeAt(0)).buffer);
+    const channel = (offset: number) => Uint32Array.from({ length: 256 }, (_, index) => view.getUint32((offset + index) * 4, true));
+    const histogram: Histogram = { r: channel(0), g: channel(256), b: channel(512), y: channel(768) };
     return { blob: new Blob([bytes], { type: 'image/png' }), width, height, epoch, sequence,
       kind, quality, frame, cropDisplay, ...(rangeText === null ? {} : { pointColorRangeIndex: Number(rangeText) }),
       ...(activeInteraction ? { interactionId: activeInteraction.id, interactionSequence } : {}), ...(curvePoints ? { curvePoints } : {}),
-      ...(kind === 'before' ? { key: doc.beforeKey! } : {}) };
+      ...(kind === 'before' ? { key: doc.beforeKey! } : {}), histogram };
   } finally { await response.body?.cancel().catch(() => {}); }
 }
 

@@ -127,6 +127,21 @@ it('routes a non-RAW asset through Native without fetching or rendering the lega
   expect(host.querySelector('.viewer-panel img')?.getAttribute('src')).toBe('blob:lightcraft');
 });
 
+it('keeps the Native Histogram shortcut available and plots the adopted Native data', async () => {
+  const r = new Uint32Array(256), g = new Uint32Array(256), b = new Uint32Array(256), y = new Uint32Array(256);
+  r[42] = 100; g[88] = 80; b[173] = 60; y[120] = 50;
+  vi.mocked(rawApi.rawPreview).mockResolvedValue({ blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence: 1,
+    histogram: { r, g, b, y } });
+  await mount();
+  const red = host.querySelector<HTMLButtonElement>('.histogram-channel-button.channel-r')!;
+  expect(host.querySelector('[data-channel="r"]')?.getAttribute('d')).toContain('42,14');
+  expect(red.getAttribute('aria-pressed')).toBe('true');
+  const event = new KeyboardEvent('keydown', { key: 'Unidentified', code: 'Numpad1', bubbles: true, cancelable: true });
+  act(() => window.dispatchEvent(event));
+  expect(event.defaultPrevented).toBe(true);
+  expect(red.getAttribute('aria-pressed')).toBe('false');
+});
+
 it('synchronizes the Native Edit menu from the active LightCraft owner and dispatches through the copy handler', async () => {
   const setEditMenuState = vi.fn(async () => {});
   window.__GENZOROOM_DESKTOP__ = { respond: vi.fn(async () => {}), setEditMenuState };
@@ -457,10 +472,13 @@ it('shows Native unavailability without falling back to the viewing Preview', as
 it('wires native Before into the shared Viewer lazily without changing RAW edits or History', async () => {
   vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), beforeKey: 'b'.repeat(64) }));
   const urls = vi.spyOn(URL, 'createObjectURL').mockReturnValueOnce('blob:after').mockReturnValueOnce('blob:before');
+  const afterHistogram = { r: new Uint32Array(256), g: new Uint32Array(256), b: new Uint32Array(256), y: new Uint32Array(256) };
+  const beforeHistogram = { r: new Uint32Array(256), g: new Uint32Array(256), b: new Uint32Array(256), y: new Uint32Array(256) };
+  afterHistogram.r[35] = 100; beforeHistogram.r[91] = 100;
   let resolveBefore!: (frame: rawApi.RawFrame) => void;
   vi.mocked(rawApi.rawPreview).mockImplementation(async (_doc, _serial, _signal, kind = 'after') => kind === 'before'
     ? new Promise(resolve => { resolveBefore = resolve; })
-    : { blob: new Blob(), width: 16, height: 12, epoch: 1, sequence: 1 });
+    : { blob: new Blob(), width: 16, height: 12, epoch: 1, sequence: 1, histogram: afterHistogram });
   await mount();
   expect(rawApi.rawPreview).toHaveBeenCalledTimes(1);
   const saves = vi.mocked(rawApi.saveRawHistory).mock.calls.length;
@@ -470,8 +488,9 @@ it('wires native Before into the shared Viewer lazily without changing RAW edits
   expect(host.querySelector('.viewer-panel img')!.getAttribute('src')).toBe('blob:after');
   expect(host.textContent).toContain('Preparing Before');
   await act(async () => resolveBefore({ blob: new Blob(), width: 16, height: 12, epoch: 1, sequence: 1,
-    kind: 'before', key: 'b'.repeat(64) })); await flush();
+    kind: 'before', key: 'b'.repeat(64), histogram: beforeHistogram })); await flush();
   expect(host.querySelector('.viewer-panel img')!.getAttribute('src')).toBe('blob:before');
+  expect(host.querySelector('[data-channel="r"]')?.getAttribute('d')).toContain('91,14');
   act(() => toggle.click()); act(() => toggle.click()); await flush();
   expect(rawApi.rawPreview).toHaveBeenCalledTimes(2);
   expect(rawApi.saveRawHistory).toHaveBeenCalledTimes(saves);
@@ -482,18 +501,25 @@ it('wires native Before into the shared Viewer lazily without changing RAW edits
 it('pauses Show Range for Before and resumes the selected index without editing Native settings', async () => {
   const point = { lum: .42, chroma: .13, hue: 207.5, hue_shift: 0, sat_shift: 0, lum_shift: 0, variance: 0,
     range: 55, hue_range: 44, sat_range: 66, lum_range: 33 };
+  const ordinaryHistogram = { r: new Uint32Array(256), g: new Uint32Array(256), b: new Uint32Array(256), y: new Uint32Array(256) };
+  const rangeHistogram = { r: new Uint32Array(256), g: new Uint32Array(256), b: new Uint32Array(256), y: new Uint32Array(256) };
+  ordinaryHistogram.r[31] = 100; rangeHistogram.r[210] = 100;
   vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), beforeKey: 'b'.repeat(64), point_colors: [point] }));
   vi.mocked(rawApi.rawPreview).mockImplementation(async (_doc, sequence, _signal, kind = 'after', target) => ({
     blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence, kind,
     ...(kind === 'before' ? { key: 'b'.repeat(64) } : {}), quality: target?.quality ?? 'full',
+    histogram: target?.pointColorRangeIndex === undefined ? ordinaryHistogram : rangeHistogram,
     frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000,
       fullWidth: 16, fullHeight: 12, aspect: 4 / 3, window: null } }));
   await mount();
+  const ordinaryPath = host.querySelector('[data-channel="r"]')?.getAttribute('d');
+  expect(ordinaryPath).toContain('31,14');
   const pointColorTitle = host.querySelector<HTMLButtonElement>('.raw-point-color-title')!;
   if (pointColorTitle.getAttribute('aria-expanded') !== 'true') act(() => pointColorTitle.click());
   const range = () => host.querySelector<HTMLInputElement>('.raw-point-color-range input')!;
   act(() => range().click()); await flush();
   expect(vi.mocked(rawApi.rawPreview).mock.calls.at(-1)?.[4]).toMatchObject({ pointColorRangeIndex: 0 });
+  expect(host.querySelector('[data-channel="r"]')?.getAttribute('d')).toBe(ordinaryPath);
   const beforeToggle = host.querySelector<HTMLButtonElement>('[aria-label="Before and after adjustments"]')!;
   const beforeCallStart = vi.mocked(rawApi.rawPreview).mock.calls.length;
   act(() => beforeToggle.click()); await flush();
@@ -556,7 +582,16 @@ it('binds engine control specs to shared sliders and commits RAW values without 
 
 it('maps Alternate pointer previews for Sharpening controls and restores the ordinary Draft while dragging', async () => {
   vi.mocked(rawApi.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), process: 3 }));
+  const ordinaryHistogram = { r: new Uint32Array(256), g: new Uint32Array(256), b: new Uint32Array(256), y: new Uint32Array(256) };
+  const overlayHistogram = { r: new Uint32Array(256), g: new Uint32Array(256), b: new Uint32Array(256), y: new Uint32Array(256) };
+  ordinaryHistogram.r[40] = 100; overlayHistogram.r[190] = 100;
+  vi.mocked(rawApi.rawPreview).mockImplementation(async (_doc, sequence, _signal, kind = 'after', target) => ({
+    blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence, kind,
+    quality: target?.quality ?? 'full', histogram: target?.sharpenPreview ? overlayHistogram : ordinaryHistogram,
+  }));
   await mount();
+  const ordinaryPath = host.querySelector('[data-channel="r"]')?.getAttribute('d');
+  expect(ordinaryPath).toContain('40,14');
   expect(host.querySelector<HTMLInputElement>('[data-adjustment-id="detail.sharpenRadius"]')?.disabled).toBe(false);
   expect(host.querySelector<HTMLInputElement>('[data-adjustment-id="detail.sharpenDetail"]')?.disabled).toBe(false);
   for (const [id, mode] of [['detail.sharpenAmount', 'grayscale'], ['detail.sharpenRadius', 'detail'],
@@ -569,6 +604,7 @@ it('maps Alternate pointer previews for Sharpening controls and restores the ord
     act(() => { slider.dispatchEvent(down); slider.dispatchEvent(new Event('input', { bubbles: true })); });
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 65)); }); await flush();
     expect(vi.mocked(rawApi.rawPreview).mock.calls.slice(start).at(-1)?.[4]?.sharpenPreview).toBe(mode);
+    expect(host.querySelector('[data-channel="r"]')?.getAttribute('d')).toBe(ordinaryPath);
     const altRelease = vi.mocked(rawApi.rawPreview).mock.calls.length;
     act(() => window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt', altKey: false })));
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 65)); }); await flush();
@@ -2922,11 +2958,16 @@ it('keeps a pending Shadows mutation bound to Shadows after switching to Midtone
 
 it('exposes RAW-only categories, switches display contracts without mutation and resets selection after Asset departure',async()=>{
  const crop:rawApi.RawCrop={geometry:{rect:{x0:.2,y0:.2,x1:.8,y1:.8},angle:0},aspect:null,flip_h:false,flip_v:false};
+ const ordinaryHistogram={r:new Uint32Array(256),g:new Uint32Array(256),b:new Uint32Array(256),y:new Uint32Array(256)};
+ const cropHistogram={r:new Uint32Array(256),g:new Uint32Array(256),b:new Uint32Array(256),y:new Uint32Array(256)};
+ ordinaryHistogram.r[44]=100;cropHistogram.r[170]=100;
  vi.mocked(rawApi.readRawSettings).mockImplementation(async doc=>({...rawSettings(doc),crop,orientation:'Normal'}));
  vi.mocked(rawApi.rawPreview).mockImplementation(async(doc,_serial,_signal,_kind,target)=>({blob:new Blob(['png']),width:16,height:12,epoch:1,sequence:1,
+  histogram:target?.mode==='crop-edit'?cropHistogram:ordinaryHistogram,
   frame:{geometryId:target?.mode==='crop-edit'?'e'.repeat(64):'a'.repeat(64),nativeWidth:4000,nativeHeight:3000,aspect:4/3,fullWidth:16,fullHeight:12,window:null},
   ...(target?.mode==='crop-edit'?{cropDisplay:{canonicalGeometry:{crop,orientation:'Normal'},settingsFingerprint:doc.settingsFingerprint!,bitmapSpace:'oriented-warped-unstraightened-flipped' as const}}:{})}));
  await mount();expect(host.querySelectorAll('.raw-edit-categories input')).toHaveLength(2);
+ const ordinaryPath=host.querySelector('[data-channel="r"]')?.getAttribute('d');expect(ordinaryPath).toContain('44,14');
  expect(host.querySelectorAll<HTMLInputElement>('.raw-edit-categories input')[0].checked).toBe(true);
  expect(host.querySelector('.raw-edit-categories input:checked + span')?.textContent).toBe('Develop');
  const developTab=host.querySelector<HTMLElement>('.raw-edit-categories input:checked + span')!;
@@ -2941,6 +2982,7 @@ it('exposes RAW-only categories, switches display contracts without mutation and
  expect(getComputedStyle(developTab).color).toBe('rgb(165, 165, 168)');
  expect(host.querySelector('.raw-crop-controls')).not.toBeNull();expect(host.querySelector('.raw-adjustment-controls')).toBeNull();
  expect(host.querySelector('.raw-crop-reset')?.textContent).toBe('Reset Crop');
+ expect(host.querySelector('[data-channel="r"]')?.getAttribute('d')).toBe(ordinaryPath);
  expect(vi.mocked(rawApi.rawPreview).mock.calls.at(-1)![4]?.mode).toBe('crop-edit');expect(rawApi.saveRawHistory).toHaveBeenCalledTimes(saves);
  await act(async()=>host.querySelectorAll<HTMLInputElement>('.raw-edit-categories input')[0].click());await flush();
  expect(host.querySelector('.raw-adjustment-controls')).not.toBeNull();expect(vi.mocked(rawApi.rawPreview).mock.calls.at(-1)![4]?.mode).toBe('whole');

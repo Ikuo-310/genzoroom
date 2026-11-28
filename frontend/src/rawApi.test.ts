@@ -11,10 +11,17 @@ import { rawHistoryResult, rawHistoryData } from './test/rawHistory';
 const doc: RawDocument = { workspaceId: 'a'.repeat(32), handle: 'b'.repeat(32), documentToken: 'c'.repeat(32),
   assetId: 'asset', generation: 1, revision: 2, sourceWbMode: 'absolute' };
 const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+function histogramPayload(values: Record<number, number> = {}) {
+  const bytes = new Uint8Array(4100), view = new DataView(bytes.buffer);
+  for (const [index, value] of Object.entries(values)) view.setUint32(Number(index) * 4, value, true);
+  return btoa(String.fromCharCode(...bytes));
+}
+const defaultHistogram = histogramPayload({ [1024]: 1 });
 function response(patch: Record<string, string> = {}, bytes = png) {
   return new Response(bytes, { headers: { 'Content-Type': 'image/png', 'X-Raw-Generation': '1',
     'X-Raw-Token': doc.documentToken, 'X-Raw-Revision': '2', 'X-Raw-Serial': '3',
-    'X-Raw-Epoch': '1', 'X-Raw-Sequence': '1', 'X-Raw-Width': '16', 'X-Raw-Height': '12', ...patch } });
+    'X-Raw-Epoch': '1', 'X-Raw-Sequence': '1', 'X-Raw-Width': '16', 'X-Raw-Height': '12',
+    'X-Raw-Histogram-Format': 'u32le-r256-g256-b256-luma256-samples-v1', 'X-Raw-Histogram': defaultHistogram, ...patch } });
 }
 afterEach(() => vi.unstubAllGlobals());
 
@@ -80,6 +87,22 @@ describe('RAW point curve readback contract', () => {
     { master: [[0, 0]], red: [], green: [], blue: [] },
     { master: [], red: [], green: [], blue: [], extra: [] },
   ])('rejects malformed readback %#', curve => expect(validRawCurve(curve)).toBe(false));
+});
+it('decodes the Native histogram payload into the existing channel arrays', async () => {
+  const payload = histogramPayload({ 4: 17, 264: 23, 524: 31, 784: 41, 1024: 192 });
+  vi.stubGlobal('fetch', vi.fn(async () => response({ 'X-Raw-Histogram': payload })));
+  const frame = await rawPreview(doc, 3, new AbortController().signal);
+  expect(frame.histogram?.r[4]).toBe(17);
+  expect(frame.histogram?.g[8]).toBe(23);
+  expect(frame.histogram?.b[12]).toBe(31);
+  expect(frame.histogram?.y[16]).toBe(41);
+});
+it.each([
+  { 'X-Raw-Histogram-Format': 'unknown' },
+  { 'X-Raw-Histogram': defaultHistogram.slice(4) },
+] as Record<string, string>[])('rejects malformed Native histogram headers %j', async headers => {
+  vi.stubGlobal('fetch', vi.fn(async () => response(headers)));
+  await expect(rawPreview(doc, 3, new AbortController().signal)).rejects.toThrow();
 });
 it('returns targeted curve readback before requesting the matching interaction preview', async () => {
   const interactionId = 'd'.repeat(32), points = [{ x: .2, y: .4 }];
