@@ -148,7 +148,8 @@ def validate_result(result, target, operation, photo_id):
                 or (r['width'],r['height']) != (r['window']['w'],r['window']['h']):
             raise ValueError()
         data = images[0].get('data')
-        if not isinstance(data, str) or not data or len(data) > 4*((MAX_PNG_BYTES+2)//3):
+        if images[0].get('mimeType') != 'image/png' or not isinstance(data, str) or not data \
+                or len(data) > 4*((MAX_PNG_BYTES+2)//3):
             raise ValueError()
         # Region metadata has its own contract; only the encoded image body is shared.
         from lightcraft_raw import _validate_png_body
@@ -156,9 +157,7 @@ def validate_result(result, target, operation, photo_id):
         if len(raw) > MAX_PNG_BYTES:
             raise ValueError()
         return raw, {'response': r}
-    except LightCraftError as error:
-        if error.code == 'lightcraft_invalid_preview':
-            raise LightCraftError('raw_invalid_region_response') from None
+    except LightCraftError:
         raise
     except (KeyError, ValueError, TypeError, AttributeError, OverflowError, RecursionError):
         raise LightCraftError('raw_invalid_region_response') from None

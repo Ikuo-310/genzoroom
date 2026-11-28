@@ -11,6 +11,7 @@ from uuid import uuid4
 import pytest
 
 import raw_region as region
+import lightcraft_raw
 from lightcraft_mcp import LightCraftError, LightCraftMCP, MCPTransportError
 from lightcraft_raw import SUPERSEDED
 from tests.test_lightcraft_raw import create, png
@@ -238,7 +239,7 @@ def test_region_request_rejects_bad_shapes_and_spoofed_owner(tmp_path):
     asyncio.run(run())
 
 
-def test_region_response_png_metadata_and_identity_are_validated(tmp_path):
+def test_region_response_png_metadata_and_identity_are_validated(tmp_path, monkeypatch):
     async def run():
         raw,manager,children,files=await create(tmp_path)
         try:
@@ -254,6 +255,14 @@ def test_region_response_png_metadata_and_identity_are_validated(tmp_path):
             with pytest.raises(LightCraftError):region.validate_result(bad,t,'render',1)
             bad=copy.deepcopy(good);bad['content'][0]['data']=base64.b64encode(png(8,8)[:-1]+b'x').decode()
             with pytest.raises(LightCraftError):region.validate_result(bad,t,'render',1)
+            bad=copy.deepcopy(good);bad['content'][0]['mimeType']='image/jpeg'
+            with pytest.raises(LightCraftError, match='^raw_invalid_region_response$'):
+                region.validate_result(bad,t,'render',1)
+            def broken_decoder(*args, **kwargs):
+                raise OSError('invalid image stream')
+            monkeypatch.setattr(lightcraft_raw.Image, 'open', broken_decoder)
+            with pytest.raises(LightCraftError, match='^raw_invalid_region_response$'):
+                region.validate_result(good,t,'render',1)
             bad=copy.deepcopy(good);bad['content'][1]['text']=' '* (region.MAX_METADATA_BYTES+1)
             with pytest.raises(LightCraftError):region.validate_result(bad,t,'render',1)
         finally:
