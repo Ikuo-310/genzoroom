@@ -436,6 +436,14 @@ Frontendのみ変更した。Backend API／Native managed patch／manifest／Nat
 
 - LightCraftの定義カテゴリが単一選択IDだけを持つ場合、カテゴリ名の親チェックボックスと同名の子チェックボックスを重複表示せず、設定名のチェックボックス1個で選択する。複数IDカテゴリは親子checkboxと中間選択状態を維持する。この判定はLightCraftカテゴリ設定時のみ有効で、既存JPEGダイアログには適用しない。ペースト時に複数IDカテゴリのうち1 IDだけがClipboardにある場合も、元カテゴリの複数選択単位を維持する。
 - 単一選択IDカテゴリでのWB disabled状態と理由、通常copyの24 ID初期選択、Crop初期未選択、「全選択」によるCrop選択は維持する。
-- 表示名は対象範囲に合わせて `pointCurve` を「ポイントカーブ全体」／“Point Curve (all channels)”、`vignette` を「周辺光量補正一式」／“Vignette correction settings”、`crop` を「切り抜き・水平補正」／“Crop and straighten” に変更した。新しいlocale keyはselection dialogと同じID-label mapを使うHistory行にも適用される。
+- 表示名は対象範囲に合わせて `pointCurve` を「ポイントカーブ全体」／“Point Curve (all channels)”、`vignette` を「周辺光量補正一式」／“Vignette correction settings”、`crop` を「切り抜き・水平補正」／“Crop and straighten” に変更した。これらの項目名は選択dialogで使用する。History表示の後続簡略化はR.6を参照。
 - Frontend関連5テストファイル **293 passed**。単一カテゴリの直接checkbox、複数カテゴリの中間状態、24項目とCrop、WB disabled理由、Select All／Clear All、3名称の日英表示、History表示とJPEG回帰を確認した。`npx tsc --noEmit` と `git diff --check` も成功。
 - P1-D-F1は表示構造・名称のみの変更。25 ID、selection scope、Clipboard／WB互換性、API、History保存契約、Backend／Native資材は変更していない。P1-E・P2の作業はこの変更に含めない。
+
+### R.6 P1-D-F2: History・翻訳参照・列レイアウト
+
+- `settingsPaste` のHistory説明は、全設定／選択ペースト、`selectedIds` の有無を問わず既存 `workspace.pasteHistory` のコピー元ファイル名＋操作名だけを使う。適用項目一覧は表示しない。metadataの `selectedIds` は保持され、保存形式に変更はない。不要になった `settingsPasteHistory` locale keyは日英から削除した。
+- カテゴリと全25項目のlocale参照を日英locale実定義と照合した。未定義だったroot `workspace.*` のRAW panel用参照は、RAW現像パネルが使う `workspace.rawPreview.*` keyへ置き換えた。選択対象の表示名と現像パネル用語を共通化し、全translation keyについて日本語・英語それぞれ `i18n.t(key) !== key` をテストする。
+- LightCraft選択dialogだけに `raw-adjustment-selection-dialog` classを付け、幅を最大1040pxへ拡張した。カテゴリ領域を均等高さのGrid行から、カテゴリを分割しない `column-count: 3` のbalanced flowに変更し、各カードは内容の高さを保つ。幅900px以下で2列、600px以下で1列へ縮退する。連続順序は現像panel順を保つ。JPEG dialogのclass・2列Grid・寸法は維持する。
+- Frontend関連5テストファイル **293 passed**。日英のfull／partial Historyが同一の短い文になること、metadataのselectedIds保持、JPEG History回帰、25 IDとカテゴリの翻訳解決、LightCraft専用レイアウトclass、既存JPEGダイアログの分離を確認した。`npx tsc --noEmit` 成功。
+- P1-D-F2はFrontend表示・locale参照・選択dialog layoutと研究文書のみ変更し、Clipboard、copy／paste処理、Backend API、History保存契約、Native資材は変更していない。実Desktopでの新レイアウト確認は未実施。P1-E／P2には着手していない。

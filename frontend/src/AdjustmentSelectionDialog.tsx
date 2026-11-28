@@ -88,7 +88,8 @@ export function AdjustmentSelectionDialog({ mode, availableIds, onConfirm, onCan
     </label>;
   }
 
-  return <dialog ref={dialog} className="adjustment-selection-dialog" aria-labelledby={titleId}
+  return <dialog ref={dialog} className={`adjustment-selection-dialog${categories ? ' raw-adjustment-selection-dialog' : ''}`}
+    aria-labelledby={titleId}
     onCancel={(event) => { event.preventDefault(); onCancel(); }}
     onKeyUp={(event) => event.stopPropagation()}
     onKeyDown={(event) => {

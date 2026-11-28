@@ -3,7 +3,7 @@ import i18n from 'i18next';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import './i18n';
 import { RawEditHistory } from './RawEditHistory';
-import type { RawHistoryStep } from './rawApi';
+import { RAW_COPY_SETTING_IDS, type RawHistoryStep } from './rawApi';
 
 function rawHistory(steps: RawHistoryStep[], cursor: number) {
   return { historySteps: steps, history: { initialized: true, cursor, length: steps.length,
@@ -13,20 +13,22 @@ function rawHistory(steps: RawHistoryStep[], cursor: number) {
 describe('RAW History display', () => {
   beforeEach(async () => { await i18n.changeLanguage('ja'); });
 
-  it.each(['ja', 'en'])('shows settings paste source and actually applied items in %s, with legacy metadata fallback', async language => {
+  it.each(['ja', 'en'])('shows concise settings paste history for full and partial paste in %s', async language => {
     await i18n.changeLanguage(language);
-    const step: RawHistoryStep = { stepId: 'paste', kind: 'settingsPaste', metadata: {
+    const partial: RawHistoryStep = { stepId: 'partial', kind: 'settingsPaste', metadata: {
       sourceAssetId: '00000000-0000-4000-8000-000000000001', sourceFilename: 'source.dng',
-      selectedIds: ['basic.exposure', 'pointCurve', 'vignette', 'crop'],
+      selectedIds: ['basic.exposure', 'crop'],
     }, changes: [], createdAt: '' };
-    const markup = renderToStaticMarkup(<RawEditHistory raw={rawHistory([step], 1) as never} disabled={false} onReset={() => {}} />);
-    expect(markup).toContain(language === 'ja' ? 'source.dngからペースト' : 'Pasted from source.dng');
-    expect(markup).toContain(language === 'ja' ? '露光量' : 'Exposure');
-    for (const label of language === 'ja'
-      ? ['ポイントカーブ全体', '周辺光量補正一式', '切り抜き・水平補正']
-      : ['Point Curve (all channels)', 'Vignette correction settings', 'Crop and straighten']) expect(markup).toContain(label);
+    const full: RawHistoryStep = { ...partial, stepId: 'full', metadata: { ...partial.metadata, selectedIds: [...RAW_COPY_SETTING_IDS] } };
+    expect(partial.metadata.selectedIds).toEqual(['basic.exposure', 'crop']);
+    expect(full.metadata.selectedIds).toHaveLength(25);
+    const markup = renderToStaticMarkup(<RawEditHistory raw={rawHistory([partial, full], 2) as never} disabled={false} onReset={() => {}} />);
+    const description = language === 'ja' ? 'source.dngからペースト' : 'Pasted from source.dng';
+    expect(markup.split(description)).toHaveLength(3);
+    expect(markup).not.toContain(language === 'ja' ? '露光量' : 'Exposure');
+    expect(markup).not.toContain(language === 'ja' ? '切り抜き・水平補正' : 'Crop and straighten');
 
-    const legacy = { ...step, metadata: { sourceAssetId: step.metadata.sourceAssetId, sourceFilename: 'old.jpg' } } as RawHistoryStep;
+    const legacy = { ...partial, metadata: { sourceAssetId: partial.metadata.sourceAssetId, sourceFilename: 'old.jpg' } } as RawHistoryStep;
     const legacyMarkup = renderToStaticMarkup(<RawEditHistory raw={rawHistory([legacy], 1) as never} disabled={false} onReset={() => {}} />);
     expect(legacyMarkup).toContain(language === 'ja' ? 'old.jpgからペースト' : 'Pasted from old.jpg');
   });

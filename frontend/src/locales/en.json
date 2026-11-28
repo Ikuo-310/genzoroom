@@ -826,7 +826,6 @@
     "colorResetHistory": "Reset Color adjustments",
     "allReset": "Reset all",
     "pasteHistory": "Pasted from {{filename}}",
-    "settingsPasteHistory": "Pasted from {{filename}} — {{items}}",
     "editSettingsActions": "Edit settings actions",
     "copyAll": "Copy all settings",
     "selectCopy": "Copy selected settings",

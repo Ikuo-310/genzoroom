@@ -816,7 +816,6 @@
     "colorResetHistory": "色補正をリセット",
     "allReset": "すべてリセット",
     "pasteHistory": "{{filename}}からペースト",
-    "settingsPasteHistory": "{{filename}}からペースト — {{items}}",
     "editSettingsActions": "編集設定の操作",
     "copyAll": "全設定をコピー",
     "selectCopy": "項目を選んでコピー",

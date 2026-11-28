@@ -56,6 +56,7 @@ describe('adjustment selection dialog', () => {
   it('opens modal with sixteen selected values and distinct grading ranges, without enabled flags', () => {
     mount();
     expect(host.querySelector('dialog')!.open).toBe(true);
+    expect(host.querySelector('dialog')!.classList.contains('raw-adjustment-selection-dialog')).toBe(false);
     expect(document.activeElement).toBe(button('Copy'));
     expect(host.querySelectorAll('input[name]')).toHaveLength(16);
     expect(ADJUSTMENT_IDS.every((id) => item(id).checked && !item(id).disabled)).toBe(true);
@@ -166,6 +167,7 @@ describe('adjustment selection dialog', () => {
   });
   it('defaults raw copy to 24 items, adds Crop only after explicit Select all, and keeps blocked WB unselected', () => {
     mountRaw({ initial: RAW_DEFAULT_COPY_SETTING_IDS });
+    expect(host.querySelector('dialog')!.classList.contains('raw-adjustment-selection-dialog')).toBe(true);
     expect(host.querySelectorAll('input[name]')).toHaveLength(25);
     expect(host.querySelectorAll('fieldset')).toHaveLength(5);
     expect(RAW_DEFAULT_COPY_SETTING_IDS.every(id => item(id).checked)).toBe(true);
@@ -195,6 +197,11 @@ describe('adjustment selection dialog', () => {
   it.each(['ja', 'en'])('uses whole-setting labels for Point Curve, Vignette and Crop in %s', async language => {
     await i18n.changeLanguage(language);
     mountRaw();
+    const labelKeys = [...Object.values(RAW_COPY_SETTING_LABEL_KEYS), ...RAW_COPY_SETTING_CATEGORIES.map(category => category.labelKey)];
+    const untranslated = labelKeys.filter(labelKey => !i18n.getResource(language, 'translation', labelKey)
+      || i18n.t(labelKey, { lng: language }) === labelKey);
+    expect(untranslated).toEqual([]);
+    expect(host.textContent).not.toContain('workspace.');
     for (const label of language === 'ja'
       ? ['ポイントカーブ全体', '周辺光量補正一式', '切り抜き・水平補正']
       : ['Point Curve (all channels)', 'Vignette correction settings', 'Crop and straighten']) expect(host.textContent).toContain(label);
