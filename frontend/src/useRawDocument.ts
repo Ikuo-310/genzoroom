@@ -408,6 +408,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         const baseline = owner.baseline;
         setState(previous => previous && previous.assetId === assetId ? { ...previous, url: baseline?.url,
           width: baseline?.width, height: baseline?.height, frame: baseline?.frame, quality: baseline?.quality,
+          histogram: baseline?.surface?.histogram ?? previous.histogram,
           imageRevision: baseline?.imageRevision, displayError: undefined } : previous);
       }
     };
@@ -754,11 +755,11 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
             if (frame.frame) {
               publishedFrame = { revision: doc.revision, quality: frame.quality ?? 'draft', frame: frame.frame };
               wholeSurfaces.current.after = { url: candidate, doc: { ...doc }, frame: frame.frame,
-                quality: frame.quality ?? 'draft', maxSide: target.maxSide, histogram: wholeSurfaces.current.after?.histogram };
+                quality: frame.quality ?? 'draft', maxSide: target.maxSide, histogram: frame.histogram };
             }
             setState(previous => previous && previous.assetId === assetId ? { ...previous, url: candidate,
               width: frame.width, height: frame.height, frame: frame.frame, quality: frame.quality ?? 'draft',
-              imageRevision: doc.revision, displayError: undefined } : previous);
+              histogram: frame.histogram, imageRevision: doc.revision, displayError: undefined } : previous);
             overlay.refresh();
           }).catch(cause => {
             if (owner.active && sequence >= owner.displayedSequence) {
@@ -802,11 +803,12 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
               publishedFrame = { revision: doc.revision, quality: frame.quality ?? 'draft', frame: frame.frame };
               wholeSurfaces.current.after = { url: candidate, doc: { ...doc }, frame: frame.frame,
                 quality: frame.quality ?? 'draft', maxSide: target.maxSide,
-                histogram: wholeSurfaces.current.after?.histogram,
+                histogram: target.pointColorRangeIndex === undefined ? frame.histogram : wholeSurfaces.current.after?.histogram,
                 ...(target.pointColorRangeIndex === undefined ? {} : { pointColorRangeIndex: target.pointColorRangeIndex }) };
             }
             setState(previous => previous && previous.assetId === assetId ? { ...previous, url: candidate,
               width: frame.width, height: frame.height, frame: frame.frame, quality: frame.quality ?? 'draft',
+              histogram: target.pointColorRangeIndex === undefined ? frame.histogram : previous.histogram,
               imageRevision: doc.revision, displayError: undefined } : previous);
             overlay.refresh();
           }).catch(cause => {
@@ -830,11 +832,11 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
             if (frame.frame) {
               publishedFrame = { revision: doc.revision, quality: frame.quality ?? 'draft', frame: frame.frame };
               wholeSurfaces.current.after = { url: candidate, doc: { ...doc }, frame: frame.frame,
-                quality: frame.quality ?? 'draft', maxSide: target.maxSide, histogram: wholeSurfaces.current.after?.histogram };
+                quality: frame.quality ?? 'draft', maxSide: target.maxSide, histogram: frame.histogram };
             }
             setState(previous => previous && previous.assetId === assetId ? { ...previous, url: candidate,
               width: frame.width, height: frame.height, frame: frame.frame, quality: frame.quality ?? 'draft',
-              imageRevision: doc.revision, displayError: undefined } : previous);
+              histogram: frame.histogram, imageRevision: doc.revision, displayError: undefined } : previous);
             overlay.refresh();
           }).catch(cause => {
             if (owner.active && sequence > owner.displayedSequence) {

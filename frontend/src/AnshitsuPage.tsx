@@ -28,6 +28,7 @@ import { ColorGradingAdjustmentControls, type GradingRangeMenuTarget } from './C
 import { isBasicDefault, isColorDefault, isColorGradingDefault, supportsEditing } from './editing';
 import { useJpegOriginal } from './useJpegOriginal';
 import { useRawDocument } from './useRawDocument';
+import { selectRawRegionDisplay } from './rawRegionOverlay';
 import { RawApiError } from './rawApi';
 import { RawAdjustmentControls } from './RawAdjustmentControls';
 import type { JpegProfile } from './jpegProfile';
@@ -191,6 +192,9 @@ export function AnshitsuPage() {
   const jpegOriginal = useJpegOriginal(developmentEngine === 'jpeg' ? activeDetail : null, settings.initialImage,
     initialGpu?.assetId === assetId && initialGpu.usable);
   const rawDocument = useRawDocument(usesLightcraft && activeDetail ? assetId : null, viewerShowsBefore);
+  const scopeRegionDisplay = usesLightcraft ? selectRawRegionDisplay(rawDocument?.regionDisplay,
+    viewerShowsBefore ? rawDocument?.beforeFrame?.geometryId ?? rawDocument?.frame?.geometryId : rawDocument?.frame?.geometryId,
+    viewerShowsBefore) : undefined;
   // Back/Forward can change the route without activateAsset, so unlock only after the target settles.
   useEffect(() => {
     if (observedRouteAssetRef.current !== assetId) {
@@ -1133,7 +1137,7 @@ export function AnshitsuPage() {
             <option value="histogram">{t('workspace.histogram')}</option>
           </select>}>
           <ScopePanel histogram={usesLightcraft
-            ? (viewerShowsBefore ? rawDocument?.regionDisplay?.wholeBefore?.histogram : rawDocument?.regionDisplay?.wholeAfter?.histogram)
+            ? (viewerShowsBefore ? scopeRegionDisplay?.wholeBefore?.histogram : scopeRegionDisplay?.wholeAfter.histogram)
               ?? rawDocument?.scopeHistogram ?? null
             : activeHistograms?.[viewerShowsBefore ? 'before' : 'after'] ?? null}
             keyboardBlocked={(!editable && !usesLightcraft) || workspaceKeyboardBlocked} />

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { RawPreviewUrls, RawRegionOverlay, regionLayerPlacement, rebindRegion, type RawWholeSurface } from './rawRegionOverlay';
+import { RawPreviewUrls, RawRegionOverlay, regionLayerPlacement, rebindRegion, selectRawRegionDisplay, type RawRegionDisplay, type RawWholeSurface } from './rawRegionOverlay';
 import { checkRegionResponse, type RegionRequest } from './rawRegionContract';
 import { planRawRegion, type RegionPlannerInput } from './rawRegionPlanner';
 import type { RegionCandidate, RegionDeliveryOwner } from './rawRegionDelivery';
@@ -11,6 +11,21 @@ let serial = 0;
 const revoke = vi.fn();
 beforeEach(() => { serial = 0; revoke.mockReset(); vi.stubGlobal('URL', { createObjectURL: () => `blob:${++serial}`, revokeObjectURL: revoke }); });
 afterEach(() => vi.unstubAllGlobals());
+
+it('selects the Region Whole Histogram only when Viewer geometry and Before pairing allow Region display', () => {
+  const h = harness(true), after = h.candidate(), before = h.candidate('before');
+  if (after.result.operation !== 'render' || before.result.operation !== 'render') throw new Error();
+  const geometry = h.getOwner().geometry;
+  const layer = (metadata: typeof after.result.metadata) => ({ url: 'blob:region', metadata, planGeneration: 1,
+    ...regionLayerPlacement(metadata, geometry) });
+  const whole = (url: string): RawWholeSurface => ({ ...h.whole(), url });
+  const display: RawRegionDisplay = { after: layer(after.result.metadata), wholeAfter: whole('blob:after') };
+  const paired: RawRegionDisplay = { ...display, before: layer(before.result.metadata), wholeBefore: whole('blob:before') };
+  expect(selectRawRegionDisplay(display, geometry.geometryId, false)).toBe(display);
+  expect(selectRawRegionDisplay(display, 'f'.repeat(64), false)).toBeUndefined();
+  expect(selectRawRegionDisplay(display, geometry.geometryId, true)).toBeUndefined();
+  expect(selectRawRegionDisplay(paired, geometry.geometryId, true)).toBe(paired);
+});
 
 function harness(comparing = false, failed = vi.fn()) {
   const r = regionRequest(), urls = new RawPreviewUrls();

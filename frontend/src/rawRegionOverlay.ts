@@ -24,6 +24,10 @@ export type RawRegionLayer = { url: string; metadata: RegionResponse; planGenera
   nativePlacement: RegionRect; validNativeRect: RegionRect };
 export type RawRegionDisplay = { after: RawRegionLayer; before?: RawRegionLayer;
   wholeAfter: RawWholeSurface; wholeBefore?: RawWholeSurface };
+export function selectRawRegionDisplay(display: RawRegionDisplay | undefined, geometryId: string | undefined, showBefore: boolean) {
+  if (!display || display.after.metadata.geometryId !== geometryId || showBefore && (!display.before || !display.wholeBefore)) return undefined;
+  return display;
+}
 type Context = { owner?: RegionDeliveryOwner; after?: RawWholeSurface; before?: RawWholeSurface; comparing: boolean; regionFull?: RegionFullFrame };
 type Options = { context: () => Context; current: (candidate: RegionCandidate) => boolean; changed: () => void;
   urls: RawPreviewUrls; failed?: (code: string) => void;

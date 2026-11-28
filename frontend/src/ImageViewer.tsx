@@ -17,7 +17,7 @@ import type { WorkspaceGpuRenderer, ProcessingBackend } from './useWorkspaceGpu'
 import type { HistogramChangeHandler } from './histogram';
 import type { RawPickTarget } from './rawApi';
 import type { RawView } from './rawWholePreview';
-import type { RawRegionDisplay } from './rawRegionOverlay';
+import { selectRawRegionDisplay, type RawRegionDisplay } from './rawRegionOverlay';
 
 type ImageViewerProps = {
   src: string;
@@ -204,8 +204,7 @@ export function ImageViewer({ src, documentKey, rawCrop, rawFrame: afterFrame, b
       nativeWidth: rawFrame.nativeWidth, nativeHeight: rawFrame.nativeHeight, geometryId: rawFrame.geometryId, fit: fitMode,
       panX: pan.x, panY: pan.y, interacting: viewInteracting });
   }, [scale, dpr, rawFrame?.geometryId, rawFrame?.nativeWidth, rawFrame?.nativeHeight, viewportSize.x, viewportSize.y, fitMode, pan.x, pan.y, viewInteracting]);
-  const regionDisplay = rawRegionDisplay?.after.metadata.geometryId === rawFrame?.geometryId
-    && (!showBeforeAdjustments || !!rawRegionDisplay?.before && !!rawRegionDisplay.wholeBefore) ? rawRegionDisplay : undefined;
+  const regionDisplay = selectRawRegionDisplay(rawRegionDisplay, rawFrame?.geometryId, showBeforeAdjustments);
   const regionLayer = showBeforeAdjustments ? regionDisplay?.before : regionDisplay?.after;
   const regionBase = showBeforeAdjustments ? regionDisplay?.wholeBefore : regionDisplay?.wholeAfter;
   const displayedKind = showBeforeAdjustments ? 'before' : 'after';

@@ -990,7 +990,13 @@ describe('RAW native Before cache', () => {
     expect(vi.mocked(api.rawPreview).mock.calls.at(-1)?.[4]?.quality).toBe('full');
   });
   it('publishes a completed curve Draft while newer pointer input is pending', async () => {
+    const initialHistogram = { r: new Uint32Array(256), g: new Uint32Array(256), b: new Uint32Array(256), y: new Uint32Array(256) };
+    const draftHistogram = { r: new Uint32Array(256), g: new Uint32Array(256), b: new Uint32Array(256), y: new Uint32Array(256) };
+    initialHistogram.r[12] = 3; draftHistogram.r[87] = 9;
+    vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(['base']), width: 16, height: 12, epoch: 1, sequence: 1,
+      histogram: initialHistogram });
     await render('a'); await flush();
+    expect(current?.scopeHistogram?.r[12]).toBe(3);
     const first = deferred<api.RawFrame>();
     const before = vi.mocked(api.rawPreview).mock.calls.length;
     vi.mocked(api.rawPreview).mockReturnValueOnce(first.promise);
@@ -1002,9 +1008,11 @@ describe('RAW native Before cache', () => {
     act(() => current!.updateCurveInteraction([{ x: 0, y: 0 }, { x: .6, y: .8 }, { x: 1, y: 1 }]));
     const previousUrl = current?.url;
     await act(async () => { first.resolve({ blob: new Blob(['draft-a']), width: 16, height: 12, epoch: 1, sequence: 1,
-      quality: 'draft' }); await flush(); });
+      quality: 'draft', histogram: draftHistogram }); await flush(); });
     expect(current?.url).not.toBe(previousUrl);
+    expect(current?.scopeHistogram?.r[87]).toBe(9);
     act(() => current!.cancelCurveInteraction()); await flush();
+    expect(current?.scopeHistogram?.r[12]).toBe(3);
   });
   it('keeps a newer curve Draft when an older decoded image finishes later', async () => {
     await render('a'); await flush();
@@ -1332,6 +1340,40 @@ describe('RAW document lifetime', () => {
     expect(current!.url).not.toBe(previous);
     await act(async () => { current!.cancelPointColorInteraction(); });
     await flush();
+  });
+
+  it('updates the Histogram from a normal Point Color dedicated Draft', async () => {
+    const draftHistogram = { r: new Uint32Array(256), g: new Uint32Array(256), b: new Uint32Array(256), y: new Uint32Array(256) };
+    draftHistogram.r[134] = 17;
+    await beginPointColor();
+    vi.mocked(api.rawPreview).mockResolvedValueOnce({ ...pointFrame, quality: 'draft', interactionSequence: 1, histogram: draftHistogram });
+    act(() => current!.updatePointColorInteraction(38));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 65)); }); await flush();
+    expect(vi.mocked(api.rawPreview).mock.calls.at(-1)?.[4]).not.toHaveProperty('pointColorRangeIndex');
+    expect(current!.scopeHistogram?.r[134]).toBe(17);
+    await act(async () => { current!.cancelPointColorInteraction(); }); await flush();
+  });
+
+  it('keeps the last ordinary Histogram during an adopted Point Color range Draft', async () => {
+    const ordinaryHistogram = { r: new Uint32Array(256), g: new Uint32Array(256), b: new Uint32Array(256), y: new Uint32Array(256) };
+    const rangeHistogram = { r: new Uint32Array(256), g: new Uint32Array(256), b: new Uint32Array(256), y: new Uint32Array(256) };
+    ordinaryHistogram.r[18] = 4; rangeHistogram.r[201] = 14;
+    vi.mocked(api.readRawSettings).mockImplementation(async doc => ({ ...rawSettings(doc), point_colors: [pointColor] }));
+    vi.mocked(api.rawPreview).mockImplementation(async (_doc, sequence, _signal, kind = 'after', target, _curve, _targeted, _mixer, interaction) => ({
+      ...pointFrame, sequence, kind, quality: target?.quality ?? 'full', interactionSequence: interaction?.sequence,
+      histogram: target?.pointColorRangeIndex === undefined ? ordinaryHistogram : rangeHistogram,
+    }));
+    await render('a'); await flush();
+    expect(current?.scopeHistogram?.r[18]).toBe(4);
+    act(() => current!.setPointColorRangeIndex(0)); await flush();
+    expect(vi.mocked(api.rawPreview).mock.calls.at(-1)?.[4]?.pointColorRangeIndex).toBe(0);
+    expect(current?.scopeHistogram?.r[18]).toBe(4);
+    act(() => { expect(current!.beginPointColorInteraction('pointColor.0.hueShift', 0)).toBe(true); }); await flush();
+    act(() => current!.updatePointColorInteraction(8));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 65)); }); await flush();
+    expect(vi.mocked(api.rawPreview).mock.calls.at(-1)?.[4]?.pointColorRangeIndex).toBe(0);
+    expect(current?.scopeHistogram?.r[18]).toBe(4);
+    await act(async () => { current!.cancelPointColorInteraction(); }); await flush();
   });
 
   it('cancels an acknowledged Point Color draft before explicit discard', async () => {
@@ -2073,13 +2115,18 @@ describe('bounded RAW session renewal', () => {
   async function drain() { await act(async () => { for (let i = 0; i < 150; i++) await Promise.resolve(); }); }
   it('runs a Mixer target drag through ordered Draft updates and one Native History operation', async () => {
     vi.useFakeTimers();
+    const ordinaryHistogram = { r: new Uint32Array(256), g: new Uint32Array(256), b: new Uint32Array(256), y: new Uint32Array(256) };
+    const mixerHistogram = { r: new Uint32Array(256), g: new Uint32Array(256), b: new Uint32Array(256), y: new Uint32Array(256) };
+    ordinaryHistogram.r[20] = 2; mixerHistogram.r[220] = 13;
     vi.mocked(api.rawPreview).mockImplementation(async (doc, sequence, _signal, kind = 'after', _target, _curve, _targeted, mixer) => ({
       blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence, kind,
       interactionSequence: mixer?.sequence,
+      histogram: mixer ? mixerHistogram : ordinaryHistogram,
       frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000, aspect: 4/3, fullWidth: 16, fullHeight: 12, window: null },
     }));
     await render('mixer-target'); await drain();
     expect(current?.frame).toBeTruthy();
+    expect(current?.scopeHistogram?.r[20]).toBe(2);
     act(() => current!.toggleMixerTarget('hue'));
     expect(current?.mixerTargetActive).toBe('hue');
     let began = false;
@@ -2088,6 +2135,7 @@ describe('bounded RAW session renewal', () => {
     expect(api.beginRawMixerInteraction).toHaveBeenCalledWith(expect.objectContaining({ assetId: 'mixer-target' }), 'hue', .25, .75);
     act(() => current!.updateMixerTarget(3));
     await act(async () => { await vi.advanceTimersByTimeAsync(60); }); await drain();
+    expect(current?.scopeHistogram?.r[220]).toBe(13);
     expect(api.updateRawMixerInteraction).toHaveBeenCalledWith(expect.anything(), expect.any(Number), expect.any(AbortSignal),
       expect.objectContaining({ quality: 'draft', mode: 'whole' }), expect.objectContaining({ target: 'hue', delta: 3, sequence: 1 }));
     expect(current?.mixerTargetValues).toEqual({ 'mixer.red.hue': 1.5, 'mixer.orange.hue': .75 });
