@@ -7,6 +7,7 @@ import { GalleryPage } from './GalleryPage';
 import { updateSetting } from './appSettings';
 import { writePhotoFilterMode } from './photoFilters';
 import i18n from './i18n';
+import './style.css';
 vi.mock('./exportQueueApi', async original => ({ ...await original<typeof import('./exportQueueApi')>(),
   listExportQueue: async () => [] }));
 
@@ -59,6 +60,10 @@ describe('Home album tab', () => {
   it('starts with Recent, renders albums, and keeps the recent photo state when returning', async () => {
     await mount();
     expect(host.querySelector('#home-recent-tab')?.getAttribute('aria-selected')).toBe('true');
+    const recentTab=host.querySelector<HTMLElement>('#home-recent-tab')!;
+    const albumTab=host.querySelector<HTMLElement>('#home-albums-tab')!;
+    expect(getComputedStyle(recentTab).backgroundColor).toBe('rgb(48, 48, 51)');
+    expect(getComputedStyle(albumTab).backgroundColor).toBe('rgba(0, 0, 0, 0)');
     expect(api.recent).toHaveBeenCalledTimes(1);
     expect(api.albums).not.toHaveBeenCalled();
     expect(host.querySelectorAll('.photo-card')).toHaveLength(1);
@@ -75,6 +80,8 @@ describe('Home album tab', () => {
     clickTab('#home-albums-tab');
     await act(async () => { await Promise.resolve(); });
     expect(host.querySelector('#home-albums-tab')?.getAttribute('aria-selected')).toBe('true');
+    expect(getComputedStyle(albumTab).backgroundColor).toBe('rgb(48, 48, 51)');
+    expect(getComputedStyle(recentTab).backgroundColor).toBe('rgba(0, 0, 0, 0)');
     expect(api.albums).toHaveBeenCalledTimes(1);
     expect(host.querySelector('.album-card .album-name')?.textContent).toBe('旅行 2026');
     expect(host.querySelector<HTMLImageElement>('.album-cover img')?.getAttribute('src')).toBe('/api/assets/cover-1/thumbnail');

@@ -93,7 +93,9 @@ button:disabled { opacity: 0.6; cursor: wait; }
 .immich-action-button:disabled { opacity: 0.6; cursor: not-allowed; }
 .home-tabs button { color: var(--text-secondary); background: transparent; border: 0; border-bottom: 3px solid transparent; border-radius: 0; padding: 5px 8px 8px; font-weight: 600; }
 .home-tabs button:hover { color: var(--text-primary); background: var(--bg-elevated); }
-.home-tabs button[aria-selected="true"] { color: var(--text-primary); border-bottom-color: var(--accent); }
+.home-tabs button[aria-selected="true"], .home-tabs button[aria-selected="true"]:hover {
+  color: var(--text-primary); background: #303033; border-bottom-color: var(--accent);
+}
 .home-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .home-tab-panel { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; min-height: 0; }
 .album-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--album-card-width, 200px)), var(--album-card-width, 200px))); grid-auto-rows: max-content; justify-content: center; gap: 16px; min-height: 0; overflow-y: visible; padding: 2px; }
