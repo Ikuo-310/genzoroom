@@ -633,7 +633,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
             && previous.phase==='provisional' && previous.crop.geometry.angle===confirmed.crop!.geometry.angle
               ? {...previous,crop:structuredClone(confirmed.crop!),revision:confirmed.revision,fingerprint:confirmed.settingsFingerprint}:previous);
       }
-      saver?.observe(confirmed, !editor.unsettled);
+      saver?.observe(confirmed);
       setState(previous => ({ ...previous, assetId, status: previous?.status ?? 'ready',
         document: confirmed, settings: confirmed, desired: { ...editor!.desired }, pending: editor!.unsettled,
         editError: editor!.error, dirty: saver?.dirty || saver?.moving, saving: saver?.saving, saveError: saver?.error,
@@ -1025,8 +1025,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
           if (retry && editor!.error) { editor!.retry(true); await owned(async () => {}); }
           await editor!.settle();
           if (!current()) throw new RawApiError('raw_document_closed');
-          saver!.observe(editor!.confirmed, true);
-          await saver!.save(retry, saver!.revision === 0);
+          saver!.observe(editor!.confirmed);
+          await saver!.save(retry);
           if (saver!.dirty || editor!.unsettled) throw new RawApiError('raw_save_unconfirmed');
           expectedFingerprint = editor!.confirmed.settingsFingerprint;
           expectedRecipeRevision = saver!.revision;
@@ -1780,7 +1780,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     do {
       await editor.settle();
       if (activeEditor() !== editor) throw new RawApiError('raw_stale_handle');
-      saver.observe(editor.confirmed, true);
+      saver.observe(editor.confirmed);
       await saver.save(retry);
       if (activeEditor() !== editor) throw new RawApiError('raw_stale_handle');
       // A control handoff accepted before freezing may start only after the first ack.

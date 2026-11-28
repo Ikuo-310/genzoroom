@@ -127,9 +127,6 @@ export class RawSaveError extends RawApiError {
   constructor(code: string, public readonly outcome: 'unknown' | 'rejected', status?: number) { super(code, status); }
 }
 export type RawRecipeRequest = { doc: RawSettings; expectedRecipeRevision: number; saveId: string };
-export type RawRecipeAck = { recipeRevision: number; saveId: string; updatedAt: string;
-  documentRevision: number; settingsFingerprint: string };
-export type RawRecipeState = { recipeRevision: number; recipeFingerprint: string | null; lastSaveId: string | null; updatedAt: string | null };
 export type RawPickFrame = { kind: 'before' | 'after'; geometryId: string; maxSide: number; quality: 'draft' | 'full'; x: number; y: number };
 export type RawPickTarget = { url: string; doc: RawDocument; frame: Omit<RawPickFrame, 'x' | 'y'> };
 export type RawPointColorControlField = 'hueShift' | 'satShift' | 'lumShift' | 'variance'
@@ -553,36 +550,6 @@ async function geometryGesture(doc: RawSettings, intent: { gestureId: string; se
   if (value.gestureId !== intent.gestureId || value.sequence !== (intent.sequence ?? -1)
     || (suffix ? value.revision !== doc.revision : value.revision <= doc.revision)) throw new RawApiError('raw_invalid_response');
   return value;
-}
-export async function readRawRecipe(doc: RawDocument): Promise<RawRecipeState> {
-  const value = await json(`/documents/${doc.handle}/recipe`, { headers: { 'X-Raw-Workspace': doc.workspaceId,
-    'X-Raw-Generation': String(doc.generation), 'X-Raw-Token': doc.documentToken } });
-  document(value, doc.workspaceId, doc.assetId);
-  if (value.handle !== doc.handle || value.generation !== doc.generation || value.documentToken !== doc.documentToken
-    || !integer(value.recipeRevision) || value.recipeFingerprint !== null && !fingerprint(value.recipeFingerprint)
-    || (value.recipeRevision === 0 ? value.recipeFingerprint !== null || value.lastSaveId !== null || value.updatedAt !== null
-      : !fingerprint(value.recipeFingerprint) || typeof value.lastSaveId !== 'string'
-        || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value.lastSaveId)
-        || typeof value.updatedAt !== 'string' || !Number.isFinite(Date.parse(value.updatedAt)))) throw new RawApiError('raw_invalid_response');
-  return value;
-}
-export async function saveRawRecipe(request: RawRecipeRequest): Promise<RawRecipeAck> {
-  const { doc, expectedRecipeRevision, saveId } = request;
-  let accepted = false;
-  try {
-    const value = await json(`/documents/${doc.handle}/recipe`, { ...post({ ...identityBody(doc),
-      documentRevision: doc.revision, expectedRecipeRevision, saveId }), method: 'PUT' });
-    accepted = true;
-    document({ ...value, revision: value.documentRevision }, doc.workspaceId, doc.assetId);
-    if (value.handle !== doc.handle || value.generation !== doc.generation || value.documentToken !== doc.documentToken
-      || value.documentRevision !== doc.revision || value.settingsFingerprint !== doc.settingsFingerprint
-      || !integer(value.recipeRevision) || value.recipeRevision !== expectedRecipeRevision + 1 || value.saveId !== saveId
-      || typeof value.updatedAt !== 'string' || !Number.isFinite(Date.parse(value.updatedAt))) throw new RawApiError('raw_invalid_response');
-    return value;
-  } catch (cause) {
-    const error = cause instanceof RawApiError ? cause : new RawApiError('raw_connection_failed');
-    throw new RawSaveError(error.code, accepted || !error.status || error.status >= 500 || error.status === 408 ? 'unknown' : 'rejected', error.status);
-  }
 }
 /** A retry keeps the exact document/body; current metadata is independent of the original ack. */
 export async function saveRawHistory(request: RawHistoryRequest): Promise<RawHistoryResult> {

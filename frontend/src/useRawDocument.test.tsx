@@ -17,7 +17,7 @@ vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawA
   closeRawDocument: vi.fn(), discardRawWorkspace:vi.fn(), beginRawGeometry: vi.fn(),updateRawGeometry: vi.fn(),recoverRawGeometry: vi.fn(), beginRawCurveInteraction: vi.fn(), cancelRawCurveInteraction: vi.fn(), updateRawTargetedCurve: vi.fn(), beginRawMixerInteraction: vi.fn(), updateRawMixerInteraction: vi.fn(), cancelRawMixerInteraction: vi.fn(), endRawMixerInteraction: vi.fn(), rawCapability: vi.fn(), createRawWorkspace: vi.fn(), openRawDocument: vi.fn(),
   rawRegionOwner: vi.fn(), rawRegion: vi.fn(), cancelRawRegion: vi.fn(async () => {}), abortRawWorkspaceRequests: vi.fn(),
   rawPreview: vi.fn(), cancelRawPreview: vi.fn(async () => {}), readRawDocument: vi.fn(), readRawSettings: vi.fn(), setRawControls: vi.fn(), releaseRawWorkspace: vi.fn(), rawWorkspaceEmpty: vi.fn(),
-  readRawHistory: vi.fn(), readRawCopySettings: vi.fn(), saveRawHistory: vi.fn(), saveRawRecipe: vi.fn(), readRawRecipe: vi.fn(),
+  readRawHistory: vi.fn(), readRawCopySettings: vi.fn(), saveRawHistory: vi.fn(),
   beginRawPointColorInteraction: vi.fn(), updateRawPointColorInteraction: vi.fn(), cancelRawPointColorInteraction: vi.fn() }));
 const commitHistory = vi.fn(async (request: api.RawHistoryRequest): Promise<api.RawHistoryResult> => rawHistoryResult(request));
 let root: Root, host: HTMLDivElement;

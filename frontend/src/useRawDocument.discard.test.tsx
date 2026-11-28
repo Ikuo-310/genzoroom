@@ -11,7 +11,7 @@ import { rawHistoryData, rawHistoryResult } from './test/rawHistory';
 
 vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(),
   createRawWorkspace: vi.fn(), openRawDocument: vi.fn(), rawCapability: vi.fn(), rawPreview: vi.fn(),
-  readRawDocument: vi.fn(), readRawSettings: vi.fn(), readRawHistory: vi.fn(), saveRawHistory: vi.fn(), saveRawRecipe: vi.fn(),
+  readRawDocument: vi.fn(), readRawSettings: vi.fn(), readRawHistory: vi.fn(), saveRawHistory: vi.fn(),
   beginRawPointColorInteraction: vi.fn(), updateRawPointColorInteraction: vi.fn(), cancelRawPointColorInteraction: vi.fn(),
   discardRawWorkspace: vi.fn(), releaseRawWorkspace: vi.fn(), rawWorkspaceEmpty: vi.fn(), cancelRawPreview: vi.fn(async () => {}),
   rawRegionOwner: vi.fn(), rawRegion: vi.fn(), cancelRawRegion: vi.fn(async () => {}), setRawControls: vi.fn() }));

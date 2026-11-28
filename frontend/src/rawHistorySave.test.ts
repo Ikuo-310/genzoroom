@@ -8,7 +8,7 @@ import { rawHistoryResult, rawHistoryData } from './test/rawHistory';
 vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawApi')>(),
   beginRawGeometry: vi.fn(), updateRawGeometry: vi.fn(), beginRawCurveInteraction: vi.fn(), cancelRawCurveInteraction: vi.fn(),
   updateRawTargetedCurve: vi.fn(), rawPreview: vi.fn(),
-  recoverRawGeometry: vi.fn(), readRawHistory: vi.fn(), saveRawHistory: vi.fn(), saveRawRecipe: vi.fn(), setRawControls: vi.fn(), readRawSettings: vi.fn() }));
+  recoverRawGeometry: vi.fn(), readRawHistory: vi.fn(), saveRawHistory: vi.fn(), setRawControls: vi.fn(), readRawSettings: vi.fn() }));
 let queue: Promise<void>;
 const schedule = (action: () => Promise<void>) => { queue = queue.then(action); };
 const fp = (value: number) => String(value).padStart(64, '0');
@@ -18,7 +18,7 @@ function owner(settings = initial()) {
   let saver: RawRecipeSave;
   const curvePreview = vi.fn();
   const curveRecovery = vi.fn(async () => {});
-  const controls = new RawControls(settings, { schedule, changed: () => saver?.observe(controls.confirmed, !controls.unsettled),
+  const controls = new RawControls(settings, { schedule, changed: () => saver?.observe(controls.confirmed),
     preview: async () => {} });
   saver = new RawRecipeSave(settings, { schedule, changed: () => {}, controls, curvePreview, curveRecovery });
   return { saver, controls, curvePreview, curveRecovery };
@@ -75,7 +75,6 @@ it('keeps an incompatible Recipe at import defaults without creating baseline Re
   expect(saver.dirty).toBe(false);
   await saver.save();
   expect(api.saveRawHistory).not.toHaveBeenCalled();
-  expect(api.saveRawRecipe).not.toHaveBeenCalled();
   expect(saver.locked).toBe(false);
 });
 
@@ -271,14 +270,13 @@ it('coalesces repeated begins and many intermediate readbacks into one gesture c
   expect(request.control).toBe('light.exposure'); expect(request.doc.values['light.exposure']).toBe(2);
   expect(controls.confirmed.recipeRevision).toBe(saver.revision);
   expect(saver.savedFingerprint).toBe(controls.confirmed.settingsFingerprint);
-  expect(api.saveRawRecipe).not.toHaveBeenCalled();
 });
 
 it('never autosaves an open gesture even after five seconds', async () => {
   const { saver } = owner(); await saver.save();
   saver.change('light.exposure', 1);
   await vi.advanceTimersByTimeAsync(6000); await drain();
-  expect(saver.dirty).toBe(true); expect(api.saveRawHistory).toHaveBeenCalledOnce(); expect(api.saveRawRecipe).not.toHaveBeenCalled();
+  expect(saver.dirty).toBe(true); expect(api.saveRawHistory).toHaveBeenCalledOnce();
   await saver.save(); expect(saver.dirty).toBe(false);
 });
 

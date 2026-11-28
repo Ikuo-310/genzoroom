@@ -42,7 +42,7 @@ vi.mock('./rawApi', async original => ({ ...await original<typeof import('./rawA
   setRawControls: vi.fn(async (doc, patch) => ({ ...rawSettings(doc), revision: doc.revision + 1,
     settingsFingerprint: String(doc.revision + 1).padStart(64, '0'),
     values: { ...rawSettings(doc).values, ...patch } })), releaseRawWorkspace: vi.fn(async () => {}),
-  readRawHistory: vi.fn(), saveRawHistory: vi.fn(), saveRawRecipe: vi.fn(), readRawRecipe: vi.fn(),
+  readRawHistory: vi.fn(), saveRawHistory: vi.fn(),
   beginRawPointColorInteraction: vi.fn(async () => 'a'.repeat(32)),
   updateRawPointColorInteraction: vi.fn(async (_doc, _serial, _signal, _target, interaction) => interaction.sequence),
   cancelRawPointColorInteraction: vi.fn(async () => {}),
@@ -2124,7 +2124,7 @@ it.each(['pointerup', 'pointercancel'])('commits one History operation for a lon
     await act(async () => { await vi.advanceTimersByTimeAsync(150); }); await flush();
   }
   await act(async () => { await vi.advanceTimersByTimeAsync(6000); }); await flush();
-  expect(commitHistory).not.toHaveBeenCalled(); expect(rawApi.saveRawRecipe).not.toHaveBeenCalled();
+  expect(commitHistory).not.toHaveBeenCalled();
   expect(rawApi.setRawControls).toHaveBeenCalledTimes(8);
   act(() => window.dispatchEvent(new MouseEvent(ending, { bubbles: true }))); await flush();
   expect(commitHistory).toHaveBeenCalledOnce();
