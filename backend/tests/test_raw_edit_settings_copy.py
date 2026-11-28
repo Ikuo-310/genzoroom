@@ -9,6 +9,7 @@ import pytest
 import windows_raw_api as api_module
 from lightcraft_mcp import LightCraftError
 from raw_edit_settings_copy import (COPY_SETTING_IDS, CROP_SETTING_ID, extract_copy_settings)
+from raw_edit_settings_copy import source_wb_mode
 from tests.test_lightcraft_raw import DEFAULT
 from tests.test_raw_controls import identity
 from tests.test_windows_local import authenticate, client, local
@@ -22,6 +23,13 @@ def test_frontend_copy_setting_ids_match_backend_contract():
     frontend_ids = re.findall(r"'([^']+)'", match.group(1))
     assert len(frontend_ids) == 25
     assert set(frontend_ids) == COPY_SETTING_IDS
+
+
+@pytest.mark.parametrize(("scale", "expected"), [("kelvin", "absolute"), ("legacy", "relative"),
+                                                    (None, "relative"), ("future", "unknown")])
+def test_source_wb_mode_comes_from_native_import_settings(scale, expected):
+    settings = {"wb": {} if scale is None else {"scale": scale}}
+    assert source_wb_mode(settings) == expected
 
 
 def test_copy_selection_projects_only_published_fields_and_excludes_crop_from_all():
@@ -88,6 +96,20 @@ def test_copy_settings_http_uses_import_and_saved_snapshots_without_native_or_sq
                                 "selectedIds": ["pointColor"]}
                 initial = await http.post(f'/api/raw/documents/{doc["handle"]}/copy-settings', json=initial_body)
                 assert initial.status_code == 200 and initial.json()["settings"]["point_colors"] == []
+                assert initial.json()["sourceWbMode"] == "absolute"
+                await api.raw.merge_settings(api._raw_handle, {"wb": {"scale": "legacy"}}, doc["revision"])
+                settled = await http.post(f'/api/raw/documents/{doc["handle"]}/settings', json=identity(doc))
+                assert settled.status_code == 200, settled.text
+                doc = settled.json()
+                assert doc["wb"]["scale"] == "legacy"
+                assert doc["sourceWbMode"] == "absolute"
+                current = await http.post(f'/api/raw/documents/{doc["handle"]}/copy-settings', json={
+                    "workspaceId": doc["workspaceId"], "generation": doc["generation"],
+                    "documentToken": doc["documentToken"], "documentRevision": doc["revision"],
+                    "settingsFingerprint": doc["settingsFingerprint"], "recipeRevision": doc["recipeRevision"],
+                    "selectedIds": ["whiteBalance"]})
+                assert current.status_code == 200 and current.json()["sourceWbMode"] == "absolute"
+                assert current.json()["settings"]["wb"]["scale"] == "legacy"
                 history_body = identity(doc) | {"documentRevision": doc["revision"],
                     "settingsFingerprint": doc["settingsFingerprint"], "expectedRecipeRevision": doc["recipeRevision"],
                     "saveId": str(uuid4())}

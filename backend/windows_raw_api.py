@@ -35,6 +35,7 @@ HISTORY_CONFLICTS = {"raw_history_save_pending", "raw_history_commit_required", 
                      "raw_history_step_id_reused", "raw_recipe_save_pending", "raw_history_requires_operation",
                      "raw_geometry_gesture_pending", "raw_geometry_outcome_unknown", "raw_geometry_request_conflict",
                      "raw_history_operation_outcome_unknown",
+                     "raw_wb_incompatible",
                      "raw_curve_interaction_pending", "raw_mixer_interaction_pending",
                      "raw_curve_interaction_stale", "raw_mixer_interaction_stale", "raw_mixer_interaction_sequence",
                      "raw_mixer_interaction_conflict", "raw_point_color_interaction_conflict"}
@@ -810,6 +811,8 @@ class RawPreviewApi:
                     photo = self.raw._photo(handle, active=True)
                     import_defaults = json.loads(photo.import_settings_json)
                     import_defaults_fingerprint = self._fingerprint(import_defaults)
+                    from raw_edit_settings_copy import source_wb_mode
+                    source_wb_mode_value = source_wb_mode(import_defaults)
                     snapshot, recipe_status, recipe_revision, recovery_pending = await self._restore_document(handle, snapshot)
                 except BaseException:
                     # Import may have partially registered the source; reap before deleting it.
@@ -826,6 +829,7 @@ class RawPreviewApi:
                                  "sourceHeight": self.raw._photo(handle, active=True).source_size[1],
                                  "recipeStatus": recipe_status, "recipeRevision": recipe_revision,
                                  "importDefaultsFingerprint": import_defaults_fingerprint,
+                                 "sourceWbMode": source_wb_mode_value,
                                  "recipeRecoveryPending": recovery_pending}
                 self.document.update(self._edit_budget())
                 self.document["settingsFingerprint"] = self._fingerprint(snapshot.settings)
@@ -874,7 +878,8 @@ class RawPreviewApi:
                     "workspaceId": doc["workspaceId"], "handle": doc["handle"], "assetId": doc["assetId"],
                     "generation": doc["generation"], "documentToken": doc["documentToken"],
                     "documentRevision": doc["revision"], "settingsFingerprint": doc["settingsFingerprint"],
-                    "recipeRevision": doc["recipeRevision"], "selectedIds": body["selectedIds"],
+                    "recipeRevision": doc["recipeRevision"], "sourceWbMode": doc["sourceWbMode"],
+                    "selectedIds": body["selectedIds"],
                     "settings": settings,
                 }, headers={"Cache-Control": "no-store"})
             if "/geometry" in path:
@@ -1646,9 +1651,15 @@ class RawPreviewApi:
         elif action == "operate":
             from raw_controls import POINT_COLOR_HISTORY_SCHEMAS, validate_point_color_history_operation
             if body["kind"] == "settingsPaste":
-                from raw_edit_settings_copy import validate_copy_payload
+                from raw_edit_settings_copy import source_wb_mode_for_scale, validate_copy_payload
                 validate_history_operation(body["kind"], body["metadata"])
                 validate_copy_payload(body["metadata"]["selectedIds"], body["copySettings"])
+                if "whiteBalance" in body["metadata"]["selectedIds"]:
+                    source_mode = body["metadata"].get("sourceWbMode")
+                    payload_mode = source_wb_mode_for_scale(body["copySettings"].get("wb", {}).get("scale"))
+                    if (source_mode not in ("absolute", "relative") or source_mode != payload_mode
+                            or source_mode != doc.get("sourceWbMode")):
+                        raise LightCraftError("raw_wb_incompatible")
             elif type(body["kind"]) is str and body["kind"] in POINT_COLOR_HISTORY_SCHEMAS:
                 body["metadata"] = validate_point_color_history_operation(body["kind"], body["metadata"])
             else:

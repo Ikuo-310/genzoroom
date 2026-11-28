@@ -7,6 +7,7 @@ import { C1_REGION_BUDGET, validRegionGeometry, type RegionGeometry } from './ra
 
 export type RawDocument = {
   workspaceId: string; handle: string; assetId: string; generation: number; documentToken: string; revision: number;
+  sourceWbMode?: 'absolute' | 'relative' | 'unknown';
   sourceWidth?: number; sourceHeight?: number;
   recipeRevision?: number; recipeFingerprint?: string | null; settingsFingerprint?: string; importDefaultsFingerprint?: string;
   recipeRecoveryPending?: boolean;
@@ -50,7 +51,8 @@ export type RawCopySettingId = typeof RAW_COPY_SETTING_IDS[number];
 export const RAW_DEFAULT_COPY_SETTING_IDS = RAW_COPY_SETTING_IDS.filter((id): id is Exclude<RawCopySettingId, 'crop'> => id !== 'crop');
 export type RawCopySettings = Record<string, unknown>;
 export type RawCopySettingsResponse = Pick<RawSettings, 'workspaceId' | 'handle' | 'assetId' | 'generation' | 'documentToken'
-  | 'settingsFingerprint' | 'recipeRevision'> & { documentRevision: number; selectedIds: RawCopySettingId[]; settings: RawCopySettings };
+  | 'settingsFingerprint' | 'recipeRevision'> & { documentRevision: number; sourceWbMode: 'absolute' | 'relative' | 'unknown';
+    selectedIds: RawCopySettingId[]; settings: RawCopySettings };
 export function validRawCopySettingIds(value: unknown): value is RawCopySettingId[] {
   return Array.isArray(value) && value.length > 0 && value.length <= RAW_COPY_SETTING_IDS.length
     && value.every((id: unknown) => typeof id === 'string' && (RAW_COPY_SETTING_IDS as readonly string[]).includes(id))
@@ -151,7 +153,8 @@ export function validGeometryMetadata(m: { operation?: RawGeometryOperationId; a
     && (m.action === undefined || (m.operation === 'drag' ? ['move','resize'] : m.operation === 'aspect' ? ['lock','unlock'] : []).includes(m.action));
 }
 export type RawHistoryOperation = { kind: 'controlReset'; metadata: { control: RawHistoryControlId } }
-  | { kind: 'settingsPaste'; metadata: { sourceAssetId: string; sourceFilename: string; selectedIds: RawCopySettingId[] };
+  | { kind: 'settingsPaste'; metadata: { sourceAssetId: string; sourceFilename: string; selectedIds: RawCopySettingId[];
+      sourceWbMode?: 'absolute' | 'relative' | 'unknown' };
       copySettings: RawCopySettings }
   | { kind: 'mixerTarget'; metadata: { target: 'hue' | 'sat' | 'lum' } }
   | { kind: 'curve'; metadata: { channel: RawCurveChannel }; points: RawCurveCommandPoint[] }
@@ -373,6 +376,7 @@ function document(value: RawDocument, workspaceId: string, assetId?: string) {
   if (!value || value.workspaceId !== workspaceId || !opaque(value.handle) || !opaque(value.documentToken)
     || !integer(value.generation) || !integer(value.revision) || typeof value.assetId !== 'string'
     || assetId !== undefined && value.assetId !== assetId
+    || value.sourceWbMode !== 'absolute' && value.sourceWbMode !== 'relative' && value.sourceWbMode !== 'unknown'
     || value.recipeRecoveryPending !== undefined && typeof value.recipeRecoveryPending !== 'boolean') throw new RawApiError('raw_invalid_response');
   return value;
 }
@@ -494,14 +498,14 @@ export async function readRawCopySettings(doc: RawSettings, selectedIds: readonl
     documentRevision: doc.revision, settingsFingerprint: doc.settingsFingerprint, recipeRevision: doc.recipeRevision, selectedIds }),
   RAW_COPY_SETTINGS_MAX_BYTES + 4096);
   const fields = ['workspaceId', 'handle', 'assetId', 'generation', 'documentToken', 'documentRevision',
-    'settingsFingerprint', 'recipeRevision', 'selectedIds', 'settings'];
+    'settingsFingerprint', 'recipeRevision', 'sourceWbMode', 'selectedIds', 'settings'];
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).length !== fields.length || fields.some(key => !Object.hasOwn(value, key)))
     throw new RawApiError('raw_invalid_response');
   document({ ...value, revision: value.documentRevision }, doc.workspaceId, doc.assetId);
   if (value.handle !== doc.handle || value.generation !== doc.generation || value.documentToken !== doc.documentToken
     || value.documentRevision !== doc.revision || value.settingsFingerprint !== doc.settingsFingerprint
-    || value.recipeRevision !== doc.recipeRevision)
+    || value.recipeRevision !== doc.recipeRevision || value.sourceWbMode !== doc.sourceWbMode)
     throw new RawApiError('raw_revision_conflict');
   if (!validRawCopySettingIds(value.selectedIds) || !sameRawCopySettingIds(value.selectedIds, selectedIds)
     || !value.settings || typeof value.settings !== 'object' || Array.isArray(value.settings))
@@ -651,9 +655,11 @@ export async function readRawHistory(doc: RawDocument): Promise<RawHistoryData> 
         : step.kind === 'pointColorControl' ? Object.keys(m).length !== 2 || !validRawPointColorControlValue(m.control, m.value)
         : step.kind === 'pointColorControlReset' ? Object.keys(m).length !== 1 || !validRawPointColorControlId(m.control)
         : step.kind === 'pointColorReset' ? Object.keys(m).length !== 0
-        : step.kind === 'settingsPaste' ? Object.keys(m).length !== 3 || !uuid(m.sourceAssetId)
+        : step.kind === 'settingsPaste' ? ![3, 4].includes(Object.keys(m).length) || !uuid(m.sourceAssetId)
           || typeof m.sourceFilename !== 'string' || m.sourceFilename.length < 1 || m.sourceFilename.length > 255
           || /[\\/:\u0000-\u001f]/.test(m.sourceFilename) || !Array.isArray(m.selectedIds)
+          || Object.hasOwn(m, 'sourceWbMode') && !['absolute', 'relative', 'unknown'].includes(m.sourceWbMode)
+          || Object.keys(m).length === 4 && !Object.hasOwn(m, 'sourceWbMode')
           || m.selectedIds.length < 1 || m.selectedIds.length > 64
           || m.selectedIds.some((id: unknown) => typeof id !== 'string' || id.length === 0)
           || new Set(m.selectedIds).size !== m.selectedIds.length

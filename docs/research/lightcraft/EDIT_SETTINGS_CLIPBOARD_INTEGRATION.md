@@ -360,3 +360,41 @@ P1-B は Backend の History 操作へ `settingsPaste` を追加した。コピ�
 - P1-Dは返却hook interfaceを使い、全設定コピー／選択コピー／通常ペースト／選択ペーストのメニュー・dialogと有効状態表示を接続する。LightCraft copied IDs、`canCopySettings`、`canPasteSettings`、`sameEngineClipboard`を使い、Clipboardの本文やownerの独自管理を追加しない。
 - 選択dialogのID表示名・カテゴリ構造はP1-AのID一覧とP1-Cの既存LightCraft JPEGメニューUI部品を参照して構成する。Cropは全コピー既定値に含めず、選択時のみ許可する。
 - 今回はブラウザ／Desktop UI実動作、メニュー操作、実際の画素への貼付け反映を検証していない。これらはP1-D以降の受入確認とする。
+
+## Q. P1-C-F1: WB補正方式の互換性制限
+
+### Q.1 判定根拠
+
+LightCraft v0.20.0 のNative `wb.scale` は `kelvin`（絶対Kelvin）と `legacy`（素材相対）を区別する。 GenzoRoomの `_settings_json()` はscale省略をNative既定値 `legacy` として正規化し、未知のscaleは受け付けない。Import時の `_Photo.import_settings_json` は `develop.get` のImport readbackをRecipe復元より先に保存し、その後のRecipe復元・WB操作・過去のcross-mode適用では更新しない。このため素材固有方式はImport readbackから決め、現在のHistory cursorまたはRecipe適用後の `settings.wb.scale` からは推定しない。 [v0.20.0 WB contract](https://github.com/storytold/lightcraft/blob/192ff72923c39e6623f2c7ff67ab3a119deb8071/docs/mcp.md) · [`_settings_json()` と `legacy` 既定値](../../../backend/lightcraft_raw.py#L393-L405) · [Import readbackの保存とRecipe復元順](../../../backend/lightcraft_raw.py#L1144-L1157) · [`controls_state()` の現在scale表示](../../../backend/raw_controls.py#L424-L433)
+
+`photo.inspect.as_shot_wb` と `_Photo.wb_kelvin` はKelvin編集・As Shot reset能力を決めるための情報であり、素材方式の完全な区別には使わない。既存WB UIの `wb.scale` は現在設定に対するControl表示契約で、過去の部分設定適用後に素材固有方式を表さないことがある。素材方式はファイル拡張子、RAW/JPEG分類、カメラメーカー／機種からGenzoRoom側で再計算しない。 Native Import readbackでscaleを得られないケースは `unknown` とし、WB適用をfail-closedにする。
+
+P1-Bで記録した実NativeのWB merge/readbackおよび後続Control成功は、Native APIがJSONを受理し編集を継続できた証拠である。絶対／相対方式間の意味的互換性を証明するものではなく、過去の検証結果はそのまま保持する。今回、実Nativeによる方式識別確認は環境変数 `GENZOROOM_TEST_LIGHTCRAFT_EXE` が未設定で実行できず、提供されたPentax／Pixel素材のある環境でもlive testはskipとなる。コード側では既存のLightCraft v0.20.0契約とImport readbackを根拠に方式を同定した。
+
+### Q.2 確定仕様とAPI変更
+
+- `sourceWbMode` は `absolute | relative | unknown`。BackendのOpen Document応答とP1-A `copy-settings` 応答に含める。値はImport readbackの `wb.scale` から導出する。Copy経路は既存 `confirmed_settings()` と保持済み `import_settings_json` のみを読み、Native再問い合わせとSQLite読込を追加しない。
+- LightCraft Clipboardは `sourceWbMode` をコピー時点の不変metadataとして保持する。 `selectedIds` はWBを含んだままで、貼付け先の `clipboardPasteableSettingIds` で現在適用可能な項目を別に返す。WB不可のreason codeは `wbScaleMismatch` または `wbModeUnknown` とし、日本語・英語locale key `workspace.rawClipboard.wbModeMismatch`／`workspace.rawClipboard.wbModeUnknown` を用意する。これはP1-Dがdisabled理由を表示するためのinterfaceであり、今回UIは追加していない。
+- 通常／選択ペーストは既存の選択projectionで適用可能IDだけを新規部分payloadへ抽出する。素材方式が不一致またはunknownならWB IDと `wb` JSONをpayloadから外し、他項目は同じ `settingsPaste` 操作へ適用する。WBだけが残って操作対象がなくなる場合はFrontendで `raw_wb_incompatible` とし、History操作／Native mutationを起こさない。Clipboardは変更しない。
+- Backend `settingsPaste` ingressと `LightCraftRawSession.apply_history_operation()` の両方で、payloadのscale、コピー元 `sourceWbMode`、貼付け先のImport方式が一致しなければ `raw_wb_incompatible`（HTTP 409）で拒否する。拒否はHistory pending／Native mutationより前に行う。非WB項目には方式制限を適用しない。
+- 新規 `settingsPaste` metadataに `sourceWbMode` を追加し、WB選択時は値と `copySettings.wb.scale` の一致を必須にする。履歴本文・Recipe保存metadataのvalidatorは旧 `{sourceAssetId,sourceFilename,selectedIds}` 形式も受け入れるため、既存Historyの復元・表示・Undo／Redo／Jumpは維持する。保存payload本文の二重記録はしない。
+- P1-C `pasteSettings()` の `editor.confirmed` 取得直後に同一参照のrevisionを比較していた実効性のない条件を削除した。settle後は既存editor／saver ownerと変更されないDocument identityを検証し、revision・save境界は `RawRecipeSaver.operate()` に委ねる。独自revision状態は追加しない。
+
+### Q.3 検証結果
+
+| 項目 | 結果 |
+| --- | --- |
+| absolute→absolute／relative→relative | Backend契約テストで許可し、HistoryとNative mergeを確認 |
+| absolute↔relative | Backend契約テストで409拒否、追加mergeなし、History length不変を確認 |
+| 非WB項目を含む混合ペースト | 不一致時もFrontendがWBだけを除外し、他項目を `settingsPaste` に渡すことを確認 |
+| WBのみ／Clipboard保持／別素材切替 | Hookテストで不一致先の操作無効、Clipboard保持、互換方式へ切替後の適用を確認 |
+| Import方式と編集後のscale | HTTPテストで現在WB scale変更後もImport方式を返すことを確認 |
+| 旧History metadata | 3項目metadataを含むHistory API／Store validatorの既存テストを維持 |
+| 自動テスト | Backend copy／paste／History関連 **179 passed, 1 deselected**。`release_smoke_sqlite_assertions_against_current_database` はこの機能の変更対象外で、sandbox pytest temp環境のSQLite open失敗を確認したため除外。Frontend `rawApi.test.ts`／`editClipboard.test.ts`／`useRawDocument.test.tsx` **465 passed**、既存 `AnshitsuClipboard.test.tsx` **129 passed** |
+| 静的確認・build | `npx tsc --noEmit`、Frontend production `npm run build`、`git diff --check` 成功。buildは既存chunk sizeとReact Router `use client` warningを出力 |
+| Live Native | `GENZOROOM_TEST_LIGHTCRAFT_EXE` 未設定のため `test_raw_edit_settings_paste_live.py` は実行条件を満たさずskip。RAW素材の場所のみではNative executableを起動できない |
+
+### Q.4 P1-Dへの引継ぎ
+
+- dialogはClipboardの `selectedIds` をコピー済み一覧、`clipboardPasteableSettingIds` を現在適用可能一覧として使う。WBが除外されたら `clipboardWbCompatibilityBlocked` と `clipboardWbCompatibilityReason` を表示する。全項目不可なら `canPasteSettings` はfalse。
+- reason `wbScaleMismatch` は色温度補正方式の不一致、`wbModeUnknown` は方式情報不足。locale keyを日本語／英語両方追加済み。メニュー、選択dialog、ショートカット、Desktop menuは本作業では追加しない。

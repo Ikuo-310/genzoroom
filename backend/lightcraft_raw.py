@@ -2553,9 +2553,17 @@ class LightCraftRawSession:
         if kind == "settingsPaste":
             if curve_points is not None or settings_patch is None:
                 raise LightCraftError("raw_invalid_request")
-            from raw_edit_settings_copy import extract_copy_settings, validate_copy_payload
+            from raw_edit_settings_copy import (extract_copy_settings, source_wb_mode, source_wb_mode_for_scale,
+                                                validate_copy_payload)
             validate_history_operation(kind, metadata)
             validate_copy_payload(metadata["selectedIds"], settings_patch)
+            if "whiteBalance" in metadata["selectedIds"]:
+                target_mode = source_wb_mode(json.loads(self._photo(handle, active=True).import_settings_json))
+                source_mode = metadata.get("sourceWbMode")
+                payload_mode = source_wb_mode_for_scale(settings_patch.get("wb", {}).get("scale"))
+                if (source_mode not in ("absolute", "relative") or source_mode != payload_mode
+                        or source_mode != target_mode):
+                    raise LightCraftError("raw_wb_incompatible")
             snapshot = self.confirmed_settings(handle, expected_revision)
             if extract_copy_settings(snapshot.settings, metadata["selectedIds"]) == settings_patch:
                 return snapshot

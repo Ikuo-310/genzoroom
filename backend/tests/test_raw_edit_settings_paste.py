@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import json
 from uuid import uuid4
 
 import pytest
@@ -25,7 +26,9 @@ def history_body(doc, **fields):
 def paste_body(doc, selected_ids, settings, *, source_asset_id=None, source_filename="source.jpg", save_id=None):
     return history_body(doc, saveId=str(save_id or uuid4()), kind="settingsPaste",
         metadata={"sourceAssetId": source_asset_id or str(uuid4()), "sourceFilename": source_filename,
-                  "selectedIds": selected_ids}, copySettings=settings)
+                  "selectedIds": selected_ids,
+                  "sourceWbMode": "absolute" if settings.get("wb", {}).get("scale") == "kelvin" else "relative"},
+        copySettings=settings)
 
 
 async def history_request(http, doc, action, request=None):
@@ -203,6 +206,65 @@ def test_noop_paste_keeps_redo_and_replayed_save_id_does_not_apply_again(local, 
                     targetStepId=history.json()["steps"][0]["stepId"]))
                 assert jump.status_code == 200 and jump.json()["history"]["cursor"] == 1
                 assert jump.json()["values"]["light.exposure"] == 1.0
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(("source_mode", "target_mode", "allowed"), [
+    ("absolute", "absolute", True), ("relative", "relative", True),
+    ("absolute", "relative", False), ("relative", "absolute", False),
+])
+def test_paste_enforces_native_import_wb_mode(source_mode, target_mode, allowed, local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                _, doc = await open_document(http)
+                photo = api.raw._photo(api._raw_handle, active=True)
+                source_scale = "kelvin" if source_mode == "absolute" else "legacy"
+                target_scale = "kelvin" if target_mode == "absolute" else "legacy"
+                photo.import_settings_json = json.dumps({"wb": {"scale": target_scale}})
+                api.document["sourceWbMode"] = target_mode
+                doc["sourceWbMode"] = target_mode
+                doc = await initialize_history(http, doc)
+                selected = ["whiteBalance"]
+                source = {"wb": {"mode": "custom", "scale": source_scale, "temp": 5100.125, "tint": -3.25}}
+                payload = extract_copy_settings(source, selected)
+                before_merges = sum(command == "develop.merge" for command, _ in children[0].commands)
+                response = await history_request(http, doc, "operate", paste_body(doc, selected, payload))
+                if allowed:
+                    assert response.status_code == 200, response.text
+                    assert response.json()["history"]["length"] == 1
+                    assert sum(command == "develop.merge" for command, _ in children[0].commands) == before_merges + 1
+                else:
+                    assert response.status_code == 409 and response.json()["code"] == "raw_wb_incompatible"
+                    assert sum(command == "develop.merge" for command, _ in children[0].commands) == before_merges
+                    current_history = await http.get(f'/api/raw/documents/{doc["handle"]}/history', headers=headers(doc))
+                    assert current_history.status_code == 200 and current_history.json()["history"]["length"] == 0
+        finally:
+            await api.close()
+    asyncio.run(run())
+
+
+def test_non_wb_copy_remains_allowed_across_source_modes(local, tmp_path, monkeypatch):
+    async def run():
+        api, _, children, _ = await setup(tmp_path, local, monkeypatch)
+        try:
+            async with client(local) as http:
+                await authenticate(http, local)
+                _, doc = await open_document(http)
+                photo = api.raw._photo(api._raw_handle, active=True)
+                photo.import_settings_json = json.dumps({"wb": {"scale": "legacy"}})
+                api.document["sourceWbMode"] = doc["sourceWbMode"] = "relative"
+                doc = await initialize_history(http, doc)
+                selected = ["basic.exposure"]
+                payload = extract_copy_settings({"light": {"exposure": 1.25}}, selected)
+                response = await history_request(http, doc, "operate", paste_body(doc, selected, payload))
+                assert response.status_code == 200, response.text
+                assert response.json()["history"]["length"] == 1
+                assert sum(command == "develop.merge" for command, _ in children[0].commands) == 1
         finally:
             await api.close()
     asyncio.run(run())

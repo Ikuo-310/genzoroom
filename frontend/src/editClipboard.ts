@@ -10,13 +10,15 @@ export type JpegEditClipboard = {
 };
 export type LightcraftEditClipboard = {
   engine: 'lightcraft';
+  sourceWbMode: RawCopySettingsResponse['sourceWbMode'];
   sourceAssetId: string;
   sourceFilename: string;
   selectedIds: RawCopySettingId[];
   settings: RawCopySettings;
 };
 export type EditClipboard = JpegEditClipboard | LightcraftEditClipboard;
-export type EditClipboardInfo = { engine: 'jpeg'; selectedIds: AdjustmentId[] } | { engine: 'lightcraft'; selectedIds: RawCopySettingId[] };
+export type EditClipboardInfo = { engine: 'jpeg'; selectedIds: AdjustmentId[] } | { engine: 'lightcraft';
+  selectedIds: RawCopySettingId[]; sourceWbMode: RawCopySettingsResponse['sourceWbMode'] };
 export const RAW_COPY_SETTING_CATEGORIES = [
   { id: 'basic', labelKey: 'workspace.basic', selectedIds: ['basic.exposure', 'basic.contrast', 'basic.highlights', 'basic.shadows', 'basic.whites', 'basic.blacks'] },
   { id: 'whiteBalance', labelKey: 'workspace.whiteBalance', selectedIds: ['whiteBalance'] },
@@ -91,10 +93,11 @@ export function copyEditSettings(
 
 export function copyLightcraftEditSettings(response: RawCopySettingsResponse, sourceFilename: string): LightcraftEditClipboard {
   if (!validRawCopySettingIds(response.selectedIds) || !response.settings || typeof response.settings !== 'object'
+    || response.sourceWbMode !== 'absolute' && response.sourceWbMode !== 'relative' && response.sourceWbMode !== 'unknown'
     || Array.isArray(response.settings) || typeof sourceFilename !== 'string' || sourceFilename.length < 1
     || [...sourceFilename].length > 255 || /[\\/:\u0000-\u001f]/.test(sourceFilename)) throw new Error('raw_invalid_response');
   const copied: LightcraftEditClipboard = { engine: 'lightcraft', sourceAssetId: response.assetId,
-    sourceFilename, selectedIds: [...response.selectedIds], settings: structuredClone(response.settings) };
+    sourceFilename, sourceWbMode: response.sourceWbMode, selectedIds: [...response.selectedIds], settings: structuredClone(response.settings) };
   clipboard = copied;
   return readEditClipboard() as LightcraftEditClipboard;
 }
@@ -108,7 +111,7 @@ export function readEditClipboard(): EditClipboard | null {
 export function editClipboardInfo(): EditClipboardInfo | null {
   if (!clipboard) return null;
   return clipboard.engine === 'jpeg' ? { engine: 'jpeg', selectedIds: Object.keys(clipboard.values) as AdjustmentId[] }
-    : { engine: 'lightcraft', selectedIds: [...clipboard.selectedIds] };
+    : { engine: 'lightcraft', selectedIds: [...clipboard.selectedIds], sourceWbMode: clipboard.sourceWbMode };
 }
 
 export function isJpegEditClipboard(value: EditClipboard | null | undefined): value is JpegEditClipboard {

@@ -13,7 +13,7 @@ const opticsSpecs: Partial<Record<RawSettingControlId, readonly [number, number,
 };
 
 export function rawSettings(doc: RawDocument): RawSettings {
-  return { ...doc, settingsFingerprint: doc.settingsFingerprint ?? String(doc.revision).padStart(64, '0'),
+  return { ...doc, sourceWbMode: doc.sourceWbMode ?? 'absolute', settingsFingerprint: doc.settingsFingerprint ?? String(doc.revision).padStart(64, '0'),
     curve: { master: [], red: [], green: [], blue: [] },
     point_colors: [],
     recipeRevision: doc.recipeRevision ?? 0, recipeFingerprint: doc.recipeFingerprint ?? null,

@@ -272,6 +272,7 @@
     "openSelected": "暗室へ"
   },
   "workspace": {
+    "rawClipboard": {"wbModeMismatch": "色温度補正方式が異なるため、ホワイトバランスを適用できません。", "wbModeUnknown": "色温度補正方式を確認できないため、ホワイトバランスを適用できません。"},
     "collapseGrading": "カラーグレーディングを折りたたむ",
     "expandGrading": "カラーグレーディングを展開",
     "enableGrading": "カラーグレーディングを有効にする",

@@ -281,6 +281,7 @@
     "openSelectedCompact": "Develop"
   },
   "workspace": {
+    "rawClipboard": {"wbModeMismatch": "White balance cannot be applied because the source and target use different correction modes.", "wbModeUnknown": "White balance cannot be applied because the correction mode could not be identified."},
     "collapseGrading": "Collapse Color Grading",
     "expandGrading": "Expand Color Grading",
     "enableGrading": "Enable Color Grading",

@@ -39,6 +39,7 @@ _SELECTORS = {
 }
 COPY_SETTING_IDS = frozenset(_SELECTORS)
 CROP_SETTING_ID = "crop"
+WB_SOURCE_MODES = frozenset(("absolute", "relative", "unknown"))
 MAX_COPY_SETTINGS_BYTES = 64 * 1024
 MAX_PASTE_METADATA_BYTES = 1024
 
@@ -191,6 +192,17 @@ def extract_copy_settings(settings, selected_ids):
     return result
 
 
+def source_wb_mode(import_settings):
+    """Use Native's immutable import readback, not a Recipe-restored WB scale."""
+    wb = import_settings.get("wb") if type(import_settings) is dict else None
+    scale = wb.get("scale", "legacy") if type(wb) is dict else None
+    return "absolute" if scale == "kelvin" else "relative" if scale == "legacy" else "unknown"
+
+
+def source_wb_mode_for_scale(scale):
+    return "absolute" if scale == "kelvin" else "relative" if scale == "legacy" else "unknown"
+
+
 def validate_selected_ids(selected_ids):
     if (type(selected_ids) is not list or not selected_ids
             or any(type(item) is not str or item not in COPY_SETTING_IDS for item in selected_ids)
@@ -200,12 +212,17 @@ def validate_selected_ids(selected_ids):
 
 
 def validate_paste_metadata(metadata):
-    if (type(metadata) is not dict or set(metadata) != {"sourceAssetId", "sourceFilename", "selectedIds"}
+    if (type(metadata) is not dict or set(metadata) not in (
+                {"sourceAssetId", "sourceFilename", "selectedIds"},
+                {"sourceAssetId", "sourceFilename", "selectedIds", "sourceWbMode"})
             or type(metadata.get("sourceAssetId")) is not str
             or type(metadata.get("sourceFilename")) is not str
             or not 1 <= len(metadata["sourceFilename"]) <= 255
             or any(char in metadata["sourceFilename"] for char in "/\\:")
             or any(ord(char) < 32 for char in metadata["sourceFilename"])):
+        raise LightCraftError("raw_invalid_request")
+    if "sourceWbMode" in metadata and (type(metadata["sourceWbMode"]) is not str
+                                        or metadata["sourceWbMode"] not in WB_SOURCE_MODES):
         raise LightCraftError("raw_invalid_request")
     try:
         if str(UUID(metadata["sourceAssetId"])) != metadata["sourceAssetId"]:

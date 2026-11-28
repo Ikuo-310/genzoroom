@@ -42,7 +42,7 @@ describe('tab edit clipboard and compound Paste', () => {
         defringe_green_hue_lo: 35, defringe_green_hue_hi: 36, ca_red: 37, ca_blue: 38 },
       profile: { camera_local_tone: false }, calibration: { red: { hue: 39 } }, crop: { left: 0, right: 1 }, orientation: 'Normal' };
     const confirmed = { workspaceId: 'workspace', handle: 'handle', assetId: 'source', generation: 1,
-      documentToken: 'token', documentRevision: 2, settingsFingerprint: 'a'.repeat(64), recipeRevision: 3,
+      documentToken: 'token', documentRevision: 2, settingsFingerprint: 'a'.repeat(64), recipeRevision: 3, sourceWbMode: 'absolute',
       selectedIds: RAW_COPY_SETTING_CATEGORIES.flatMap(category => category.selectedIds), settings } as unknown as RawCopySettingsResponse;
     const copied = copyLightcraftEditSettings(confirmed, 'source.dng');
     const selected = selectLightcraftEditClipboardItems(copied, confirmed.selectedIds);
@@ -73,7 +73,7 @@ describe('tab edit clipboard and compound Paste', () => {
       wb: { mode: 'custom', scale: 'kelvin', temp: 5432.1, tint: -2.25 },
       point_colors: [{ hue: 1.25, range: .75 }], crop: { aspect: null }, orientation: 'Rotate90' };
     const response: RawCopySettingsResponse = { workspaceId: 'w', handle: 'h', assetId: 'source', generation: 2, documentToken: 't',
-      documentRevision: 7, settingsFingerprint: 'a'.repeat(64), recipeRevision: 4,
+      documentRevision: 7, settingsFingerprint: 'a'.repeat(64), recipeRevision: 4, sourceWbMode: 'absolute',
       selectedIds: ['basic.exposure', 'whiteBalance', 'pointColor', 'crop'], settings };
     const clipboard = copyLightcraftEditSettings(response, 'portrait.dng');
     settings.light.exposure = 99;
@@ -96,7 +96,7 @@ describe('tab edit clipboard and compound Paste', () => {
 
   it('rejects LightCraft selection outside the copied IDs and keeps the single clipboard slot unchanged', () => {
     const response: RawCopySettingsResponse = { workspaceId: 'w', handle: 'h', assetId: 'source', generation: 1, documentToken: 't',
-      documentRevision: 1, settingsFingerprint: 'a'.repeat(64), recipeRevision: 0,
+      documentRevision: 1, settingsFingerprint: 'a'.repeat(64), recipeRevision: 0, sourceWbMode: 'absolute',
       selectedIds: ['basic.exposure'], settings: { light: { exposure: 2 } } };
     const copied = copyLightcraftEditSettings(response, 'source.dng');
     const before = readEditClipboard();

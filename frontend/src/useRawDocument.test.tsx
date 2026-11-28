@@ -62,7 +62,7 @@ beforeEach(() => {
   vi.mocked(api.rawRegion).mockReset().mockRejectedValue(new api.RawApiError('raw_region_unsupported'));
   vi.mocked(api.createRawWorkspace).mockResolvedValue('workspace');
   vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => ({
-    workspaceId, assetId, handle: assetId, generation: 1, documentToken: assetId, revision: 1, sourceWidth: 4000, sourceHeight: 3000 }));
+    workspaceId, assetId, handle: assetId, generation: 1, documentToken: assetId, revision: 1, sourceWbMode: 'absolute', sourceWidth: 4000, sourceHeight: 3000 }));
   vi.mocked(api.rawPreview).mockResolvedValue({ blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence: 1 });
   vi.mocked(api.beginRawCurveInteraction).mockResolvedValue('a'.repeat(32));
   vi.mocked(api.beginRawPointColorInteraction).mockResolvedValue('d'.repeat(32));
@@ -417,7 +417,7 @@ it('copies selected confirmed settings through one owner-bound request and keeps
   const asset = regionRequest().identity.assetId;
   await render(asset); await flush();
   vi.mocked(api.readRawCopySettings).mockImplementation(async (doc, selectedIds) => ({ ...doc,
-    documentRevision: doc.revision, recipeRevision: doc.recipeRevision!, selectedIds: [...selectedIds],
+    documentRevision: doc.revision, recipeRevision: doc.recipeRevision!, sourceWbMode: doc.sourceWbMode ?? 'unknown', selectedIds: [...selectedIds],
     settings: { light: { exposure: 1.23456789 } } }));
   const historyWrites = vi.mocked(api.saveRawHistory).mock.calls.length;
   await act(async () => { await current!.copySettings('source.dng'); });
@@ -440,7 +440,7 @@ it('does not replace the shared clipboard when a copy reply belongs to a departe
   const source = current!.settings!;
   await render('next-photo'); await flush();
   await act(async () => pending.resolve({ ...source, documentRevision: source.revision,
-    recipeRevision: source.recipeRevision!, selectedIds: ['basic.exposure'], settings: { light: { exposure: 1 } } }));
+    recipeRevision: source.recipeRevision!, sourceWbMode: source.sourceWbMode ?? 'unknown', selectedIds: ['basic.exposure'], settings: { light: { exposure: 1 } } }));
   await expect(copy).resolves.toMatchObject({ code: 'raw_stale_handle' });
   expect(readEditClipboard()).toMatchObject({ engine: 'jpeg', sourceAssetId: 'jpeg-source' });
 });
@@ -449,8 +449,9 @@ it('projects selected copied settings into one settingsPaste History operation',
   const asset = regionRequest().identity.assetId;
   const confirmed = rawSettings({ workspaceId: 'source-workspace', handle: 'source-handle', assetId: 'source-asset', generation: 1,
     documentToken: 'source-token', revision: 4, recipeRevision: 7 });
-  copyLightcraftEditSettings({ ...confirmed, documentRevision: confirmed.revision, selectedIds: ['basic.exposure', 'whiteBalance'],
-    settings: { light: { exposure: 1.25 }, wb: { mode: 'custom', temp: 5200, tint: 7 } } }, 'source.dng');
+  copyLightcraftEditSettings({ ...confirmed, documentRevision: confirmed.revision, sourceWbMode: confirmed.sourceWbMode ?? 'unknown',
+    selectedIds: ['basic.exposure', 'whiteBalance'],
+    settings: { light: { exposure: 1.25 }, wb: { mode: 'custom', scale: 'kelvin', temp: 5200, tint: 7 } } }, 'source.dng');
   await render(asset); await flush();
   commitHistory.mockImplementationOnce(async request => rawHistoryResult(request, { history: { initialized: true, cursor: 1,
     length: 1, selectedStepId: request.saveId } }));
@@ -460,6 +461,55 @@ it('projects selected copied settings into one settingsPaste History operation',
     metadata: { sourceAssetId: 'source-asset', sourceFilename: 'source.dng', selectedIds: ['basic.exposure'] },
     copySettings: { light: { exposure: 1.25 } } } });
   expect(current?.history?.length).toBe(1);
+});
+
+it('filters only incompatible WB, preserves the clipboard, and disables WB-only paste', async () => {
+  const asset = regionRequest().identity.assetId;
+  const confirmed = rawSettings({ workspaceId: 'wb-source-workspace', handle: 'wb-source-handle', assetId: 'wb-source', generation: 1,
+    documentToken: 'wb-source-token', revision: 1, recipeRevision: 2 });
+  copyLightcraftEditSettings({ ...confirmed, documentRevision: confirmed.revision, sourceWbMode: 'absolute',
+    selectedIds: ['basic.exposure', 'whiteBalance'], settings: { light: { exposure: 1.25 },
+      wb: { mode: 'custom', scale: 'kelvin', temp: 5200, tint: 7 } } }, 'source.dng');
+  vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => ({
+    workspaceId, assetId, handle: assetId, generation: 1, documentToken: assetId, revision: 1, sourceWbMode: 'relative' }));
+  await render(asset); await flush();
+  expect(current?.clipboardPasteableSettingIds).toEqual(['basic.exposure']);
+  expect(current?.clipboardWbCompatibilityBlocked).toBe(true);
+  expect(current?.clipboardWbCompatibilityReason).toBe('wbScaleMismatch');
+  await act(async () => { await current!.pasteSettings(); });
+  const request = vi.mocked(api.saveRawHistory).mock.calls.map(([value]) => value).find(value => value.action === 'operate');
+  expect(request).toMatchObject({ operation: { kind: 'settingsPaste',
+    metadata: { selectedIds: ['basic.exposure'], sourceWbMode: 'absolute' }, copySettings: { light: { exposure: 1.25 } } } });
+  await act(async () => { await current!.pasteSettings(['whiteBalance', 'basic.exposure']); });
+  const selectedRequest = vi.mocked(api.saveRawHistory).mock.calls.map(([value]) => value)
+    .filter(value => value.action === 'operate').at(-1);
+  expect(selectedRequest).toMatchObject({ operation: { kind: 'settingsPaste',
+    metadata: { selectedIds: ['basic.exposure'], sourceWbMode: 'absolute' }, copySettings: { light: { exposure: 1.25 } } } });
+  expect((readEditClipboard() as ReturnType<typeof readEditClipboard> & { engine: 'lightcraft' })?.selectedIds)
+    .toEqual(['basic.exposure', 'whiteBalance']);
+
+  copyLightcraftEditSettings({ ...confirmed, documentRevision: confirmed.revision, sourceWbMode: 'absolute',
+    selectedIds: ['whiteBalance'], settings: { wb: { mode: 'custom', scale: 'kelvin', temp: 5200, tint: 7 } } }, 'source.dng');
+  await render(asset); await flush();
+  expect(current?.canPasteSettings).toBe(false);
+  const operationCount = vi.mocked(api.saveRawHistory).mock.calls.length;
+  let rejected: unknown;
+  await act(async () => { try { await current!.pasteSettings(); } catch (error) { rejected = error; } });
+  expect(rejected).toMatchObject({ code: 'raw_wb_incompatible' });
+  expect(vi.mocked(api.saveRawHistory)).toHaveBeenCalledTimes(operationCount);
+
+  vi.mocked(api.openRawDocument).mockImplementation(async (workspaceId, assetId) => ({
+    workspaceId, assetId, handle: assetId, generation: 1, documentToken: assetId, revision: 1,
+    sourceWbMode: assetId === 'relative-target' ? 'relative' : 'absolute' }));
+  await render('compatible-target'); await flush();
+  expect(current?.canPasteSettings).toBe(true);
+  expect(current?.clipboardSettingIds).toEqual(['whiteBalance']);
+  await act(async () => { await current!.pasteSettings(); });
+  const compatibleRequest = vi.mocked(api.saveRawHistory).mock.calls.map(([value]) => value)
+    .filter(value => value.action === 'operate').at(-1);
+  expect(compatibleRequest).toMatchObject({ operation: { kind: 'settingsPaste',
+    metadata: { selectedIds: ['whiteBalance'], sourceWbMode: 'absolute' },
+    copySettings: { wb: { scale: 'kelvin', temp: 5200, tint: 7 } } } });
 });
 
 it('RAW Viewer smoke representative lifecycle', async () => {

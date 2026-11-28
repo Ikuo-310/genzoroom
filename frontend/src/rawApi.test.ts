@@ -9,7 +9,7 @@ import { RawSuperseded } from './rawApi';
 import { rawHistoryResult, rawHistoryData } from './test/rawHistory';
 
 const doc: RawDocument = { workspaceId: 'a'.repeat(32), handle: 'b'.repeat(32), documentToken: 'c'.repeat(32),
-  assetId: 'asset', generation: 1, revision: 2 };
+  assetId: 'asset', generation: 1, revision: 2, sourceWbMode: 'absolute' };
 const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
 function response(patch: Record<string, string> = {}, bytes = png) {
   return new Response(bytes, { headers: { 'Content-Type': 'image/png', 'X-Raw-Generation': '1',
@@ -24,7 +24,7 @@ describe('RAW edit settings copy transport', () => {
     const settings = { light: { exposure: 1.23456789012345 }, crop: { flip_h: false } };
     const value = { workspaceId: doc.workspaceId, handle: doc.handle, assetId: doc.assetId, generation: doc.generation,
       documentToken: doc.documentToken, documentRevision: doc.revision, settingsFingerprint: confirmed.settingsFingerprint,
-      recipeRevision: 4, selectedIds: ['basic.exposure', 'crop'], settings };
+      recipeRevision: 4, sourceWbMode: doc.sourceWbMode, selectedIds: ['basic.exposure', 'crop'], settings };
     const fetch = vi.fn(async () => new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } }));
     vi.stubGlobal('fetch', fetch);
     await expect(readRawCopySettings(confirmed, ['basic.exposure', 'crop'])).resolves.toEqual(value);
@@ -36,12 +36,13 @@ describe('RAW edit settings copy transport', () => {
   });
   it.each([
     { assetId: 'other' }, { generation: 2 }, { documentToken: 'd'.repeat(32) }, { documentRevision: 3 },
-    { settingsFingerprint: 'f'.repeat(64) }, { recipeRevision: 5 }, { selectedIds: ['crop', 'basic.exposure'] },
+    { settingsFingerprint: 'f'.repeat(64) }, { recipeRevision: 5 }, { sourceWbMode: 'relative' },
+    { selectedIds: ['crop', 'basic.exposure'] },
   ])('rejects copy responses with mismatched owner or selection %j', async patch => {
     const confirmed = rawSettings({ ...doc, recipeRevision: 4, recipeFingerprint: 'a'.repeat(64) });
     const value = { workspaceId: doc.workspaceId, handle: doc.handle, assetId: doc.assetId, generation: doc.generation,
       documentToken: doc.documentToken, documentRevision: doc.revision, settingsFingerprint: confirmed.settingsFingerprint,
-      recipeRevision: 4, selectedIds: ['basic.exposure'], settings: { light: { exposure: .5 } }, ...patch };
+      recipeRevision: 4, sourceWbMode: doc.sourceWbMode, selectedIds: ['basic.exposure'], settings: { light: { exposure: .5 } }, ...patch };
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } })));
     await expect(readRawCopySettings(confirmed, ['basic.exposure'])).rejects.toThrow();
   });
@@ -228,7 +229,7 @@ it('routes temporary curve updates through the existing adaptive Draft Preview c
   const settings = rawSettings(doc), interactionId = 'd'.repeat(32);
   const fetch = vi.fn<typeof globalThis.fetch>()
     .mockResolvedValueOnce(new Response(JSON.stringify({ workspaceId: doc.workspaceId, handle: doc.handle, assetId: doc.assetId,
-      generation: doc.generation, documentToken: doc.documentToken, revision: doc.revision, interactionId }),
+      generation: doc.generation, documentToken: doc.documentToken, revision: doc.revision, sourceWbMode: doc.sourceWbMode, interactionId }),
       { headers: { 'Content-Type': 'application/json' } }))
     .mockResolvedValueOnce(response({ ...adaptiveHeaders(), 'X-Raw-Serial': '1', 'X-Raw-Interaction-Id': interactionId,
       'X-Raw-Interaction-Sequence': '1' }))
@@ -309,7 +310,7 @@ describe('RAW History transport', () => {
   });
   it.each<RawHistoryOperation>([
     { kind: 'settingsPaste', metadata: { sourceAssetId: '00000000-0000-4000-8000-000000000001', sourceFilename: 'source.jpg',
-      selectedIds: ['basic.exposure'] }, copySettings: { light: { exposure: 1.23456789012345 } } },
+      selectedIds: ['basic.exposure'], sourceWbMode: 'absolute' }, copySettings: { light: { exposure: 1.23456789012345 } } },
     { kind: 'controlReset', metadata: { control: 'wb.tint' } },
     { kind: 'sectionToggle', metadata: { section: 'color', enabled: false } },
     { kind: 'sectionReset', metadata: { section: 'light' } },
@@ -512,6 +513,7 @@ describe('RAW History transport', () => {
     { sourceAssetId: '00000000-0000-4000-8000-000000000002', sourceFilename: '../source.jpg', selectedIds: ['basic.exposure'] },
     { sourceAssetId: '00000000-0000-4000-8000-000000000002', sourceFilename: 'source.jpg', selectedIds: [] },
     { sourceAssetId: '00000000-0000-4000-8000-000000000002', sourceFilename: 'source.jpg', selectedIds: ['basic.exposure', 'basic.exposure'] },
+    { sourceAssetId: '00000000-0000-4000-8000-000000000002', sourceFilename: 'source.jpg', selectedIds: ['basic.exposure'], sourceWbMode: 'kelvin' },
   ])('rejects invalid settings paste display metadata %j', async metadata => {
     const request = historyRequest('commit');
     const result = rawHistoryResult(request, { history: { initialized: true, cursor: 1, length: 1, selectedStepId: request.saveId } });
