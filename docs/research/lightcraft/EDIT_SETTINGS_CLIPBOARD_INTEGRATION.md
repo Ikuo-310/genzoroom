@@ -177,7 +177,7 @@ GenzoRoom `ddf334333cc44402b4d33dd9c5001534ff45f82a` のソース調査。以下
 
 | 状態 | 現行動作とコピーの扱い |
 | --- | --- |
-| **初回、History 行なし** | Import 中の readback を Backend が確定する。既存 Recipe があれば Document 公開前に検証・復元し、History 行がなければ store はその Recipe を暫定 baseline として返す。新規写真では既存の自動初期化が Import 時点を cursor 0 として保存する。コピーは DB 行作成を強制しない。Document が同期済みで保留編集や初期化中の保存がなければ、確定済み Import readback がコピー元になる。互換性のない旧 Recipe の復旧待ちでも、編集開始前の Import を使う仕様なら現在の readback が取得でき、旧 Recipe 本文は候補にしない。 [Import](../../../backend/lightcraft_raw.py#L1128-L1159) · [Document の Recipe 復元](../../../backend/windows_raw_api.py#L2052-L2111) · [暫定 baseline](../../../backend/raw_recipe_store.py#L819-L834) · [Frontend の初期化](../../../frontend/src/useRawDocument.ts#L835-L843) |
+| **初回、History 行なし** | Import 中の readback を Backend が確定する。既存 Recipe があれば Document 公開前に検証・復元し、History 行がなければ store はその Recipe を暫定 baseline として返す。新規写真では既存の自動初期化が Import 時点を cursor 0 として保存する。コピーは DB 行作成を強制しない。Document が同期済みで保留編集や初期化中の保存がなければ、確定済み Import readback がコピー元になる。P1-A は復旧 pending 中の取得を拒否し、復旧完了後の現行 snapshot のみを取得する。 [Import](../../../backend/lightcraft_raw.py#L1128-L1159) · [Document の Recipe 復元](../../../backend/windows_raw_api.py#L2052-L2111) · [暫定 baseline](../../../backend/raw_recipe_store.py#L819-L834) · [Frontend の初期化](../../../frontend/src/useRawDocument.ts#L835-L843) |
 | **スライダーに未確定の入力がある** | `RawControls` の desired／送信待ちと Backend の確定済み readback は別。通常の確定は controls の flush／settle と saver の commit／ACK を経る。現像 owner でその確定を待つか、完了までコピーを無効にする。コピー用の HTTP で UI の送信待ちを確定することはできない。退出用 `prepareSave` は表示停止・freeze／pause を伴うため、コピーでは通常編集の確定境界を再利用する。 [RawControls](../../../frontend/src/rawControls.ts#L63) · [settle/unsettled](../../../frontend/src/rawControls.ts#L137-L154) · [saver の flush と保存](../../../frontend/src/rawRecipeSave.ts#L960-L990) · [退出時の排出](../../../frontend/src/useRawDocument.ts#L1832-L1860) |
 | **Curve／Mixer／Point Color／Crop 等の途中** | Native の一時値や Draft をコピーしない。通常の Finish／Cancel を owner に任せ、確定または取消後だけ取得する。Native の Interaction ガードに加え、Backend の `_history_unsettled` が管理する Crop gesture と未完了 History 保存をコピー境界でも確認する。 [Native Interaction ガード](../../../backend/lightcraft_raw.py#L838-L868) · [Backend の保留判定](../../../backend/windows_raw_api.py#L1399-L1403) · [保存後の Interaction 確定](../../../backend/windows_raw_api.py#L1896-L1914) · [Frontend の dirty／locked](../../../frontend/src/rawRecipeSave.ts#L706-L712) |
 | **Undo／Redo／Jump 直後** | Backend は現在の revision／fingerprint と Recipe revision を照合し、行先の History snapshot が現在値と異なれば Native に復元して readback を照合する。cursor と Recipe を同時に保存し、確定 ACK 後に Frontend が新しい設定と cursor を受理する。同じ値への移動などは Native revision が変わらない場合があるので、保存完了と現行 Recipe revision も見る。コピー元は移動後の readback。 [対象 snapshot の決定](../../../backend/windows_raw_api.py#L1705-L1750) · [復元と保存](../../../backend/windows_raw_api.py#L1823-L1891) · [Native 復元の readback 照合](../../../backend/lightcraft_raw.py#L2190-L2204) |
@@ -206,3 +206,76 @@ Backend の readback と store は UI Control の一覧へ絞らず、サイズ�
 **API 変更は必要。** 現行の `POST /documents/{handle}/settings` は Native 再照会の後に `controls_state` を返し、 `GET /recipe` と `GET /history` もコピー用の設定本文を返さない。四操作を既存の UI に接続する際は、選択 ID と期待 revision／fingerprint を受け、必要な部分 JSON だけを返す明示的な読み取り契約を追加する。既存の認証済み Document API 内の専用ルートまたは明示的なコピー取得分岐のどちらでも成立する。既存の表示用応答の拡張は不要。Backend の現行 Document 排他内で handle／workspace／generation／token、期待 Document revision／settings fingerprint、該当する Recipe revision、同期済み・保存保留なしを照合する。`confirmed_settings` 単体は永続確定や Frontend の未送信入力まで確認しないため、Frontend の確定境界と Backend の既存ガードの両方が必要。選択コピーはダイアログ確定時に1回取得する。 [現行のルーティング](../../../backend/windows_raw_api.py#L104-L130) · [現行 settings 応答](../../../backend/windows_raw_api.py#L832-L866) · [History 応答での既存再利用例](../../../backend/windows_raw_api.py#L1524-L1533)
 
 今回の追加調査はソースと既存回帰ケースの確認。根拠となる回帰ケースには [切替と cursor 復元](../../../backend/tests/test_raw_history_api.py#L45)、[Undo／Redo／Jump と再訪](../../../backend/tests/test_raw_history_api.py#L664)、[保存の応答不明と再試行](../../../backend/tests/test_raw_history_api.py#L1078)、[Native 再生成と旧 owner の拒否](../../../backend/tests/test_raw_history_api.py#L1516)、[Undo 前の readback 不一致検出](../../../backend/tests/test_raw_history_api.py#L1816) がある。新しいコピー取得契約の動作検証は実装時の受入項目とする。
+
+## N. P1-A 実装確定・選択コピー取得
+
+**P1-A で本仕様を確定した。** E節で未確定としていた選択粒度は、依頼で指定された C 案の混合方式とする。M節の推奨どおり B 案、すなわち Backend の現行 Document が保持する確定済み `DevelopSettings` を使う。M.4 の「専用ルートまたは分岐を追加する」は、認証済み `POST /api/raw/documents/{handle}/copy-settings` の専用ルートとして実装した。既存 `/settings`・Recipe・History の応答契約は変えない。
+
+### N.1 選択 ID と Native JSON fields
+
+取得器は `backend/raw_edit_settings_copy.py` の閉じた `COPY_SETTING_IDS` と `extract_copy_settings()` に置く。選択 ID は History 表示 metadata ではなく、Native JSON への射影を指す。この表が P1-B の選択対象検証にも使う唯一の許可リスト。`all` という特別 ID は送らず、全コピーは `crop` 以外の全 ID を列挙する。
+
+| 選択 ID | 粒度 | 取得する Native JSON fields |
+| --- | --- | --- |
+| `basic.exposure` | 個別 | `light.exposure` |
+| `basic.contrast` | 個別 | `light.contrast` |
+| `basic.highlights` | 個別 | `light.highlights` |
+| `basic.shadows` | 個別 | `light.shadows` |
+| `basic.whites` | 個別 | `light.whites` |
+| `basic.blacks` | 個別 | `light.blacks` |
+| `whiteBalance` | 一括 | `wb.mode`, `wb.scale`, `wb.temp`, `wb.tint` |
+| `color.vibrance` | 個別 | `color.vibrance` |
+| `color.saturation` | 個別 | `color.saturation` |
+| `colorMixer` | 一括 | `mixer` の red/orange/yellow/green/aqua/blue/purple/magenta 各 hue/sat/lum |
+| `pointColor` | 一括 | `point_colors` 配列 |
+| `colorGrading` | 一括 | `grading` の shadows/midtones/highlights 各 hue/sat/lum、`blending`、`balance` |
+| `pointCurve` | 一括 | `curve` の master/red/green/blue 点配列、highlights/lights/darks/shadows、split_shadows/split_mid/split_highlights、refine_saturation |
+| `effects.texture` | 個別 | `effects.texture` |
+| `effects.clarity` | 個別 | `effects.clarity` |
+| `effects.dehaze` | 個別 | `effects.dehaze` |
+| `vignette` | 一括 | `vignette.amount`, midpoint, feather, roundness, highlights, style |
+| `sharpening` | 一括 | `detail.sharpen_amount`, sharpen_radius, sharpen_detail, sharpen_masking |
+| `luminanceNoiseReduction` | 一括 | `detail.nr_luminance`, nr_detail |
+| `colorNoiseReduction` | 一括 | `detail.nr_color`, nr_color_detail, nr_color_smoothness |
+| `lensCorrection` | 一括 | optics の distortion, vignetting, vignetting_midpoint, profile_distortion, profile_vignetting, lens_profile |
+| `chromaticAberration` | 一括 | optics の remove_ca, defringe_purple_amount/hue_lo/hue_hi, defringe_green_amount/hue_lo/hue_hi, ca_red, ca_blue |
+| `localToneMapping` | 独立 | `profile.camera_local_tone` |
+| `calibration` | 一括 | calibration の shadows_tint, red_hue/red_sat, green_hue/green_sat, blue_hue/blue_sat |
+| `crop` | 一括・明示選択時のみ | `crop` と `orientation` |
+
+この射影は公開中の Control 定義と geometry 契約を使う。Native の `disabled_sections`、`version`、`process`、WB以外の profile metadata、grading global、detail の未公開項目、grain、enhance、geometry 等の未公開機能、写真／カメラ／レンズ metadata は出力しない。個別設定として公開される optics の `lens_profile`、`remove_ca`、profile の `camera_local_tone` は値が false でも設定に含める。Crop は全コピー一覧から除外し、`crop` ID が選ばれた時だけ出力する。
+
+### N.2 部分抽出・省略値
+
+- 返却 JSON は選択された ID に対応する field だけを含める。入れ子 object、Point Color・カーブの array と順序、Native の数値精度を保ち、UI step／表示桁へ丸めない。
+- コピー対象の既知の省略値だけを補完する。例: Point Color の省略は選択時に `point_colors: []`、`camera_local_tone` と optics flags の省略は false、Mixer は各色の hue/sat/lum を 0、Curve は現行の既知 serde defaults、Crop は既存 `DEFAULT_CROP` と orientation `Normal`。WB、Grading、Vignette、公開 numeric controls も各公開 field の既定値を用いる。
+- `nr_outliers`、未公開 `nr_contrast`、WB以外の profile 情報等は本選択対象に含めない。選択外の配列は返さず、空 array は選択済みの空値として明示する。
+- `complete_snapshot_for_merge()` は呼ばない。そこにある全復元用の補完を部分 payload に適用して、選択外設定を足すことを避ける。
+
+### N.3 HTTP 契約と確定境界
+
+`POST /api/raw/documents/{handle}/copy-settings` の JSON body は次の完全一致キーを受ける。
+
+```json
+{
+  "workspaceId": "<current workspace>",
+  "generation": 1,
+  "documentToken": "<current document token>",
+  "documentRevision": 4,
+  "settingsFingerprint": "<64 lowercase hex>",
+  "recipeRevision": 2,
+  "selectedIds": ["basic.exposure", "pointColor"]
+}
+```
+
+成功時は HTTP 200、`Cache-Control: no-store` で現在の owner identity、document revision／settings fingerprint、recipe revision、要求した選択 ID、射影後の `settings` を返す。既存の認証 middleware と Document owner 判定を通り、handle／workspace／generation／token、document revision、settings fingerprint、recipe revision が現在値と一致することを要求する。さらに既存 `_history_unsettled()`、Recipe save pending、recovery pending、Native `synced` 状態を検査し、History 初期化済みなら Recipe fingerprint と現在 settings fingerprint の一致を要求する。最終取得は `confirmed_settings(current_handle, current_revision)` が行い、active owner／generation／同期／revision／Native Interaction を再確認する。不正 ID・空選択は 400、古い owner／revision・保留状態は既存エラー契約の 409。旧 Document／Native generation や同期不能状態は既存 Document／Native error 契約に従う。
+
+初回 Import の未初期化状態も、復旧 pending でなく Native が同期済みなら `confirmed_settings()` から取得できる。読み取り経路では `develop.get` を呼ばず、SQLite を読まず、Document／Recipe／History、Undo・Redo、Redo 分岐を変更しない。Ingress の通常 control reservation と `_lock` は既存の編集競合境界を共有する。コピー要求で確定できない Frontend の未送信スライダー値は対象にしない。UI 側が後続工程で既存確定処理を済ませてから要求する。
+
+### N.4 検証と P1-B への引継ぎ
+
+Backend `tests/test_raw_edit_settings_copy.py` は選択 ID・射影範囲、通常コピーでの Crop 除外／明示選択、公開外フィールド除外、省略 false／既定値、空配列、Point Color／Curve 配列、浮動小数精度、不正・重複・空選択、初回 Import と変更後の確定 snapshot、HTTP 認証、owner／revision、保存 pending、Native command 0件、SQLite/threadpool 読込 0件を検証する。同テスト 7件と既存 `test_raw_controls.py`・`test_raw_history_api.py` の計148件が成功した。既存 `POST /settings` 等の応答契約は変更していない。実際の `develop.merge`、適用後 readback、画素出力は対象外。
+
+P1-B はこの `COPY_SETTING_IDS` と field 射影定義をペースト側の許可リストとして再利用する。ペーストは既存 History 操作の Native `develop.merge` 経路へ選択済み partial settings を渡し、LightCraft に適用・正規化を委ねる。貼付け後 readback／Recipe／History は従来境界を使う。コピー API から新しい完全設定 cache、SQLite snapshot reader、Native managed patch、設定変換エンジンを導入しない。
+
+実装根拠: [選択ID・field mapping](../../../backend/raw_edit_settings_copy.py#L13-L49) · [部分抽出と既定値](../../../backend/raw_edit_settings_copy.py#L75-L183) · [Document API route](../../../backend/windows_raw_api.py#L117) · [owner／revision／保存状態と取得](../../../backend/windows_raw_api.py#L831-L869) · [`confirmed_settings`](../../../backend/lightcraft_raw.py#L1240-L1248) · [`_history_unsettled`](../../../backend/windows_raw_api.py#L1436-L1439) · [既存公開Control一覧](../../../backend/raw_controls.py#L9-L59) · [Curveの公開field集合](../../../backend/raw_controls.py#L59-L63) · [Crop／orientation契約](../../../backend/raw_geometry.py#L26-L52) · [P1-A回帰テスト](../../../backend/tests/test_raw_edit_settings_copy.py)

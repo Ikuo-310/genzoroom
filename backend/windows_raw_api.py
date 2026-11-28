@@ -114,6 +114,7 @@ class RawPreviewApi:
             Route("/documents/{handle}/region", self.endpoint, methods=["GET", "POST"]),
             Route("/documents/{handle}/region/cancel", self.endpoint, methods=["POST"]),
             Route("/documents/{handle}/settings", self.endpoint, methods=["POST"]),
+            Route("/documents/{handle}/copy-settings", self.endpoint, methods=["POST"]),
             Route("/documents/{handle}/controls", self.endpoint, methods=["POST"]),
             Route("/documents/{handle}/geometry/begin", self.endpoint, methods=["POST"]),
             Route("/documents/{handle}/geometry", self.endpoint, methods=["POST"]),
@@ -830,8 +831,44 @@ class RawPreviewApi:
                                revision=snapshot.revision)
                 return JSONResponse(self.document)
             settings_request = path.endswith("/settings")
+            copy_settings_request = path.endswith("/copy-settings")
             history_request = "/history" in path
             doc = self._document(request.path_params["handle"], resync=settings_request or history_request or "/geometry" in path)
+            if copy_settings_request:
+                required = {"workspaceId", "generation", "documentToken", "documentRevision",
+                            "settingsFingerprint", "recipeRevision", "selectedIds"}
+                if (set(body) != required or type(body.get("generation")) is not int
+                        or type(body.get("documentRevision")) is not int
+                        or type(body.get("recipeRevision")) is not int
+                        or type(body.get("settingsFingerprint")) is not str
+                        or re.fullmatch(r"[0-9a-f]{64}", body["settingsFingerprint"]) is None):
+                    raise LightCraftError("raw_invalid_request")
+                if any(body[key] != doc[key] for key in ("generation", "documentToken", "workspaceId")):
+                    raise LightCraftError("raw_stale_handle")
+                if (body["documentRevision"] != doc["revision"]
+                        or body["settingsFingerprint"] != doc["settingsFingerprint"]
+                        or body["recipeRevision"] != doc["recipeRevision"]):
+                    raise LightCraftError("raw_revision_conflict")
+                self._history_unsettled()
+                if self._recipe_save and not self._recipe_save.get("settled", False):
+                    raise LightCraftError("raw_recipe_save_pending")
+                if doc.get("recipeRecoveryPending"):
+                    raise LightCraftError("raw_history_requires_operation")
+                if (self._history_initialized
+                        and doc["recipeFingerprint"] != doc["settingsFingerprint"]):
+                    raise LightCraftError("raw_history_commit_required")
+                if self.raw.status().state != "synced":
+                    raise LightCraftError("raw_history_commit_required")
+                snapshot = self.raw.confirmed_settings(self._raw_handle, doc["revision"])
+                from raw_edit_settings_copy import extract_copy_settings
+                settings = extract_copy_settings(snapshot.settings, body["selectedIds"])
+                return JSONResponse({
+                    "workspaceId": doc["workspaceId"], "handle": doc["handle"], "assetId": doc["assetId"],
+                    "generation": doc["generation"], "documentToken": doc["documentToken"],
+                    "documentRevision": doc["revision"], "settingsFingerprint": doc["settingsFingerprint"],
+                    "recipeRevision": doc["recipeRevision"], "selectedIds": body["selectedIds"],
+                    "settings": settings,
+                }, headers={"Cache-Control": "no-store"})
             if "/geometry" in path:
                 return await self._geometry(request, body, doc)
             if history_request:
