@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { LIGHTCRAFT_ENGINE } from './lightcraftEngine';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createRawWorkspace,closeRawDocument,abortRawWorkspaceRequests,discardRawWorkspace, rawCapability, rawPreview, beginRawCurveInteraction, cancelRawCurveInteraction, updateRawTargetedCurve, beginRawMixerInteraction, updateRawMixerInteraction, cancelRawMixerInteraction, endRawMixerInteraction, readRawDocument, readRawSettings, readRawCopySettings, setRawControls, saveRawRecipe, saveRawHistory, readRawHistory, readRawRecipe, rawWorkspaceEmpty,
+import { createRawWorkspace,closeRawDocument,abortRawWorkspaceRequests,discardRawWorkspace, rawCapability, rawPreview, beginRawCurveInteraction, cancelRawCurveInteraction, updateRawTargetedCurve, beginRawMixerInteraction, beginRawPointColorInteraction, updateRawMixerInteraction, cancelRawMixerInteraction, endRawMixerInteraction, readRawDocument, readRawSettings, readRawCopySettings, setRawControls, saveRawRecipe, saveRawHistory, readRawHistory, readRawRecipe, rawWorkspaceEmpty,
   RAW_CONTROL_IDS, RAW_HISTORY_CONTROL_IDS, RAW_COPY_SETTING_IDS, RAW_DEFAULT_COPY_SETTING_IDS, RawSaveError, type RawDocument, type RawHistoryRequest, type RawHistoryOperation, validRawCurve, validRawCurveInput } from './rawApi';
 import { downloadRawLensDatabase, readRawLensDatabaseStatus } from './rawApi';
 import { rawSettings } from './test/rawSettings';
@@ -11,6 +11,8 @@ import { rawHistoryResult, rawHistoryData } from './test/rawHistory';
 const doc: RawDocument = { workspaceId: 'a'.repeat(32), handle: 'b'.repeat(32), documentToken: 'c'.repeat(32),
   assetId: 'asset', generation: 1, revision: 2, sourceWbMode: 'absolute' };
 const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+const interactionBeginReply = (interactionId: string) => ({ workspaceId: doc.workspaceId, handle: doc.handle, assetId: doc.assetId,
+  generation: doc.generation, documentToken: doc.documentToken, revision: doc.revision, interactionId });
 function histogramPayload(values: Record<number, number> = {}) {
   const bytes = new Uint8Array(4100), view = new DataView(bytes.buffer);
   for (const [index, value] of Object.entries(values)) view.setUint32(Number(index) * 4, value, true);
@@ -126,7 +128,7 @@ it('returns targeted curve readback before requesting the matching interaction p
 it('exposes Mixer targeted begin/update/preview/cancel and one History end API', async () => {
   const interactionId = 'e'.repeat(32), changes = { 'mixer.red.sat': 1.25, 'mixer.orange.sat': .625 };
   const fetch = vi.fn<typeof globalThis.fetch>()
-    .mockResolvedValueOnce(new Response(JSON.stringify({ ...doc, interactionId }), { headers: { 'Content-Type': 'application/json' } }))
+    .mockResolvedValueOnce(new Response(JSON.stringify(interactionBeginReply(interactionId)), { headers: { 'Content-Type': 'application/json' } }))
     .mockResolvedValueOnce(new Response(JSON.stringify({ interactionId, interactionSequence: 1, changes }), { headers: { 'Content-Type': 'application/json' } }))
     .mockResolvedValueOnce(response({ ...adaptiveHeaders(), 'X-Raw-Serial': '3',
       'X-Raw-Interaction-Id': interactionId, 'X-Raw-Interaction-Sequence': '1' }))
@@ -251,8 +253,7 @@ it.each(['grayscale', 'detail', 'mask'] as const)('sends and verifies the sharpe
 it('routes temporary curve updates through the existing adaptive Draft Preview contract', async () => {
   const settings = rawSettings(doc), interactionId = 'd'.repeat(32);
   const fetch = vi.fn<typeof globalThis.fetch>()
-    .mockResolvedValueOnce(new Response(JSON.stringify({ workspaceId: doc.workspaceId, handle: doc.handle, assetId: doc.assetId,
-      generation: doc.generation, documentToken: doc.documentToken, revision: doc.revision, sourceWbMode: doc.sourceWbMode, interactionId }),
+    .mockResolvedValueOnce(new Response(JSON.stringify(interactionBeginReply(interactionId)),
       { headers: { 'Content-Type': 'application/json' } }))
     .mockResolvedValueOnce(response({ ...adaptiveHeaders(), 'X-Raw-Serial': '1', 'X-Raw-Interaction-Id': interactionId,
       'X-Raw-Interaction-Sequence': '1' }))
@@ -268,6 +269,12 @@ it('routes temporary curve updates through the existing adaptive Draft Preview c
     serial: 1, maxSide: adaptiveTarget.maxSide, viewGeneration: adaptiveTarget.viewGeneration });
   await cancelRawCurveInteraction(settings, interactionId);
   expect(fetch.mock.calls[2]?.[0]).toBe(`/api/raw/documents/${doc.handle}/curve-interaction/cancel`);
+});
+it('accepts the Backend Point Color Begin response shape', async () => {
+  const interactionId = 'f'.repeat(32);
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(interactionBeginReply(interactionId)),
+    { headers: { 'Content-Type': 'application/json' } })));
+  expect(await beginRawPointColorInteraction(rawSettings(doc), 'pointColor.0.hueShift')).toBe(interactionId);
 });
 it.each<Record<string, string>>([
   { 'X-Raw-View-Generation': '3' }, { 'X-Raw-Mode': 'region' },

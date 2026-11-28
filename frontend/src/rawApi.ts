@@ -381,6 +381,13 @@ function document(value: RawDocument, workspaceId: string, assetId?: string) {
     || value.recipeRecoveryPending !== undefined && typeof value.recipeRecoveryPending !== 'boolean') throw new RawApiError('raw_invalid_response');
   return value;
 }
+function interactionBegin(value: any, doc: RawSettings) {
+  if (!value || value.workspaceId !== doc.workspaceId || value.assetId !== doc.assetId
+    || value.handle !== doc.handle || value.generation !== doc.generation
+    || value.documentToken !== doc.documentToken || value.revision !== doc.revision
+    || !opaque(value.interactionId)) throw new RawApiError('raw_invalid_response');
+  return value.interactionId as string;
+}
 export async function openRawDocument(workspaceId: string, assetId: string) {
   return document(await json('/documents', post({ workspaceId, assetId })), workspaceId, assetId);
 }
@@ -717,10 +724,7 @@ export async function beginRawMixerInteraction(doc: RawSettings, target: RawMixe
   if (![x, y].every(value => Number.isFinite(value) && value >= 0 && value <= 1)) throw new RawApiError('raw_invalid_request');
   const value = await json(`/documents/${doc.handle}/mixer-interaction/begin`, post({ ...identityBody(doc),
     documentRevision: doc.revision, target, x, y }));
-  document(value, doc.workspaceId, doc.assetId);
-  if (value.handle !== doc.handle || value.generation !== doc.generation || value.documentToken !== doc.documentToken
-    || typeof value.interactionId !== 'string' || !opaque(value.interactionId)) throw new RawApiError('raw_invalid_response');
-  return value.interactionId;
+  return interactionBegin(value, doc);
 }
 export async function updateRawMixerInteraction(doc: RawDocument, serial: number, signal: AbortSignal,
   target: RawDisplayTarget, interaction: { id: string; sequence: number; delta: number; target: RawMixerTarget }):
@@ -754,11 +758,7 @@ export async function beginRawPointColorInteraction(doc: RawSettings, control: R
   if (!validRawPointColorControlId(control)) throw new RawApiError('raw_invalid_request');
   const value = await json(`/documents/${doc.handle}/point-color-interaction/begin`, post({ ...identityBody(doc),
     documentRevision: doc.revision, control }));
-  document(value, doc.workspaceId, doc.assetId);
-  if (value.handle !== doc.handle || value.generation !== doc.generation || value.documentToken !== doc.documentToken
-    || value.revision !== doc.revision || typeof value.interactionId !== 'string' || !opaque(value.interactionId))
-    throw new RawApiError('raw_invalid_response');
-  return value.interactionId;
+  return interactionBegin(value, doc);
 }
 export async function updateRawPointColorInteraction(doc: RawSettings, serial: number, signal: AbortSignal,
   target: RawDisplayTarget, interaction: { id: string; sequence: number; control: RawPointColorControlId; value: number }): Promise<number> {
@@ -793,10 +793,7 @@ export async function endRawMixerInteraction(request: RawRecipeRequest & { inter
 export async function beginRawCurveInteraction(doc: RawSettings, channel: RawCurveChannel, mode: 'points' | 'targeted' = 'points'): Promise<string> {
   const value = await json(`/documents/${doc.handle}/curve-interaction/begin`, post({ ...identityBody(doc),
     documentRevision: doc.revision, channel, ...(mode === 'targeted' ? { mode } : {}) }));
-  document(value, doc.workspaceId, doc.assetId);
-  if (value.handle !== doc.handle || value.generation !== doc.generation || value.documentToken !== doc.documentToken
-    || typeof value.interactionId !== 'string' || !/^[a-f0-9]{32}$/.test(value.interactionId)) throw new RawApiError('raw_invalid_response');
-  return value.interactionId;
+  return interactionBegin(value, doc);
 }
 export async function cancelRawCurveInteraction(doc: RawSettings, interactionId: string) {
   await request(`/documents/${doc.handle}/curve-interaction/cancel`, post({ ...identityBody(doc),
