@@ -375,6 +375,7 @@ P1-Bで記録した実NativeのWB merge/readbackおよび後続Control成功は�
 
 - `sourceWbMode` は `absolute | relative | unknown`。BackendのOpen Document応答とP1-A `copy-settings` 応答に含める。値はImport readbackの `wb.scale` から導出する。Copy経路は既存 `confirmed_settings()` と保持済み `import_settings_json` のみを読み、Native再問い合わせとSQLite読込を追加しない。
 - LightCraft Clipboardは `sourceWbMode` をコピー時点の不変metadataとして保持する。 `selectedIds` はWBを含んだままで、貼付け先の `clipboardPasteableSettingIds` で現在適用可能な項目を別に返す。WB不可のreason codeは `wbScaleMismatch` または `wbModeUnknown` とし、日本語・英語locale key `workspace.rawClipboard.wbModeMismatch`／`workspace.rawClipboard.wbModeUnknown` を用意する。これはP1-Dがdisabled理由を表示するためのinterfaceであり、今回UIは追加していない。
+- **F1-01修正。** `editClipboard.ts` の共通 `lightcraftWbCompatibility()` が、コピー元source mode、payload `wb.scale` から読んだmode、貼り付け先source modeの3値を同時に判定する。hookの適用可能一覧と `pasteSettings()` の実適用がこの関数を共有するため、sourceとtargetだけが一致しpayload scaleが異なるケースでも表示とHistory payloadがずれない。非互換ならWBのみ射影から外し、他の選択項目は適用可能に残す。WBのみなら `canPasteSettings` をfalseにし、処理呼び出し時もHistory操作を作らない。Clipboard値は変更しない。
 - 通常／選択ペーストは既存の選択projectionで適用可能IDだけを新規部分payloadへ抽出する。素材方式が不一致またはunknownならWB IDと `wb` JSONをpayloadから外し、他項目は同じ `settingsPaste` 操作へ適用する。WBだけが残って操作対象がなくなる場合はFrontendで `raw_wb_incompatible` とし、History操作／Native mutationを起こさない。Clipboardは変更しない。
 - Backend `settingsPaste` ingressと `LightCraftRawSession.apply_history_operation()` の両方で、payloadのscale、コピー元 `sourceWbMode`、貼付け先のImport方式が一致しなければ `raw_wb_incompatible`（HTTP 409）で拒否する。拒否はHistory pending／Native mutationより前に行う。非WB項目には方式制限を適用しない。
 - 新規 `settingsPaste` metadataに `sourceWbMode` を追加し、WB選択時は値と `copySettings.wb.scale` の一致を必須にする。履歴本文・Recipe保存metadataのvalidatorは旧 `{sourceAssetId,sourceFilename,selectedIds}` 形式も受け入れるため、既存Historyの復元・表示・Undo／Redo／Jumpは維持する。保存payload本文の二重記録はしない。
@@ -390,7 +391,7 @@ P1-Bで記録した実NativeのWB merge/readbackおよび後続Control成功は�
 | WBのみ／Clipboard保持／別素材切替 | Hookテストで不一致先の操作無効、Clipboard保持、互換方式へ切替後の適用を確認 |
 | Import方式と編集後のscale | HTTPテストで現在WB scale変更後もImport方式を返すことを確認 |
 | 旧History metadata | 3項目metadataを含むHistory API／Store validatorの既存テストを維持 |
-| 自動テスト | Backend copy／paste／History関連 **179 passed, 1 deselected**。`release_smoke_sqlite_assertions_against_current_database` はこの機能の変更対象外で、sandbox pytest temp環境のSQLite open失敗を確認したため除外。Frontend `rawApi.test.ts`／`editClipboard.test.ts`／`useRawDocument.test.tsx` **465 passed**、既存 `AnshitsuClipboard.test.tsx` **129 passed** |
+| 自動テスト | Backend copy／paste／History関連 **179 passed, 1 deselected**。`release_smoke_sqlite_assertions_against_current_database` はこの機能の変更対象外で、sandbox pytest temp環境のSQLite open失敗を確認したため除外。Frontend `rawApi.test.ts`／`editClipboard.test.ts`／`useRawDocument.test.tsx` はF1-01修正後 **468 passed**、既存 `AnshitsuClipboard.test.tsx` **129 passed**。回帰ケースは素材方式一致・payload scale不一致時のWB除外、非WB適用、WB-only無効、Clipboard保持、操作可否と適用内容の一致を確認 |
 | 静的確認・build | `npx tsc --noEmit`、Frontend production `npm run build`、`git diff --check` 成功。buildは既存chunk sizeとReact Router `use client` warningを出力 |
 | Live Native | `GENZOROOM_TEST_LIGHTCRAFT_EXE` 未設定のため `test_raw_edit_settings_paste_live.py` は実行条件を満たさずskip。RAW素材の場所のみではNative executableを起動できない |
 

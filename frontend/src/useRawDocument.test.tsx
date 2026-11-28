@@ -512,6 +512,37 @@ it('filters only incompatible WB, preserves the clipboard, and disables WB-only 
     copySettings: { wb: { scale: 'kelvin', temp: 5200, tint: 7 } } } });
 });
 
+it('matches WB compatibility in availability and paste when payload scale disagrees with source mode', async () => {
+  const asset = regionRequest().identity.assetId;
+  const confirmed = rawSettings({ workspaceId: 'scale-source-workspace', handle: 'scale-source-handle', assetId: 'scale-source', generation: 1,
+    documentToken: 'scale-source-token', revision: 1, recipeRevision: 2 });
+  copyLightcraftEditSettings({ ...confirmed, documentRevision: confirmed.revision, sourceWbMode: 'absolute',
+    selectedIds: ['basic.exposure', 'whiteBalance'], settings: { light: { exposure: 1.5 },
+      wb: { mode: 'custom', scale: 'legacy', temp: 5200, tint: 7 } } }, 'source.dng');
+  await render(asset); await flush();
+  expect(current?.clipboardPasteableSettingIds).toEqual(['basic.exposure']);
+  expect(current?.clipboardWbCompatibilityReason).toBe('wbScaleMismatch');
+  expect(current?.canPasteSettings).toBe(true);
+  await act(async () => { await current!.pasteSettings(); });
+  const operation = vi.mocked(api.saveRawHistory).mock.calls.map(([value]) => value)
+    .filter(value => value.action === 'operate').at(-1);
+  expect(operation).toMatchObject({ operation: { kind: 'settingsPaste',
+    metadata: { selectedIds: ['basic.exposure'], sourceWbMode: 'absolute' }, copySettings: { light: { exposure: 1.5 } } } });
+  const clipboard = readEditClipboard();
+  expect(clipboard?.engine).toBe('lightcraft');
+  if (clipboard?.engine === 'lightcraft') expect(clipboard.settings.wb).toEqual({ mode: 'custom', scale: 'legacy', temp: 5200, tint: 7 });
+
+  copyLightcraftEditSettings({ ...confirmed, documentRevision: confirmed.revision, sourceWbMode: 'absolute',
+    selectedIds: ['whiteBalance'], settings: { wb: { mode: 'custom', scale: 'legacy', temp: 5200, tint: 7 } } }, 'source.dng');
+  await render(asset); await flush();
+  expect(current?.canPasteSettings).toBe(false);
+  const callCount = vi.mocked(api.saveRawHistory).mock.calls.length;
+  let rejected: unknown;
+  await act(async () => { try { await current!.pasteSettings(); } catch (error) { rejected = error; } });
+  expect(rejected).toMatchObject({ code: 'raw_wb_incompatible' });
+  expect(vi.mocked(api.saveRawHistory)).toHaveBeenCalledTimes(callCount);
+});
+
 it('RAW Viewer smoke representative lifecycle', async () => {
   vi.useFakeTimers(); enableAutomaticNative();
   const asset = regionRequest().identity.assetId;

@@ -18,7 +18,9 @@ export type LightcraftEditClipboard = {
 };
 export type EditClipboard = JpegEditClipboard | LightcraftEditClipboard;
 export type EditClipboardInfo = { engine: 'jpeg'; selectedIds: AdjustmentId[] } | { engine: 'lightcraft';
-  selectedIds: RawCopySettingId[]; sourceWbMode: RawCopySettingsResponse['sourceWbMode'] };
+  selectedIds: RawCopySettingId[]; sourceWbMode: RawCopySettingsResponse['sourceWbMode'];
+  payloadWbMode: RawCopySettingsResponse['sourceWbMode'] };
+export type LightcraftWbCompatibility = 'compatible' | 'modeMismatch' | 'modeUnknown';
 export const RAW_COPY_SETTING_CATEGORIES = [
   { id: 'basic', labelKey: 'workspace.basic', selectedIds: ['basic.exposure', 'basic.contrast', 'basic.highlights', 'basic.shadows', 'basic.whites', 'basic.blacks'] },
   { id: 'whiteBalance', labelKey: 'workspace.whiteBalance', selectedIds: ['whiteBalance'] },
@@ -111,7 +113,24 @@ export function readEditClipboard(): EditClipboard | null {
 export function editClipboardInfo(): EditClipboardInfo | null {
   if (!clipboard) return null;
   return clipboard.engine === 'jpeg' ? { engine: 'jpeg', selectedIds: Object.keys(clipboard.values) as AdjustmentId[] }
-    : { engine: 'lightcraft', selectedIds: [...clipboard.selectedIds], sourceWbMode: clipboard.sourceWbMode };
+    : { engine: 'lightcraft', selectedIds: [...clipboard.selectedIds], sourceWbMode: clipboard.sourceWbMode,
+      payloadWbMode: lightcraftWbPayloadMode(clipboard) };
+}
+
+function wbModeForScale(scale: unknown): RawCopySettingsResponse['sourceWbMode'] {
+  return scale === 'kelvin' ? 'absolute' : scale === 'legacy' ? 'relative' : 'unknown';
+}
+
+export function lightcraftWbPayloadMode(copy: LightcraftEditClipboard): RawCopySettingsResponse['sourceWbMode'] {
+  const wb = copy.settings.wb;
+  return wb && typeof wb === 'object' && !Array.isArray(wb)
+    ? wbModeForScale((wb as Record<string, unknown>).scale) : 'unknown';
+}
+
+export function lightcraftWbCompatibility(sourceMode: RawCopySettingsResponse['sourceWbMode'],
+  payloadMode: RawCopySettingsResponse['sourceWbMode'], targetMode: RawCopySettingsResponse['sourceWbMode'] | undefined): LightcraftWbCompatibility {
+  if (sourceMode === 'unknown' || payloadMode === 'unknown' || targetMode === undefined || targetMode === 'unknown') return 'modeUnknown';
+  return sourceMode === payloadMode && payloadMode === targetMode ? 'compatible' : 'modeMismatch';
 }
 
 export function isJpegEditClipboard(value: EditClipboard | null | undefined): value is JpegEditClipboard {

@@ -5,7 +5,7 @@ import { createRawWorkspace, openRawDocument, rawCapability, rawPreview, cancelR
   type RawPickTarget, type RawPickFrame, type RawHistoryResult, type RawHistoryStep, type RawHistoryOperation, type RawFrame, type RawGeometry, type RawCropDisplay, type RawGeometryOperation,
   RAW_DEFAULT_COPY_SETTING_IDS, readRawCopySettings, validRawCopySettingIds, type RawCopySettingId } from './rawApi';
 import { editClipboardInfo, copyLightcraftEditSettings, isLightcraftEditClipboard, readEditClipboard,
-  selectLightcraftEditClipboardItems } from './editClipboard';
+  lightcraftWbCompatibility, lightcraftWbPayloadMode, selectLightcraftEditClipboardItems } from './editClipboard';
 import { frontendLogger } from './frontendLogging';
 import { RawControls } from './rawControls';
 import { RawRecipeSave, type RawDraftDiscardDecision } from './rawRecipeSave';
@@ -1909,7 +1909,8 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       throw new RawApiError('raw_busy');
     const selected = selectedIds ? selectLightcraftEditClipboardItems(copy, selectedIds) : copy;
     const targetMode = editor.confirmed.sourceWbMode;
-    const wbCompatible = copy.sourceWbMode !== 'unknown' && targetMode !== 'unknown' && copy.sourceWbMode === targetMode;
+    const wbCompatibility = lightcraftWbCompatibility(copy.sourceWbMode, lightcraftWbPayloadMode(copy), targetMode);
+    const wbCompatible = wbCompatibility === 'compatible';
     const applicableIds = selected.selectedIds.filter(id => id !== 'whiteBalance' || wbCompatible);
     if (applicableIds.length === 0) throw new RawApiError('raw_wb_incompatible');
     const applicable = selectLightcraftEditClipboardItems(copy, applicableIds);
@@ -1981,9 +1982,10 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     });
   };
   const clipboardInfo = editClipboardInfo();
-  const clipboardWbCompatible = clipboardInfo?.engine === 'lightcraft' && visible?.settings
-    ? clipboardInfo.sourceWbMode !== 'unknown' && visible.settings.sourceWbMode !== 'unknown'
-      && clipboardInfo.sourceWbMode === visible.settings.sourceWbMode : false;
+  const clipboardWbCompatibility = clipboardInfo?.engine === 'lightcraft' && visible?.settings
+    ? lightcraftWbCompatibility(clipboardInfo.sourceWbMode, clipboardInfo.payloadWbMode, visible.settings.sourceWbMode)
+    : 'modeUnknown';
+  const clipboardWbCompatible = clipboardWbCompatibility === 'compatible';
   const clipboardPasteableIds = clipboardInfo?.engine === 'lightcraft'
     ? clipboardInfo.selectedIds.filter(id => id !== 'whiteBalance' || clipboardWbCompatible) : [];
   const clipboardOwnerReady = visible?.status === 'ready' && !visible.pending && !visible.regenerating && !visible.resetting
@@ -2001,7 +2003,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
       && clipboardInfo.selectedIds.includes('whiteBalance') && !clipboardWbCompatible,
     clipboardWbCompatibilityReason: clipboardInfo?.engine === 'lightcraft'
       && clipboardInfo.selectedIds.includes('whiteBalance') && !clipboardWbCompatible
-      ? clipboardInfo.sourceWbMode === 'unknown' || visible?.settings?.sourceWbMode === 'unknown'
+      ? clipboardWbCompatibility === 'modeUnknown'
         ? 'wbModeUnknown' as const : 'wbScaleMismatch' as const : null,
     canPasteSettings: !!clipboardOwnerReady && clipboardInfo?.engine === 'lightcraft' && clipboardPasteableIds.length > 0,
     setSharpenPreview,
