@@ -502,3 +502,20 @@ Frontendのみ変更した。Backend API／Native managed patch／manifest／Nat
 | Docker／Browser | Docker build・Browser操作の動的確認は未実施。変更はDesktop bridge経由に限定し、共有BrowserにNative menu/event sourceを追加していない。 |
 
 P1-EのBackend 290件・Frontend 831件・実Native WB確認はS節の工程別結果として維持し、本P2の成功件数へ合算していない。実Desktopの実操作、Windows menu shortcut hintの見た目・タブ整列、既存File／View／HelpのOS描画確認が残る。実装上の新規Findingは自動検証範囲では見つからなかった。
+
+### T.3 P2-F1 IPC有効状態同期修正
+
+ユーザーがWindows Desktopで暗室を表示しても4操作が無効のままになることを確認した。原因はTauri IPCのACL登録不足。`desktop/permissions/lifecycle.toml` の `allow-desktop-lifecycle` はMain WebView／localhostに限定されていたが、`set_native_edit_menu_state` を許可していなかった。加えて `desktop/build.rs` のapp manifest command listにもこのcommandがなく、Tauriの自動生成command permissionが作られていなかった。Frontendからのinvoke rejectionは捕捉して無視されていたため、permission denialが見えなかった。
+
+手書きpermissionへ新commandを許可し、`build.rs` の限定command listへ `desktop_lifecycle`、`set_native_menu_language`、`set_native_edit_menu_state` を揃えた。Buildで生成される `allow-set-native-edit-menu-state`／`deny-set-native-edit-menu-state` command permissionも出力・検証する。CapabilityBuilderの `local(false)`、`window("main")`、`remote(http://127.0.0.1:{port}/*)` と既存 `allow-desktop-lifecycle` assignmentは変更していないため、許可対象origin／windowを広げていない。
+
+FrontendはIPC失敗を無視せず、権限拒否・command未登録・その他invoke失敗を安全な固定 `errorCode` とcommand名・例外型で `desktop_menu.edit_state.sync_failed` warnへ記録する。raw error本文は記録しない。同じ失敗状態のDOM更新ごとに警告を重複させず、後続成功で再記録可能な状態へ戻す。メニュー状態は引き続きFrontendの既存操作可否に従い、無条件に有効化する処理はない。
+
+| 検証 | 結果 |
+| --- | --- |
+| IPC permission境界 | Desktop Rust test **21 passed**。手書きMain UI permission、build.rs生成command permission、Tauri build出力の `acl-manifests.json` にあるコンパイル済み `allow-desktop-lifecycle` command listを照合。Tauri `invoke_handler`への登録もDesktop crate compileで確認。既存language commandを保持。 |
+| 操作状態と失敗診断 | 関連Frontend **315 passed**（`AnshitsuRawPreview.test.tsx`、`AnshitsuClipboard.test.tsx`、`SettingsDialog.test.tsx`）。暗室入場時のcopy有効化、Clipboard後のpaste有効化、退出時の全無効化、permission rejection分類ログ、Nativeメニュー言語同期、既存JPEG／LightCraft操作を確認。 |
+| Build／format | `cargo build --locked --manifest-path desktop/Cargo.toml`、Rust format check、Frontend `npm run build`（TypeScript含む）、`git diff --check` 成功。Frontend buildの大きなchunk／React Router directive警告は既存。 |
+| 実Desktop | ユーザーは既存のキーボードショートカットが正常動作することを確認済み。これはNative menuのIPC経路とは別の確認。今回修正後のNative menu項目が実Tauri IPCを通過し、OS menu stateを変える実Desktop操作は未実施。 |
+
+このFindingは権限境界の不整合として修正済み。Frontend mockのみではなく、Rust側のTauri command registration、build生成ACLと手書きcapability permissionの整合を検証した。実Desktopでの修正後確認はユーザー受入に残る。

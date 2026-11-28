@@ -17,6 +17,7 @@ import { rawHistoryResult, rawHistoryData, fakeRawHistory } from './test/rawHist
 import { DesktopLifecycleProvider } from './DesktopLifecycle';
 import { defaultRawDevelopmentPanelUi, RAW_DEVELOPMENT_PANEL_UI_KEY, updateSetting } from './appSettings';
 import { isJpegEditClipboard, readEditClipboard } from './editClipboard';
+import { frontendLogger } from './frontendLogging';
 
 const base: AssetDetail = { id: '12345678-1234-4234-9234-123456789abc', filename: 'a.DNG',
   date: '2026-10-22', thumbnail_url: '/thumb', preview_url: '/immich-viewing', format: 'DNG', is_raw: true, exif: {} };
@@ -96,7 +97,7 @@ beforeEach(async () => {
     ? rawHistoryResult(request) : commitHistory(request));
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
-afterEach(async () => { act(() => root.unmount()); await flush(); host.remove(); delete window.__GENZOROOM_DESKTOP__; vi.useRealTimers(); vi.unstubAllGlobals(); updateSetting('rawDevelopmentPanelUi', defaultRawDevelopmentPanelUi()); window.localStorage.removeItem(RAW_DEVELOPMENT_PANEL_UI_KEY); });
+afterEach(async () => { act(() => root.unmount()); await flush(); host.remove(); delete window.__GENZOROOM_DESKTOP__; vi.useRealTimers(); vi.unstubAllGlobals(); updateSetting('rawDevelopmentPanelUi', defaultRawDevelopmentPanelUi()); window.localStorage.removeItem(RAW_DEVELOPMENT_PANEL_UI_KEY); frontendLogger.clear(); frontendLogger.setLevel('off'); });
 
 async function editRaw() {
   const number = host.querySelector<HTMLInputElement>('[data-adjustment-id="exposure"]')!.closest('.adjustment-control')!
@@ -144,6 +145,16 @@ it('synchronizes the Native Edit menu from the active LightCraft owner and dispa
   copy.mockRestore();
 });
 
+it('records a bounded diagnostic when the Native Edit menu IPC is denied', async () => {
+  frontendLogger.clear();
+  frontendLogger.setLevel('warn');
+  window.__GENZOROOM_DESKTOP__ = { respond: vi.fn(async () => {}),
+    setEditMenuState: vi.fn().mockRejectedValue(new Error('command set_native_edit_menu_state not allowed')) };
+  await mount();
+  const entry = frontendLogger.getEntries().find(item => item.component === 'desktop_menu' && item.event === 'edit_state.sync_failed');
+  expect(entry?.context).toMatchObject({ command: 'set_native_edit_menu_state', errorCode: 'ipc_permission_denied', exceptionType: 'Error' });
+});
+
 it('routes all Native Edit menu entries through the existing JPEG clipboard operations', async () => {
   developmentPolicy.engine = 'jpeg';
   const setEditMenuState = vi.fn(async () => {});
@@ -173,6 +184,9 @@ it('routes all Native Edit menu entries through the existing JPEG clipboard oper
     .find(button => button.textContent === 'Cancel')!.click());
   await flush();
   expect(host.querySelector('dialog')).toBeNull();
+  await clickText('Back to Gallery');
+  expect(host.querySelector('[data-gallery]')).not.toBeNull();
+  expect(setEditMenuState).toHaveBeenLastCalledWith({ copyAll: false, copySelected: false, paste: false, pasteSelected: false });
 });
 
 it('keeps the Filmstrip switch guard through Document Close and successor initialization', async () => {

@@ -1,4 +1,4 @@
 [[permission]]
 identifier = "allow-desktop-lifecycle"
-description = "Allow the verified main UI to manage desktop lifecycle and synchronize its native menu language."
-commands.allow = ["desktop_lifecycle", "set_native_menu_language"]
+description = "Allow the verified main UI to manage desktop lifecycle and synchronize native menu state and language."
+commands.allow = ["desktop_lifecycle", "set_native_menu_language", "set_native_edit_menu_state"]

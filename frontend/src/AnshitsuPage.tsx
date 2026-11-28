@@ -84,6 +84,18 @@ function logExclusion(event: 'start' | 'complete' | 'failed' | 'undo', context: 
   } catch { /* Diagnostics must not change saving, exclusion or restoration. */ }
 }
 
+function logNativeEditMenuSyncFailure(cause: unknown) {
+  const message = cause instanceof Error ? cause.message.toLowerCase() : typeof cause === 'string' ? cause.toLowerCase() : '';
+  const errorCode = /not allowed|permission|capability/.test(message) ? 'ipc_permission_denied'
+    : /unknown command|command.{0,24}(missing|not found|not registered)/.test(message) ? 'ipc_command_unavailable'
+      : 'ipc_invoke_failed';
+  try {
+    frontendLogger.add({ level: 'warn', component: 'desktop_menu', event: 'edit_state.sync_failed',
+      context: { command: 'set_native_edit_menu_state', errorCode,
+        exceptionType: cause instanceof Error ? cause.name : typeof cause } });
+  } catch { /* Native menu diagnostics must never change edit availability. */ }
+}
+
 function rawPreviewMessage(code: string | undefined): string {
   if (code === 'raw_unavailable' || code === 'lightcraft_not_ready') return 'nativeUnavailable';
   if (['raw_download_failed', 'raw_download_timeout', 'raw_source_unavailable', 'raw_source_too_large', 'raw_source_incomplete'].includes(code ?? ''))
@@ -479,16 +491,25 @@ export function AnshitsuPage() {
     const setEditMenuState = window.__GENZOROOM_DESKTOP__?.setEditMenuState;
     if (!setEditMenuState) return;
     let lastModalOrMenuOpen: boolean | null = null;
+    let previousSyncFailed = false;
+    const reportFailure = (cause: unknown) => {
+      if (previousSyncFailed) return;
+      previousSyncFailed = true;
+      logNativeEditMenuSyncFailure(cause);
+    };
     const publish = () => {
       const modalOrMenuOpen = !!document.querySelector(
         'dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], details.edit-settings-menu[open]');
       if (modalOrMenuOpen === lastModalOrMenuOpen) return;
       lastModalOrMenuOpen = modalOrMenuOpen;
       const enabled = !modalOrMenuOpen;
-      void setEditMenuState({ copyAll: enabled && nativeCopySettingsEnabled,
-        copySelected: enabled && nativeCopySettingsEnabled,
-        paste: enabled && nativePasteSettingsEnabled,
-        pasteSelected: enabled && nativePasteSettingsEnabled }).catch(() => {});
+      try {
+        void setEditMenuState({ copyAll: enabled && nativeCopySettingsEnabled,
+          copySelected: enabled && nativeCopySettingsEnabled,
+          paste: enabled && nativePasteSettingsEnabled,
+          pasteSelected: enabled && nativePasteSettingsEnabled })
+          .then(() => { previousSyncFailed = false; }).catch(reportFailure);
+      } catch (cause) { reportFailure(cause); }
     };
     publish();
     const observer = new MutationObserver(publish);
@@ -498,9 +519,12 @@ export function AnshitsuPage() {
   }, [nativeCopySettingsEnabled, nativePasteSettingsEnabled]);
 
   useEffect(() => () => {
-    void window.__GENZOROOM_DESKTOP__?.setEditMenuState?.({
+    const setEditMenuState = window.__GENZOROOM_DESKTOP__?.setEditMenuState;
+    if (!setEditMenuState) return;
+    try { void setEditMenuState({
       copyAll: false, copySelected: false, paste: false, pasteSelected: false,
-    }).catch(() => {});
+    }).catch(logNativeEditMenuSyncFailure); }
+    catch (cause) { logNativeEditMenuSyncFailure(cause); }
   }, []);
 
   useEffect(() => {
