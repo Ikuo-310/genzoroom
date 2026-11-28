@@ -1037,6 +1037,12 @@ dialog.workspace-save-dialog { color: #ececee; }
 .raw-edit-categories .binary-radio-options { width: 100%; }
 .raw-edit-categories label { flex: 1; }
 .raw-edit-categories .binary-radio-options span { text-align: center; }
+.raw-edit-categories .binary-radio-options input:checked + span {
+  background: var(--bg-elevated);
+  box-shadow: inset 0 -2px 0 var(--accent);
+  color: var(--text-primary);
+}
+.raw-edit-categories .binary-radio-options input:not(:checked) + span { color: var(--text-secondary); }
 .raw-crop-controls { padding: 10px; min-width: 0; }
 .raw-crop-aspect { display: grid; gap: 6px; }
 .raw-crop-aspect-row { display: flex; gap: 6px; min-width: 0; }

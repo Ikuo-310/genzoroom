@@ -2927,8 +2927,10 @@ it('exposes RAW-only categories, switches display contracts without mutation and
   ...(target?.mode==='crop-edit'?{cropDisplay:{canonicalGeometry:{crop,orientation:'Normal'},settingsFingerprint:doc.settingsFingerprint!,bitmapSpace:'oriented-warped-unstraightened-flipped' as const}}:{})}));
  await mount();expect(host.querySelectorAll('.raw-edit-categories input')).toHaveLength(2);
  expect(host.querySelectorAll<HTMLInputElement>('.raw-edit-categories input')[0].checked).toBe(true);
+ expect(host.querySelector('.raw-edit-categories input:checked + span')?.textContent).toBe('Develop');
  const saves=vi.mocked(rawApi.saveRawHistory).mock.calls.length;
  await act(async()=>host.querySelectorAll<HTMLInputElement>('.raw-edit-categories input')[1].click());await flush();
+ expect(host.querySelector('.raw-edit-categories input:checked + span')?.textContent).toBe('Crop');
  expect(host.querySelector('.raw-crop-controls')).not.toBeNull();expect(host.querySelector('.raw-adjustment-controls')).toBeNull();
  expect(host.querySelector('.raw-crop-reset')?.textContent).toBe('Reset Crop');
  expect(vi.mocked(rawApi.rawPreview).mock.calls.at(-1)![4]?.mode).toBe('crop-edit');expect(rawApi.saveRawHistory).toHaveBeenCalledTimes(saves);
