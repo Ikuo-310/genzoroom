@@ -140,13 +140,13 @@ export class RawRecipeSave {
     gesture.started = preceding.then(async () => {
       if (!this.active || this.mixerGesture !== gesture) throw new RawApiError('raw_document_closed');
       gesture.doc = structuredClone(this.options.controls!.confirmed);
+      this.options.controls!.beginPreview();
       const id = await beginRawMixerInteraction(gesture.doc, target, point.x, point.y);
       if (!this.active || this.mixerGesture !== gesture) {
         await cancelRawMixerInteraction(gesture.doc, id);
         throw new RawApiError('raw_document_closed');
       }
       gesture.id = id;
-      this.options.controls!.beginPreview();
       return id;
     }).catch(cause => {
       if (this.mixerGesture === gesture) this.mixerGesture = undefined;

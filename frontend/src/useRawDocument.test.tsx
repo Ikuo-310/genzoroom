@@ -2148,6 +2148,71 @@ describe('bounded RAW session renewal', () => {
     expect(current?.mixerTargetActive).toBeNull();
     expect(vi.mocked(api.rawPreview).mock.calls.some(call => call[3] === 'after' && call[7]?.sequence === 1)).toBe(true);
   });
+  it('cancels an in-flight ordinary Preview before Mixer Begin and resumes it after ownership ends', async () => {
+    vi.useFakeTimers();
+    const pending = deferred<api.RawFrame>();
+    let ordinaryCalls = 0;
+    let holdNextOrdinary = false;
+    const order: string[] = [];
+    vi.mocked(api.rawPreview).mockImplementation(async (doc, sequence, _signal, kind = 'after', _target, _curve, _targeted, mixer) => {
+      if (!mixer) {
+        ordinaryCalls++;
+        if (holdNextOrdinary) { holdNextOrdinary = false; return pending.promise; }
+      }
+      return { blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence, kind,
+        interactionSequence: mixer?.sequence,
+        frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000, aspect: 4/3, fullWidth: 16, fullHeight: 12, window: null } };
+    });
+    vi.mocked(api.cancelRawPreview).mockImplementation(async () => { order.push('cancel-preview'); });
+    vi.mocked(api.beginRawMixerInteraction).mockImplementation(async () => { order.push('begin-mixer'); return 'b'.repeat(32); });
+    await render('mixer-preview-race'); await drain();
+    holdNextOrdinary = true;
+    act(() => current!.viewChanged({ width: 1000, height: 750, nativeWidth: 4000, nativeHeight: 3000,
+      geometryId: 'a'.repeat(64), dpr: 1, scale: .5, fit: false }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(200); }); await drain();
+    expect(ordinaryCalls).toBe(2);
+    act(() => current!.toggleMixerTarget('hue'));
+    act(() => { expect(current!.beginMixerTarget({ x: .5, y: .5 })).toBe(true); }); await drain();
+    expect(order.indexOf('cancel-preview')).toBeLessThan(order.indexOf('begin-mixer'));
+
+    const ordinaryBeforeOwnedRetry = ordinaryCalls;
+    act(() => current!.retryPreview()); await drain();
+    expect(ordinaryCalls).toBe(ordinaryBeforeOwnedRetry);
+    pending.resolve({ blob: new Blob(['old']), width: 16, height: 12, epoch: 1, sequence: 2, kind: 'after' });
+    await drain();
+    await act(async () => { current!.finishMixerTarget(); await drain(); });
+    expect(ordinaryCalls).toBeGreaterThan(ordinaryBeforeOwnedRetry);
+    expect(current?.locked).toBe(false);
+  });
+  it('keeps Mixer input and commit available after its Draft image request fails', async () => {
+    vi.useFakeTimers();
+    const histogram = { r: new Uint32Array(256), g: new Uint32Array(256), b: new Uint32Array(256), y: new Uint32Array(256) };
+    const updatedHistogram = { r: new Uint32Array(256), g: new Uint32Array(256), b: new Uint32Array(256), y: new Uint32Array(256) };
+    histogram.r[20] = 2; updatedHistogram.r[220] = 13;
+    let mixerPreviews = 0;
+    vi.mocked(api.rawPreview).mockImplementation(async (doc, sequence, _signal, kind = 'after', _target, _curve, _targeted, mixer) => {
+      if (mixer && ++mixerPreviews === 1) throw new api.RawApiError('raw_connection_failed');
+      return { blob: new Blob(['png']), width: 16, height: 12, epoch: 1, sequence, kind,
+        interactionSequence: mixer?.sequence, histogram: mixer ? updatedHistogram : histogram,
+        frame: { geometryId: 'a'.repeat(64), nativeWidth: 4000, nativeHeight: 3000, aspect: 4/3, fullWidth: 16, fullHeight: 12, window: null } };
+    });
+    await render('mixer-draft-preview-failure'); await drain();
+    expect(current?.scopeHistogram?.r[20]).toBe(2);
+    act(() => current!.toggleMixerTarget('hue'));
+    act(() => { expect(current!.beginMixerTarget({ x: .4, y: .6 })).toBe(true); }); await drain();
+    act(() => current!.updateMixerTarget(2));
+    await act(async () => { await vi.advanceTimersByTimeAsync(60); }); await drain();
+    expect(current?.scopeHistogram?.r[20]).toBe(2);
+    expect(current?.mixerTargetActive).toBe('hue');
+    act(() => current!.updateMixerTarget(1));
+    await act(async () => { await vi.advanceTimersByTimeAsync(60); }); await drain();
+    expect(current?.scopeHistogram?.r[220]).toBe(13);
+    await act(async () => { current!.finishMixerTarget(); await drain(); });
+    expect(mixerPreviews).toBe(2);
+    expect(commitHistory).toHaveBeenCalledWith(expect.objectContaining({ operation: { kind: 'mixerTarget', metadata: { target: 'hue' } } }));
+    expect(current?.mixerTargetActive).toBeNull();
+    expect(current?.locked).toBe(false);
+  });
   it('cancels a Mixer target drag through Native recovery without recording History', async () => {
     vi.useFakeTimers();
     vi.mocked(api.rawPreview).mockImplementation(async (doc, sequence, _signal, kind = 'after', _target, _curve, _targeted, mixer) => ({

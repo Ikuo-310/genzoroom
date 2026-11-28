@@ -514,6 +514,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     };
     const pumpDisplay = () => {
       if (displayRunning || !displayPending || !current() || frozen.current) return;
+      if (saver?.mixerInteracting) return;
       if (displayPending.quality === 'full' && saver?.locked) return;
       const intent = displayPending;
       displayPending = undefined;
@@ -555,7 +556,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
     };
     resyncPreviewRef.current = () => resyncPreview();
     const displayPreview = (doc: RawDocument, valid = current) => {
-      if (!current() || !valid() || curvePresentation.current.active) return;
+      if (!current() || !valid() || saver?.mixerInteracting || curvePresentation.current.active) return;
       // Rect/angle do not change crop-edit pixels. Keep the paired bitmap and give
       // input/readback priority; request one official Full at the settled boundary.
       if(cropMode && saver?.cropping)return;
@@ -771,7 +772,7 @@ export function useRawDocument(assetId: string | null, beforeRequested = false) 
         mixerReadback: changes => { if (current()) setMixerTargetValues(changes); },
         mixerPreviewError: cause => {
           const code = cause instanceof RawApiError ? cause.code : 'raw_connection_failed';
-          if (current()) { curvePresentation.current.active = false; setState(previous => previous && ({ ...previous, displayError: code })); }
+          if (current()) setState(previous => previous && ({ ...previous, displayError: code }));
         },
         mixerSettled: cancelled => {
           mixerTargetMode.current = null;
